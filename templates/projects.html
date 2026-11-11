@@ -1,9 +1,9 @@
 {% extends "base.html" %}
 {% block title %}Projects{% endblock %}
 {% block content %}
-<div class="head row wrap">
-  <h1>Projects</h1><span class="grow"></span><a class="btn" href="/projects/new">New project</a>
-
+<div class="head">
+  <div class="row wrap"><h1>Projects</h1><span class="grow"></span><a class="btn" href="/projects/new">New project</a></div>
+  <p class="status-line">One card per project and its agent. New project starts one, or onboards an existing folder.</p>
 </div>
 {% if cards.is_empty() %}
 <section class="card pad empty"><h2>No projects yet</h2><p class="sub">Start one with New project, or onboard an existing folder the same way.</p></section>

@@ -326,7 +326,7 @@ button.opt { font: inherit; color: var(--ink); text-align: left; width: 100%; }
 .feat:has(.verdict.v-problem input:checked) .problem-note { display: block; }
 
 /* Conversations */
-.split.conv .split-side { flex: 1 1 380px; max-width: 520px; }
+.split.conv .split-side { flex: 1 1 440px; max-width: 520px; }
 .conv-row { color: var(--ink); text-decoration: none; }
 .conv-row:hover { background: #121216; color: var(--ink); }
 .conv-row.on { background: var(--soft); }
@@ -429,3 +429,5 @@ button.opt { font: inherit; color: var(--ink); text-align: left; width: 100%; }
   .only-phone { display: inline; }
   p.only-phone { display: block; }
 }
+.form-grid input::placeholder { color: var(--muted); opacity: .7; }
+.explain { color: var(--ink2); font-size: 15px; display: flex; flex-direction: column; gap: 6px; margin: 0; padding-left: 20px; }

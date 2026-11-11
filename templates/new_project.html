@@ -26,17 +26,17 @@
 <form method="post" action="/projects/new" class="card pad stack" aria-labelledby="form-h">
   <h2 id="form-h" class="vh">The project</h2>
   <div class="form-grid">
-    <label>Name<input name="name" required maxlength="60" value="{{ name }}" placeholder="Speculum" autofocus></label>
-    <label>Folder<input name="folder" value="{{ folder }}" placeholder="~/speculum (from the name if left empty)"></label>
-    <label class="span-all">What it is<input name="description" maxlength="300" value="{{ description }}" placeholder="Screenshot and screen recording tool for Hyprland."></label>
-    <label>Tech stack<input name="stack" value="{{ stack }}" placeholder="Rust, Slint"></label>
-    <label>Target platform<input name="platform" value="{{ platform }}" placeholder="Linux · Hyprland"></label>
+    <label>Name (required)<input name="name" required maxlength="60" value="{{ name }}" placeholder="e.g. Speculum" autofocus></label>
+    <label>Folder<input name="folder" value="{{ folder }}" placeholder="e.g. ~/speculum"><span class="sub">Left empty: ~/ and the name, lowercase.</span></label>
+    <label class="span-all">What it is<input name="description" maxlength="300" value="{{ description }}" placeholder="e.g. Screenshot and screen recording tool for Hyprland"></label>
+    <label>Tech stack<input name="stack" value="{{ stack }}" placeholder="e.g. Rust, Slint"></label>
+    <label>Target platform<input name="platform" value="{{ platform }}" placeholder="e.g. Linux · Hyprland"></label>
     <label>Model<select name="model">{% for m in ["Claude Opus 5.5", "Claude Sonnet 5.5", "Claude Fable 5.1"] %}<option{% if *m == model %} selected{% endif %}>{{ m }}</option>{% endfor %}</select></label>
     <label>Effort<select name="effort">{% for e in ["high", "medium", "low"] %}<option{% if *e == effort %} selected{% endif %}>{{ e }}</option>{% endfor %}</select></label>
   </div>
   <div class="stack-sm">
     <span class="label">What happens</span>
-    <ul class="sub">
+    <ul class="explain">
       <li>The project record and an empty M0 milestone, on {{ host }}.</li>
       <li>The folder with a local git repository (an existing folder or repository is left as it is). You create the GitHub repo later and tell the agent the remote.</li>
       <li>A project token, in a file only you can read, and the command to register AgentFlow for that folder.</li>

@@ -20,7 +20,7 @@
   <section class="split-main card pad stack" aria-labelledby="thread-h">
     {% if let Some((id, subject, line)) = selected %}
     <a class="back phone-only" href="/conversations">← All conversations</a>
-    <div class="stack-sm"><h2 id="thread-h">{{ subject }}</h2><span class="sub">{{ line }} · conversation {{ id }}</span></div>
+    <div class="stack-sm"><h2 id="thread-h">{{ subject }}</h2><span class="sub">{{ line }}</span></div>
     {% if sent %}<p class="notice ok" role="status">Sent. Everyone in this conversation gets it.</p>{% endif %}
     <ol class="plain msgs">
       {% for m in messages %}

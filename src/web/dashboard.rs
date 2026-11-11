@@ -242,9 +242,7 @@ async fn dashboard(
                     slug: p.slug.clone(),
                     name: p.name.clone(),
                     online: p.agent.online(now),
-                    milestone: current
-                        .map(|m| format!("{} · {}", m.name, m.title))
-                        .unwrap_or_else(|| "no active milestone".into()),
+                    milestone: current.map(|m| format!("{} · {}", m.name, m.title)).unwrap_or_else(|| "—".into()),
                     percent,
                     waiting: open_by_project(p.id),
                 });
