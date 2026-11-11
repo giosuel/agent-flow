@@ -10,6 +10,7 @@ mod cli;
 mod config;
 mod contributions;
 mod db;
+mod demo;
 mod github;
 mod guides;
 mod hands;

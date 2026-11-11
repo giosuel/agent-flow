@@ -31,6 +31,9 @@ pub enum AdminCommand {
     /// Print the root command that installs Claude Code managed settings keeping agents' file
     /// tools away from AgentFlow's tokens and data.
     ManagedSettings,
+    /// Create "Lumen (demo)", a complete made-up project to try the pages with. Archive it on its
+    /// page when you're done.
+    Demo,
 }
 
 #[derive(Subcommand)]
@@ -175,6 +178,12 @@ pub fn admin(config_path: &Path, command: AdminCommand) -> anyhow::Result<()> {
             eprintln!("Exported {n} projects to {}", config.data_dir().join("export").display());
         }
         AdminCommand::ManagedSettings => print!("{}", crate::hardening::managed_settings_command(&config)?),
+        AdminCommand::Demo => {
+            let data = config.data_dir();
+            let said = db.call_blocking(move |c| crate::demo::create(c, &data))?;
+            log_cli(&db, Action::Write, format!("demo project {} created", crate::demo::SLUG))?;
+            println!("{said}");
+        }
     }
     Ok(())
 }
