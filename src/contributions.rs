@@ -67,6 +67,8 @@ pub fn track(
     data.insert("url".into(), info.url.clone().into());
     data.insert("type".into(), if info.is_pr { "pr" } else { "issue" }.into());
     data.insert("comments".into(), info.comments.into());
+    data.insert("reviews".into(), info.reviews.into());
+    data.insert("review_comments".into(), info.review_comments.into());
     let state = finished_state(&info.state).unwrap_or(WATCHING);
     records::create(
         conn,
@@ -84,27 +86,45 @@ pub fn track(
 
 /// Applies what GitHub says now; returns what to tell the agent, if anything changed.
 pub fn update(conn: &Connection, r: &Record, info: &ItemInfo) -> anyhow::Result<Option<String>> {
-    let before = r.data.get("comments").and_then(Value::as_i64).unwrap_or(0);
     let state = finished_state(&info.state).unwrap_or(r.state.as_str());
+    let counts = [
+        ("comments", info.comments, "new comment", "new comments"),
+        ("reviews", info.reviews, "new review", "new reviews"),
+        ("review_comments", info.review_comments, "new comment on the code", "new comments on the code"),
+    ];
     let mut news = Vec::new();
-    if info.comments > before {
-        let n = info.comments - before;
-        news.push(format!("{n} new comment{}", if n == 1 { "" } else { "s" }));
+    let mut moved = false;
+    for (key, now, one, many) in counts {
+        // A record from before a count was kept starts from today's number, quietly.
+        let Some(before) = r.data.get(key).and_then(Value::as_i64) else {
+            moved = true;
+            continue;
+        };
+        if now > before {
+            let n = now - before;
+            news.push(format!("{n} {}", if n == 1 { one } else { many }));
+        }
+        moved |= now != before;
     }
     if state != r.state {
         news.push(format!("now {state}"));
     }
-    if news.is_empty() {
+    if news.is_empty() && !moved {
         return Ok(None);
     }
     let mut data = Map::new();
-    data.insert("comments".into(), info.comments.into());
+    for (key, now, ..) in counts {
+        data.insert(key.into(), now.into());
+    }
     let (r, _) = records::update(
         conn,
         r,
         "github",
         Patch { state: Some(state.into()), data, quiet: true, ..Default::default() },
     )?;
+    if news.is_empty() {
+        return Ok(None);
+    }
     let what = format!("{}: {} ({})", r.title, news.join(", "), r.str("url"));
     records::event(conn, Some(r.project_id), Some(r.id), "contribution.updated", &what, "github")?;
     Ok(Some(what))
@@ -130,7 +150,38 @@ mod tests {
             is_pr: false,
             state: state.into(),
             comments,
+            ..Default::default()
         }
+    }
+
+    #[test]
+    fn reviews_and_code_comments_count_too() {
+        let db = Db::open_memory();
+        db.call_blocking(|c| {
+            let p = crate::projects::create(c, "imaginarium", "Imaginarium", "t")?;
+            let pr = |reviews, review_comments| ItemInfo {
+                title: "Fix the parser".into(),
+                url: "https://github.com/ophymx/formulary/pull/4".into(),
+                is_pr: true,
+                state: "open".into(),
+                comments: 0,
+                reviews,
+                review_comments,
+            };
+            let r = track(c, p.id, "ophymx/formulary", 4, &pr(0, 0), "consultant")?;
+            let news = update(c, &r, &pr(1, 3))?.unwrap();
+            assert!(news.contains("1 new review") && news.contains("3 new comments on the code"), "{news}");
+            let r = records::get(c, r.id)?;
+            assert_eq!(update(c, &r, &pr(1, 3))?, None, "nothing new");
+            // A record from before reviews were counted takes today's numbers without news.
+            let mut data = Map::new();
+            data.insert("reviews".into(), Value::Null);
+            let (old, _) = records::update(c, &r, "t", Patch { data, quiet: true, ..Default::default() })?;
+            assert_eq!(update(c, &old, &pr(2, 3))?, None);
+            assert_eq!(records::get(c, r.id)?.data.get("reviews").and_then(Value::as_i64), Some(2));
+            Ok(())
+        })
+        .unwrap();
     }
 
     #[test]

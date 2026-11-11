@@ -865,6 +865,7 @@ async fn contributions_are_watched_for_their_project() {
         is_pr: false,
         state: state.into(),
         comments,
+        ..Default::default()
     };
     s.github.items.lock().unwrap().insert(("loro-dev/loro".into(), 1255), item("open", 0));
     let cs = mcp_session(&s, &consultant).await;
