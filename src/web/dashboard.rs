@@ -189,10 +189,14 @@ async fn dashboard(
                 groups.push(Group { title: "Guides to review", items: guide_prs });
             }
 
-            let activity = records::recent_events(c, None, 30)?
+            let mut seen = std::collections::HashSet::new();
+            let activity = records::recent_events(c, None, 60)?
                 .into_iter()
-                // A button being added is part of the PR's story, not news of its own.
-                .filter(|e| e.kind != "action.added")
+                // A button being added is part of the PR's story, and each piece of feedback part
+                // of "Owner tried build #n"; neither is news of its own.
+                .filter(|e| e.kind != "action.added" && e.kind != "feedback.created")
+                // A message lands in every recipient's feed; show it once.
+                .filter(|e| seen.insert((e.summary.clone(), e.actor.clone(), e.at / 1000)))
                 .take(12)
                 .map(|e| Activity {
                     time: crate::util::fmt_utc(e.at).get(11..16).unwrap_or("").into(),
@@ -208,7 +212,7 @@ async fn dashboard(
                         "var(--info)"
                     },
                     url: e.record.as_ref().and_then(|r| r.split_once('/')).map(|(p, id)| format!("/p/{p}/{id}")),
-                    what: lowercase_first(&e.summary),
+                    what: lowercase_first(&plain(e.summary.strip_prefix("Owner ").unwrap_or(&e.summary))),
                 })
                 .collect();
 
@@ -312,6 +316,12 @@ fn featured(q: &Record, project: String, blocks: Vec<(String, String)>, now: i64
         body_html: markdown::to_html(&q.body),
         options,
     }
+}
+
+/// One line without Markdown marks: summaries quote messages and notes as written.
+fn plain(s: &str) -> String {
+    let one_line = s.split_whitespace().collect::<Vec<_>>().join(" ");
+    one_line.replace("**", "").replace('`', "")
 }
 
 fn lowercase_first(s: &str) -> String {
