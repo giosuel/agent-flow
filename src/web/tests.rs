@@ -14,6 +14,8 @@ pub struct TestServer {
     pub db: Db,
     pub http: reqwest::Client,
     pub github: std::sync::Arc<crate::github::fake::FakeGitHub>,
+    /// Stands in for GitHub when the owner sends a draft.
+    pub poster: std::sync::Arc<crate::outgoing::fake::FakePoster>,
     pub state: AppState,
     _data: tempfile::TempDir,
 }
@@ -43,14 +45,18 @@ impl TestServer {
             handbook_dir: handbook.display().to_string(),
             build_free_gb: 0,
             transcripts_dir: data.path().join("transcripts").display().to_string(),
+            // "GitHub" is a folder of bare repositories.
+            git_host: format!("file://{}", data.path().join("gh").display()),
             ..Config::default()
         };
         let github = std::sync::Arc::new(crate::github::fake::FakeGitHub::default());
-        let state = AppState::new(db.clone(), config, crate::push::Vapid::random(), github.clone());
+        let mut state = AppState::new(db.clone(), config, crate::push::Vapid::random(), github.clone());
+        let poster = std::sync::Arc::new(crate::outgoing::fake::FakePoster::default());
+        state.poster = poster.clone();
         let app = router(state.clone()).into_make_service_with_connect_info::<SocketAddr>();
         tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
         let http = reqwest::Client::builder().redirect(reqwest::redirect::Policy::none()).build().unwrap();
-        Self { base: format!("http://{addr}"), db, http, github, state, _data: data }
+        Self { base: format!("http://{addr}"), db, http, github, poster, state, _data: data }
     }
 
     pub fn url(&self, path: &str) -> String {
@@ -1351,4 +1357,236 @@ async fn the_owner_edits_a_projects_details() {
     let res =
         s.http.post(s.url("/p/vinculum/settings")).bearer_auth(&token).form(&[("name", "x")]).send().await.unwrap();
     assert!(res.status().is_client_error());
+}
+
+/// git in a folder, for the tests that need repositories.
+fn git_in(dir: &std::path::Path, args: &[&str]) -> String {
+    let out = std::process::Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "init.defaultBranch=main"])
+        .args(args)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+    String::from_utf8_lossy(&out.stdout).trim().to_owned()
+}
+
+/// The commits on top of `base` in `work`, as `agentflow contribute` sends them.
+fn bundle_b64(work: &std::path::Path, base: &str) -> String {
+    use base64::Engine as _;
+    let file = work.join("draft.bundle");
+    git_in(work, &["bundle", "create", "-q", file.to_str().unwrap(), &format!("{base}..HEAD")]);
+    base64::engine::general_purpose::STANDARD.encode(std::fs::read(&file).unwrap())
+}
+
+#[tokio::test]
+async fn drafts_for_other_repositories_go_out_only_when_the_owner_sends_them() {
+    let s = TestServer::start().await;
+    let agent = s.token(TokenKind::Project, Some("imaginarium")).await;
+    let other = s.token(TokenKind::Project, Some("vinculum")).await;
+    let cookie = s.owner_cookie().await;
+
+    // "GitHub": their repository (with a PR template) and the owner's fork, as bare repositories.
+    let gh = s.state.config.data_dir().join("gh");
+    let theirs = gh.join("ophymx/formulary.git");
+    let fork = gh.join("giosuel/formulary.git");
+    for dir in [&theirs, &fork] {
+        std::fs::create_dir_all(dir).unwrap();
+        git_in(dir, &["init", "-q", "--bare"]);
+    }
+    let up = s.state.config.data_dir().join("upstream-work");
+    std::fs::create_dir_all(up.join(".github")).unwrap();
+    git_in(&up, &["init", "-q"]);
+    std::fs::write(up.join(".github/pull_request_template.md"), "## Summary\n\n## Testing\n").unwrap();
+    std::fs::write(up.join("fence.rs"), "let shift = h / 2.0;\n").unwrap();
+    git_in(&up, &["add", "."]);
+    git_in(&up, &["commit", "-q", "-m", "init"]);
+    git_in(&up, &["push", "-q", theirs.to_str().unwrap(), "HEAD:refs/heads/main"]);
+    let base = git_in(&up, &["rev-parse", "HEAD"]);
+    // The agent's commit on top.
+    std::fs::write(up.join("fence.rs"), "let shift = center - axis;\n").unwrap();
+    git_in(&up, &["commit", "-q", "-am", "Center fences on the math axis"]);
+
+    let post_draft = |token: String, body: Value| {
+        let s = &s;
+        async move { s.http.post(s.url("/api/contributions")).bearer_auth(token).json(&body).send().await.unwrap() }
+    };
+    let pr = |revise: &str, text: &str| {
+        json!({"type": "pr", "repo": "ophymx/formulary", "base": "main", "branch": "center-fences",
+               "title": "Center fence delimiters", "body": text, "why": "Tall parentheses sat low.",
+               "revise": revise, "bundle": bundle_b64(&up, &base)})
+    };
+    let res = post_draft(agent.clone(), pr("", "## Summary\nCenters them.")).await;
+    assert_eq!(res.status(), StatusCode::OK, "{}", res.text().await.unwrap());
+    // Nothing went out; the owner has something waiting.
+    assert!(s.poster.posted.lock().unwrap().is_empty());
+    assert_eq!(git_in(&fork, &["for-each-ref"]), "", "nothing pushed");
+    let count = s.db.call(|c| crate::waiting::count(c)).await.unwrap();
+    assert_eq!(count, 1);
+
+    // The page shows what AgentFlow read from the bundle, and the checks.
+    let page =
+        s.http.get(s.url("/p/imaginarium/C-1")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
+    assert!(page.contains("Send the PR") && page.contains("+let shift = center - axis;"), "{page}");
+    assert!(page.contains("has headings the text doesn") && page.contains("t: Testing"), "the template check");
+    assert!(page.contains("No decision of yours is linked"));
+    let fp = page.split("name=\"fp\" value=\"").nth(1).unwrap().split('"').next().unwrap().to_owned();
+    let form = |title: &str, note: &str, fp: &str| {
+        vec![
+            ("title", title.to_owned()),
+            ("body", "## Summary\nCenters them.\n\n## Testing\nA test.".to_owned()),
+            ("note", note.to_owned()),
+            ("fp", fp.to_owned()),
+        ]
+    };
+    let owner_post = |path: &str, f: Vec<(&'static str, String)>| {
+        let s = &s;
+        let (path, cookie) = (path.to_owned(), cookie.clone());
+        async move {
+            let res = s
+                .http
+                .post(s.url(&path))
+                .header(COOKIE, &cookie)
+                .header(ORIGIN, &s.base)
+                .form(&f)
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(res.status(), StatusCode::SEE_OTHER);
+            res.headers()[LOCATION].to_str().unwrap().to_owned()
+        }
+    };
+
+    // Only the owner presses the buttons; another project can't touch the draft.
+    let res = s
+        .http
+        .post(s.url("/p/imaginarium/C-1/send"))
+        .bearer_auth(&agent)
+        .form(&form("x", "", &fp))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::FORBIDDEN);
+    let res = post_draft(other.clone(), pr("C-1", "mine now")).await;
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+
+    // Ask for changes: the note and the owner's edits reach the agent.
+    assert_eq!(
+        owner_post("/p/imaginarium/C-1/changes", form("Center fences", "", &fp)).await,
+        "/p/imaginarium/C-1?draft=nonote"
+    );
+    assert_eq!(
+        owner_post("/p/imaginarium/C-1/changes", form("Center fences", "add a test", &fp)).await,
+        "/p/imaginarium/C-1?draft=asked"
+    );
+    let ts = mcp_session(&s, &agent).await;
+    let (_, news) = mcp_tool(&s, &agent, &ts, "since_last_check", json!({})).await;
+    assert!(news.to_string().contains("add a test"), "{news}");
+    assert_eq!(s.db.call(|c| crate::waiting::count(c)).await.unwrap(), 0, "back with the agent");
+    let r =
+        s.db.call(|c| {
+            Ok(crate::records::try_find(c, &crate::records::RecordRef::parse("imaginarium/C-1")?, None)?.unwrap())
+        })
+        .await
+        .unwrap();
+    assert_eq!(r.title, "Center fences", "the owner's edit is kept");
+
+    // A new version; the old page's fingerprint no longer sends anything.
+    let res = post_draft(agent.clone(), pr("C-1", "## Summary\nCenters them.\n\n## Testing\nA test.")).await;
+    assert_eq!(res.status(), StatusCode::OK, "{}", res.text().await.unwrap());
+    assert_eq!(
+        owner_post("/p/imaginarium/C-1/send", form("Center fences", "", &fp)).await,
+        "/p/imaginarium/C-1?draft=changed"
+    );
+    assert!(s.poster.posted.lock().unwrap().is_empty());
+
+    // Send: pushed to the fork, the PR opened with the owner's words, watched from now on.
+    let page =
+        s.http.get(s.url("/p/imaginarium/C-1")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
+    let fp2 = page.split("name=\"fp\" value=\"").nth(1).unwrap().split('"').next().unwrap().to_owned();
+    assert_eq!(
+        owner_post("/p/imaginarium/C-1/send", form("Center fence delimiters on the axis", "", &fp2)).await,
+        "/p/imaginarium/C-1?draft=sent"
+    );
+    let head = git_in(&up, &["rev-parse", "HEAD"]);
+    assert_eq!(git_in(&fork, &["rev-parse", "refs/heads/center-fences"]), head);
+    match &s.poster.posted.lock().unwrap()[0] {
+        crate::outgoing::Post::Pr { repo, base, head, title, body } => {
+            assert_eq!(
+                (repo.as_str(), base.as_str(), head.as_str()),
+                ("ophymx/formulary", "main", "giosuel:center-fences")
+            );
+            assert_eq!(title, "Center fence delimiters on the axis");
+            assert!(body.contains("## Testing"));
+        }
+        p => panic!("{p:?}"),
+    }
+    let r =
+        s.db.call(|c| {
+            Ok(crate::records::try_find(c, &crate::records::RecordRef::parse("imaginarium/C-1")?, None)?.unwrap())
+        })
+        .await
+        .unwrap();
+    assert_eq!(r.state, "sent");
+    assert_eq!(r.title, "ophymx/formulary#41: Center fence delimiters on the axis");
+    assert_eq!(r.str("fork"), "giosuel/formulary");
+    // A second press sends nothing more.
+    assert_eq!(owner_post("/p/imaginarium/C-1/send", form("x", "", &fp2)).await, "/p/imaginarium/C-1?draft=changed");
+    assert_eq!(s.poster.posted.lock().unwrap().len(), 1);
+
+    // A reply to a maintainer, through MCP; then new commits on top of the PR's branch.
+    let (ok, r) = mcp_tool(
+        &s,
+        &agent,
+        &ts,
+        "draft_contribution",
+        json!({"type": "comment", "on": "C-1", "body": "Yes, still on 1.17."}),
+    )
+    .await;
+    assert!(ok, "{r}");
+    let page =
+        s.http.get(s.url("/p/imaginarium/C-1")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
+    assert!(page.contains("Post the comment"));
+    let fp3 = page.split("name=\"fp\" value=\"").nth(1).unwrap().split('"').next().unwrap().to_owned();
+    owner_post("/p/imaginarium/C-1/send", vec![("body", "Yes, still on 1.17.0.".into()), ("fp", fp3)]).await;
+    assert_eq!(
+        s.poster.posted.lock().unwrap()[1],
+        crate::outgoing::Post::Comment {
+            repo: "ophymx/formulary".into(),
+            number: 41,
+            body: "Yes, still on 1.17.0.".into()
+        }
+    );
+    std::fs::write(up.join("fence.rs"), "let shift = center - axis; // rule 19\n").unwrap();
+    git_in(&up, &["commit", "-q", "-am", "Cite the rule"]);
+    let res = post_draft(
+        agent.clone(),
+        json!({"type": "commits", "on": "C-1", "body": "", "bundle": bundle_b64(&up, &head)}),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::OK, "{}", res.text().await.unwrap());
+    let page =
+        s.http.get(s.url("/p/imaginarium/C-1")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
+    assert!(page.contains("Push the commits") && page.contains("Cite the rule"));
+    let fp4 = page.split("name=\"fp\" value=\"").nth(1).unwrap().split('"').next().unwrap().to_owned();
+    owner_post("/p/imaginarium/C-1/send", vec![("body", String::new()), ("fp", fp4)]).await;
+    assert_eq!(git_in(&fork, &["rev-parse", "refs/heads/center-fences"]), git_in(&up, &["rev-parse", "HEAD"]));
+    assert_eq!(s.poster.posted.lock().unwrap().len(), 2, "no note, no comment");
+
+    // An issue the owner drops: nothing is posted, the agent hears it.
+    let (ok, r) = mcp_tool(
+        &s,
+        &agent,
+        &ts,
+        "draft_contribution",
+        json!({"type": "issue", "repo": "loro-dev/loro", "title": "Slow redo", "body": "Redo gets slower."}),
+    )
+    .await;
+    assert!(ok, "{r}");
+    let id = r["id"].as_str().unwrap().split('/').nth(1).unwrap().to_owned();
+    owner_post(&format!("/p/imaginarium/{id}/drop"), vec![("note", "not yet".into())]).await;
+    let (_, news) = mcp_tool(&s, &agent, &ts, "since_last_check", json!({})).await;
+    assert!(news.to_string().contains("not yet"), "{news}");
+    assert_eq!(s.poster.posted.lock().unwrap().len(), 2);
 }
