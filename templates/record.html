@@ -86,16 +86,17 @@
     <section class="card pad stack" aria-labelledby="answer-h">
       <h2 id="answer-h">{% if can_answer %}Your answer{% else %}Answer{% endif %}</h2>
       {% if can_answer %}
-      <form method="post" action="/p/{{ project_slug }}/{{ short }}/answer" class="stack">
+      {# Pick an option or write your own answer, never both; nothing is sent until Send answer. #}
+      <form method="post" action="/p/{{ project_slug }}/{{ short }}/answer" class="stack answer-form" data-answer>
         {% if !options.is_empty() %}
         <fieldset class="opts"><legend class="vh">Options</legend>
         {% for o in options %}
-          <label class="opt"><input type="radio" name="option" value="{{ o.n }}"{% if o.recommended %} checked{% endif %}><span class="mono opt-n">{{ o.n }}</span><span class="opt-t"><strong>{{ o.title }}{% if o.recommended %} <span class="chip accent">Recommended</span>{% endif %}</strong>{% if !o.detail.is_empty() %}<span class="sub">{{ o.detail }}</span>{% endif %}</span></label>
+          <label class="opt"><input type="radio" name="option" value="{{ o.n }}"><span class="mono opt-n">{{ o.n }}</span><span class="opt-t"><strong>{{ o.title }}{% if o.recommended %} <span class="chip accent">Recommended</span>{% endif %}</strong>{% if !o.detail.is_empty() %}<span class="sub">{{ o.detail }}</span>{% endif %}</span></label>
         {% endfor %}
         </fieldset>
         {% endif %}
         <label class="vh" for="words">Answer in your own words</label>
-        <textarea id="words" name="words" rows="3"{% if options.is_empty() %} required{% endif %} placeholder="{% if options.is_empty() %}Your answer{% else %}Or answer in your own words (optional with an option){% endif %}"></textarea>
+        <textarea id="words" name="words" rows="3" placeholder="{% if options.is_empty() %}Your answer{% else %}Or answer in your own words instead{% endif %}"></textarea>
         <div><button class="btn send" type="submit">Send answer</button></div>
       </form>
       {% else %}

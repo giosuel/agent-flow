@@ -430,7 +430,19 @@ async fn the_owner_answers_on_the_page_and_the_agent_reads_it() {
         .post(s.url("/p/vinculum/Q-1/answer"))
         .header(COOKIE, &cookie)
         .header(ORIGIN, &s.base)
-        .form(&[("option", "2"), ("words", "B, smaller"), ("next", "//evil.example")])
+        .form(&[("option", "2"), ("words", "B, smaller")])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.headers()[LOCATION], "/p/vinculum/Q-1?error=both", "an option or own words, not both");
+    let page = s.http.get(s.url("/p/vinculum/Q-1?error=both")).header(COOKIE, &cookie).send().await.unwrap();
+    assert!(page.text().await.unwrap().contains("not both"));
+    let res = s
+        .http
+        .post(s.url("/p/vinculum/Q-1/answer"))
+        .header(COOKIE, &cookie)
+        .header(ORIGIN, &s.base)
+        .form(&[("option", "2"), ("words", ""), ("next", "//evil.example")])
         .send()
         .await
         .unwrap();
@@ -438,10 +450,7 @@ async fn the_owner_answers_on_the_page_and_the_agent_reads_it() {
     assert_eq!(res.headers()[LOCATION], "/?answered=vinculum/Q-1", "no open redirects; back to the Dashboard");
 
     let (_, q) = mcp_tool(&s, &token, &sess, "get_record", json!({"id": "Q-1"})).await;
-    assert_eq!(
-        (q["state"].as_str(), q["data"]["answer"].as_str(), q["data"]["answer_option"].as_u64()),
-        (Some("answered"), Some("B, smaller"), Some(2))
-    );
+    assert_eq!((q["state"].as_str(), q["data"]["answer_option"].as_u64()), (Some("answered"), Some(2)));
     // Answering twice goes back to the question with the reason.
     let res = s
         .http
@@ -510,7 +519,7 @@ async fn an_agent_waits_for_the_owners_answer() {
 }
 
 #[tokio::test]
-async fn the_dashboard_features_a_question_and_answers_in_one_tap() {
+async fn the_dashboard_features_a_question_and_answers_on_send() {
     let s = TestServer::start().await;
     let cookie = s.owner_cookie().await;
     let html = s.http.get(s.url("/")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
@@ -528,11 +537,14 @@ async fn the_dashboard_features_a_question_and_answers_in_one_tap() {
     )
     .await;
     let html = s.http.get(s.url("/")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
-    // The own-words box is in a form without option buttons: Enter there must not also pick one.
+    // Choosing an option sends nothing: they're radio buttons, none chosen beforehand, in the same
+    // form as the own words and the one Send button (the owner, 2026-11-11).
     let words = html.find(r#"name="words""#).unwrap();
     let form_start = html[..words].rfind("<form").unwrap();
     let form_end = words + html[words..].find("</form>").unwrap();
-    assert!(!html[form_start..form_end].contains(r#"name="option""#), "Enter in the words box would send an option");
+    let form = &html[form_start..form_end];
+    assert!(form.contains(r#"type="radio" name="option""#) && !form.contains("checked"), "{form}");
+    assert!(!form.contains(r#"type="submit" name="option""#), "an option button would send at once");
     // The urgent one is featured, the other is listed, and the badge counts both.
     let featured = html.find("Tabs A or B?").unwrap();
     assert!(featured < html.find("Old question").unwrap());
@@ -884,7 +896,7 @@ async fn contributions_are_watched_for_their_project() {
 }
 
 #[tokio::test]
-async fn the_owner_writes_into_a_conversation() {
+async fn the_owner_reads_conversations_but_doesnt_write() {
     let s = TestServer::start().await;
     let v = s.token(TokenKind::Project, Some("vinculum")).await;
     let vs = mcp_session(&s, &v).await;
@@ -900,6 +912,7 @@ async fn the_owner_writes_into_a_conversation() {
     let cookie = s.owner_cookie().await;
     let page = s.http.get(s.url("/conversations")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
     assert!(page.contains("Tags?") && page.contains("vinculum → Consultant"), "names, not slugs");
+    assert!(!page.contains("<textarea"), "no reply box");
     let res = s
         .http
         .post(s.url(&format!("/conversations/{thread}/reply")))
@@ -909,9 +922,7 @@ async fn the_owner_writes_into_a_conversation() {
         .send()
         .await
         .unwrap();
-    assert_eq!(res.headers()[LOCATION], format!("/conversations?t={thread}&sent=1"));
-    let (_, news) = mcp_tool(&s, &v, &vs, "since_last_check", json!({})).await;
-    assert!(news.to_string().contains("Use the .a8 suffix."), "{news}");
+    assert!(res.status().is_client_error(), "{}", res.status());
     // Tokens can't use the page.
     assert_eq!(
         s.http.get(s.url("/conversations")).bearer_auth(&v).send().await.unwrap().status(),

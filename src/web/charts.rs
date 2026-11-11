@@ -1,7 +1,9 @@
 //! Small charts drawn on the server: stacked bars, stacked areas and lines. The marks are an SVG
 //! that stretches to its box (so it fills any width); the labels are HTML around it, so they keep
-//! their size on the phone. Every mark has a title for hover, and the pages show the same numbers
-//! in a table.
+//! their size on the phone. Each chart carries its exact numbers per column (`data-tips`), and
+//! app.js shows them under the pointer or finger: a highlighted column with every series' value
+//! and the total for bars, a crosshair at the nearest point for lines and areas (the owner,
+//! 2026-11-11: "allow hover to see exact datapoints").
 
 use std::fmt::Write;
 
@@ -40,10 +42,31 @@ fn esc(s: &str) -> String {
 const W: f64 = 1000.0;
 const H: f64 = 200.0;
 
-fn open_svg(out: &mut String, label: &str) {
+/// The numbers of each column for the hover layer: its label, each series with a value (top of
+/// the stack first), and the total when there are several and they add up.
+fn tips(labels: &[String], series: &[Series], fmt: &dyn Fn(f64) -> String, stacked: bool) -> String {
+    let cols: Vec<serde_json::Value> = labels
+        .iter()
+        .enumerate()
+        .map(|(i, label)| {
+            let vals: Vec<(&Series, f64)> =
+                series.iter().map(|s| (s, s.values.get(i).copied().unwrap_or(0.0))).filter(|(_, v)| *v > 0.0).collect();
+            let rows: Vec<serde_json::Value> =
+                vals.iter().rev().map(|(s, v)| serde_json::json!([s.color, s.name, fmt(*v)])).collect();
+            let total: f64 = vals.iter().map(|(_, v)| v).sum();
+            serde_json::json!({"t": label, "r": rows, "s": if stacked && vals.len() > 1 { fmt(total) } else { String::new() }})
+        })
+        .collect();
+    esc(&serde_json::Value::from(cols).to_string())
+}
+
+/// `mode`: "slots" when column i spans [i/n, (i+1)/n) of the width (bars), "centers" when point i
+/// sits in the middle of that slot (lines, under the same labels as bars), "points" when point i
+/// sits at i/(n-1) (areas).
+fn open_svg(out: &mut String, label: &str, tips: &str, mode: &str) {
     let _ = write!(
         out,
-        r#"<svg class="chart-marks" viewBox="0 0 {W} {H}" preserveAspectRatio="none" role="img" aria-label="{}">"#,
+        r#"<svg class="chart-marks" viewBox="0 0 {W} {H}" preserveAspectRatio="none" role="img" aria-label="{}" data-tips="{tips}" data-mode="{mode}">"#,
         esc(label)
     );
     // Three recessive grid lines.
@@ -67,21 +90,15 @@ pub fn stacked_bars(
         (0..n).map(|i| series.iter().map(|s| s.values.get(i).copied().unwrap_or(0.0)).sum()).collect();
     let max = nice_max(totals.iter().copied().fold(0.0, f64::max));
     let mut out = String::new();
-    open_svg(&mut out, label);
+    open_svg(&mut out, label, &tips(labels, series, fmt, true), "slots");
     let slot = W / n as f64;
     let bar = (slot * 0.7).max(1.0);
-    for (i, day) in labels.iter().enumerate() {
+    for i in 0..labels.len() {
         let x = i as f64 * slot + (slot - bar) / 2.0;
         if let Some(h) = href {
             let _ = write!(out, r#"<a href="{}">"#, esc(&h(i)));
             // The whole column is the target, not just the bar.
-            let _ = write!(
-                out,
-                r#"<rect class="hit" x="{}" y="0" width="{slot}" height="{H}"><title>{} · {}</title></rect>"#,
-                i as f64 * slot,
-                esc(day),
-                esc(&fmt(totals[i]))
-            );
+            let _ = write!(out, r#"<rect class="hit" x="{}" y="0" width="{slot}" height="{H}"/>"#, i as f64 * slot);
         }
         let mut y = H;
         for s in series {
@@ -94,12 +111,9 @@ pub fn stacked_bars(
             // A thin gap between stacked segments, in the surface colour.
             let _ = write!(
                 out,
-                r#"<rect x="{x:.1}" y="{y:.2}" width="{bar:.1}" height="{:.2}" fill="{}" class="seg"><title>{} · {} · {}</title></rect>"#,
+                r#"<rect x="{x:.1}" y="{y:.2}" width="{bar:.1}" height="{:.2}" fill="{}" class="seg"/>"#,
                 (h - 0.8).max(0.4),
-                s.color,
-                esc(day),
-                esc(&s.name),
-                esc(&fmt(v))
+                s.color
             );
         }
         if href.is_some() {
@@ -110,14 +124,20 @@ pub fn stacked_bars(
     (out, max)
 }
 
-/// Stacked areas over evenly spaced points.
-pub fn stacked_areas(label: &str, points: usize, series: &[Series], limit: Option<f64>) -> (String, f64) {
-    let n = points.max(2);
+/// Stacked areas over evenly spaced points; `labels` names each point for the hover layer.
+pub fn stacked_areas(
+    label: &str,
+    labels: &[String],
+    series: &[Series],
+    limit: Option<f64>,
+    fmt: &dyn Fn(f64) -> String,
+) -> (String, f64) {
+    let n = labels.len().max(2);
     let totals: Vec<f64> =
         (0..n).map(|i| series.iter().map(|s| s.values.get(i).copied().unwrap_or(0.0)).sum()).collect();
     let max = nice_max(totals.iter().copied().fold(limit.unwrap_or(0.0), f64::max));
     let mut out = String::new();
-    open_svg(&mut out, label);
+    open_svg(&mut out, label, &tips(labels, series, fmt, true), "points");
     let x = |i: usize| i as f64 / (n - 1) as f64 * W;
     let y = |v: f64| if max > 0.0 { H - v / max * H } else { H };
     let mut base = vec![0.0; n];
@@ -130,18 +150,13 @@ pub fn stacked_areas(label: &str, points: usize, series: &[Series], limit: Optio
         for i in (0..n).rev() {
             let _ = write!(d, "L{:.1},{:.2} ", x(i), y(base[i]));
         }
-        let _ = write!(
-            out,
-            r#"<path d="{d}Z" fill="{}" fill-opacity="0.85"><title>{}</title></path>"#,
-            s.color,
-            esc(&s.name)
-        );
+        let _ = write!(out, r#"<path d="{d}Z" fill="{}" fill-opacity="0.85"/>"#, s.color);
         base = top;
     }
     if let Some(l) = limit {
         let _ = write!(
             out,
-            r#"<line class="limit" x1="0" x2="{W}" y1="{0:.2}" y2="{0:.2}" vector-effect="non-scaling-stroke"><title>machine limit</title></line>"#,
+            r#"<line class="limit" x1="0" x2="{W}" y1="{0:.2}" y2="{0:.2}" vector-effect="non-scaling-stroke"/>"#,
             y(l)
         );
     }
@@ -151,11 +166,11 @@ pub fn stacked_areas(label: &str, points: usize, series: &[Series], limit: Optio
 
 /// One line per series (2px, never filled), a point in the middle of each slot, so they sit
 /// under the same labels as bars.
-pub fn lines(label: &str, points: usize, series: &[Series]) -> (String, f64) {
-    let n = points.max(2);
+pub fn lines(label: &str, labels: &[String], series: &[Series], fmt: &dyn Fn(f64) -> String) -> (String, f64) {
+    let n = labels.len().max(2);
     let max = nice_max(series.iter().flat_map(|s| s.values.iter().copied()).fold(0.0, f64::max));
     let mut out = String::new();
-    open_svg(&mut out, label);
+    open_svg(&mut out, label, &tips(labels, series, fmt, false), "centers");
     for s in series {
         let mut d = String::new();
         for i in 0..n {
@@ -165,9 +180,8 @@ pub fn lines(label: &str, points: usize, series: &[Series]) -> (String, f64) {
         }
         let _ = write!(
             out,
-            r#"<path d="{d}" fill="none" stroke="{}" stroke-width="2" vector-effect="non-scaling-stroke" stroke-linejoin="round"><title>{}</title></path>"#,
-            s.color,
-            esc(&s.name)
+            r#"<path d="{d}" fill="none" stroke="{}" stroke-width="2" vector-effect="non-scaling-stroke" stroke-linejoin="round"/>"#,
+            s.color
         );
     }
     out.push_str("</svg>");
@@ -204,6 +218,22 @@ mod tests {
         let (svg, max) = stacked_bars("t", &labels, &s, &|v| format!("{v}"), Some(&link));
         assert_eq!(max, 5.0);
         assert!(svg.contains("&lt;b&gt;") && !svg.contains("<b>"));
+        // Every column's numbers, for the hover layer.
+        let tips = svg
+            .split("data-tips=\"")
+            .nth(1)
+            .unwrap()
+            .split('"')
+            .next()
+            .unwrap()
+            .replace("&quot;", "\"")
+            .replace("&lt;", "<")
+            .replace("&gt;", ">")
+            .replace("&amp;", "&");
+        let v: serde_json::Value = serde_json::from_str(&tips).unwrap();
+        assert_eq!(v[1]["t"], "Tue");
+        assert_eq!(v[1]["r"][0], serde_json::json!(["#3987e5", "<b>", "3"]));
+        assert!(svg.contains(r#"data-mode="slots""#));
         assert!(svg.contains(r#"href="?day=1""#));
     }
 }

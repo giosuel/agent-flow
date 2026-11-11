@@ -586,3 +586,25 @@ body { box-sizing: border-box; min-height: 100vh; min-height: 100dvh; }
   .proj-tabs { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .proj-tabs a { padding: 0 4px; font-size: 13px; }
 }
+
+/* Chart hover (app.js): a lit column or a crosshair, and a tooltip with the exact numbers. */
+.chart-marks { touch-action: pan-y; cursor: crosshair; }
+.chart-band, .chart-cross { position: absolute; pointer-events: none; z-index: 1; }
+.chart-band { background: rgba(255, 255, 255, .06); border-radius: 4px; }
+.chart-cross { width: 0; border-left: 1px dashed var(--muted); }
+.chart-tip {
+  position: absolute; z-index: 5; pointer-events: none; min-width: 140px; max-width: 260px;
+  padding: 8px 10px; border-radius: 8px; background: rgba(16, 16, 22, .96); border: 1px solid var(--border);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .5); font-size: 13px; line-height: 1.35; color: var(--ink);
+}
+.chart-tip strong { display: block; margin-bottom: 4px; font-weight: 600; }
+.chart-tip.floating { position: absolute; min-width: 0; white-space: nowrap; }
+.tip-row { display: grid; grid-template-columns: 10px 1fr auto; gap: 8px; align-items: center; }
+.tip-sw { width: 10px; height: 10px; border-radius: 3px; }
+.tip-v { font-family: var(--mono); font-size: 12px; text-align: right; }
+.tip-total { margin-top: 4px; padding-top: 4px; border-top: 1px solid var(--line); color: var(--ink2); }
+.tip-none { color: var(--muted); }
+.strip span:hover, .hist a:hover i { opacity: 1; }
+/* The answer form: Send stays dimmed until an option or an answer is given. */
+.answer-form .btn:disabled { opacity: .4; cursor: not-allowed; }
+.answer-row input { flex: 1; min-width: 200px; }

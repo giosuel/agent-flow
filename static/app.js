@@ -117,3 +117,217 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 });
+
+// Charts: the exact numbers under the pointer or finger (the owner, 2026-11-11: "allow hover to
+// see exact datapoints"). Each chart's SVG carries its columns' numbers in data-tips; for bars the
+// hovered column is lit, for lines and areas a crosshair marks the point. On a phone, a first tap
+// on a bar that opens something shows its numbers, a second tap opens it. Small marks with a
+// data-tip (the log's timeline, a project's token strip) get the same tooltip with their one line.
+(() => {
+  const HEX = /^#[0-9a-fA-F]{3,8}$/;
+  let lastPointer = "mouse";
+  document.addEventListener("pointerdown", (e) => { lastPointer = e.pointerType; }, true);
+
+  function render(tip, col) {
+    tip.replaceChildren();
+    const h = document.createElement("strong");
+    h.textContent = col.t;
+    tip.append(h);
+    for (const [color, name, value] of col.r) {
+      const row = document.createElement("div");
+      row.className = "tip-row";
+      const sw = document.createElement("span");
+      sw.className = "tip-sw";
+      if (HEX.test(color)) sw.style.background = color;
+      const n = document.createElement("span");
+      n.textContent = name;
+      const v = document.createElement("span");
+      v.className = "tip-v";
+      v.textContent = value;
+      row.append(sw, n, v);
+      tip.append(row);
+    }
+    if (!col.r.length) {
+      const none = document.createElement("div");
+      none.className = "tip-none";
+      none.textContent = "nothing";
+      tip.append(none);
+    }
+    if (col.s) {
+      const row = document.createElement("div");
+      row.className = "tip-row tip-total";
+      const n = document.createElement("span");
+      n.textContent = "Total";
+      const v = document.createElement("span");
+      v.className = "tip-v";
+      v.textContent = col.s;
+      row.append(document.createElement("span"), n, v);
+      tip.append(row);
+    }
+  }
+
+  function chart(svg) {
+    let cols;
+    try {
+      cols = JSON.parse(svg.dataset.tips || "[]");
+    } catch {
+      return;
+    }
+    if (!cols.length) return;
+    const box = svg.closest(".chart") || svg.parentElement;
+    const points = svg.dataset.mode === "points";
+    const centers = svg.dataset.mode === "centers";
+    const mark = document.createElement("div");
+    mark.className = points || centers ? "chart-cross" : "chart-band";
+    mark.hidden = true;
+    const tip = document.createElement("div");
+    tip.className = "chart-tip";
+    tip.hidden = true;
+    tip.setAttribute("aria-hidden", "true");
+    box.append(mark, tip);
+    let shown = -1;
+
+    const at = (clientX) => {
+      const r = svg.getBoundingClientRect();
+      const x = Math.min(Math.max(clientX - r.left, 0), r.width - 0.01);
+      const n = cols.length;
+      return points ? Math.round((x / r.width) * (n - 1)) : Math.floor((x / r.width) * n);
+    };
+    const show = (i, clientX) => {
+      const r = svg.getBoundingClientRect();
+      const b = box.getBoundingClientRect();
+      const n = cols.length;
+      const left = r.left - b.left;
+      const top = r.top - b.top;
+      if (points) {
+        mark.style.left = `${left + (i / (n - 1)) * r.width}px`;
+      } else if (centers) {
+        mark.style.left = `${left + ((i + 0.5) / n) * r.width}px`;
+      } else {
+        mark.style.left = `${left + (i / n) * r.width}px`;
+        mark.style.width = `${r.width / n}px`;
+      }
+      mark.style.top = `${top}px`;
+      mark.style.height = `${r.height}px`;
+      mark.hidden = false;
+      if (i !== shown) render(tip, cols[i]);
+      tip.hidden = false;
+      // Beside the pointer, flipped to the left near the right edge; never outside the chart.
+      const x = clientX - b.left;
+      const w = tip.offsetWidth;
+      let tx = x + 14;
+      if (tx + w > b.width) tx = x - w - 14;
+      tip.style.left = `${Math.max(0, Math.min(tx, b.width - w))}px`;
+      tip.style.top = `${top + 4}px`;
+      shown = i;
+    };
+    const hide = () => {
+      mark.hidden = true;
+      tip.hidden = true;
+      shown = -1;
+    };
+    svg.addEventListener("pointermove", (e) => show(at(e.clientX), e.clientX));
+    svg.addEventListener("pointerdown", (e) => show(at(e.clientX), e.clientX));
+    svg.addEventListener("pointerleave", (e) => {
+      if (e.pointerType === "mouse") hide();
+    });
+    // On a touch screen the first tap on a linked bar shows its numbers; the next one opens it.
+    svg.addEventListener(
+      "click",
+      (e) => {
+        if (lastPointer === "mouse" || !e.target.closest("a")) return;
+        const i = at(e.clientX);
+        if (svg.dataset.tapped !== String(i)) {
+          e.preventDefault();
+          svg.dataset.tapped = String(i);
+          show(i, e.clientX);
+        }
+      },
+      true,
+    );
+    document.addEventListener("pointerdown", (e) => {
+      if (!box.contains(e.target)) {
+        hide();
+        delete svg.dataset.tapped;
+      }
+    });
+  }
+
+  // One floating tooltip for small marks with a data-tip.
+  function small() {
+    const tip = document.createElement("div");
+    tip.className = "chart-tip floating";
+    tip.hidden = true;
+    tip.setAttribute("aria-hidden", "true");
+    document.body.append(tip);
+    const place = (el) => {
+      tip.textContent = el.dataset.tip;
+      tip.hidden = false;
+      const r = el.getBoundingClientRect();
+      const w = tip.offsetWidth;
+      tip.style.left = `${Math.max(8, Math.min(r.left + r.width / 2 - w / 2, innerWidth - w - 8)) + scrollX}px`;
+      tip.style.top = `${r.top + scrollY - tip.offsetHeight - 8}px`;
+    };
+    document.addEventListener("pointerover", (e) => {
+      const el = e.target.closest && e.target.closest("[data-tip]");
+      if (el) place(el);
+    });
+    document.addEventListener("pointerout", (e) => {
+      const el = e.target.closest && e.target.closest("[data-tip]");
+      if (el && e.pointerType === "mouse") tip.hidden = true;
+    });
+    document.addEventListener("focusin", (e) => {
+      const el = e.target.closest && e.target.closest("[data-tip]");
+      if (el) place(el);
+      else tip.hidden = true;
+    });
+    document.addEventListener("pointerdown", (e) => {
+      if (!(e.target.closest && e.target.closest("[data-tip]"))) tip.hidden = true;
+    });
+  }
+
+  document.addEventListener("DOMContentLoaded", () => {
+    for (const svg of document.querySelectorAll("svg[data-tips]")) {
+      svg.dataset.wired = "1";
+      chart(svg);
+    }
+    if (document.querySelector("[data-tip]")) small();
+  });
+  // The Machine page swaps its charts every minute: wire up the new ones.
+  document.addEventListener("af:charts", () => {
+    for (const svg of document.querySelectorAll("svg[data-tips]:not([data-wired])")) {
+      svg.dataset.wired = "1";
+      chart(svg);
+    }
+  });
+})();
+
+// Answering a question: pick an option or write your own answer, never both, and nothing goes
+// out until Send answer (the owner, 2026-11-11). Choosing an option empties the text; typing
+// clears the option; Send is enabled only when exactly one of them is given. The server refuses
+// both as well, so this holds without the script too.
+document.addEventListener("DOMContentLoaded", () => {
+  for (const form of document.querySelectorAll("form[data-answer]")) {
+    const words = form.querySelector("[name=words]");
+    const radios = [...form.querySelectorAll("input[name=option]")];
+    const send = form.querySelector("button[type=submit]");
+    const update = () => {
+      const picked = radios.some((r) => r.checked);
+      const typed = words && words.value.trim() !== "";
+      send.disabled = !(picked !== typed);
+    };
+    for (const r of radios) {
+      r.addEventListener("change", () => {
+        if (words) words.value = "";
+        update();
+      });
+    }
+    if (words) {
+      words.addEventListener("input", () => {
+        if (words.value.trim() !== "") for (const r of radios) r.checked = false;
+        update();
+      });
+    }
+    update();
+  }
+});

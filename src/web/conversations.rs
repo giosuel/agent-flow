@@ -1,17 +1,19 @@
-//! The Conversations page: what agents and the consultant tell each other, and the owner's replies.
+//! The Conversations page: what agents and the consultant tell each other. The owner reads along;
+//! they don't write here (the owner, 2026-11-11: "why can i write into conversations? this seems
+//! weird, lets remove it"): agents reach them with questions, and they talk to an agent in its own
+//! session.
 
 use std::collections::HashMap;
 
 use askama::Template;
-use axum::extract::{Path, Query, State};
-use axum::response::{IntoResponse, Redirect, Response};
-use axum::routing::{get, post};
-use axum::{Extension, Form, Router};
+use axum::extract::{Query, State};
+use axum::response::Response;
+use axum::routing::get;
+use axum::{Extension, Router};
 use serde::Deserialize;
 
 use super::pages::{Nav, nav, render};
-use super::{AppError, AppResult, AppState, ClientIp};
-use crate::activity::{self, Action, Entry, Via};
+use super::{AppResult, AppState};
 use crate::auth::Actor;
 use crate::messages::{self, OWNER};
 use crate::tz::Tz;
@@ -19,7 +21,7 @@ use crate::util::{ago, now_ms};
 use crate::{markdown, records};
 
 pub fn routes() -> Router<AppState> {
-    Router::new().route("/conversations", get(page)).route("/conversations/{id}/reply", post(reply))
+    Router::new().route("/conversations", get(page))
 }
 
 struct ThreadRow {
@@ -55,7 +57,6 @@ struct ConversationsPage {
     selected: Option<(i64, String, String)>,
     messages: Vec<MessageView>,
     contributions: Vec<ContributionRow>,
-    sent: bool,
     /// A conversation was chosen (not just the newest shown): on the phone, the list steps aside.
     picked: bool,
 }
@@ -63,7 +64,6 @@ struct ConversationsPage {
 #[derive(Deserialize)]
 struct PageQuery {
     t: Option<i64>,
-    sent: Option<u8>,
 }
 
 /// A member as people read it: the project's name, "Consultant", "you" or "everyone".
@@ -154,36 +154,6 @@ async fn page(
                 project: r.project.clone(),
             })
             .collect(),
-        sent: q.sent == Some(1),
         picked,
     })
-}
-
-#[derive(Deserialize)]
-struct ReplyForm {
-    body: String,
-}
-
-async fn reply(
-    State(state): State<AppState>,
-    Extension(actor): Extension<Actor>,
-    Extension(ip): Extension<ClientIp>,
-    Path(id): Path<i64>,
-    Form(form): Form<ReplyForm>,
-) -> AppResult<Response> {
-    actor.require_owner()?;
-    let body = form.body;
-    state
-        .db
-        .call(move |c| {
-            let tx = c.transaction()?;
-            messages::send(&tx, OWNER, &[], "", &body, "info", Some(id))?;
-            tx.commit()?;
-            Ok(())
-        })
-        .await
-        .map_err(|e| AppError::BadRequest(format!("{e:#}")))?;
-    let e = Entry::new(&actor, Via::Page, Action::Message, format!("wrote in conversation {id}")).ip(Some(ip.0));
-    activity::write(&state.db, e).await;
-    Ok(Redirect::to(&format!("/conversations?t={id}&sent=1")).into_response())
 }

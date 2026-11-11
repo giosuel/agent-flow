@@ -229,7 +229,8 @@ async fn page(
             Series { name: s.name.clone(), color: s.color, values }
         })
         .collect();
-    let (lines, lines_max) = charts::lines("model calls per project", n, &call_series);
+    let calls_fmt = |v: f64| format!("{} calls", crate::util::fmt_count(v as i64));
+    let (lines, lines_max) = charts::lines("model calls per project", &labels, &call_series, &calls_fmt);
     let x_labels: Vec<String> = labels
         .iter()
         .enumerate()
