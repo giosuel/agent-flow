@@ -5,7 +5,7 @@
 
 use askama::Template;
 use axum::extract::{Query, State};
-use axum::response::Response;
+use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Extension, Router};
 use serde::Deserialize;
@@ -18,7 +18,7 @@ use crate::machine;
 use crate::util::now_ms;
 
 pub fn routes() -> Router<AppState> {
-    Router::new().route("/machine", get(page))
+    Router::new().route("/machine", get(page)).route("/machine/now", get(now))
 }
 
 #[derive(Deserialize)]
@@ -72,6 +72,45 @@ struct MachinePage {
     mem_total: String,
 }
 
+/// The figures at the top, now. The page asks for them again every 5 seconds (`/machine/now`).
+async fn tiles(snap: &machine::Snapshot) -> Vec<Tile> {
+    let busy = machine::busy_cores(snap.cores).await;
+    let (l1, l5, l15) = machine::loads();
+    let (root_free, root_total) = machine::disk("/");
+    let (tmp_free, tmp_total) = machine::disk("/tmp");
+    vec![
+        Tile {
+            label: "CPU now",
+            value: format!("{busy:.1} of {} cores", snap.cores),
+            warn: busy > snap.cores as f64 * 0.9,
+        },
+        Tile {
+            label: "Memory now",
+            value: format!("{:.1} of {:.0} GB", snap.mem_used_gb(), snap.mem_total_gb()),
+            warn: snap.mem_available_kb < 2 * 1024 * 1024,
+        },
+        Tile {
+            label: "Disk free",
+            value: format!("{:.0} of {:.0} GB", gb(root_free), gb(root_total)),
+            warn: root_free < 15_000_000_000,
+        },
+        Tile {
+            label: "/tmp free",
+            value: format!("{:.1} of {:.0} GB", gb(tmp_free), gb(tmp_total)),
+            warn: tmp_free < 2_000_000_000,
+        },
+        Tile { label: "Load 1 / 5 / 15", value: format!("{l1:.1}  {l5:.1}  {l15:.1}"), warn: false },
+    ]
+}
+
+/// The tiles as JSON, for the page's live update.
+async fn now(Extension(actor): Extension<Actor>) -> AppResult<Response> {
+    actor.require_owner()?;
+    let tiles = tiles(&machine::snapshot()).await;
+    let body = serde_json::json!({ "tiles": tiles.iter().map(|t| serde_json::json!({"value": t.value, "warn": t.warn})).collect::<Vec<_>>() });
+    Ok(axum::Json(body).into_response())
+}
+
 fn gb(bytes: u64) -> f64 {
     bytes as f64 / 1e9
 }
@@ -101,32 +140,7 @@ async fn page(
         .await?;
 
     let snap = machine::snapshot();
-    let (l1, l5, l15) = machine::loads();
-    let (root_free, root_total) = machine::disk("/");
-    let (tmp_free, tmp_total) = machine::disk("/tmp");
-    let tiles = vec![
-        Tile {
-            label: "CPU now",
-            value: format!("{l1:.1} of {} cores", snap.cores),
-            warn: l1 > snap.cores as f64 * 0.9,
-        },
-        Tile {
-            label: "Memory now",
-            value: format!("{:.1} of {:.0} GB", snap.mem_used_gb(), snap.mem_total_gb()),
-            warn: snap.mem_available_kb < 2 * 1024 * 1024,
-        },
-        Tile {
-            label: "Disk free",
-            value: format!("{:.0} of {:.0} GB", gb(root_free), gb(root_total)),
-            warn: root_free < 15_000_000_000,
-        },
-        Tile {
-            label: "/tmp free",
-            value: format!("{:.1} of {:.0} GB", gb(tmp_free), gb(tmp_total)),
-            warn: tmp_free < 2_000_000_000,
-        },
-        Tile { label: "Load 1 / 5 / 15", value: format!("{l1:.1}  {l5:.1}  {l15:.1}"), warn: false },
-    ];
+    let tiles = tiles(&snap).await;
 
     let slugs: Vec<String> = projects.iter().map(|p| p.slug.clone()).collect();
     let colors = charts::colors(&slugs);

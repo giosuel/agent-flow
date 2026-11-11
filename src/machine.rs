@@ -55,6 +55,39 @@ pub fn loads() -> (f64, f64, f64) {
     (it.next().unwrap_or(0.0), it.next().unwrap_or(0.0), it.next().unwrap_or(0.0))
 }
 
+/// CPU time in jiffies from /proc/stat's first line: (busy, total).
+fn cpu_jiffies() -> Option<(u64, u64)> {
+    let stat = std::fs::read_to_string("/proc/stat").ok()?;
+    let nums: Vec<u64> = stat.lines().next()?.split_whitespace().skip(1).filter_map(|v| v.parse().ok()).collect();
+    // user nice system idle iowait irq softirq steal (guest time is already in user).
+    let total: u64 = nums.iter().take(8).sum();
+    let idle = nums.get(3).copied().unwrap_or(0) + nums.get(4).copied().unwrap_or(0);
+    Some((total - idle, total))
+}
+
+static LAST_CPU: std::sync::Mutex<Option<(std::time::Instant, u64, u64)>> = std::sync::Mutex::new(None);
+
+/// How many cores are busy right now: measured since the last call when that was between 0.5
+/// and 60 seconds ago (the Machine page asks every 5), otherwise over a quarter second.
+pub async fn busy_cores(cores: usize) -> f64 {
+    let fresh = |at: std::time::Instant| (0.5..60.0).contains(&at.elapsed().as_secs_f64());
+    let prev = *LAST_CPU.lock().unwrap_or_else(|e| e.into_inner());
+    let (b0, t0) = match prev {
+        Some((at, b, t)) if fresh(at) => (b, t),
+        _ => {
+            let Some((b, t)) = cpu_jiffies() else { return 0.0 };
+            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+            (b, t)
+        }
+    };
+    let Some((b1, t1)) = cpu_jiffies() else { return 0.0 };
+    *LAST_CPU.lock().unwrap_or_else(|e| e.into_inner()) = Some((std::time::Instant::now(), b1, t1));
+    if t1 <= t0 {
+        return 0.0;
+    }
+    (b1.saturating_sub(b0)) as f64 / (t1 - t0) as f64 * cores as f64
+}
+
 /// Free and total bytes of the filesystem holding `path`.
 pub fn disk(path: &str) -> (u64, u64) {
     match rustix::fs::statvfs(path) {
