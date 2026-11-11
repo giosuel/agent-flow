@@ -32,13 +32,14 @@
       {% for b in bars %}<a href="{{ b.href }}" data-tip="{{ b.label }}" aria-label="{{ b.label }}"><i style="height: {{ b.height }}%"></i></a>{% endfor %}
     </div>
     <div class="axis sub mono">{% for a in axis %}<span>{{ a }}</span>{% endfor %}</div>
-    <p class="sub">Newest first · times in {{ tz }}</p>
+    <p class="sub">Newest first · times in {{ tz }}{% if output_hidden %} · build and test output lines are left out (<a href="/log?q=via:build&amp;range={{ range }}">via:build</a> shows them){% endif %}</p>
     <ol class="plain entries" id="entries">
       {% for e in entries %}
       <li><details class="entry sev-{{ e.severity }}">
         <summary><span class="mono sub">{{ e.time }}</span><strong>{{ e.actor }}</strong><span class="chip">{{ e.action }}</span><span class="esum">{{ e.summary }}</span>{% if e.archived %}<span class="chip">archived</span>{% endif %}</summary>
         <div class="edetail">
-          <div class="row wrap">{% if let Some(u) = e.record_url %}<a class="sub" href="{{ u }}">Open the record</a>{% endif %}<a class="sub" href="{{ e.around }}">Entries around this</a></div>
+          <div class="row wrap">{% if let Some(u) = e.record_url %}<a class="sub" href="{{ u }}">Open the record</a>{% endif %}{% if let Some((job, all)) = e.job %}<a class="sub" href="{{ job }}">The job</a><a class="sub" href="{{ all }}">All its lines</a>{% endif %}<a class="sub" href="{{ e.around }}">Entries around this</a></div>
+          {% if !e.build_lines.is_empty() %}<div class="blog">{% for (cls, line) in e.build_lines %}<div class="{{ cls }}">{{ line }}</div>{% endfor %}</div>{% endif %}
           <dl class="kv mono">{% for (k, v, link) in e.fields %}<dt>{{ k }}</dt><dd>{% if let Some(l) = link %}<a href="{{ l }}">{{ v }}</a>{% else %}{{ v }}{% endif %}</dd>{% endfor %}</dl>
         </div>
       </details></li>
