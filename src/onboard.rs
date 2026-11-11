@@ -216,6 +216,14 @@ pub fn create_files(
         std::fs::write(&index, text)?;
         steps.push(format!("Left the agent a first note in its memory ({}).", note.display()));
     }
+    let (mcp_add, start) = commands(folder, &token_file, public_url);
+    Ok(Outcome { slug: p.slug.clone(), steps, mcp_add, start })
+}
+
+/// The owner's two commands for a project's folder: register AgentFlow with Claude Code there
+/// (the token is read from its file on every connect, never stored in Claude's config), and
+/// start the agent. Shown after New project, and on the project's page afterwards.
+pub fn commands(folder: &Path, token_file: &Path, public_url: &str) -> (String, String) {
     let bin = std::env::current_exe().map(|p| p.display().to_string()).unwrap_or_else(|_| "agentflow".into());
     let mcp_add = format!(
         "cd {} && claude mcp add-json agentflow '{{\"type\": \"http\", \"url\": \"{}/mcp\", \"headersHelper\": \"{bin} mcp-headers --token-file {}\"}}'",
@@ -223,7 +231,7 @@ pub fn create_files(
         public_url.trim_end_matches('/'),
         token_file.display()
     );
-    Ok(Outcome { slug: p.slug.clone(), steps, mcp_add, start: format!("cd {} && claude", folder.display()) })
+    (mcp_add, format!("cd {} && claude", folder.display()))
 }
 
 /// Checks the form before anything is created.

@@ -6,9 +6,9 @@
   <h1>{{ name }}{% if status != "active" %} <span class="chip">{{ status }}</span>{% endif %}</h1>
   <p class="status-line"><span class="dot{% if agent.online %} ok{% endif %}" aria-hidden="true"></span>{% if !repo.is_empty() %}<a href="https://github.com/{{ repo }}">github.com/{{ repo }}</a> · {% endif %}<span>{{ headline }}</span></p>
 </div>
-<nav class="tabs" aria-label="Project">
+<nav class="tabs proj-tabs" aria-label="Project">
   {% for (key, name) in tabs %}
-  <a href="/p/{{ slug }}{% if *key != "overview" %}?tab={{ key }}{% endif %}"{% if tab == *key %} class="on" aria-current="page"{% endif %}>{{ name }}{% if *key == "questions" && !open_questions.is_empty() %} <span class="mono count">{{ open_questions.len() }}</span>{% endif %}{% if *key == "prs" && prs_total > 0 %} <span class="mono sub">{{ prs_total }}</span>{% endif %}</a>
+  <a href="/p/{{ slug }}{% if *key != "overview" %}?tab={{ key }}{% endif %}"{% if tab == *key %} class="on" aria-current="page"{% endif %}>{% if *key == "prs" %}<span class="hide-phone">{{ name }}</span><span class="only-phone">PRs</span>{% else %}{{ name }}{% endif %}{% if *key == "questions" && !open_questions.is_empty() %} <span class="mono count">{{ open_questions.len() }}</span>{% endif %}{% if *key == "prs" && prs_total > 0 %} <span class="mono sub">{{ prs_total }}</span>{% endif %}</a>
   {% endfor %}
 </nav>
 {% if let Some(n) = notice %}<p class="notice{% if notice_bad %} warn{% else %} ok{% endif %}" role="status">{{ n }}</p>{% endif %}
@@ -88,6 +88,18 @@
           <a class="sub" href="/usage">Open in Usage</a></dd>
       </dl>
       <p class="sub">One agent works on each project. It hands focused jobs to subagents, and only it writes here.</p>
+      {% if let Some(c) = connect %}
+      <details class="connect">
+        <summary class="sub">Connect the agent</summary>
+        <div class="stack-sm">
+          <p class="sub">1. Register AgentFlow with Claude Code for this folder only (once per machine):</p>
+          <pre class="cmd mono">{{ c.mcp_add }}</pre>
+          <p class="sub">2. Start the agent there:</p>
+          <pre class="cmd mono">{{ c.start }}</pre>
+          {% if !c.has_file %}<p class="notice warn">The token file <span class="mono">{{ c.token_file }}</span> doesn't exist. Rotate the project's token in <a href="/settings">Settings</a>; that writes it.</p>{% endif %}
+        </div>
+      </details>
+      {% endif %}
     </section>
 
     <section class="card pad stack" aria-labelledby="oq-h">
