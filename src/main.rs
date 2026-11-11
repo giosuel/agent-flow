@@ -12,6 +12,7 @@ mod contributions;
 mod db;
 mod github;
 mod guides;
+mod hands;
 mod hardening;
 mod logview;
 mod machine;
@@ -74,6 +75,16 @@ enum Command {
         #[arg(long, default_value_t = 480)]
         minutes: u64,
     },
+    /// Do the server's jobs as the agents' user (run as that user, when AgentFlow runs as its own):
+    /// the owner's buttons, gh, guide edits, token files, new projects' folders, transcripts.
+    Hands {
+        /// Where to listen.
+        #[arg(long, default_value = "/run/agentflow-hands/hands.sock")]
+        socket: PathBuf,
+        /// The only user allowed to send jobs: AgentFlow's own.
+        #[arg(long, default_value = "agentflow")]
+        server_user: String,
+    },
     /// Print the Authorization header for Claude Code's `headersHelper`, from a token file.
     McpHeaders {
         /// File holding the token, e.g. ~/.config/agentflow/tokens/<project>.token
@@ -94,6 +105,7 @@ fn main() -> anyhow::Result<()> {
     match args.command {
         Command::Serve => {
             let config = config::Config::load(&config_path)?;
+            config.apply();
             let db = db::Db::open(&config.db_path())?;
             let vapid = push::Vapid::load_or_create(&config.data_dir())?;
             let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().build()?;
@@ -105,5 +117,6 @@ fn main() -> anyhow::Result<()> {
         Command::Run(args) => cli::run(&config_path, args),
         Command::Wait { client, record, minutes } => cli::wait(&config_path, client, record, minutes),
         Command::McpHeaders { token_file } => cli::mcp_headers(&token_file),
+        Command::Hands { socket, server_user } => hands::serve(&socket, util::uid_of(&server_user)?),
     }
 }
