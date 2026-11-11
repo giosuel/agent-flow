@@ -40,7 +40,7 @@ struct WaitSlot {
 
 impl WaitSlot {
     fn take(state: &AppState, project_id: i64) -> Option<Self> {
-        let mut map = state.waits.lock().unwrap();
+        let mut map = crate::util::lock(&state.waits);
         let n = map.entry(project_id).or_insert(0);
         if *n >= MAX_WAITS_PER_PROJECT {
             return None;
@@ -52,7 +52,7 @@ impl WaitSlot {
 
 impl Drop for WaitSlot {
     fn drop(&mut self) {
-        if let Some(n) = self.state.waits.lock().unwrap().get_mut(&self.project_id) {
+        if let Some(n) = crate::util::lock(&self.state.waits).get_mut(&self.project_id) {
             *n = n.saturating_sub(1);
         }
     }

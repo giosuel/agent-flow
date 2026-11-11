@@ -213,7 +213,7 @@ pub async fn refresh_guide_prs(state: &AppState) -> anyhow::Result<()> {
     let open = state.github.repo_prs(&repo, false).await?;
     let merged = state.github.repo_prs(&repo, true).await?;
     let new: Vec<crate::github::RepoPr> = {
-        let mut cache = state.guide_prs.lock().unwrap();
+        let mut cache = crate::util::lock(&state.guide_prs);
         let new = if cache.fetched {
             open.iter().filter(|p| !cache.open.iter().any(|o| o.number == p.number)).cloned().collect()
         } else {

@@ -12,6 +12,12 @@ pub fn now_ms() -> i64 {
 }
 
 /// A random secret with a readable prefix, e.g. `af_dev_…`. 32 random bytes, so guessing one is hopeless.
+/// Locks a std mutex, also after a panic elsewhere poisoned it: what's kept behind these (caches,
+/// counters, pending ceremonies) is still usable, and one panic shouldn't take every page down.
+pub fn lock<T>(m: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 pub fn new_secret(prefix: &str) -> String {
     let mut bytes = [0u8; 32];
     rand::rng().fill_bytes(&mut bytes);

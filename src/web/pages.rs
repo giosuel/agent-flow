@@ -68,7 +68,7 @@ pub struct Nav {
 pub async fn nav(state: &AppState, actor: &Actor, active: &str) -> Nav {
     let mut n = Nav::new(actor, active);
     if actor.is_owner() {
-        let guides = state.guide_prs.lock().unwrap().open.len() as i64;
+        let guides = crate::util::lock(&state.guide_prs).open.len() as i64;
         n.waiting = state.db.call(|c| crate::waiting::count(c)).await.unwrap_or(0) as i64 + guides;
     }
     n
