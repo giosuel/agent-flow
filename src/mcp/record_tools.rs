@@ -91,6 +91,31 @@ pub struct AskQuestion {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct AddToTest {
+    /// What to test, in a line, e.g. "Import a folder with 10,000 photos".
+    pub title: String,
+    /// How: what to do and what should happen, e.g. "Pick ~/Pictures/big in Import; it stays
+    /// responsive and ends with 10,000 in All photos."
+    #[serde(default)]
+    pub how: String,
+    /// A category of your choosing, a few words, e.g. "Import", "Albums", "Print and PDF". Keep
+    /// using the same ones; the owner sees the list grouped by them.
+    pub category: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct ResolveTests {
+    /// The items, e.g. ["TT-3", "TT-5"].
+    pub ids: Vec<String>,
+    /// "works" (tested, done), "problem" (stays open; say what in the note) or "dropped" (no
+    /// longer needed; say why).
+    pub result: String,
+    /// The owner's words for a problem, or why it's dropped; optional for works.
+    #[serde(default)]
+    pub note: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct Withdraw {
     /// The question, e.g. "Q-12".
     pub id: String,
@@ -400,6 +425,63 @@ impl FlowMcp {
             Err(e) => Err(e),
         };
         self.finish(&actor, "ask_question", Action::Write, outcome).await
+    }
+
+    #[tool(description = "Add something the owner needs to test, with a category of your choosing. It stays \
+        on your project's To test list, and comes along with every release and build, until the owner tested it: \
+        they tick it on a page (you hear it as news) or tell you, and you mark it with resolve_tests.")]
+    async fn add_to_test(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(p): Parameters<AddToTest>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let actor = actor_of(&parts);
+        let a = actor.clone();
+        let outcome = self
+            .state
+            .db
+            .call(move |c| {
+                let project = target_project(c, &a, None, true)?;
+                let r = crate::totest::add(c, project.id, &a.name(), &p.title, &p.how, &p.category)?;
+                Ok(Outcome::new(json!({"id": r.ref_id, "category": r.str("category"), "open": crate::totest::open_count(c, project.id)?}))
+                    .summary(format!("to test {}: {}", r.short_id(), r.title))
+                    .project(project.slug)
+                    .target(r.ref_id))
+            })
+            .await;
+        self.finish(&actor, "add_to_test", Action::Write, outcome).await
+    }
+
+    #[tool(description = "After the owner told you how testing went: mark items works (done), problem (stays \
+        open with the problem noted, in their words) or dropped (no longer needed). Items they ticked on a page \
+        are done already; you hear those as news.")]
+    async fn resolve_tests(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(p): Parameters<ResolveTests>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let actor = actor_of(&parts);
+        let a = actor.clone();
+        let outcome = self
+            .state
+            .db
+            .call(move |c| {
+                if p.ids.is_empty() {
+                    anyhow::bail!("name the items, e.g. [\"TT-3\"]");
+                }
+                let tx = c.transaction()?;
+                let mut done = Vec::new();
+                for id in &p.ids {
+                    let item = writable(&tx, &a, id)?;
+                    let r = crate::totest::agent_resolve(&tx, &item, p.result.trim(), &p.note, &a.name())?;
+                    done.push(json!({"id": r.ref_id, "state": r.state}));
+                }
+                tx.commit()?;
+                let n = done.len();
+                Ok(Outcome::new(json!({"items": done})).summary(format!("{n} to test: {}", p.result.trim())))
+            })
+            .await;
+        self.finish(&actor, "resolve_tests", Action::Write, outcome).await
     }
 
     #[tool(description = "Withdraw one of your open questions that no longer needs an answer.")]
