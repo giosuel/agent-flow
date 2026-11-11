@@ -246,6 +246,11 @@ pub fn spawn_sampler(state: crate::web::AppState) {
             .await
             .unwrap_or_else(|_| (Sampler::default(), Vec::new()));
             sampler = s;
+            // The whole machine every minute, for the cards' last hour.
+            let t = totals_now().await;
+            if let Err(e) = state.db.call(move |c| store_totals(c, &t)).await {
+                tracing::warn!("machine sample: {e:#}");
+            }
             if std::mem::take(&mut first) {
                 continue;
             }
@@ -264,6 +269,58 @@ pub fn checkout_dirs(c: &rusqlite::Connection) -> anyhow::Result<Vec<(std::path:
         .filter(|p| !p.checkout.trim().is_empty())
         .map(|p| (crate::util::expand_home(p.checkout.trim()), p.slug))
         .collect())
+}
+
+/// The machine as a whole at one minute.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct Totals {
+    pub at: i64,
+    pub cpu: f64,
+    pub mem_gb: f64,
+    pub disk_free_gb: f64,
+    pub tmp_free_gb: f64,
+    pub load1: f64,
+}
+
+/// Reads the machine now (CPU since the last reading).
+pub async fn totals_now() -> Totals {
+    let snap = snapshot();
+    let cpu = busy_cores(snap.cores).await;
+    Totals {
+        at: crate::util::now_ms(),
+        cpu,
+        mem_gb: snap.mem_used_gb(),
+        disk_free_gb: disk("/").0 as f64 / 1e9,
+        tmp_free_gb: disk("/tmp").0 as f64 / 1e9,
+        load1: loads().0,
+    }
+}
+
+pub fn store_totals(c: &rusqlite::Connection, t: &Totals) -> anyhow::Result<()> {
+    c.execute(
+        "INSERT OR REPLACE INTO machine_totals (at, cpu, mem_gb, disk_free_gb, tmp_free_gb, load1) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        rusqlite::params![t.at, t.cpu, t.mem_gb, t.disk_free_gb, t.tmp_free_gb, t.load1],
+    )?;
+    c.execute("DELETE FROM machine_totals WHERE at < ?1", [t.at - KEEP_MS])?;
+    Ok(())
+}
+
+/// The machine's minutes since `from`, oldest first.
+pub fn totals_since(c: &rusqlite::Connection, from: i64) -> anyhow::Result<Vec<Totals>> {
+    let mut stmt = c.prepare(
+        "SELECT at, cpu, mem_gb, disk_free_gb, tmp_free_gb, load1 FROM machine_totals WHERE at >= ?1 ORDER BY at",
+    )?;
+    let rows = stmt.query_map([from], |r| {
+        Ok(Totals {
+            at: r.get(0)?,
+            cpu: r.get(1)?,
+            mem_gb: r.get(2)?,
+            disk_free_gb: r.get(3)?,
+            tmp_free_gb: r.get(4)?,
+            load1: r.get(5)?,
+        })
+    })?;
+    Ok(rows.collect::<Result<_, _>>()?)
 }
 
 pub fn store(c: &rusqlite::Connection, at: i64, shares: &[(String, Share)]) -> anyhow::Result<()> {
