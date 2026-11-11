@@ -385,3 +385,4 @@ button.opt { font: inherit; color: var(--ink); text-align: left; width: 100%; }
 .pfoot { flex-wrap: wrap; row-gap: 4px; }
 .pfoot .pms { min-width: 0; flex: 1 1 200px; }
 .pfoot .grow { display: none; }
+.chip.quiet { background: transparent; border: 1px solid var(--line); color: var(--muted); }

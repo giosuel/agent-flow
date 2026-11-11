@@ -1,7 +1,7 @@
 <ol class="prs">
 {% for pr in prs %}
   <li class="pr-row">
-    <div class="row wrap"><span class="mono sub">{{ pr.position }}</span><a class="mono" href="{{ pr.url }}">#{{ pr.number }}</a><a class="pr-title" href="{{ pr.record_url }}">{{ pr.title }}</a><span class="chip {{ pr.chip_class }}">{{ pr.chip }}</span></div>
+    <div class="row wrap"><span class="mono sub">{{ pr.position }}</span><a class="mono" href="{{ pr.url }}">#{{ pr.number }}</a><a class="pr-title" href="{{ pr.record_url }}">{{ pr.title }}</a><span class="chip {{ pr.chip_class }}">{{ pr.chip }}</span>{% if !pr.base.is_empty() %}<span class="sub">{{ pr.base }}</span>{% endif %}</div>
     <div class="pr-actions">
       {% for b in pr.buttons %}{% include "button.html" %}{% endfor %}
       {% if let Some((label, ids, confirm)) = pr.up_to %}

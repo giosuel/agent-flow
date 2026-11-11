@@ -75,6 +75,8 @@ pub struct PrRow {
     pub record_url: String,
     pub chip: String,
     pub chip_class: &'static str,
+    /// "based on main", or "based on #48" for a stacked PR.
+    pub base: String,
     pub buttons: Vec<ButtonView>,
     /// "Merge #48–#50": every PR from the bottom of the stack up to this one, in order: the
     /// label, the buttons' "id:hash" list, and the dialog listing every command.
@@ -92,10 +94,17 @@ pub fn pr_rows(c: &Connection, project_id: i64, now: i64) -> anyhow::Result<Vec<
         let ready = prs::merge_ready(r);
         let (chip, chip_class) = match (&ready, o.after) {
             (Ok(()), None) => ("ready".to_owned(), "ok"),
-            (Ok(()), Some(n)) => (format!("ready, after #{n}"), "accent"),
+            (Ok(()), Some(_)) => ("ready".to_owned(), "accent"),
+            // Not marked ready is the normal state of work in progress, not a problem.
+            (Err(why), _) if why.contains("hasn't marked it ready") => ("not ready yet".to_owned(), "quiet"),
             (Err(why), _) => {
                 (why.clone(), if r.str("ci") == "failing" || r.str("mergeable") == "conflicting" { "bad" } else { "" })
             }
+        };
+        let base = match o.after {
+            Some(n) => format!("based on #{n}, merges after it"),
+            None if r.str("base").is_empty() => String::new(),
+            None => format!("based on {}", r.str("base")),
         };
         let merge_button = actions::for_record(c, r.id)?.into_iter().find(|a| a.is_merge() && a.state == "waiting");
         // A chain continues while each PR is based on the previous one, ready, and has a merge button.
@@ -129,6 +138,7 @@ pub fn pr_rows(c: &Connection, project_id: i64, now: i64) -> anyhow::Result<Vec<
             record_url: r.url(),
             chip,
             chip_class,
+            base,
             buttons,
             up_to,
         });
