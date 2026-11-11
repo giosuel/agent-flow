@@ -357,3 +357,30 @@ const wireToTest = (root) => {
 };
 document.addEventListener("DOMContentLoaded", () => wireToTest(document));
 document.addEventListener("af:content", (e) => wireToTest(e.detail));
+
+// Project overview: a milestone button swaps the board below it without reloading the page.
+document.addEventListener("click", async (e) => {
+  const a = e.target.closest("a[data-ms]");
+  if (!a || e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+  const board = document.getElementById("board");
+  if (!board) return;
+  e.preventDefault();
+  board.classList.add("loading");
+  try {
+    const r = await fetch(a.href, { credentials: "same-origin" });
+    if (!r.ok) throw new Error(r.status);
+    const doc = new DOMParser().parseFromString(await r.text(), "text/html");
+    const next = doc.getElementById("board");
+    if (!next) throw new Error("no board");
+    board.replaceWith(next);
+    for (const m of document.querySelectorAll("a[data-ms]")) {
+      const on = m === a;
+      m.classList.toggle("sel", on);
+      if (on) m.setAttribute("aria-current", "true"); else m.removeAttribute("aria-current");
+    }
+    history.replaceState(history.state, "", a.href.replace(/#.*$/, ""));
+    document.dispatchEvent(new CustomEvent("af:content", { detail: next }));
+  } catch {
+    location.href = a.href;
+  }
+});
