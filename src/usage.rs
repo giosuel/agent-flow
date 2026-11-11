@@ -274,13 +274,28 @@ pub fn assign_projects(conn: &Connection) -> anyhow::Result<()> {
             params![id, dir, folder],
         )?;
     }
-    conn.execute(
-        "UPDATE usage SET project_id = (SELECT u.project_id FROM usage u WHERE u.session = usage.session
-                                        AND u.project_id IS NOT NULL GROUP BY u.project_id ORDER BY count(*) DESC LIMIT 1)
-         WHERE project_id IS NULL AND session != ''
-           AND EXISTS (SELECT 1 FROM usage u WHERE u.session = usage.session AND u.project_id IS NOT NULL)",
-        [],
+    // Sessions with calls both with and without a project: one grouped read, then an indexed
+    // update per session (a correlated UPDATE over every row took seconds, holding the lock).
+    let mut stmt = conn.prepare(
+        "SELECT session, project_id, count(*) FROM usage
+         WHERE project_id IS NOT NULL
+           AND session IN (SELECT DISTINCT session FROM usage WHERE project_id IS NULL AND session != '')
+         GROUP BY session, project_id",
     )?;
+    let mut best: HashMap<String, (i64, i64)> = HashMap::new();
+    for row in stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?)))? {
+        let (session, project, n) = row?;
+        let e = best.entry(session).or_insert((project, 0));
+        if n > e.1 {
+            *e = (project, n);
+        }
+    }
+    for (session, (project, _)) in best {
+        conn.execute(
+            "UPDATE usage SET project_id = ?1 WHERE session = ?2 AND project_id IS NULL",
+            params![project, session],
+        )?;
+    }
     Ok(())
 }
 
