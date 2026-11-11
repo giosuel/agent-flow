@@ -238,6 +238,9 @@ pub fn consultant_inbox(conn: &Connection) -> anyhow::Result<Vec<Message>> {
 
 /// Marks the consultant's messages up to and including `up_to` read.
 pub fn mark_consultant_read(conn: &Connection, up_to: i64) -> anyhow::Result<()> {
+    // Never past the newest message: a wrong id must not hide the ones still to come.
+    let newest: i64 = conn.query_row("SELECT coalesce(max(id), 0) FROM messages", [], |r| r.get(0))?;
+    let up_to = up_to.min(newest);
     conn.execute(
         "INSERT INTO consultant_reads (reader, last_id) VALUES (?1, ?2)
          ON CONFLICT (reader) DO UPDATE SET last_id = max(last_id, excluded.last_id)",
@@ -303,7 +306,11 @@ mod tests {
             assert_eq!(consultant_inbox(c)?.len(), 1, "still there until it's marked read");
             mark_consultant_read(c, inbox[0].id)?;
             assert!(consultant_inbox(c)?.is_empty(), "read");
-            assert_eq!(threads(c, Some("vinculum"), 10, None)?.len(), 2, "its own and the one to all");
+            // An id from the future doesn't hide what comes next.
+            mark_consultant_read(c, i64::MAX)?;
+            send(c, "vinculum", &[CONSULTANT.into()], "Later", "still here", "question", None)?;
+            assert_eq!(consultant_inbox(c)?.len(), 1);
+            assert_eq!(threads(c, Some("vinculum"), 10, None)?.len(), 3, "its own two and the one to all");
             Ok(())
         })
         .unwrap();
