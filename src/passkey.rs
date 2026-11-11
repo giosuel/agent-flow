@@ -22,19 +22,29 @@ use crate::util::{new_secret, now_ms};
 
 /// Ceremonies must finish within this time.
 const CEREMONY_MS: i64 = 5 * 60_000;
-/// At most this many unfinished ceremonies at once, so the public sign-in endpoint can't be used
-/// to fill memory.
+/// At most this many unfinished sign-ins at once, so the public endpoint can't fill memory; when
+/// full, the oldest is dropped (refusing would let anyone lock the owner out).
 const MAX_PENDING: usize = 64;
+/// And at most this many per client address.
+const MAX_PER_CLIENT: usize = 4;
 
 enum Pending {
     Register(PasskeyRegistration),
     Login(PasskeyAuthentication),
 }
 
+struct Ceremony {
+    expires: i64,
+    client: String,
+    state: Pending,
+}
+
 #[derive(Clone)]
 pub struct Passkeys {
     webauthn: Option<Arc<Webauthn>>,
-    pending: Arc<Mutex<HashMap<String, (i64, Pending)>>>,
+    /// Sign-ins (public) and enrolments (owner only) are kept apart, so one can't crowd out the other.
+    logins: Arc<Mutex<HashMap<String, Ceremony>>>,
+    enrolments: Arc<Mutex<HashMap<String, Ceremony>>>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -54,7 +64,7 @@ impl Passkeys {
                 None
             }
         };
-        Self { webauthn, pending: Arc::default() }
+        Self { webauthn, logins: Arc::default(), enrolments: Arc::default() }
     }
 
     /// False on plain http to an IP address, where browsers refuse WebAuthn.
@@ -66,21 +76,35 @@ impl Passkeys {
         self.webauthn.as_deref().context("passkeys need AgentFlow on https with a domain name")
     }
 
-    fn remember(&self, state: Pending) -> anyhow::Result<String> {
+    fn remember(pool: &Mutex<HashMap<String, Ceremony>>, client: &str, state: Pending) -> String {
         let now = now_ms();
-        let mut pending = self.pending.lock().unwrap();
-        pending.retain(|_, (expires, _)| *expires > now);
-        if pending.len() >= MAX_PENDING {
-            bail!("too many sign-in attempts at once; try again in a few minutes");
+        let mut pending = pool.lock().unwrap();
+        pending.retain(|_, c| c.expires > now);
+        // Per client: drop that client's oldest; overall: drop the oldest of all.
+        let oldest = |p: &HashMap<String, Ceremony>, only: Option<&str>| {
+            p.iter()
+                .filter(|(_, c)| only.is_none_or(|o| c.client == o))
+                .min_by_key(|(_, c)| c.expires)
+                .map(|(k, _)| k.clone())
+        };
+        if pending.values().filter(|c| c.client == client).count() >= MAX_PER_CLIENT
+            && let Some(k) = oldest(&pending, Some(client))
+        {
+            pending.remove(&k);
+        }
+        if pending.len() >= MAX_PENDING
+            && let Some(k) = oldest(&pending, None)
+        {
+            pending.remove(&k);
         }
         let id = new_secret("");
-        pending.insert(id.clone(), (now + CEREMONY_MS, state));
-        Ok(id)
+        pending.insert(id.clone(), Ceremony { expires: now + CEREMONY_MS, client: client.to_owned(), state });
+        id
     }
 
-    fn take(&self, id: &str) -> Option<Pending> {
-        let (expires, state) = self.pending.lock().unwrap().remove(id)?;
-        (expires > now_ms()).then_some(state)
+    fn take(pool: &Mutex<HashMap<String, Ceremony>>, id: &str) -> Option<Pending> {
+        let c = pool.lock().unwrap().remove(id)?;
+        (c.expires > now_ms()).then_some(c.state)
     }
 
     /// Starts enrolling a new passkey (the owner is signed in).
@@ -89,7 +113,7 @@ impl Passkeys {
         let existing = load(conn)?.into_iter().map(|(_, p)| p.cred_id().clone()).collect::<Vec<_>>();
         let (challenge, state) =
             self.webauthn()?.start_passkey_registration(user, "owner", "AgentFlow owner", Some(existing))?;
-        Ok((self.remember(Pending::Register(state))?, challenge))
+        Ok((Self::remember(&self.enrolments, "owner", Pending::Register(state)), challenge))
     }
 
     pub fn finish_registration(
@@ -99,7 +123,9 @@ impl Passkeys {
         name: &str,
         credential: &RegisterPublicKeyCredential,
     ) -> anyhow::Result<i64> {
-        let Some(Pending::Register(state)) = self.take(id) else { bail!("this enrolment expired; start again") };
+        let Some(Pending::Register(state)) = Self::take(&self.enrolments, id) else {
+            bail!("this enrolment expired; start again")
+        };
         let passkey = self.webauthn()?.finish_passkey_registration(credential, &state)?;
         let name = match name.trim() {
             "" => "Passkey".to_owned(),
@@ -114,13 +140,17 @@ impl Passkeys {
     }
 
     /// Starts a sign-in. None when no passkey is enrolled yet.
-    pub fn start_login(&self, conn: &Connection) -> anyhow::Result<Option<(String, RequestChallengeResponse)>> {
+    pub fn start_login(
+        &self,
+        conn: &Connection,
+        client: &str,
+    ) -> anyhow::Result<Option<(String, RequestChallengeResponse)>> {
         let keys: Vec<Passkey> = load(conn)?.into_iter().map(|(_, p)| p).collect();
         if keys.is_empty() {
             return Ok(None);
         }
         let (challenge, state) = self.webauthn()?.start_passkey_authentication(&keys)?;
-        Ok(Some((self.remember(Pending::Login(state))?, challenge)))
+        Ok(Some((Self::remember(&self.logins, client, Pending::Login(state)), challenge)))
     }
 
     /// Checks a sign-in and updates the passkey's counter. Returns the passkey's name.
@@ -130,7 +160,9 @@ impl Passkeys {
         id: &str,
         credential: &PublicKeyCredential,
     ) -> anyhow::Result<String> {
-        let Some(Pending::Login(state)) = self.take(id) else { bail!("this sign-in expired; try again") };
+        let Some(Pending::Login(state)) = Self::take(&self.logins, id) else {
+            bail!("this sign-in expired; try again")
+        };
         let result = self.webauthn()?.finish_passkey_authentication(credential, &state)?;
         let (row, mut passkey) = load(conn)?
             .into_iter()
@@ -217,16 +249,39 @@ mod tests {
         let db = crate::db::Db::open_memory();
         let p = Passkeys::new(&config("https://flow.giosuel.io"));
         db.call_blocking(|c| {
-            assert!(p.start_login(c)?.is_none(), "no passkeys yet");
+            assert!(p.start_login(c, "x")?.is_none(), "no passkeys yet");
             let (id, challenge) = p.start_registration(c)?;
             let json = serde_json::to_value(&challenge)?;
             assert_eq!(json["publicKey"]["rp"]["id"], "flow.giosuel.io");
             // The same user handle every time.
             assert_eq!(owner_uuid(c)?, owner_uuid(c)?);
-            p.pending.lock().unwrap().get_mut(&id).unwrap().0 = 0;
-            assert!(p.take(&id).is_none());
+            p.enrolments.lock().unwrap().get_mut(&id).unwrap().expires = 0;
+            assert!(Passkeys::take(&p.enrolments, &id).is_none());
             Ok(())
         })
         .unwrap();
+    }
+
+    #[test]
+    fn strangers_cant_crowd_out_the_owner() {
+        let pool = Mutex::new(HashMap::new());
+        let mut first = String::new();
+        for i in 0..200 {
+            let id = Passkeys::remember(&pool, "attacker", Pending::Login(dummy_login()));
+            if i == 0 {
+                first = id;
+            }
+        }
+        assert!(pool.lock().unwrap().len() <= MAX_PER_CLIENT, "one address holds at most four");
+        assert!(Passkeys::take(&pool, &first).is_none(), "its oldest were dropped");
+        let owner = Passkeys::remember(&pool, "owner-ip", Pending::Login(dummy_login()));
+        assert!(Passkeys::take(&pool, &owner).is_some(), "the owner still gets a sign-in");
+    }
+
+    fn dummy_login() -> PasskeyAuthentication {
+        // A real authentication state from a throwaway passkey-less ceremony isn't possible, so
+        // build one through serde (the crate allows it with danger-allow-state-serialisation).
+        serde_json::from_value(serde_json::json!({"ast": {"credentials": [], "policy": "required", "challenge": "AAAAAAAAAAAAAAAAAAAAAA", "appid": null, "allow_backup_eligible_upgrade": true}}))
+            .expect("auth state shape")
     }
 }
