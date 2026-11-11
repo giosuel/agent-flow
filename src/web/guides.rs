@@ -74,13 +74,29 @@ struct PageQuery {
     error: Option<String>,
 }
 
-/// The first plain line of a guide, for the file list.
+/// The first plain line of a guide, for the file list, with Markdown marks and links' targets removed.
 fn blurb(text: &str) -> String {
-    text.lines()
-        .map(str::trim)
-        .find(|l| !l.is_empty() && !l.starts_with('#') && !l.starts_with('@'))
-        .map(|l| crate::activity::clip(&l.replace(['*', '`'], ""), 90))
-        .unwrap_or_default()
+    let line =
+        text.lines().map(str::trim).find(|l| !l.is_empty() && !l.starts_with('#') && !l.starts_with('@')).unwrap_or("");
+    let mut out = String::new();
+    let mut rest = line;
+    // "[OWNER.md](OWNER.md)" → "OWNER.md"
+    while let Some(open) = rest.find('[') {
+        out.push_str(&rest[..open]);
+        let after = &rest[open + 1..];
+        match (after.find("]("), after.find(')')) {
+            (Some(close), Some(end)) if close < end => {
+                out.push_str(&after[..close]);
+                rest = &after[end + 1..];
+            }
+            _ => {
+                out.push('[');
+                rest = after;
+            }
+        }
+    }
+    out.push_str(rest);
+    crate::activity::clip(&out.replace(['*', '`'], ""), 90)
 }
 
 fn pr_row(p: &crate::github::RepoPr) -> PrRow {
@@ -277,5 +293,14 @@ async fn merge(
     match pulled {
         Ok(o) if o.status.success() => Ok(Redirect::to(&format!("/guides?merged={}", form.number)).into_response()),
         _ => Ok(Redirect::to("/guides?error=pull").into_response()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn blurbs_lose_markdown() {
+        let b = super::blurb("# MACHINE\n\nThe server. Read [OWNER.md](OWNER.md) **first**.\n");
+        assert_eq!(b, "The server. Read OWNER.md first.");
     }
 }
