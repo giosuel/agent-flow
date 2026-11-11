@@ -10,8 +10,11 @@ use rusqlite::Connection;
 use tokio::sync::Semaphore;
 
 /// Schema migrations, applied in order. `PRAGMA user_version` holds how many have run.
-const MIGRATIONS: &[&str] =
-    &[include_str!("../migrations/001_init.sql"), include_str!("../migrations/002_passkeys_push.sql")];
+const MIGRATIONS: &[&str] = &[
+    include_str!("../migrations/001_init.sql"),
+    include_str!("../migrations/002_passkeys_push.sql"),
+    include_str!("../migrations/003_projects_records.sql"),
+];
 
 const POOL_SIZE: usize = 6;
 

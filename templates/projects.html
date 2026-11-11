@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Projects{% endblock %}
+{% block content %}
+<div class="head">
+  <h1>Projects</h1>
+  <p class="status-line">Every agent can read this list. Each project has one agent.</p>
+</div>
+{% if cards.is_empty() %}
+<section class="card pad empty"><h2>No projects yet</h2><p class="sub">Projects are added with <code>agentflow admin project add</code> for now; the New project button comes later.</p></section>
+{% else %}
+<div class="cards">
+{% for c in cards %}
+  <a class="card pcard{% if c.status != "active" %} dimmed{% endif %}" href="/p/{{ c.slug }}">
+    <div class="row"><strong class="pname">{{ c.name }}</strong><span class="grow"></span><span class="chip{% if c.online %} ok{% endif %}"><span class="dot{% if c.online %} ok{% endif %}" aria-hidden="true"></span>{{ c.agent_state }}</span></div>
+    {% if !c.description.is_empty() %}<p class="pdesc">{{ c.description }}</p>{% endif %}
+    {% if !c.facts.is_empty() %}<p class="facts">{% for f in c.facts %}<span>{{ f }}</span>{% endfor %}</p>{% endif %}
+    <div class="row pfoot"><span>{% if let Some((n, t)) = c.milestone %}<span class="mono">{{ n }}</span> · {{ t }}{% else %}<span class="sub">no milestones yet</span>{% endif %}</span><span class="grow"></span><span class="sub">{{ c.questions }}{% if c.status != "active" %} · {{ c.status }}{% endif %}</span></div>
+  </a>
+{% endfor %}
+</div>
+{% endif %}
+{% endblock %}

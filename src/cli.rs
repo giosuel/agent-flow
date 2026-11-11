@@ -5,13 +5,12 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, bail};
 use clap::{Args, Subcommand};
-use rusqlite::params;
 
 use crate::activity::{self, Action, Entry, Via};
 use crate::auth::{self, Actor, TokenKind};
 use crate::config::Config;
 use crate::db::Db;
-use crate::util::{expand_home, fmt_utc, now_ms};
+use crate::util::{expand_home, fmt_utc};
 
 #[derive(Subcommand)]
 pub enum AdminCommand {
@@ -132,15 +131,7 @@ pub fn admin(config_path: &Path, command: AdminCommand) -> anyhow::Result<()> {
             eprintln!("Token {id} revoked.");
         }
         AdminCommand::Project { command: ProjectCommand::Add { slug, name } } => {
-            check_slug(&slug)?;
-            db.call_blocking(|c| {
-                c.execute(
-                    "INSERT INTO projects (slug, name, created_at) VALUES (?1, ?2, ?3)",
-                    params![slug, name, now_ms()],
-                )
-                .with_context(|| format!("adding {slug} (does it exist already?)"))?;
-                Ok(())
-            })?;
+            db.call_blocking(|c| crate::projects::create(c, &slug, &name, "admin-cli"))?;
             log_cli(&db, Action::Write, format!("project {slug} added"))?;
             eprintln!("Project {slug} added.");
         }

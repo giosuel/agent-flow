@@ -278,3 +278,152 @@ async fn pwa_files_are_public() {
     assert!(sw.text().await.unwrap().contains("showNotification"));
     assert_eq!(s.http.get(s.url("/static/icons/apple-touch-icon.png")).send().await.unwrap().status(), StatusCode::OK);
 }
+
+#[tokio::test]
+async fn an_agent_runs_its_project_over_mcp() {
+    let s = TestServer::start().await;
+    let token = s.token(TokenKind::Project, Some("vinculum")).await;
+    let other = s.token(TokenKind::Project, Some("imaginarium")).await;
+    let sess = mcp_session(&s, &token).await;
+    let call = |name: &'static str, args: Value| {
+        let (s, token, sess) = (&s, token.clone(), sess.clone());
+        async move { mcp_tool(s, &token, &sess, name, args).await }
+    };
+
+    let (ok, hello) =
+        call("hello", json!({"session": "Vinculum", "machine": "giosuel.ch", "model": "Opus 5.5", "effort": "high"}))
+            .await;
+    assert!(ok, "{hello}");
+    assert_eq!(hello["project"]["agent"]["online"], true);
+
+    assert!(call("add_milestone", json!({"name": "M4", "title": "Keybinds"})).await.0);
+    assert!(call("add_milestone", json!({"name": "K1", "title": "Read binds", "step_of": "M4"})).await.0);
+    let (ok, t) = call("add_task", json!({"title": "Record a bind", "milestone": "K1", "estimate": "2 h"})).await;
+    assert!(ok, "{t}");
+    assert_eq!(t["id"], "vinculum/T-1");
+    let (ok, t) = call("update_task", json!({"id": "T-1", "state": "doing"})).await;
+    assert!(ok && t["state"] == "doing", "{t}");
+    let (ok, err) = call("update_task", json!({"id": "T-1", "state": "finished"})).await;
+    assert!(!ok && err.as_str().unwrap().contains("todo, doing"), "{err}");
+
+    let (ok, q) = call(
+        "ask_question",
+        json!({"title": "Tabs A or B?", "options": [{"title": "A"}, {"title": "B"}], "recommended": 1, "blocks": ["T-1"]}),
+    )
+    .await;
+    assert!(ok, "{q}");
+    assert_eq!(q["id"], "vinculum/Q-1");
+    assert!(!call("ask_question", json!({"title": "x", "options": [{"title": "A"}], "recommended": 2})).await.0);
+
+    let (ok, d) = call(
+        "record_decision",
+        json!({"title": "Tabs on the left", "owner_words": "A, the vertical list", "source": "owner", "answers": "Q-1"}),
+    )
+    .await;
+    assert!(ok, "{d}");
+    let (ok, d2) = call(
+        "record_decision",
+        json!({"title": "Tabs on top after all", "owner_words": "B", "source": "relayed by Viber Consultant", "supersedes": "D-1"}),
+    )
+    .await;
+    assert!(ok, "{d2}");
+    let (_, rec) = call("get_record", json!({"id": "D-1"})).await;
+    assert_eq!(rec["state"], "replaced");
+    assert!(rec["links"].as_array().unwrap().iter().any(|l| l["relation"] == "Replaced by"));
+
+    let (_, found) = call("find_records", json!({"kind": "task", "milestone": "M4"})).await;
+    assert_eq!(found["count"], 1, "steps count as their milestone");
+    let (_, found) = call("find_records", json!({"project": "all", "text": "vertical"})).await;
+    assert_eq!(found["records"][0]["id"], "vinculum/D-1");
+
+    // Another project's agent can read but not change.
+    let other_sess = mcp_session(&s, &other).await;
+    let (ok, _) = mcp_tool(&s, &other, &other_sess, "get_record", json!({"id": "vinculum/T-1"})).await;
+    assert!(ok);
+    let (ok, err) =
+        mcp_tool(&s, &other, &other_sess, "update_task", json!({"id": "vinculum/T-1", "state": "done"})).await;
+    assert!(!ok && err.as_str().unwrap().contains("only your own project"), "{err}");
+    let (ok, _) =
+        mcp_tool(&s, &other, &other_sess, "add_milestone", json!({"project": "vinculum", "name": "M9", "title": "x"}))
+            .await;
+    assert!(!ok);
+    // A device token only reads.
+    let device = s.token(TokenKind::Device, None).await;
+    let dev_sess = mcp_session(&s, &device).await;
+    let (ok, _) = mcp_tool(&s, &device, &dev_sess, "project_info", json!({"project": "vinculum"})).await;
+    assert!(ok);
+    let (ok, _) =
+        mcp_tool(&s, &device, &dev_sess, "update_project", json!({"project": "vinculum", "description": "x"})).await;
+    assert!(!ok);
+    // Refusals are logged as warnings.
+    assert!(s.log_summaries().await.iter().any(|l| l.starts_with("update_task refused")));
+}
+
+#[tokio::test]
+async fn the_owner_answers_on_the_page_and_the_agent_reads_it() {
+    let s = TestServer::start().await;
+    let token = s.token(TokenKind::Project, Some("vinculum")).await;
+    let sess = mcp_session(&s, &token).await;
+    mcp_tool(
+        &s,
+        &token,
+        &sess,
+        "ask_question",
+        json!({"title": "A or B?", "options": [{"title": "A"}, {"title": "B"}]}),
+    )
+    .await;
+
+    // Pages render for the owner, and a token can't answer.
+    let cookie = s.owner_cookie().await;
+    for path in [
+        "/projects",
+        "/p/vinculum",
+        "/p/vinculum?tab=tasks",
+        "/p/vinculum?tab=decisions",
+        "/p/vinculum?tab=questions",
+        "/p/vinculum/Q-1",
+    ] {
+        let res = s.http.get(s.url(path)).header(COOKIE, &cookie).send().await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK, "{path}");
+    }
+    assert_eq!(
+        s.http.get(s.url("/p/nope")).header(COOKIE, &cookie).send().await.unwrap().status(),
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        s.http.get(s.url("/p/vinculum/Q-9")).header(COOKIE, &cookie).send().await.unwrap().status(),
+        StatusCode::NOT_FOUND
+    );
+    let res =
+        s.http.post(s.url("/p/vinculum/Q-1/answer")).bearer_auth(&token).form(&[("option", "1")]).send().await.unwrap();
+    assert_eq!(res.status(), StatusCode::FORBIDDEN);
+
+    let res = s
+        .http
+        .post(s.url("/p/vinculum/Q-1/answer"))
+        .header(COOKIE, &cookie)
+        .header(ORIGIN, &s.base)
+        .form(&[("option", "2"), ("words", "B, smaller"), ("next", "//evil.example")])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::SEE_OTHER);
+    assert_eq!(res.headers()[LOCATION], "/p/vinculum/Q-1", "no open redirects");
+
+    let (_, q) = mcp_tool(&s, &token, &sess, "get_record", json!({"id": "Q-1"})).await;
+    assert_eq!(
+        (q["state"].as_str(), q["data"]["answer"].as_str(), q["data"]["answer_option"].as_u64()),
+        (Some("answered"), Some("B, smaller"), Some(2))
+    );
+    // Answering twice shows the reason on the page instead of failing.
+    let res = s
+        .http
+        .post(s.url("/p/vinculum/Q-1/answer"))
+        .header(COOKIE, &cookie)
+        .header(ORIGIN, &s.base)
+        .form(&[("option", "1")])
+        .send()
+        .await
+        .unwrap();
+    assert!(res.text().await.unwrap().contains("already answered"));
+}

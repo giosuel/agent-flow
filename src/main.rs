@@ -1,15 +1,18 @@
 //! AgentFlow: one binary with the server (`agentflow serve`), the owner's admin commands, and the
 //! client commands agents and the owner run against the server.
-#![allow(dead_code, reason = "M0 lays foundations (log fields, permissions) that later milestones use")]
+#![allow(dead_code, reason = "log kinds and helpers that M3–M8 start using; removed once they all do")]
 
 mod activity;
 mod auth;
 mod cli;
 mod config;
 mod db;
+mod markdown;
 mod mcp;
 mod passkey;
+mod projects;
 mod push;
+mod records;
 mod tokens;
 mod util;
 mod web;
