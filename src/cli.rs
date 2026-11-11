@@ -157,18 +157,6 @@ pub fn admin(config_path: &Path, command: AdminCommand) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Slugs end up in record ids and URLs: lowercase letters, digits and dashes.
-pub fn check_slug(slug: &str) -> anyhow::Result<()> {
-    let ok = !slug.is_empty()
-        && slug.len() <= 40
-        && slug.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
-        && !slug.starts_with('-');
-    if !ok {
-        bail!("{slug:?}: use lowercase letters, digits and dashes, e.g. \"cold-trace\"");
-    }
-    Ok(())
-}
-
 fn write_secret_file(path: &Path, secret: &str) -> anyhow::Result<()> {
     use std::io::Write;
     use std::os::unix::fs::OpenOptionsExt;
@@ -289,15 +277,14 @@ pub fn mcp_headers(token_file: &Path) -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
 
     #[test]
     fn slugs() {
         for ok in ["vinculum", "cold-trace", "p2"] {
-            assert!(check_slug(ok).is_ok(), "{ok}");
+            assert!(crate::projects::check_slug(ok).is_ok(), "{ok}");
         }
         for bad in ["", "Cold", "a b", "-x", "a/b", "ä"] {
-            assert!(check_slug(bad).is_err(), "{bad}");
+            assert!(crate::projects::check_slug(bad).is_err(), "{bad}");
         }
     }
 }

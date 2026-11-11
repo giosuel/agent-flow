@@ -196,9 +196,7 @@ async fn dashboard(
                 let current = ms.iter().filter(|m| m.parent_id.is_none()).find(|m| m.state == "active");
                 let percent = match current {
                     Some(m) => {
-                        let ids: Vec<i64> = std::iter::once(m.id)
-                            .chain(ms.iter().filter(|s| s.parent_id == Some(m.id)).map(|s| s.id))
-                            .collect();
+                        let ids: Vec<i64> = projects::with_steps(&ms, m.id);
                         let tasks = records::query(
                             c,
                             &records::Query {

@@ -327,6 +327,11 @@ async fn security_headers(req: Request, next: Next) -> Response {
     res
 }
 
+/// A JSON error for API calls and the pages' scripts.
+pub fn json_error(status: StatusCode, message: impl Into<String>) -> Response {
+    (status, axum::Json(serde_json::json!({"error": message.into()}))).into_response()
+}
+
 /// A return address from a form, if it's one of our own pages: a path, plain printable ASCII,
 /// not `//…` or `/\…` (both mean another host to a browser). Anything else is ignored.
 pub fn local_path(next: Option<&str>) -> Option<String> {
