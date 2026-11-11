@@ -19,7 +19,6 @@ pub const VERSION: &str = env!("APP_VERSION");
 
 pub fn routes() -> Router<AppState> {
     let mut r = Router::new()
-        .route("/", get(dashboard))
         .route("/login", get(login))
         .route("/login/link/{secret}", get(link_confirm).post(link_use))
         .route("/login/passkey/start", post(passkey_start))
@@ -27,7 +26,12 @@ pub fn routes() -> Router<AppState> {
         .route("/logout", post(logout))
         .route("/api/whoami", get(whoami));
     for (path, _, milestone) in COMING {
-        r = r.route(path, get(move |Extension(actor): Extension<Actor>| coming(actor, path, milestone)));
+        r = r.route(
+            path,
+            get(move |State(state): State<AppState>, Extension(actor): Extension<Actor>| {
+                coming(state, actor, path, milestone)
+            }),
+        );
     }
     r
 }
@@ -66,6 +70,15 @@ pub struct Nav {
     pub waiting: i64,
 }
 
+/// The navigation with the live "waiting on you" count, for every page.
+pub async fn nav(state: &AppState, actor: &Actor, active: &str) -> Nav {
+    let mut n = Nav::new(actor, active);
+    if actor.is_owner() {
+        n.waiting = state.db.call(|c| crate::waiting::count(c)).await.unwrap_or(0) as i64;
+    }
+    n
+}
+
 impl Nav {
     pub fn new(actor: &Actor, active: &str) -> Self {
         Self {
@@ -82,19 +95,6 @@ pub fn render(t: impl Template) -> AppResult<Response> {
 }
 
 #[derive(Template)]
-#[template(path = "dashboard.html")]
-struct DashboardPage {
-    nav: Nav,
-    today: String,
-}
-
-async fn dashboard(Extension(actor): Extension<Actor>) -> AppResult<Response> {
-    let today = time::OffsetDateTime::now_utc();
-    let f = time::macros::format_description!("[weekday] [day padding:none] [month repr:long] · [hour]:[minute] UTC");
-    render(DashboardPage { nav: Nav::new(&actor, "/"), today: today.format(&f).unwrap_or_default() })
-}
-
-#[derive(Template)]
 #[template(path = "coming.html")]
 struct ComingPage {
     nav: Nav,
@@ -102,9 +102,9 @@ struct ComingPage {
     milestone: &'static str,
 }
 
-async fn coming(actor: Actor, path: &'static str, milestone: &'static str) -> AppResult<Response> {
+async fn coming(state: AppState, actor: Actor, path: &'static str, milestone: &'static str) -> AppResult<Response> {
     let title = COMING.iter().find(|c| c.0 == path).map(|c| c.1).unwrap_or("Page");
-    render(ComingPage { nav: Nav::new(&actor, path), title, milestone })
+    render(ComingPage { nav: nav(&state, &actor, path).await, title, milestone })
 }
 
 #[derive(Template)]

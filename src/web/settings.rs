@@ -11,7 +11,7 @@ use serde::Deserialize;
 use serde_json::json;
 use webauthn_rs::prelude::RegisterPublicKeyCredential;
 
-use super::pages::{Nav, render};
+use super::pages::{Nav, nav, render};
 use super::{AppError, AppResult, AppState, ClientIp};
 use crate::activity::{self, Action, Entry, Via};
 use crate::auth::{self, Actor, TokenKind};
@@ -195,7 +195,7 @@ async fn render_page(
         .partition(|t| t.kind == "device");
 
     let page = SettingsPage {
-        nav: Nav::new(actor, "/settings"),
+        nav: nav(state, actor, "/settings").await,
         notice,
         new_token,
         passkeys_available: state.passkeys.available(),
