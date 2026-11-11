@@ -294,11 +294,12 @@ async fn list(State(state): State<AppState>, Path(product): Path<String>) -> Res
     }
 }
 
-async fn find_build(state: &AppState, product: String, number: i64) -> Result<Record, Response> {
+/// The build, or the error response to send instead (boxed: a Response is large).
+async fn find_build(state: &AppState, product: String, number: i64) -> Result<Record, Box<Response>> {
     match state.db.call(move |c| Ok(builds_of(c, &product)?.into_iter().find(|r| r.number == number))).await {
         Ok(Some(r)) => Ok(r),
-        Ok(None) => Err(json_error(StatusCode::NOT_FOUND, "no such build")),
-        Err(e) => Err(json_error(StatusCode::INTERNAL_SERVER_ERROR, format!("{e:#}"))),
+        Ok(None) => Err(Box::new(json_error(StatusCode::NOT_FOUND, "no such build"))),
+        Err(e) => Err(Box::new(json_error(StatusCode::INTERNAL_SERVER_ERROR, format!("{e:#}")))),
     }
 }
 
@@ -309,7 +310,7 @@ async fn one(State(state): State<AppState>, Path((product, number)): Path<(Strin
             v["files"] = r.data.get("files").cloned().unwrap_or(Value::Null);
             Json(v).into_response()
         }
-        Err(res) => res,
+        Err(res) => *res,
     }
 }
 
@@ -323,7 +324,7 @@ async fn archive(
     }
     let r = match find_build(&state, product.clone(), number).await {
         Ok(r) => r,
-        Err(res) => return res,
+        Err(res) => return *res,
     };
     let path = builds::archive_path(&builds_dir(&state), &product, r.str("name"));
     let file = match tokio::fs::File::open(&path).await {
