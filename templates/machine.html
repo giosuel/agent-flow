@@ -14,25 +14,26 @@
     <span class="ranges" role="group" aria-label="Time range">{% for (k, label, on) in ranges %}<a class="rng{% if *on %} on{% endif %}" href="/machine?range={{ k }}"{% if *on %} aria-current="true"{% endif %}>{{ label }}</a>{% endfor %}</span>
   </div>
   {% if !sampled %}<p class="sub">No samples yet; the first comes a minute or two after AgentFlow starts.</p>{% else %}
-  <ul class="legend plain" aria-label="Projects">{% for l in legend %}<li><span class="swatch" style="--c: {{ l.color }}"></span>{{ l.name }}</li>{% endfor %}<li><span class="swatch limit"></span>machine limit</li></ul>
+  {% if let Some(c) = collecting %}<p class="sub">{{ c }}</p>{% endif %}
+  <ul class="legend plain" aria-label="Projects">{% for l in legend %}<li><span class="swatch" style="--c: {{ l.color }}"></span>{{ l.name }}</li>{% endfor %}<li><span class="swatch limit"></span>the machine: {{ cores }} cores, {{ mem_total }} GB</li></ul>
   <div class="duo-charts">
     <div class="stack-sm"><span class="label">CPU · cores</span>
-      <div class="chart"><span class="y-max mono sub">{{ cpu_max }}</span>{{ cpu|safe }}<div class="x-labels edges mono sub" aria-hidden="true">{% for l in x_labels %}<span>{{ l }}</span>{% endfor %}</div></div></div>
+      <div class="chart"><span class="y-max mono sub">{{ cpu_max }}</span><span class="y-zero mono sub">0</span>{{ cpu|safe }}<div class="x-labels edges mono sub" aria-hidden="true">{% for l in x_labels %}<span>{{ l }}</span>{% endfor %}</div></div></div>
     <div class="stack-sm"><span class="label">Memory · GB</span>
-      <div class="chart"><span class="y-max mono sub">{{ mem_max }}</span>{{ mem|safe }}<div class="x-labels edges mono sub" aria-hidden="true">{% for l in x_labels %}<span>{{ l }}</span>{% endfor %}</div></div></div>
+      <div class="chart"><span class="y-max mono sub">{{ mem_max }}</span><span class="y-zero mono sub">0</span>{{ mem|safe }}<div class="x-labels edges mono sub" aria-hidden="true">{% for l in x_labels %}<span>{{ l }}</span>{% endfor %}</div></div></div>
   </div>
   {% endif %}
   <div class="table-wrap"><table class="table nums">
-    <thead><tr><th scope="col">Agent</th><th scope="col">CPU-hours today</th><th scope="col">Peak memory today</th><th scope="col">Now</th></tr></thead>
-    <tbody>{% for a in agents %}<tr><th scope="row"><span class="swatch" style="--c: {{ a.color }}"></span>{{ a.name }}</th><td>{{ a.cpu_hours }}</td><td>{{ a.peak }}</td><td class="sub">{{ a.now }}</td></tr>{% endfor %}
+    <thead><tr><th scope="col">Agent</th><th scope="col" class="hide-phone">CPU-hours today</th><th scope="col">Peak memory today</th><th scope="col">Now</th></tr></thead>
+    <tbody>{% for a in agents %}<tr><th scope="row"><span class="swatch" style="--c: {{ a.color }}"></span>{{ a.name }}</th><td class="hide-phone">{{ a.cpu_hours }}</td><td>{{ a.peak }}</td><td class="sub">{{ a.now }}</td></tr>{% endfor %}
     {% if agents.is_empty() %}<tr><td colspan="4" class="sub">Nothing measured today yet.</td></tr>{% endif %}</tbody>
   </table></div>
-  <p class="sub">Usage counts per agent session and everything it starts (builds, tests, dev servers), matched to a project by the directory the session runs in. Agents on other machines show in the project list; this page only measures this one.</p>
+  <p class="sub">Usage counts per agent session and everything it starts (builds, tests, dev servers), matched to a project by the directory the session runs in. Other is everything else: the system, services and other users. Agents on other machines show in the project list; this page only measures this one.</p>
 </section>
 
 <section class="card pad stack" aria-labelledby="ports-h">
   <div class="sec"><h2 id="ports-h">Claimed ports</h2><span class="sub">from each project's details</span></div>
-  {% if ports.is_empty() %}<p class="sub">No project lists its ports yet (update_project, ports).</p>{% else %}
+  {% if ports.is_empty() %}<p class="sub">No project lists its ports yet. Agents add them to their project's details when they claim one.</p>{% else %}
   <ul class="rows">{% for p in ports %}<li class="item-row"><span class="mono">{{ p.port }}</span><div class="ttl"><span class="sub">{{ p.project }}</span></div></li>{% endfor %}</ul>
   {% endif %}
 </section>

@@ -57,6 +57,19 @@ pub fn fmt_utc(ms: i64) -> String {
     t.format(&f).unwrap_or_default()
 }
 
+/// "35,948": counts with thousands separators.
+pub fn fmt_count(n: i64) -> String {
+    let digits = n.unsigned_abs().to_string();
+    let mut out = String::new();
+    for (i, d) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(d);
+    }
+    if n < 0 { format!("-{out}") } else { out }
+}
+
 /// "02:04" (UTC).
 pub fn fmt_hm(ms: i64) -> String {
     fmt_utc(ms).get(11..16).unwrap_or("").to_owned()
@@ -92,6 +105,13 @@ pub fn home_dir() -> std::path::PathBuf {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn counts_get_separators() {
+        assert_eq!(super::fmt_count(35_948), "35,948");
+        assert_eq!(super::fmt_count(999), "999");
+        assert_eq!(super::fmt_count(-1_234_567), "-1,234,567");
+    }
+
     use super::*;
 
     #[test]

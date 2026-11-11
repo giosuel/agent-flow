@@ -207,7 +207,9 @@ pub fn histogram(conn: &Connection, f: &Filter, from: i64, to: i64, buckets: i64
     let rows = stmt.query_map(params_from_iter(args), |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?)))?;
     for row in rows {
         let (i, c) = row?;
-        if let Some(slot) = out.get_mut(i as usize) {
+        // The width is rounded down, so the range's last moments fall one past the end; they
+        // belong to the last bucket (the query already stops at `to`).
+        if let Some(slot) = out.get_mut((i.max(0) as usize).min(buckets as usize - 1)) {
             *slot += c;
         }
     }
@@ -373,6 +375,9 @@ mod tests {
             assert!(older[0].seq < first[4].seq);
             let now = crate::util::now_ms();
             let h = histogram(c, &Filter::default(), now - 3_600_000, now + 1, 12)?;
+            assert_eq!(h.iter().sum::<i64>(), 30);
+            // Entries in the very last moment of the range count too.
+            let h = histogram(c, &Filter::default(), now - 3_600_000, now + 1, 7)?;
             assert_eq!(h.iter().sum::<i64>(), 30);
 
             // Pretend the reads are old: they move to the archive, nothing else does, and a

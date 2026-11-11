@@ -66,6 +66,10 @@ struct MachinePage {
     agents: Vec<AgentRow>,
     ports: Vec<PortRow>,
     sampled: bool,
+    /// "Collecting since 05:20 (12 min so far)" while the samples don't cover the range yet.
+    collecting: Option<String>,
+    cores: usize,
+    mem_total: String,
 }
 
 fn gb(bytes: u64) -> f64 {
@@ -87,10 +91,11 @@ async fn page(
     let n = (span / step) as usize;
     let from = now - span;
     let today = crate::usage::day_start(now);
-    let (projects, history, summary) = state
+    let (projects, history, summary, first) = state
         .db
         .call(move |c| {
-            Ok((crate::projects::list(c)?, machine::history(c, from, step)?, machine::group_summary(c, today)?))
+            let first: Option<i64> = c.query_row("SELECT min(at) FROM machine_samples", [], |r| r.get(0))?;
+            Ok((crate::projects::list(c)?, machine::history(c, from, step)?, machine::group_summary(c, today)?, first))
         })
         .await?;
 
@@ -126,7 +131,7 @@ async fn page(
     let colors = charts::colors(&slugs);
     let mut groups: Vec<(String, String, &'static str)> =
         projects.iter().zip(&colors).map(|(p, c)| (p.slug.clone(), p.name.clone(), *c)).collect();
-    groups.push(("other".into(), "Other (system, services, other users)".into(), charts::OTHER));
+    groups.push(("other".into(), "Other".into(), charts::OTHER));
     let series_of = |pick: &dyn Fn(f64, f64) -> f64| -> Vec<Series> {
         groups
             .iter()
@@ -183,6 +188,15 @@ async fn page(
         tiles,
         ranges: vec![("6h", "6 h", range == "6h"), ("24h", "24 h", range == "24h"), ("7d", "7 d", range == "7d")],
         sampled: !history.is_empty(),
+        collecting: first.filter(|f| *f > from + step).map(|f| {
+            format!(
+                "Collecting since {} UTC ({} so far); the chart fills in as it goes.",
+                crate::util::fmt_hm(f),
+                crate::util::ago(f, now).trim_end_matches(" ago")
+            )
+        }),
+        cores: snap.cores,
+        mem_total: format!("{:.0}", snap.mem_total_gb()),
         legend,
         cpu,
         cpu_max: format!("{cpu_max:.0}"),

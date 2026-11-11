@@ -41,7 +41,7 @@
       {% if !prs.is_empty() %}
       <section class="card pad stack" aria-labelledby="mo-h">
         <div class="sec"><h2 class="label" id="mo-h">Merge order</h2><span class="sub">from PR bases</span></div>
-        <p class="sub">Each PR merges after the one it's based on.{% if has_stack_button %} "Merge #a–#b" merges every PR up to that one, in order.{% endif %}</p>
+        <p class="sub">PRs based on main can merge in any order once ready; a PR based on another merges after it.{% if has_stack_button %} "Merge #a–#b" merges every PR up to that one, in order.{% endif %}</p>
         {% include "pr_list.html" %}
         {% if prs_total > prs.len() %}<a class="sub" href="/p/{{ slug }}?tab=prs">All {{ prs_total }} open PRs</a>{% endif %}
       </section>

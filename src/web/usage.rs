@@ -57,7 +57,7 @@ struct Cells {
 impl Cells {
     fn of(t: &Tokens) -> Self {
         Self {
-            calls: t.calls.to_string(),
+            calls: crate::util::fmt_count(t.calls),
             input: short(t.input),
             cache_write: short(t.cache_write),
             output: short(t.output),
@@ -82,7 +82,7 @@ struct TaskRow {
 }
 
 struct Tile {
-    label: &'static str,
+    label: String,
     value: String,
     hint: String,
 }
@@ -109,6 +109,10 @@ struct UsagePage {
     projects: Vec<ProjectRow>,
     range: String,
     tasks: Vec<TaskRow>,
+    /// Some token counts against a task (not only "Not in a task").
+    any_task: bool,
+    show_status: bool,
+    show_estimate: bool,
     days: i64,
     empty: bool,
 }
@@ -184,6 +188,7 @@ async fn page(
     ids.push(None);
     let mut series = Vec::new();
     let mut legend = Vec::new();
+    let mut ids_of: Vec<(String, Option<i64>)> = Vec::new();
     for id in ids {
         let mut values = vec![0.0; n];
         for (b, p, t) in &buckets {
@@ -199,6 +204,7 @@ async fn page(
         }
         let (name, color) = name_of(id);
         legend.push(Legend { name: name.clone(), color, total: short(total as i64) });
+        ids_of.push((name.clone(), id));
         series.push(Series { name, color, values });
     }
     let labels: Vec<String> =
@@ -214,9 +220,23 @@ async fn page(
         &fmt,
         if day.is_none() { Some(&link) } else { None },
     );
-    // The per-agent lines: the same buckets, a cumulative line per project would hide the
-    // shape, so these are per bucket too.
-    let (lines, lines_max) = charts::lines("per agent", n, &series);
+    // The lines show what the bars don't: how many model calls each project's agent made.
+    let call_series: Vec<Series> = series
+        .iter()
+        .map(|s| {
+            let id = ids_of.iter().find(|(name, _)| *name == s.name).map(|(_, id)| *id).unwrap_or(None);
+            let mut values = vec![0.0; n];
+            for (b, p, t) in &buckets {
+                if *p == id
+                    && let Some(v) = values.get_mut(*b as usize)
+                {
+                    *v += t.calls as f64;
+                }
+            }
+            Series { name: s.name.clone(), color: s.color, values }
+        })
+        .collect();
+    let (lines, lines_max) = charts::lines("model calls per project", n, &call_series);
     let x_labels: Vec<String> = labels
         .iter()
         .enumerate()
@@ -229,20 +249,31 @@ async fn page(
             a
         })
     };
-    let (td, fn_) = (sum(&today_total), sum(&fortnight));
-    let tiles = vec![
-        Tile { label: "New tokens today", value: short(td.new_tokens()), hint: format!("{} calls", td.calls) },
-        Tile { label: "New tokens, 14 days", value: short(fn_.new_tokens()), hint: format!("{} calls", fn_.calls) },
-        Tile {
-            label: "Cache reads, 14 days",
-            value: short(fn_.cache_read),
-            hint: if fn_.new_tokens() > 0 {
-                format!("{:.0}× the new tokens", fn_.cache_read as f64 / fn_.new_tokens() as f64)
-            } else {
-                String::new()
+    let (td, fn_, window) = (sum(&today_total), sum(&fortnight), sum(&per_project));
+    let calls = |t: &Tokens| format!("{} calls", crate::util::fmt_count(t.calls));
+    let ratio = |t: &Tokens| {
+        if t.new_tokens() > 0 {
+            format!("{:.0}× the new tokens", t.cache_read as f64 / t.new_tokens() as f64)
+        } else {
+            String::new()
+        }
+    };
+    // An opened day gets its own figures; the 14-day view shows today and the fortnight.
+    let tiles = match day {
+        Some(d) => vec![
+            Tile {
+                label: format!("New tokens on {}", date_of(d)),
+                value: short(window.new_tokens()),
+                hint: calls(&window),
             },
-        },
-    ];
+            Tile { label: "Cache reads that day".into(), value: short(window.cache_read), hint: ratio(&window) },
+        ],
+        None => vec![
+            Tile { label: "New tokens today".into(), value: short(td.new_tokens()), hint: calls(&td) },
+            Tile { label: "New tokens, 14 days".into(), value: short(fn_.new_tokens()), hint: calls(&fn_) },
+            Tile { label: "Cache reads, 14 days".into(), value: short(fn_.cache_read), hint: ratio(&fn_) },
+        ],
+    };
 
     let mut project_rows: Vec<ProjectRow> = per_project
         .iter()
@@ -309,12 +340,15 @@ async fn page(
         empty: legend.is_empty(),
         legend,
         lines,
-        lines_max: short(lines_max as i64),
+        lines_max: crate::util::fmt_count(lines_max as i64),
         projects: project_rows,
         range: match day {
             Some(d) => date_of(d),
             None => "14 days".into(),
         },
+        any_task: task_rows.iter().any(|t| !t.url.is_empty()),
+        show_status: task_rows.iter().any(|t| !t.status.is_empty()),
+        show_estimate: task_rows.iter().any(|t| !t.estimate.is_empty()),
         tasks: task_rows,
         days,
     })
