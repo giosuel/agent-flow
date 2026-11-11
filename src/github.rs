@@ -24,14 +24,19 @@ pub struct PrInfo {
 }
 
 /// A PR or issue on someone else's repository, as the watcher sees it.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ItemInfo {
     pub title: String,
     pub url: String,
     pub is_pr: bool,
     /// open, closed or merged
     pub state: String,
+    /// Comments on the conversation.
     pub comments: i64,
+    /// A PR's reviews (approve, request changes, or a review with comments); 0 for an issue.
+    pub reviews: i64,
+    /// Comments on a PR's lines of code; 0 for an issue.
+    pub review_comments: i64,
 }
 
 /// A pull request as a list shows it (the guides' PRs).
@@ -204,6 +209,12 @@ struct GhIssue {
     pull_request: Option<serde_json::Value>,
 }
 
+#[derive(Deserialize)]
+struct GhPull {
+    merged: bool,
+    review_comments: i64,
+}
+
 impl GitHub for GhCli {
     fn repo_prs<'a>(&'a self, repo: &'a str, merged: bool) -> BoxFuture<'a, anyhow::Result<Vec<RepoPr>>> {
         Box::pin(async move {
@@ -238,18 +249,38 @@ impl GitHub for GhCli {
         Box::pin(async move {
             check_repo(repo)?;
             check_number(number)?;
-            // The issues endpoint answers for PRs too; only a PR's own endpoint knows "merged".
+            // The issues endpoint answers for PRs too; only a PR's own endpoints know "merged", the
+            // comments on lines of code and the reviews (which aren't comments to GitHub).
             let out = Self::run(&["api", &format!("repos/{repo}/issues/{number}")]).await?;
             let i: GhIssue = serde_json::from_slice(&out).context("reading gh's answer")?;
             let is_pr = i.pull_request.is_some();
-            let mut state = i.state.to_lowercase();
-            if is_pr && state == "closed" {
-                let out = Self::run(&["api", &format!("repos/{repo}/pulls/{number}"), "--jq", ".merged"]).await?;
-                if String::from_utf8_lossy(&out).trim() == "true" {
-                    state = "merged".into();
+            let mut info = ItemInfo {
+                title: i.title,
+                url: i.html_url,
+                is_pr,
+                state: i.state.to_lowercase(),
+                comments: i.comments,
+                ..Default::default()
+            };
+            if is_pr {
+                let out = Self::run(&["api", &format!("repos/{repo}/pulls/{number}")]).await?;
+                let p: GhPull = serde_json::from_slice(&out).context("reading gh's answer")?;
+                if p.merged {
+                    info.state = "merged".into();
                 }
+                info.review_comments = p.review_comments;
+                // One length per page of 30.
+                let out = Self::run(&[
+                    "api",
+                    "--paginate",
+                    &format!("repos/{repo}/pulls/{number}/reviews"),
+                    "--jq",
+                    "length",
+                ])
+                .await?;
+                info.reviews = String::from_utf8_lossy(&out).lines().filter_map(|l| l.trim().parse::<i64>().ok()).sum();
             }
-            Ok(ItemInfo { title: i.title, url: i.html_url, is_pr, state, comments: i.comments })
+            Ok(info)
         })
     }
 
