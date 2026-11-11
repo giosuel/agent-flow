@@ -988,3 +988,34 @@ async fn the_owner_edits_a_guide_and_agents_read_it() {
         s.http.post(s.url("/guides/prs/merge")).bearer_auth(&token).form(&[("number", "27")]).send().await.unwrap();
     assert_eq!(res.status(), StatusCode::FORBIDDEN);
 }
+
+#[tokio::test]
+async fn the_log_page_filters_and_streams() {
+    let s = TestServer::start().await;
+    let token = s.token(TokenKind::Project, Some("vinculum")).await;
+    s.http.get(s.url("/api/whoami")).bearer_auth(&token).send().await.unwrap();
+    let cookie = s.owner_cookie().await;
+    let html = s
+        .http
+        .get(s.url("/log?q=actor:vinculum&range=1h"))
+        .header(COOKIE, &cookie)
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(html.contains("GET /api/whoami"), "the agent's request is listed");
+    assert!(!html.contains("owner signed in with a one-time link"), "filtered to the agent");
+    let html =
+        s.http.get(s.url("/log?q=-actor:vinculum")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
+    assert!(!html.contains("GET /api/whoami"));
+    // Owner only, page and stream.
+    assert_eq!(s.http.get(s.url("/log")).bearer_auth(&token).send().await.unwrap().status(), StatusCode::FORBIDDEN);
+    assert_eq!(
+        s.http.get(s.url("/log/stream?after=0")).bearer_auth(&token).send().await.unwrap().status(),
+        StatusCode::FORBIDDEN
+    );
+    let res = s.http.get(s.url("/log/stream?after=0")).header(COOKIE, &cookie).send().await.unwrap();
+    assert_eq!(res.headers()["content-type"], "text/event-stream");
+}
