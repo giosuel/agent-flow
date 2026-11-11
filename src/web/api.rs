@@ -64,8 +64,12 @@ async fn wait(
     Extension(actor): Extension<Actor>,
     Query(q): Query<WaitQuery>,
 ) -> Response {
+    if matches!(actor, Actor::Admin { .. }) {
+        return wait_consultant(state, q).await;
+    }
     let Actor::Project { project_id, slug, .. } = actor.clone() else {
-        return (StatusCode::FORBIDDEN, Json(json!({"error": "wait is for a project's agent token"}))).into_response();
+        return (StatusCode::FORBIDDEN, Json(json!({"error": "wait is for a project's agent or the consultant"})))
+            .into_response();
     };
     // One agent per project needs one or two waits at a time; more would only load the database.
     let Some(_slot) = WaitSlot::take(&state, project_id) else {
@@ -107,6 +111,36 @@ async fn wait(
                     .map(|e| json!({"at": fmt_utc(e.at), "record": e.record, "kind": e.kind, "what": e.summary, "by": e.actor}))
                     .collect();
                 return Json(json!({"events": list})).into_response();
+            }
+            Ok(_) => {}
+            Err(e) => {
+                return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": format!("{e:#}")}))).into_response();
+            }
+        }
+        if Instant::now() >= deadline {
+            return Json(json!({"events": [], "timed_out": true})).into_response();
+        }
+        tokio::time::sleep(POLL).await;
+    }
+}
+
+/// The consultant waits for messages to it (it has no project feed).
+async fn wait_consultant(state: AppState, q: WaitQuery) -> Response {
+    // Its waits count under a project id no project has.
+    let Some(_slot) = WaitSlot::take(&state, -1) else {
+        return (StatusCode::TOO_MANY_REQUESTS, Json(json!({"error": "two waits are running already"})))
+            .into_response();
+    };
+    let deadline = Instant::now() + Duration::from_secs(q.timeout.unwrap_or(MAX_WAIT).clamp(1, MAX_WAIT));
+    loop {
+        match state.db.call(|c| crate::messages::consultant_inbox(c, true)).await {
+            Ok(list) if !list.is_empty() => {
+                let events: Vec<_> = list
+                    .iter()
+                    .map(|m| json!({"at": fmt_utc(m.created_at), "record": null, "kind": "message",
+                        "what": format!("Message from {} (conversation {}): {}", m.sender, m.thread_id, m.body), "by": m.sender}))
+                    .collect();
+                return Json(json!({"events": events})).into_response();
             }
             Ok(_) => {}
             Err(e) => {

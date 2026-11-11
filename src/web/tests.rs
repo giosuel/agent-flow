@@ -763,3 +763,49 @@ async fn a_build_goes_from_agent_to_owner_and_feedback_comes_back() {
     let (_, news) = mcp_tool(&s, &token, &sess, "since_last_check", json!({})).await;
     assert!(news.to_string().contains("1 works, 1 problem"), "{news}");
 }
+
+#[tokio::test]
+async fn agents_and_the_consultant_talk_through_agentflow() {
+    let s = TestServer::start().await;
+    let v = s.token(TokenKind::Project, Some("vinculum")).await;
+    let a = s.token(TokenKind::Project, Some("antimony")).await;
+    let consultant = s.token(TokenKind::Admin, None).await;
+    let (vs, as_, cs) = (mcp_session(&s, &v).await, mcp_session(&s, &a).await, mcp_session(&s, &consultant).await);
+
+    let (ok, r) = mcp_tool(&s, &v, &vs, "send_message", json!({"to": ["antimony"], "subject": "Port 21300?", "body": "Can I use 21300 for a demo?", "kind": "resource"})).await;
+    assert!(ok, "{r}");
+    let thread = r["conversation"].as_i64().unwrap();
+
+    // Antimony's next reply of any tool says something is waiting; since_last_check has it.
+    let (_, info) = mcp_tool(&s, &a, &as_, "project_info", json!({})).await;
+    assert!(info["unread"].as_str().unwrap_or("").starts_with("1 new"), "{info}");
+    let (_, news) = mcp_tool(&s, &a, &as_, "since_last_check", json!({})).await;
+    assert!(news.to_string().contains("Can I use 21300"), "{news}");
+    mcp_tool(
+        &s,
+        &a,
+        &as_,
+        "send_message",
+        json!({"conversation": thread, "body": "Yes, it's free.", "kind": "answer"}),
+    )
+    .await;
+    let (_, conv) = mcp_tool(&s, &v, &vs, "conversation", json!({"conversation": thread})).await;
+    assert_eq!(conv["messages"].as_array().unwrap().len(), 2);
+
+    // The consultant waits for its messages; a question to it ends the wait.
+    let waiter = {
+        let (http, url, t) = (s.http.clone(), s.url("/api/wait?timeout=20"), consultant.clone());
+        tokio::spawn(async move { http.get(url).bearer_auth(t).send().await.unwrap().json::<Value>().await.unwrap() })
+    };
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    mcp_tool(&s, &v, &vs, "send_message", json!({"to": ["consultant"], "subject": "Tags for A milestones", "body": "How do A milestones get tagged?", "kind": "question"})).await;
+    let got = tokio::time::timeout(std::time::Duration::from_secs(10), waiter).await.unwrap().unwrap();
+    assert!(got.to_string().contains("How do A milestones"), "{got}");
+    let (_, inbox) = mcp_tool(&s, &consultant, &cs, "inbox", json!({})).await;
+    assert_eq!(inbox["messages"].as_array().unwrap().len(), 0, "the wait marked it read");
+    // An agent can't read a conversation it isn't in, nor the consultant's inbox.
+    let (ok, _) = mcp_tool(&s, &a, &as_, "conversation", json!({"conversation": thread + 1})).await;
+    assert!(!ok);
+    let (ok, _) = mcp_tool(&s, &a, &as_, "inbox", json!({})).await;
+    assert!(!ok);
+}
