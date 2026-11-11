@@ -7,6 +7,7 @@ mod auth;
 mod cli;
 mod config;
 mod db;
+mod machine;
 mod markdown;
 mod mcp;
 mod passkey;

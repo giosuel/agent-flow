@@ -239,3 +239,37 @@ ol.history { padding-left: 0; list-style: none; font-size: 14px; color: var(--in
 .rows a:hover, .ttl a:hover { color: var(--hover); text-decoration: underline; }
 .sec a.sub { color: var(--muted); }
 .sec a.sub:hover { color: var(--ink); }
+
+/* Dashboard */
+.featured { border-color: var(--border); }
+.ftitle { font-size: 22px; letter-spacing: -0.01em; }
+.ftitle a { color: var(--ink); text-decoration: none; }
+.ftitle a:hover { color: var(--hover); }
+.clamp { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+button.opt { font: inherit; color: var(--ink); text-align: left; width: 100%; }
+.card.list { overflow: hidden; }
+.grp { padding: 10px 20px 6px; font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); font-weight: 600; border-top: 1px solid var(--line); }
+.grp:first-child { border-top: 0; }
+.item { display: flex; align-items: center; gap: 14px; min-height: 56px; padding: 6px 20px; border-top: 1px solid var(--line2); }
+.grp + .item { border-top: 0; }
+.ico { flex: none; width: 30px; height: 30px; border-radius: 8px; background: var(--chip); display: flex; align-items: center; justify-content: center; color: var(--hover); }
+.ico .i { width: 16px; height: 16px; }
+.tl { list-style: none; margin: 0; position: relative; display: flex; flex-direction: column; gap: 12px; padding-left: 22px; }
+.tl:before { content: ""; position: absolute; left: 5px; top: 6px; bottom: 6px; width: 1px; background: var(--line); }
+.ev { position: relative; font-size: 14px; color: var(--ink2); }
+.ev:before { content: ""; position: absolute; left: -21px; top: 7px; width: 9px; height: 9px; border-radius: 5px; background: var(--c, var(--info)); box-shadow: 0 0 0 3px var(--ground); }
+.ev strong { color: var(--ink); font-weight: 500; }
+.ev a { color: var(--ink2); text-decoration: none; }
+.ev a:hover { color: var(--hover); text-decoration: underline; }
+.prow { display: flex; gap: 12px; align-items: center; min-height: 44px; border-top: 1px solid var(--line2); }
+.prow .pn { color: var(--ink); text-decoration: none; font-weight: 500; width: 110px; flex: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.prow .pm { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.prow .pw { width: 24px; text-align: right; }
+.bar { display: block; width: 48px; flex: none; height: 4px; border-radius: 2px; background: var(--chip); overflow: hidden; }
+.bar i { display: block; height: 100%; background: var(--accent); border-radius: 2px; }
+@media (max-width: 600px) {
+  .item { padding: 12px 16px; align-items: flex-start; flex-wrap: wrap; row-gap: 10px; }
+  .item .ttl { flex: 1 1 calc(100% - 50px); }
+  .item .btn { margin-left: 44px; }
+  .ftitle { font-size: 20px; }
+}
