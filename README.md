@@ -182,6 +182,13 @@ runs short. Output streams to the agent, the job's page and the Log (`via:build`
 has its warnings and errors). When the server is offline, the command exits with 75 at once, so
 the agent builds locally.
 
+Build servers are managed on the Settings page: **Add** one by name and `user@host` (or a Host
+from `~/.ssh/config`); AgentFlow can make a key for it and shows the one line to add to that user's
+`authorized_keys` (with `restrict`). **Check** shows whether it has Rust and sccache, **Set up
+Rust** and **Install sccache** do that in the background, and **Limits** sets when jobs start and
+pause. Each project picks its build server in its own Settings; a project without one builds
+where its agent is (`agentflow remote` exits with 75). Servers in `config.toml` are added at start.
+
 For the low priority to hold against the machine's own user, give the build user's slice a low
 weight once (as root there): `systemctl set-property user-<uid>.slice CPUWeight=10 IOWeight=10`.
 
