@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Guides{% endblock %}
 {% block content %}
-<div class="head">
+<div class="head{% if file.is_some() %} hide-on-phone{% endif %}">
   <h1>Guides</h1>
   <p class="status-line">Your rules for every project, as files in the {{ repo }} repo. Agents read them through AgentFlow; the consultant changes them with pull requests, one file each.</p>
 </div>
