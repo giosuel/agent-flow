@@ -217,7 +217,7 @@ async fn save(
     let dir = state.config.handbook_dir();
     let repo = guides::Repo { dir: dir.clone(), author: state.config.git_author.clone() };
     let f = form.f.clone();
-    let result = tokio::task::spawn_blocking(move || -> anyhow::Result<(String, String)> {
+    let result = tokio::task::spawn_blocking(move || -> Result<(String, String), guides::SaveError> {
         let g = guides::read(&dir, &form.f)?;
         let (content, what) = match form.section.as_deref().filter(|s| !s.is_empty()) {
             Some(i) => {
@@ -240,18 +240,16 @@ async fn save(
             Ok(Redirect::to(&format!("/guides?f={f}&saved={commit}")).into_response())
         }
         Err(e) => {
-            let msg = format!("{e:#}");
-            let code = if msg.contains("changed since") {
-                "stale"
-            } else if msg.contains("isn't on main") {
-                "branch"
-            } else if msg.contains("uncommitted") {
-                "dirty"
-            } else if msg.contains("nothing changed") {
-                "same"
-            } else {
-                tracing::warn!("saving {f}: {msg}");
-                "failed"
+            use guides::SaveError::*;
+            let code = match e {
+                Stale => "stale",
+                NotOnMain => "branch",
+                Dirty => "dirty",
+                Unchanged => "same",
+                Other(e) => {
+                    tracing::warn!("saving {f}: {e:#}");
+                    "failed"
+                }
             };
             Ok(Redirect::to(&format!("/guides?f={f}&error={code}")).into_response())
         }
