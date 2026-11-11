@@ -6,7 +6,8 @@
 //
 // A click on a link to one of those records loads its page and shows its content in a dialog (a
 // sheet from below on the phone). The address changes to the record's, so Back closes it and a
-// reload shows its page; ‹ › step through the other records of the list it was opened from.
+// reload shows its page; ‹ › step through the other records of the list it was opened from. No
+// "open as a page" link (the owner, 2026-11-11: "remove the "open as a page" everywhere").
 // Modified clicks, other records (builds, releases, drafts) and pages without the script open the
 // page as before.
 "use strict";
@@ -36,7 +37,6 @@
       <div class="rdlg-grab" aria-hidden="true"></div>
       <div class="rdlg-head"><span class="sub" id="rdlg-title"></span><span class="grow"></span>
         <span class="rdlg-nav"><button type="button" class="rdlg-btn" data-step="-1" aria-label="Previous">‹</button><button type="button" class="rdlg-btn" data-step="1" aria-label="Next">›</button></span>
-        <a class="sub rdlg-page" href="#">Open as a page ↗</a>
         <button type="button" class="rdlg-btn rdlg-x" aria-label="Close">×</button></div>
       <div class="rdlg-body"></div></div>`;
     box.addEventListener("click", (e) => {
@@ -85,7 +85,6 @@
     body.replaceChildren(...[...main.childNodes].map((n) => document.importNode(n, true)));
     for (const el of body.querySelectorAll(".crumb-row, .back-bar")) el.remove();
     box.querySelector("#rdlg-title").textContent = (doc.querySelector(".crumb-where") || {}).textContent || "";
-    box.querySelector(".rdlg-page").href = path;
     const nav = box.querySelector(".rdlg-nav");
     nav.hidden = list.length < 2;
     box.querySelector("[data-step='-1']").disabled = at <= 0;

@@ -788,7 +788,6 @@ html.rdlg-on { overflow: hidden; }
   .rdlg-grab { display: block; width: 44px; height: 5px; border-radius: 3px; background: var(--border); margin: 8px auto 0; flex: none; }
   .rdlg-head { padding: 8px 12px 12px; }
   .rdlg-nav { display: none; }
-  .rdlg-page { display: none; }
   .rdlg-body { padding: 16px 16px calc(24px + env(safe-area-inset-bottom)); }
 }
 @media (prefers-reduced-motion: reduce) { .rdlg, .rdlg-back { transition: none; } }
