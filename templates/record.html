@@ -25,6 +25,14 @@
     </section>
     {% endif %}
 
+    {% if !pr_url.is_empty() %}<p><a href="{{ pr_url }}">Open on GitHub</a> · <a href="{{ pr_url }}/files">View changes on GitHub</a></p>{% endif %}
+    {% if !buttons.is_empty() %}
+    <section class="card pad stack" aria-labelledby="btn-h">
+      <h2 class="label" id="btn-h">Buttons</h2>
+      {% for b in buttons %}{% include "button.html" %}{% endfor %}
+    </section>
+    {% endif %}
+
     {% if !extra.is_empty() %}
     <dl class="kv">{% for (k, v) in extra %}<dt>{{ k }}</dt><dd>{% if v.starts_with("https://") %}<a href="{{ v }}">{{ v }}</a>{% else %}{{ v }}{% endif %}</dd>{% endfor %}</dl>
     {% endif %}

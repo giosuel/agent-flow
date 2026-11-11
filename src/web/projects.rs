@@ -225,15 +225,46 @@ struct ProjectPage {
     decisions: Vec<RecordRow>,
     groups: Vec<TaskGroup>,
     questions: Vec<RecordRow>,
+    prs: Vec<super::buttons::PrRow>,
+    releases: Vec<super::buttons::ReleaseRow>,
+    notice: Option<String>,
+    notice_bad: bool,
+    /// Where a pressed button returns to.
+    next: String,
 }
 
 #[derive(Deserialize)]
 struct TabQuery {
     tab: Option<String>,
+    /// After a button: its id and whether it worked.
+    ran: Option<i64>,
+    ok: Option<u8>,
+    /// After "Merge up to here": how many merged, and up to which PR.
+    merged: Option<usize>,
+    upto: Option<i64>,
 }
 
-const TABS: &[(&str, &str)] =
-    &[("overview", "Overview"), ("tasks", "Tasks"), ("decisions", "Decisions"), ("questions", "Questions")];
+/// The line shown after pressing a button, from the redirect's query.
+fn press_notice(q: &TabQuery) -> (Option<String>, bool) {
+    match (q.ran, q.ok, q.merged, q.upto) {
+        (Some(_), Some(1), _, _) => (Some("Done. The agent has been told.".into()), false),
+        (Some(_), Some(_), _, _) => {
+            (Some("The command failed; its output is under the button. The agent has been told.".into()), true)
+        }
+        (_, _, Some(n), Some(to)) => {
+            (Some(format!("{n} PR{} merged, up to #{to}.", if n == 1 { "" } else { "s" })), false)
+        }
+        _ => (None, false),
+    }
+}
+
+const TABS: &[(&str, &str)] = &[
+    ("overview", "Overview"),
+    ("tasks", "Tasks"),
+    ("prs", "Pull requests"),
+    ("decisions", "Decisions"),
+    ("questions", "Questions"),
+];
 
 async fn project(
     State(state): State<AppState>,
@@ -241,6 +272,7 @@ async fn project(
     Path(slug): Path<String>,
     Query(q): Query<TabQuery>,
 ) -> AppResult<Response> {
+    let (notice, notice_bad) = press_notice(&q);
     let tab = q.tab.filter(|t| TABS.iter().any(|(k, _)| k == t)).unwrap_or_else(|| "overview".into());
     let now = now_ms();
     let t = tab.clone();
@@ -254,7 +286,8 @@ async fn project(
         })
         .await?
         .ok_or(AppError::NotFound)?;
-    let page = ProjectPage { nav: nav(&state, &actor, "/projects").await, tab, ..page };
+    let next = if tab == "overview" { format!("/p/{}", page.slug) } else { format!("/p/{}?tab={tab}", page.slug) };
+    let page = ProjectPage { nav: nav(&state, &actor, "/projects").await, tab, notice, notice_bad, next, ..page };
     render(page)
 }
 
@@ -520,6 +553,11 @@ fn build_project_page(
         decisions,
         groups,
         questions,
+        prs: super::buttons::pr_rows(c, p.id, now)?,
+        releases: super::buttons::release_rows(c, p.id, now)?,
+        notice: None,
+        notice_bad: false,
+        next: String::new(),
     })
 }
 
@@ -570,6 +608,9 @@ struct RecordPage {
     stale: Vec<RecordRow>,
     history: Vec<HistoryRow>,
     error: Option<String>,
+    buttons: Vec<super::buttons::ButtonView>,
+    pr_url: String,
+    next: String,
 }
 
 async fn record(
@@ -597,11 +638,12 @@ async fn load_record_page(
             let project = projects::get_by_id(c, r.project_id)?;
             let links = records::links_of(c, &r)?;
             let history = records::revisions(c, r.id)?;
-            Ok(Some((r, project, links, history)))
+            let buttons = super::buttons::views(c, r.id, now)?;
+            Ok(Some((r, project, links, history, buttons)))
         })
         .await?
         .ok_or(AppError::NotFound)?;
-    let (r, project, links, history) = page;
+    let (r, project, links, history, buttons) = page;
 
     let mut groups: Vec<LinkGroup> = Vec::new();
     let mut stale = Vec::new();
@@ -703,6 +745,9 @@ async fn load_record_page(
             })
             .collect(),
         error,
+        buttons,
+        pr_url: if r.kind == Kind::Pr { r.str("url").to_owned() } else { String::new() },
+        next: r.url(),
     })
 }
 
