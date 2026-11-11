@@ -188,6 +188,29 @@ async fn dashboard(
             if !guide_prs.is_empty() {
                 groups.push(Group { title: "Guides to review", items: guide_prs });
             }
+            // The owner, 2026-11-11: "put it on the dashboard in the existing card under a new
+            // title "external PRs / issues"". Only drafts waiting for their Send.
+            let drafts: Vec<Item> = w
+                .drafts
+                .iter()
+                .filter_map(|r| {
+                    let p = crate::outgoing::pending(r)?;
+                    Some(Item {
+                        icon: icon("draft"),
+                        title: crate::outgoing::heading(r, &p),
+                        sub: format!(
+                            "{} · draft, waiting for your Send{}",
+                            name(&r.project),
+                            if p.version > 1 { format!(" · version {}", p.version) } else { String::new() }
+                        ),
+                        url: r.url(),
+                        action: "Review",
+                    })
+                })
+                .collect();
+            if !drafts.is_empty() {
+                groups.push(Group { title: "External PRs / issues", items: drafts });
+            }
 
             let mut seen = std::collections::HashSet::new();
             let archived: Vec<&str> =

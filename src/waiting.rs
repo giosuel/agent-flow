@@ -17,6 +17,8 @@ pub struct Waiting {
     pub merges: Vec<Record>,
     /// Builds published for the owner to try (M5).
     pub builds: Vec<Record>,
+    /// Drafts for other people's repositories, waiting for the owner's Send.
+    pub drafts: Vec<Record>,
 }
 
 pub fn load(conn: &Connection) -> anyhow::Result<Waiting> {
@@ -68,10 +70,23 @@ pub fn load(conn: &Connection) -> anyhow::Result<Waiting> {
         stmt.query_map([], |r| r.get(0))?.collect::<Result<_, _>>()?
     };
     let mut builds: Vec<Record> = builds;
-    for list in [&mut questions, &mut merges, &mut builds] {
+    let mut drafts: Vec<Record> = records::query(
+        conn,
+        &Query {
+            kinds: vec![Kind::Contribution],
+            states: vec!["shown".into(), "sent".into()],
+            limit: 0,
+            ..Default::default()
+        },
+    )?
+    .into_iter()
+    .filter(crate::outgoing::waits_for_owner)
+    .collect();
+    drafts.sort_by_key(|r| r.updated_at);
+    for list in [&mut questions, &mut merges, &mut builds, &mut drafts] {
         list.retain(|r| !archived.contains(&r.project_id));
     }
-    Ok(Waiting { questions, merges, builds })
+    Ok(Waiting { questions, merges, builds, drafts })
 }
 
 /// Leaves out archived projects' records.
@@ -89,7 +104,15 @@ pub fn count(conn: &Connection) -> anyhow::Result<usize> {
         [],
         |r| r.get(0),
     )?;
-    Ok((questions + builds) as usize)
+    let drafts: i64 = conn.query_row(
+        &format!(
+            "SELECT count(*) FROM records WHERE kind = 'contribution'
+               AND (state = 'shown' OR (state = 'sent' AND json_extract(data, '$.reply.state') = 'shown')) {LIVE}"
+        ),
+        [],
+        |r| r.get(0),
+    )?;
+    Ok((questions + builds + drafts) as usize)
 }
 
 fn blocking_ids(conn: &Connection) -> anyhow::Result<Vec<i64>> {
