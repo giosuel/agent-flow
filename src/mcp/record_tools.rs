@@ -272,7 +272,8 @@ impl FlowMcp {
                 if let Some(e) = p.estimate {
                     data.insert("estimate".into(), if e.trim().is_empty() { Value::Null } else { e.trim().into() });
                 }
-                if p.state.as_deref() == Some("doing") {
+                // Started now only if it wasn't already in progress.
+                if p.state.as_deref() == Some("doing") && r.state != "doing" {
                     data.insert("started_at".into(), now_ms().into());
                 }
                 let (r, changed) = records::update(
