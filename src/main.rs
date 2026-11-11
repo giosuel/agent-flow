@@ -28,6 +28,7 @@ mod projects;
 mod prs;
 mod push;
 mod records;
+mod remote;
 mod screenshots;
 mod setup;
 mod tokens;
@@ -70,6 +71,10 @@ enum Command {
     /// Draft a PR, issue, comment or new commits for someone else's repository (agents). The
     /// owner reads it in AgentFlow and sends it, as them; agents never post or push there.
     Contribute(cli::ContributeArgs),
+    /// Run a build or test on a build server (agents): `agentflow remote -- cargo build --release`.
+    /// Copies only what changed, prints the output as it comes, exits with the command's exit code
+    /// (75: the server is offline, build here instead).
+    Remote(cli::RemoteArgs),
     /// Fetch and start a test build (the owner's machines; like viber-run). Without a product,
     /// lists the products; `run <product> list` lists its builds.
     Run(cli::RunArgs),
@@ -129,6 +134,10 @@ fn main() -> anyhow::Result<()> {
         Command::Publish(args) => cli::publish(&config_path, args),
         Command::Screenshot(args) => cli::screenshot(&config_path, args),
         Command::Contribute(args) => cli::contribute(&config_path, args),
+        Command::Remote(args) => {
+            let code = cli::remote(&config_path, args)?;
+            std::process::exit(code);
+        }
         Command::Run(args) => cli::run(&config_path, args),
         Command::Wait { client, record, minutes } => cli::wait(&config_path, client, record, minutes),
         Command::McpHeaders { token_file } => cli::mcp_headers(&token_file),
