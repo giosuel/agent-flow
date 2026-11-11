@@ -7,7 +7,7 @@ use axum::extract::{Path, Query, State};
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use axum::{Extension, Form, Router};
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 use serde::Deserialize;
 use serde_json::Value;
 
@@ -353,6 +353,85 @@ struct TaskGroup {
     rows: Vec<RecordRow>,
 }
 
+/// One PR or issue on someone else's repository, or a draft of one, on the project's overview.
+pub struct ExtRow {
+    icon: &'static str,
+    title: String,
+    sub: String,
+    url: String,
+    /// A chip: (class, text), e.g. ("warn", "1 new review").
+    chip: Option<(&'static str, String)>,
+    /// A button for a draft waiting for the owner.
+    review: bool,
+}
+
+/// The overview's "External PRs / issues": drafts first, then those still open, then the rest
+/// (merged, closed, dropped) folded away. The owner, 2026-11-11: "below project agent and above
+/// open questions".
+fn external_rows(c: &Connection, all: &[Record], now: i64) -> anyhow::Result<(Vec<ExtRow>, Vec<ExtRow>)> {
+    let week_ago = now - 7 * 24 * 3600 * 1000;
+    let mut news = c.prepare(
+        "SELECT summary FROM events WHERE record_id = ?1 AND kind = 'contribution.updated' AND at > ?2
+         ORDER BY seq DESC LIMIT 1",
+    )?;
+    let mut open: Vec<(u8, i64, ExtRow)> = Vec::new();
+    let mut done = Vec::new();
+    for r in all.iter().filter(|r| r.kind == Kind::Contribution) {
+        let number = r.data.get("number").and_then(Value::as_i64);
+        let short = |r: &Record| match number {
+            Some(n) => format!("{} #{n}", r.str("repo")),
+            None => r.str("repo").to_owned(),
+        };
+        // The PR's or issue's own title, without "repo#n: ".
+        let own_title =
+            r.title.split_once(": ").filter(|_| number.is_some()).map_or(r.title.as_str(), |(_, t)| t).to_owned();
+        if let Some(p) = crate::outgoing::pending(r) {
+            let what = match p.kind {
+                crate::outgoing::DraftType::Pr => format!("New PR to {}", r.str("repo")),
+                crate::outgoing::DraftType::Issue => format!("New issue for {}", r.str("repo")),
+                crate::outgoing::DraftType::Comment => format!("Comment on {}", short(r)),
+                crate::outgoing::DraftType::Commits => format!("New commits for {}", short(r)),
+            };
+            let (rank, chip, review) = match p.state {
+                "shown" => (0, None, true),
+                "sending" => (0, Some(("accent", "sending".to_owned())), false),
+                _ => (1, Some(("quiet", "changes asked".to_owned())), false),
+            };
+            let sub = if p.kind.is_new() { format!("Draft · {}", p.title) } else { format!("Draft · {own_title}") };
+            open.push((rank, -r.updated_at, ExtRow { icon: "draft", title: what, sub, url: r.url(), chip, review }));
+            continue;
+        }
+        let icon = if r.str("type") == "issue" { "issue" } else { "pr" };
+        let row = |chip| ExtRow { icon, title: short(r), sub: own_title.clone(), url: r.url(), chip, review: false };
+        match r.state.as_str() {
+            "sent" => {
+                let latest: Option<String> =
+                    news.query_row(rusqlite::params![r.id, week_ago], |row| row.get(0)).optional()?;
+                // "repo#4: Title: 1 new review (url)" → "1 new review"
+                let chip = latest
+                    .as_deref()
+                    .and_then(|s| s.rsplit_once(" (").map(|(a, _)| a))
+                    .and_then(|s| s.rsplit_once(": ").map(|(_, n)| n.to_owned()))
+                    .map(|n| ("warn", n));
+                open.push((2, -r.updated_at, row(chip)));
+            }
+            "merged" => done.push(row(Some(("ok", "merged".into())))),
+            "closed" => done.push(row(Some(("quiet", "closed".into())))),
+            "dropped" => done.push(ExtRow {
+                icon: "draft",
+                title: format!("Draft for {}", r.str("repo")),
+                sub: r.title.clone(),
+                url: r.url(),
+                chip: Some(("quiet", "dropped".into())),
+                review: false,
+            }),
+            _ => {}
+        }
+    }
+    open.sort_by_key(|(rank, t, _)| (*rank, *t));
+    Ok((open.into_iter().map(|(_, _, r)| r).collect(), done))
+}
+
 struct AgentCard {
     session: String,
     machine: String,
@@ -405,6 +484,9 @@ pub struct Connect {
 #[derive(Template)]
 #[template(path = "project.html")]
 struct ProjectPage {
+    /// External PRs and issues: open ones and drafts, and the finished ones.
+    external: Vec<ExtRow>,
+    external_done: Vec<ExtRow>,
     /// The agent's Claude Code session on claude.ai, from its transcripts (remote control).
     session_url: Option<String>,
     nav: Nav,
@@ -895,7 +977,10 @@ fn build_project_page(
         Vec::new()
     };
 
+    let (external, external_done) = external_rows(c, &all, now)?;
     Ok(ProjectPage {
+        external,
+        external_done,
         session_url: crate::usage::session_link(c, p.id)?.map(|(u, _)| u),
         nav: Nav::new(&Actor::Anonymous, ""),
         connect: None,
@@ -984,6 +1069,9 @@ struct HistoryRow {
 struct RecordPage {
     nav: Nav,
     session_url: Option<String>,
+    /// A draft for someone else's repository, with Send, Ask for changes and Drop.
+    draft: Option<super::outgoing::DraftView>,
+    draft_notice: Option<(bool, String)>,
     project_slug: String,
     project_name: String,
     kind_label: &'static str,
@@ -1031,6 +1119,8 @@ struct RecordQuery {
     error: Option<String>,
     /// Set after feedback on a build was sent.
     sent: Option<u8>,
+    /// What happened to a draft for someone else's repository (sent, asked, dropped, …).
+    draft: Option<String>,
 }
 
 async fn record(
@@ -1048,7 +1138,7 @@ async fn record(
         "both" => "Pick an option or write your own answer, not both. Nothing was sent.".to_owned(),
         _ => "That didn't work; nothing was saved. Try again.".to_owned(),
     });
-    let mut page = load_record_page(&state, &actor, slug, id, error, tz).await?;
+    let mut page = load_record_page(&state, &actor, slug, id, error, q.draft.clone(), tz).await?;
     if let Some(b) = page.build.as_mut() {
         b.sent = q.sent == Some(1);
     }
@@ -1061,6 +1151,7 @@ async fn load_record_page(
     slug: String,
     id: String,
     error: Option<String>,
+    draft_code: Option<String>,
     tz: Tz,
 ) -> AppResult<RecordPage> {
     let now = now_ms();
@@ -1076,11 +1167,16 @@ async fn load_record_page(
             let history = records::revisions(c, r.id)?;
             let buttons = super::buttons::views(c, r.id, now)?;
             let session_url = crate::usage::session_link(c, project.id)?.map(|(u, _)| u);
-            Ok(Some((r, project, links, history, buttons, session_url)))
+            let draft = super::outgoing::draft_view(c, &r, now)?;
+            let draft_notice = match &draft_code {
+                Some(code) if r.kind == Kind::Contribution => super::outgoing::notice(c, &r, code)?,
+                _ => None,
+            };
+            Ok(Some((r, project, links, history, buttons, (session_url, draft, draft_notice))))
         })
         .await?
         .ok_or(AppError::NotFound)?;
-    let (r, project, links, history, buttons, session_url) = page;
+    let (r, project, links, history, buttons, (session_url, draft, draft_notice)) = page;
 
     let mut groups: Vec<LinkGroup> = Vec::new();
     let mut stale = Vec::new();
@@ -1180,6 +1276,9 @@ async fn load_record_page(
             project.name.clone(),
         ),
         session_url,
+        body_html: if draft.is_some() { String::new() } else { markdown::to_html(&r.body) },
+        draft,
+        draft_notice,
         project_slug: project.slug,
         project_name: project.name,
         kind_label: r.kind.label(),
@@ -1189,7 +1288,6 @@ async fn load_record_page(
         title: r.title.clone(),
         state: r.state.clone(),
         tags: r.tags.clone(),
-        body_html: markdown::to_html(&r.body),
         owner_words: r.str("owner_words").into(),
         words_line,
         answer: r.str("answer").into(),

@@ -50,6 +50,11 @@ pub struct Config {
     /// When AgentFlow runs as its own user: the socket of `agentflow hands`, which does what has
     /// to happen as the agents' user. Empty: do it in the server (one user for everything).
     pub hands_socket: String,
+    /// The file with the GitHub token for other people's repositories (public_repo), used only
+    /// when the owner presses Send on a draft. Empty: drafts can't be sent.
+    pub external_token_file: String,
+    /// Where repositories are fetched from and pushed to (tests use a local folder).
+    pub git_host: String,
 }
 
 impl Default for Config {
@@ -71,6 +76,8 @@ impl Default for Config {
             transcripts_dir: "~/.claude/projects".into(),
             agents_home: String::new(),
             hands_socket: String::new(),
+            external_token_file: String::new(),
+            git_host: "https://github.com".into(),
         }
     }
 }
