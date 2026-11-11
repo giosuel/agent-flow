@@ -25,6 +25,7 @@ pub fn routes() -> Router<AppState> {
         .route("/login/passkey/finish", post(passkey_finish))
         .route("/logout", post(logout))
         .route("/api/whoami", get(whoami))
+        .route("/more", get(more))
 }
 
 /// The navigation, in the order of the mockups.
@@ -44,9 +45,33 @@ pub struct NavItem {
     pub active: bool,
 }
 
+/// On the phone a tab bar at the bottom, as in iOS apps and the owner's viber console (the owner,
+/// 2026-11-11: "in the mobile version, it has the classic iOS menu at the bottom. can we also do
+/// it like this?"): four sections and More, which lists the rest. iOS fits five tabs at most.
+const TABS: &[(&str, &str, &str)] = &[
+    ("/", "Dashboard", "grid"),
+    ("/projects", "Projects", "folder"),
+    ("/usage", "Usage", "chart"),
+    ("/guides", "Guides", "book"),
+];
+pub const MORE: &[(&str, &str, &str)] = &[
+    ("/machine", "Machine", "machine"),
+    ("/conversations", "Conversations", "message"),
+    ("/log", "Log", "list"),
+    ("/settings", "Settings", "gear"),
+];
+
+pub struct Tab {
+    pub href: &'static str,
+    pub name: &'static str,
+    pub icon: &'static str,
+    pub active: bool,
+}
+
 /// What every page's header needs.
 pub struct Nav {
     pub items: Vec<NavItem>,
+    pub tabs: Vec<Tab>,
     pub label: String,
     pub version: &'static str,
     pub waiting: i64,
@@ -66,6 +91,16 @@ impl Nav {
     pub fn new(actor: &Actor, active: &str) -> Self {
         Self {
             items: NAV.iter().map(|&(href, name)| NavItem { href, name, active: href == active }).collect(),
+            tabs: TABS
+                .iter()
+                .map(|&(href, name, icon)| Tab { href, name, icon: super::icons::icon(icon), active: href == active })
+                .chain(std::iter::once(Tab {
+                    href: "/more",
+                    name: "More",
+                    icon: super::icons::icon("more"),
+                    active: active == "/more" || MORE.iter().any(|m| m.0 == active),
+                }))
+                .collect(),
             label: actor.label(),
             version: VERSION,
             waiting: 0,
@@ -75,6 +110,23 @@ impl Nav {
 
 pub fn render(t: impl Template) -> AppResult<Response> {
     Ok(Html(t.render()?).into_response())
+}
+
+/// The phone's More tab: the sections that don't fit in the tab bar.
+#[derive(Template)]
+#[template(path = "more.html")]
+struct MorePage {
+    nav: Nav,
+    items: Vec<Tab>,
+}
+
+async fn more(State(state): State<AppState>, Extension(actor): Extension<Actor>) -> AppResult<Response> {
+    actor.require_owner()?;
+    let items = MORE
+        .iter()
+        .map(|&(href, name, icon)| Tab { href, name, icon: super::icons::icon(icon), active: false })
+        .collect();
+    render(MorePage { nav: nav(&state, &actor, "/more").await, items })
 }
 
 #[derive(Template)]

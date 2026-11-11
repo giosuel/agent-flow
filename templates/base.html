@@ -34,6 +34,9 @@
 <main id="main" class="page">
 {% block content %}{% endblock %}
 </main>
+<nav class="tabbar" aria-label="Main">
+  {% for t in nav.tabs %}<a href="{{ t.href }}"{% if t.active %} class="on" aria-current="page"{% endif %}>{{ t.icon|safe }}<span>{{ t.name }}</span>{% if t.href == "/" && nav.waiting > 0 %}<b class="badge" aria-label="{{ nav.waiting }} waiting">{{ nav.waiting }}</b>{% endif %}</a>{% endfor %}
+</nav>
 <footer class="foot"><span class="mono">AgentFlow {{ nav.version }}</span><form method="post" action="/logout"><button class="link-btn" type="submit">Sign out</button></form></footer>
 </body>
 </html>
