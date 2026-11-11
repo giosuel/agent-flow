@@ -40,7 +40,7 @@ struct WaitSlot {
 
 impl WaitSlot {
     fn take(state: &AppState, project_id: i64) -> Option<Self> {
-        let mut map = state.waits.lock().unwrap();
+        let mut map = crate::util::lock(&state.waits);
         let n = map.entry(project_id).or_insert(0);
         if *n >= MAX_WAITS_PER_PROJECT {
             return None;
@@ -52,7 +52,7 @@ impl WaitSlot {
 
 impl Drop for WaitSlot {
     fn drop(&mut self) {
-        if let Some(n) = self.state.waits.lock().unwrap().get_mut(&self.project_id) {
+        if let Some(n) = crate::util::lock(&self.state.waits).get_mut(&self.project_id) {
             *n = n.saturating_sub(1);
         }
     }
@@ -133,12 +133,12 @@ async fn wait_consultant(state: AppState, q: WaitQuery) -> Response {
     };
     let deadline = Instant::now() + Duration::from_secs(q.timeout.unwrap_or(MAX_WAIT).clamp(1, MAX_WAIT));
     loop {
-        match state.db.call(|c| crate::messages::consultant_inbox(c, true)).await {
+        match state.db.call(|c| crate::messages::consultant_inbox(c)).await {
             Ok(list) if !list.is_empty() => {
                 let events: Vec<_> = list
                     .iter()
                     .map(|m| json!({"at": fmt_utc(m.created_at), "record": null, "kind": "message",
-                        "what": format!("Message from {} (conversation {}): {}", m.sender, m.thread_id, m.body), "by": m.sender}))
+                        "what": format!("Message {} from {} (conversation {}): {}", m.id, m.sender, m.thread_id, m.body), "by": m.sender}))
                     .collect();
                 return Json(json!({"events": events})).into_response();
             }

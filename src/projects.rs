@@ -535,6 +535,16 @@ mod tests {
     use crate::db::Db;
 
     #[test]
+    fn slugs() {
+        for ok in ["vinculum", "cold-trace", "p2"] {
+            assert!(check_slug(ok).is_ok(), "{ok}");
+        }
+        for bad in ["", "Cold", "a b", "-x", "a/b", "ä", "all", "owner", "consultant"] {
+            assert!(check_slug(bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
     fn projects_and_milestones() {
         let db = Db::open_memory();
         db.call_blocking(|c| {

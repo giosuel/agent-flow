@@ -827,8 +827,12 @@ async fn agents_and_the_consultant_talk_through_agentflow() {
     mcp_tool(&s, &v, &vs, "send_message", json!({"to": ["consultant"], "subject": "Tags for A milestones", "body": "How do A milestones get tagged?", "kind": "question"})).await;
     let got = tokio::time::timeout(std::time::Duration::from_secs(10), waiter).await.unwrap().unwrap();
     assert!(got.to_string().contains("How do A milestones"), "{got}");
+    // It stays unread until the consultant says it handled it.
     let (_, inbox) = mcp_tool(&s, &consultant, &cs, "inbox", json!({})).await;
-    assert_eq!(inbox["messages"].as_array().unwrap().len(), 0, "the wait marked it read");
+    let list = inbox["messages"].as_array().unwrap();
+    assert_eq!(list.len(), 1, "{inbox}");
+    let (_, inbox) = mcp_tool(&s, &consultant, &cs, "inbox", json!({"read_up_to": list[0]["id"]})).await;
+    assert_eq!(inbox["messages"].as_array().unwrap().len(), 0, "marked read");
     // An agent can't read a conversation it isn't in, nor the consultant's inbox.
     let (ok, _) = mcp_tool(&s, &a, &as_, "conversation", json!({"conversation": thread + 1})).await;
     assert!(!ok);

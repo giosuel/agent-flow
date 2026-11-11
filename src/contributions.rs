@@ -8,6 +8,18 @@ use serde_json::{Map, Value};
 use crate::github::ItemInfo;
 use crate::records::{self, Kind, NewRecord, Patch, Query, Record};
 
+/// The state of one still open on GitHub, so still watched.
+const WATCHING: &str = "sent";
+
+/// The record's state for what GitHub says, when it's finished there; None while it's open.
+fn finished_state(github_state: &str) -> Option<&'static str> {
+    match github_state {
+        "merged" => Some("merged"),
+        "closed" => Some("closed"),
+        _ => None,
+    }
+}
+
 /// Most contributions a project can have watched at once: each costs GitHub calls every round.
 pub const MAX_WATCHED: usize = 50;
 
@@ -18,7 +30,7 @@ pub fn check_room(conn: &Connection, project_id: i64) -> anyhow::Result<()> {
         &Query {
             project_id: Some(project_id),
             kinds: vec![Kind::Contribution],
-            states: vec!["sent".into()],
+            states: vec![WATCHING.into()],
             limit: 0,
             ..Default::default()
         },
@@ -55,11 +67,7 @@ pub fn track(
     data.insert("url".into(), info.url.clone().into());
     data.insert("type".into(), if info.is_pr { "pr" } else { "issue" }.into());
     data.insert("comments".into(), info.comments.into());
-    let state = match info.state.as_str() {
-        "merged" => "merged",
-        "closed" => "closed",
-        _ => "sent",
-    };
+    let state = finished_state(&info.state).unwrap_or(WATCHING);
     records::create(
         conn,
         project_id,
@@ -77,11 +85,7 @@ pub fn track(
 /// Applies what GitHub says now; returns what to tell the agent, if anything changed.
 pub fn update(conn: &Connection, r: &Record, info: &ItemInfo) -> anyhow::Result<Option<String>> {
     let before = r.data.get("comments").and_then(Value::as_i64).unwrap_or(0);
-    let state = match info.state.as_str() {
-        "merged" => "merged",
-        "closed" => "closed",
-        _ => r.state.as_str(),
-    };
+    let state = finished_state(&info.state).unwrap_or(r.state.as_str());
     let mut news = Vec::new();
     if info.comments > before {
         let n = info.comments - before;
@@ -108,10 +112,10 @@ pub fn update(conn: &Connection, r: &Record, info: &ItemInfo) -> anyhow::Result<
 
 /// Contributions still worth watching: not merged or closed.
 pub fn watched(conn: &Connection) -> anyhow::Result<Vec<Record>> {
-    Ok(records::query(conn, &Query { kinds: vec![Kind::Contribution], ..Default::default() })?
-        .into_iter()
-        .filter(|r| !matches!(r.state.as_str(), "merged" | "closed"))
-        .collect())
+    records::query(
+        conn,
+        &Query { kinds: vec![Kind::Contribution], states: vec![WATCHING.into()], ..Default::default() },
+    )
 }
 
 #[cfg(test)]

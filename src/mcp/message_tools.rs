@@ -61,8 +61,14 @@ fn who(actor: &Actor) -> anyhow::Result<String> {
     })
 }
 
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
+pub struct InboxArgs {
+    /// The id of the last message you handled: it and everything before it are marked read.
+    pub read_up_to: Option<i64>,
+}
+
 fn message_json(m: &messages::Message) -> Value {
-    json!({"from": m.sender, "kind": m.kind, "at": fmt_utc(m.created_at), "body": m.body, "conversation": m.thread_id})
+    json!({"id": m.id, "from": m.sender, "kind": m.kind, "at": fmt_utc(m.created_at), "body": m.body, "conversation": m.thread_id})
 }
 
 #[tool_router(router = message_tools, vis = "pub(super)")]
@@ -188,9 +194,17 @@ impl FlowMcp {
         self.finish(&actor, "track_contribution", Action::Write, outcome).await
     }
 
-    #[tool(description = "For the consultant: messages to you (or to everyone) you haven't read, oldest first. Marks \
-        them read. Agents get their messages through since_last_check and `agentflow wait`.")]
-    async fn inbox(&self, Extension(parts): Extension<Parts>) -> Result<CallToolResult, ErrorData> {
+    #[tool(
+        description = "For the consultant: messages to you (or to everyone) you haven't marked read, oldest first. \
+        Once you've handled some, pass the last one's id as read_up_to: it and everything before it are marked read, \
+        and the rest come back. Until then they keep coming (and `agentflow wait` keeps waking you). Agents get their \
+        messages through since_last_check and `agentflow wait`."
+    )]
+    async fn inbox(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(p): Parameters<InboxArgs>,
+    ) -> Result<CallToolResult, ErrorData> {
         let actor = actor_of(&parts);
         let a = actor.clone();
         let outcome = self
@@ -200,7 +214,10 @@ impl FlowMcp {
                 if !matches!(a, Actor::Admin { .. }) {
                     anyhow::bail!("inbox is the consultant's; agents use since_last_check");
                 }
-                let list: Vec<Value> = messages::consultant_inbox(c, true)?.iter().map(message_json).collect();
+                if let Some(id) = p.read_up_to {
+                    messages::mark_consultant_read(c, id)?;
+                }
+                let list: Vec<Value> = messages::consultant_inbox(c)?.iter().map(message_json).collect();
                 Ok(Outcome::new(json!({"messages": list})).summary(format!("inbox: {} messages", list.len())))
             })
             .await;

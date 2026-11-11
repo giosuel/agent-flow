@@ -45,7 +45,7 @@ impl ActionRow {
         h.update(self.workdir.as_bytes());
         h.update([0]);
         h.update(self.command.as_bytes());
-        h.finalize().iter().take(8).map(|b| format!("{b:02x}")).collect()
+        crate::util::hex(&h.finalize()[..8])
     }
 
     pub fn is_merge(&self) -> bool {

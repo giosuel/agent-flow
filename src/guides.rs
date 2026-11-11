@@ -32,7 +32,7 @@ pub struct Guide {
 impl Guide {
     /// A short fingerprint of the content, so a save can tell the file changed meanwhile.
     pub fn version(&self) -> String {
-        Sha256::digest(self.text.as_bytes()).iter().take(8).map(|b| format!("{b:02x}")).collect()
+        crate::util::hex(&Sha256::digest(self.text.as_bytes())[..8])
     }
 
     pub fn find_section(&self, title: &str) -> Option<usize> {
@@ -131,6 +131,27 @@ pub fn git_command(dir: &Path) -> std::process::Command {
     c
 }
 
+/// Why a save didn't happen; the page says each in its own words.
+#[derive(Debug, thiserror::Error)]
+pub enum SaveError {
+    #[error("the file changed since it was opened")]
+    Stale,
+    #[error("the handbook checkout isn't on main")]
+    NotOnMain,
+    #[error("the file has uncommitted changes in the checkout")]
+    Dirty,
+    #[error("nothing changed")]
+    Unchanged,
+    #[error(transparent)]
+    Other(#[from] anyhow::Error),
+}
+
+impl From<std::io::Error> for SaveError {
+    fn from(e: std::io::Error) -> Self {
+        SaveError::Other(e.into())
+    }
+}
+
 /// Where the owner's edits are committed, and as whom.
 pub struct Repo {
     pub dir: PathBuf,
@@ -149,20 +170,20 @@ impl Repo {
     /// Writes `content` to a guide and commits it on main as the owner. Refuses when the file
     /// changed since the page showed it (`version`), when the checkout isn't on main, or when the
     /// file has uncommitted changes of someone else's.
-    pub fn save(&self, name: &str, version: &str, content: &str, what: &str) -> anyhow::Result<String> {
+    pub fn save(&self, name: &str, version: &str, content: &str, what: &str) -> Result<String, SaveError> {
         check_name(name)?;
         let current = read(&self.dir, name)?;
         if current.version() != version {
-            bail!("{name} changed since you opened it; reload and make your edit again");
+            return Err(SaveError::Stale);
         }
         if self.git(&["rev-parse", "--abbrev-ref", "HEAD"])? != "main" {
-            bail!("the handbook checkout isn't on main; nothing was saved");
+            return Err(SaveError::NotOnMain);
         }
         if !self.git(&["status", "--porcelain", "--", name])?.is_empty() {
-            bail!("{name} has uncommitted changes in the checkout; nothing was saved");
+            return Err(SaveError::Dirty);
         }
         if content == current.text {
-            bail!("nothing changed");
+            return Err(SaveError::Unchanged);
         }
         std::fs::write(self.dir.join(name), content)?;
         let (author_name, email) =
@@ -186,9 +207,9 @@ impl Repo {
         if let Err(e) = result {
             // Leave the checkout as it was.
             let _ = self.git(&["checkout", "--", name]);
-            return Err(e);
+            return Err(e.into());
         }
-        self.git(&["rev-parse", "--short", "HEAD"])
+        Ok(self.git(&["rev-parse", "--short", "HEAD"])?)
     }
 
     /// Commits on main that aren't on origin/main yet (the owner's own edits, waiting for a push).
@@ -252,10 +273,10 @@ mod tests {
             .unwrap();
         assert_eq!(String::from_utf8_lossy(&log.stdout).trim(), "giosuel <me@giosuel.ch>|Edit MACHINE.md: Ports");
         // The old version is stale now.
-        assert!(repo.save("MACHINE.md", &g.version(), TEXT, "x").unwrap_err().to_string().contains("changed since"));
+        assert!(matches!(repo.save("MACHINE.md", &g.version(), TEXT, "x"), Err(SaveError::Stale)));
         // Someone's uncommitted change is never swept into a commit.
         std::fs::write(d.join("MACHINE.md"), "dirty\n").unwrap();
         let g2 = read(d, "MACHINE.md").unwrap();
-        assert!(repo.save("MACHINE.md", &g2.version(), "mine\n", "x").unwrap_err().to_string().contains("uncommitted"));
+        assert!(matches!(repo.save("MACHINE.md", &g2.version(), "mine\n", "x"), Err(SaveError::Dirty)));
     }
 }

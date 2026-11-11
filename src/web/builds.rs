@@ -72,20 +72,13 @@ struct UploadQuery {
     project: Option<String>,
 }
 
-/// One feature the owner should try, with what to do.
+/// The features, sent as a JSON list of "Title: what to do".
 fn parse_features(s: &str) -> anyhow::Result<Vec<Value>> {
     if s.trim().is_empty() {
         return Ok(Vec::new());
     }
     let list: Vec<String> = serde_json::from_str(s)?;
-    Ok(list
-        .iter()
-        .filter(|f| !f.trim().is_empty())
-        .map(|f| {
-            let (title, what) = f.split_once(':').map(|(a, b)| (a.trim(), b.trim())).unwrap_or((f.trim(), ""));
-            json!({"title": title, "what_to_try": what})
-        })
-        .collect())
+    Ok(list.iter().filter_map(|f| builds::feature(f)).collect())
 }
 
 /// The product belongs to the caller's project: its `build_product`, or its slug.
@@ -433,6 +426,27 @@ async fn archive(
 // ---------------------------------------------------------------------------------------------
 // Feedback
 
+/// One piece of the owner's feedback, linked to its build.
+fn add_feedback(tx: &Connection, build: &Record, title: &str, state: &str, words: &str) -> anyhow::Result<Record> {
+    let mut data = Map::new();
+    data.insert("owner_words".into(), words.into());
+    data.insert("build".into(), build.ref_id.clone().into());
+    let fb = records::create(
+        tx,
+        build.project_id,
+        "owner",
+        NewRecord {
+            kind: Some(Kind::Feedback),
+            title: title.into(),
+            state: Some(state.into()),
+            data,
+            ..Default::default()
+        },
+    )?;
+    records::link(tx, &fb, build, "feedback_on", "owner")?;
+    Ok(fb)
+}
+
 /// The owner's form: per feature `v{i}` = works | problem | skip and `n{i}` = their words, plus
 /// a general note.
 async fn feedback(
@@ -455,14 +469,15 @@ async fn feedback(
             if build.kind != Kind::Build {
                 anyhow::bail!("{} isn't a build", build.ref_id);
             }
+            if build.state == "withdrawn" {
+                anyhow::bail!("this build was withdrawn; there's nothing to try");
+            }
             let features = build.data.get("features").and_then(Value::as_array).cloned().unwrap_or_default();
             let val = |k: String| form2.iter().find(|(a, _)| *a == k).map(|(_, v)| v.clone()).unwrap_or_default();
             let mut counts = (0, 0, 0);
             let mut made = Vec::new();
             for (n, f) in features.iter().enumerate() {
-                let verdict = val(format!("v{n}"));
-                let words = val(format!("n{n}"));
-                let state = match verdict.as_str() {
+                let state = match val(format!("v{n}")).as_str() {
                     "works" => {
                         counts.0 += 1;
                         "works"
@@ -477,43 +492,11 @@ async fn feedback(
                     }
                     _ => continue,
                 };
-                let title = f.get("title").and_then(Value::as_str).unwrap_or("Feature").to_owned();
-                let mut data = Map::new();
-                data.insert("owner_words".into(), words.clone().into());
-                data.insert("build".into(), build.ref_id.clone().into());
-                let fb = records::create(
-                    &tx,
-                    build.project_id,
-                    "owner",
-                    NewRecord {
-                        kind: Some(Kind::Feedback),
-                        title,
-                        state: Some(state.into()),
-                        data,
-                        ..Default::default()
-                    },
-                )?;
-                records::link(&tx, &fb, &build, "feedback_on", "owner")?;
-                made.push(fb);
+                let title = f.get("title").and_then(Value::as_str).unwrap_or("Feature");
+                made.push(add_feedback(&tx, &build, title, state, &val(format!("n{n}")))?);
             }
             if !note.trim().is_empty() {
-                let mut data = Map::new();
-                data.insert("owner_words".into(), note.clone().into());
-                data.insert("build".into(), build.ref_id.clone().into());
-                let fb = records::create(
-                    &tx,
-                    build.project_id,
-                    "owner",
-                    NewRecord {
-                        kind: Some(Kind::Feedback),
-                        title: "General note".into(),
-                        state: Some("problem".into()),
-                        data,
-                        ..Default::default()
-                    },
-                )?;
-                records::link(&tx, &fb, &build, "feedback_on", "owner")?;
-                made.push(fb);
+                made.push(add_feedback(&tx, &build, "General note", "note", note.trim())?);
             }
             if made.is_empty() {
                 anyhow::bail!("mark at least one feature, or write a note");

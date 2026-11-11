@@ -50,6 +50,8 @@ pub struct AppState {
     pub guide_prs: Arc<std::sync::Mutex<GuidePrs>>,
     /// Held while a build uploads: one at a time.
     pub uploads: Arc<tokio::sync::Mutex<()>>,
+    /// Held while AgentFlow changes the handbook checkout (an edit's commit, a merge's pull).
+    pub handbook: Arc<tokio::sync::Mutex<()>>,
 }
 
 #[derive(Default, Clone)]
@@ -74,6 +76,7 @@ impl AppState {
             waits: Arc::default(),
             guide_prs: Arc::default(),
             uploads: Arc::default(),
+            handbook: Arc::default(),
         }
     }
 
@@ -91,7 +94,7 @@ impl AppState {
     /// At most 20 logged denials per address and minute; the rest only count as noise.
     fn log_denial(&self, ip: &str) -> bool {
         let minute = crate::util::now_ms() / 60_000;
-        let mut map = self.denied.lock().unwrap();
+        let mut map = crate::util::lock(&self.denied);
         if map.len() > 10_000 {
             map.clear();
         }
