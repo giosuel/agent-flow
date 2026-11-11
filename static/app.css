@@ -293,3 +293,20 @@ button.opt { font: inherit; color: var(--ink); text-align: left; width: 100%; }
 .pr-row .pr-title { flex: 1 1 auto; }
 .pr-row .chip { flex: none; }
 @media (max-width: 600px) { .pr-row > .row { flex-wrap: wrap; } }
+
+/* Review 1 (UX) */
+.status-line a.warn-text { color: var(--warn-ink); }
+.duo > .card { align-self: flex-start; }
+.bar { background: var(--line); }
+@media (max-width: 700px) {
+  /* The nav scrolls sideways on the phone; fade its right edge so that shows. */
+  .nav { -webkit-mask-image: linear-gradient(to right, #000 85%, transparent); mask-image: linear-gradient(to right, #000 85%, transparent); padding-right: 24px; }
+  /* Open questions and the agent before the long overview. */
+  .split { flex-direction: column; }
+  .split-side { order: -1; }
+}
+@media (max-width: 600px) {
+  .btn.sm { min-height: 44px; }
+  .cmd-box summary, .pr-actions > a.sub, .foot .link-btn { display: inline-flex; align-items: center; min-height: 44px; }
+  .pr-row .row > a.mono { min-height: 44px; display: inline-flex; align-items: center; }
+}
