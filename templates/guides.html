@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}Guides{% endblock %}
+{% block content %}
+<div class="head">
+  <h1>Guides</h1>
+  <p class="status-line">Your rules for every project, as files in the {{ repo }} repo. Agents read them through AgentFlow; the consultant changes them with pull requests, one file each.</p>
+</div>
+{% if let Some(n) = notice %}<p class="notice ok" role="status">{{ n }}</p>{% endif %}
+{% if let Some(e) = error %}<p class="notice warn" role="alert">{{ e }}</p>{% endif %}
+{% if unpushed > 0 %}<p class="notice">{{ unpushed }} of your edit{% if unpushed != 1 %}s are{% else %} is{% endif %} committed but not pushed yet. Push from the checkout when you're ready.</p>{% endif %}
+<div class="split guides">
+  <nav class="split-side stack" aria-label="Guides">
+    <div class="card list">
+      <a class="item conv-row{% if file.is_none() %} on{% endif %}" href="/guides"{% if file.is_none() %} aria-current="true"{% endif %}>
+        <div class="ttl"><strong>Pull requests</strong><span class="sub">{{ open.len() }} open · {{ merged.len() }} recently merged</span></div>
+        {% if !open.is_empty() %}<span class="mono count warn-text">{{ open.len() }}</span>{% endif %}
+      </a>
+    </div>
+    <span class="label">Files</span>
+    <div class="card list">
+      {% for f in files %}
+      <a class="item conv-row{% if f.selected %} on{% endif %}" href="/guides?f={{ f.name }}"{% if f.selected %} aria-current="true"{% endif %}>
+        <div class="ttl"><strong class="mono">{{ f.name }}</strong>{% if !f.blurb.is_empty() %}<span class="sub">{{ f.blurb }}</span>{% endif %}</div>
+      </a>
+      {% endfor %}
+    </div>
+  </nav>
+
+  <section class="split-main stack">
+  {% if let Some(name) = file %}
+    <div class="sec"><h2 class="mono">{{ name }}</h2>
+      <span class="row wrap"><a class="sub" href="https://github.com/{{ repo }}/commits/main/{{ name }}">History on GitHub</a><a class="sub" href="https://github.com/{{ repo }}/blob/main/{{ name }}">Open on GitHub</a>{% if editing.is_none() %}<a class="btn sm ghost" href="/guides?f={{ name }}&amp;edit=file">Edit file</a>{% endif %}</span></div>
+    {% if let Some(ed) = editing %}
+    <form method="post" action="/guides/save" class="card pad stack">
+      <h3>Editing {% if ed.section.is_some() %}“{{ ed.label }}”{% else %}the whole file{% endif %}</h3>
+      <input type="hidden" name="f" value="{{ name }}">
+      <input type="hidden" name="version" value="{{ version }}">
+      <input type="hidden" name="section" value="{% if let Some(i) = ed.section %}{{ i }}{% endif %}">
+      <label class="vh" for="text">Markdown</label>
+      <textarea id="text" name="text" class="mono editor" rows="{% if ed.section.is_some() %}14{% else %}30{% endif %}">{{ ed.text }}</textarea>
+      <p class="sub">Saving commits this to main as you. Nothing is pushed.</p>
+      <div class="row wrap"><button class="btn" type="submit">Save and commit</button><a class="btn ghost" href="/guides?f={{ name }}">Cancel</a></div>
+    </form>
+    {% else %}
+    {% for s in sections %}
+    <article class="card pad stack guide-sec">
+      <div class="sec"><span class="label">{{ s.title }}</span><a class="btn sm ghost" href="/guides?f={{ name }}&amp;edit={{ s.index }}">Edit section</a></div>
+      <div class="prose">{{ s.html|safe }}</div>
+    </article>
+    {% endfor %}
+    {% endif %}
+  {% else %}
+    <div class="sec"><h2>Open pull requests · {{ open.len() }}</h2><span class="sub">changes open on GitHub</span></div>
+    {% if open.is_empty() %}<p class="sub">None. The consultant opens one per change, one file each.</p>{% endif %}
+    {% for p in open %}
+    <article class="card pad stack-sm">
+      <div class="row wrap"><a class="mono" href="{{ p.url }}">{{ repo }}/pull/{{ p.number }}</a><span class="sub">{{ p.changes }} · {{ p.files }} · {{ p.by }}</span></div>
+      <strong>{{ p.title }}</strong>
+      <div class="row wrap"><a class="btn sm ghost" href="{{ p.url }}/files">View changes on GitHub</a>
+        <form method="post" action="/guides/prs/merge"><input type="hidden" name="number" value="{{ p.number }}"><button class="btn sm" type="submit" data-confirm="Merge {{ repo }}#{{ p.number }} (“{{ p.title }}”) on GitHub and update the checkout?">Merge</button></form></div>
+    </article>
+    {% endfor %}
+    {% if !merged.is_empty() %}
+    <div class="sec"><h2>Recently merged</h2></div>
+    <ul class="rows card pad">{% for p in merged %}<li class="item-row"><div class="ttl"><a href="{{ p.url }}">{{ p.title }}</a><span class="sub mono">{{ repo }}/pull/{{ p.number }} · {{ p.files }}</span></div></li>{% endfor %}</ul>
+    {% endif %}
+  {% endif %}
+  </section>
+</div>
+{% endblock %}
