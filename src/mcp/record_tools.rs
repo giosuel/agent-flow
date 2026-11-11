@@ -238,6 +238,7 @@ impl FlowMcp {
                         milestone_id: Some(m.id),
                         tags: p.tags,
                         data,
+                        ..Default::default()
                     },
                 )?;
                 tx.commit()?;

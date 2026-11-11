@@ -251,6 +251,8 @@ fn normalize_tags(tags: &[String]) -> String {
 #[derive(Debug, Default)]
 pub struct NewRecord {
     pub kind: Option<Kind>,
+    /// A fixed number instead of the next free one: a PR keeps its GitHub number (PR-58 is #58).
+    pub number: Option<i64>,
     pub title: String,
     pub body: String,
     /// None: the kind's first state.
@@ -273,11 +275,14 @@ pub fn create(conn: &Connection, project_id: i64, author: &str, new: NewRecord) 
     let state = new.state.unwrap_or_else(|| kind.states()[0].to_owned());
     kind.check_state(&state)?;
     let now = now_ms();
-    let number: i64 = conn.query_row(
-        "SELECT coalesce(max(number), 0) + 1 FROM records WHERE project_id = ?1 AND kind = ?2",
-        params![project_id, kind.as_str()],
-        |r| r.get(0),
-    )?;
+    let number: i64 = match new.number {
+        Some(n) => n,
+        None => conn.query_row(
+            "SELECT coalesce(max(number), 0) + 1 FROM records WHERE project_id = ?1 AND kind = ?2",
+            params![project_id, kind.as_str()],
+            |r| r.get(0),
+        )?,
+    };
     let position: Option<f64> = match kind {
         Kind::Task => Some(number as f64),
         _ => None,
