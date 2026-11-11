@@ -2,7 +2,7 @@
 {% block title %}{{ short }} · {{ project_name }}{% endblock %}
 {% block content %}
 <div class="head">
-  <nav class="crumbs" aria-label="Back"><a class="crumb-back" href="/p/{{ project_slug }}{% if kind == "screenshot" %}?tab=screenshots{% endif %}">{{ crate::web::icons::icon("back")|safe }}<span>{{ project_name }}</span></a><span class="crumb-where">{{ kind_label }}</span></nav>
+  <div class="crumb-row"><nav class="crumbs" aria-label="Back"><a class="crumb-back" href="/p/{{ project_slug }}{% if kind == "screenshot" %}?tab=screenshots{% endif %}">{{ crate::web::icons::icon("back")|safe }}<span>{{ project_name }}</span></a><span class="crumb-where">{{ kind_label }}</span></nav>{% if let Some(u) = session_url %}<a class="session-link" href="{{ u }}" target="_blank" rel="noopener" title="The project agent's Claude Code session on claude.ai">{{ crate::web::icons::icon("session")|safe }}<span class="hide-phone">Open the agent's session</span><span class="only-phone">Agent session</span>{{ crate::web::icons::icon("out")|safe }}</a>{% endif %}</div>
   <p class="row wrap"><span class="mono sub">{{ id }}</span><span class="chip{% if state == "open" %} warn{% endif %}{% if state == "current" || state == "answered" || state == "done" %} ok{% endif %}">{{ state }}</span>{% for t in tags %}<span class="chip">{{ t }}</span>{% endfor %}</p>
   <h1 class="rec-title">{{ title }}</h1>
 </div>

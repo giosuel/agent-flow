@@ -405,6 +405,8 @@ pub struct Connect {
 #[derive(Template)]
 #[template(path = "project.html")]
 struct ProjectPage {
+    /// The agent's Claude Code session on claude.ai, from its transcripts (remote control).
+    session_url: Option<String>,
     nav: Nav,
     /// How to connect its agent, again (the owner, 2026-11-11: "make it so I can still get the
     /// mcp / setup commands for existing projects").
@@ -894,6 +896,7 @@ fn build_project_page(
     };
 
     Ok(ProjectPage {
+        session_url: crate::usage::session_link(c, p.id)?.map(|(u, _)| u),
         nav: Nav::new(&Actor::Anonymous, ""),
         connect: None,
         slug: p.slug.clone(),
@@ -980,6 +983,7 @@ struct HistoryRow {
 #[template(path = "record.html")]
 struct RecordPage {
     nav: Nav,
+    session_url: Option<String>,
     project_slug: String,
     project_name: String,
     kind_label: &'static str,
@@ -1071,11 +1075,12 @@ async fn load_record_page(
             let links = records::links_of(c, &r)?;
             let history = records::revisions(c, r.id)?;
             let buttons = super::buttons::views(c, r.id, now)?;
-            Ok(Some((r, project, links, history, buttons)))
+            let session_url = crate::usage::session_link(c, project.id)?.map(|(u, _)| u);
+            Ok(Some((r, project, links, history, buttons, session_url)))
         })
         .await?
         .ok_or(AppError::NotFound)?;
-    let (r, project, links, history, buttons) = page;
+    let (r, project, links, history, buttons, session_url) = page;
 
     let mut groups: Vec<LinkGroup> = Vec::new();
     let mut stale = Vec::new();
@@ -1174,6 +1179,7 @@ async fn load_record_page(
             },
             project.name.clone(),
         ),
+        session_url,
         project_slug: project.slug,
         project_name: project.name,
         kind_label: r.kind.label(),

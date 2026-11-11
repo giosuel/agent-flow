@@ -29,6 +29,43 @@ struct Line {
     session_id: Option<String>,
     cwd: Option<String>,
     message: Option<Message>,
+    /// A remote-control line: `{"type":"system","subtype":"bridge_status","url":…}`.
+    subtype: Option<String>,
+    url: Option<String>,
+    /// Or `{"type":"attachment","attachment":{"type":"remote_session_change","url":…}}`.
+    attachment: Option<Attachment>,
+}
+
+#[derive(Deserialize)]
+struct Attachment {
+    #[serde(rename = "type")]
+    kind: Option<String>,
+    url: Option<String>,
+}
+
+/// A session's link on claude.ai, where the owner continues it from any device.
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Remote {
+    pub session: String,
+    pub url: String,
+    pub at: i64,
+    pub cwd: String,
+}
+
+/// Only Claude Code's own session links: nothing else from a transcript becomes a link.
+pub fn is_session_url(url: &str) -> bool {
+    url.strip_prefix("https://claude.ai/code/session_")
+        .is_some_and(|id| !id.is_empty() && id.len() <= 64 && id.bytes().all(|b| b.is_ascii_alphanumeric()))
+}
+
+/// The session link a line announces, if it's a remote-control line.
+fn remote_of(line: &Line) -> Option<&str> {
+    let url = match (line.kind.as_str(), line.subtype.as_deref(), &line.attachment) {
+        ("system", Some("bridge_status"), _) => line.url.as_deref()?,
+        ("attachment", _, Some(Attachment { kind: Some(k), url: Some(u) })) if k == "remote_session_change" => u,
+        _ => return None,
+    };
+    is_session_url(url).then_some(url)
 }
 
 #[derive(Deserialize)]
@@ -155,6 +192,8 @@ pub struct Read {
     calls: Vec<Call>,
     offset: u64,
     first_at: Option<i64>,
+    #[serde(default)]
+    remotes: Vec<Remote>,
 }
 
 /// Where the last round stopped in this file, and (for a subagent) the time of its first own call.
@@ -190,8 +229,15 @@ pub fn read_new(root: &Path, path: &Path, offset: u64, first_at: Option<i64>) ->
     let mut file = std::fs::File::open(path)?;
     file.seek(SeekFrom::Start(offset))?;
     let mut reader = BufReader::new(file);
-    let mut out =
-        Read { path: path.to_string_lossy().to_string(), folder, subagent, calls: Vec::new(), offset, first_at };
+    let mut out = Read {
+        path: path.to_string_lossy().to_string(),
+        folder,
+        subagent,
+        calls: Vec::new(),
+        offset,
+        first_at,
+        remotes: Vec::new(),
+    };
     let start = offset;
     let mut buf = Vec::new();
     while offset - start < MAX_PER_ROUND {
@@ -223,6 +269,22 @@ pub fn read_new(root: &Path, path: &Path, offset: u64, first_at: Option<i64>) ->
             continue;
         }
         offset += n as u64;
+        // A session's own remote-control lines (a subagent has none of its own). Only lines that
+        // are one: a model call that merely mentions the words still counts below.
+        if !subagent
+            && (contains(&buf, b"\"bridge_status\"") || contains(&buf, b"\"remote_session_change\""))
+            && let Ok(line) = serde_json::from_slice::<Line>(&buf)
+            && let Some(url) = remote_of(&line)
+            && let Some(at) = line.timestamp.as_deref().and_then(parse_time)
+        {
+            out.remotes.push(Remote {
+                session: line.session_id.clone().unwrap_or_default(),
+                url: url.to_owned(),
+                at,
+                cwd: line.cwd.clone().unwrap_or_default(),
+            });
+            continue;
+        }
         // Cheap checks first: most lines are tool results and user turns.
         if !contains(&buf, b"\"usage\"") || !contains(&buf, b"\"assistant\"") {
             continue;
@@ -301,6 +363,13 @@ pub fn store(conn: &mut Connection, read: &Read) -> anyhow::Result<usize> {
             ],
         )?;
     }
+    for r in &read.remotes {
+        tx.execute(
+            "INSERT INTO remote_sessions (session, url, at, folder, cwd) VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT (session, url) DO UPDATE SET at = max(at, excluded.at)",
+            params![r.session, r.url, r.at, read.folder, r.cwd],
+        )?;
+    }
     tx.execute(
         "INSERT INTO usage_files (path, offset, first_at) VALUES (?1, ?2, ?3)
          ON CONFLICT (path) DO UPDATE SET offset = excluded.offset, first_at = coalesce(first_at, excluded.first_at)",
@@ -308,6 +377,32 @@ pub fn store(conn: &mut Connection, read: &Read) -> anyhow::Result<usize> {
     )?;
     tx.commit()?;
     Ok(calls)
+}
+
+/// The newest link to a session of the project's agent, and when it was announced: the session
+/// worked in the project's checkout (the deepest one, for nested checkouts), or its transcripts are
+/// in the checkout's folder.
+pub fn session_link(conn: &Connection, project_id: i64) -> anyhow::Result<Option<(String, i64)>> {
+    let checkouts = Checkouts::load(conn)?;
+    let Some((dir, folder, _)) = checkouts.0.iter().find(|(_, _, id)| *id == project_id) else {
+        return Ok(None);
+    };
+    let dir = dir.to_string_lossy().to_string();
+    let mut stmt = conn.prepare(
+        "SELECT url, at, cwd, folder FROM remote_sessions
+         WHERE cwd = ?1 OR substr(cwd, 1, length(?1) + 1) = ?1 || '/' OR folder = ?2
+         ORDER BY at DESC LIMIT 50",
+    )?;
+    let rows = stmt.query_map(params![dir, folder], |r| {
+        Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?, r.get::<_, String>(2)?, r.get::<_, String>(3)?))
+    })?;
+    for row in rows {
+        let (url, at, cwd, folder) = row?;
+        if checkouts.project(&cwd, &folder) == Some(project_id) && is_session_url(&url) {
+            return Ok(Some((url, at)));
+        }
+    }
+    Ok(None)
 }
 
 /// Calls without a project get one when they can: a checkout set since they were read, or the
@@ -549,6 +644,61 @@ mod tests {
         format!(
             "{{\"type\":\"assistant\",\"timestamp\":\"{at}\",\"sessionId\":\"{session}\",\"message\":{{\"id\":\"{id}\",\"model\":\"claude-opus-5-5\",\"role\":\"assistant\",\"usage\":{{\"input_tokens\":{input},\"output_tokens\":10,\"cache_creation_input_tokens\":100,\"cache_read_input_tokens\":1000}}}}}}\n"
         )
+    }
+
+    #[test]
+    fn session_links_come_from_remote_control_lines_only() {
+        let root = tempfile::tempdir().unwrap();
+        let folder = root.path().join("-home-viber-office");
+        std::fs::create_dir_all(folder.join("s1/subagents")).unwrap();
+        let bridge = |url: &str, at: &str| {
+            format!(
+                "{{\"type\":\"system\",\"subtype\":\"bridge_status\",\"url\":\"{url}\",\"timestamp\":\"{at}\",\"sessionId\":\"s1\",\"cwd\":\"/home/viber/office\"}}\n"
+            )
+        };
+        let change = |url: &str, at: &str| {
+            format!(
+                "{{\"type\":\"attachment\",\"attachment\":{{\"type\":\"remote_session_change\",\"url\":\"{url}\"}},\"timestamp\":\"{at}\",\"sessionId\":\"s1\",\"cwd\":\"/home/viber/office\"}}\n"
+            )
+        };
+        // A model call that only mentions the words, and a link to somewhere else.
+        let mention =
+            call("m1", "2026-11-11T09:30:00Z", "s1", 5).replace("\"role\"", "\"note\":\"bridge_status\",\"role\"");
+        let text = [
+            bridge("https://claude.ai/code/session_01Old", "2026-11-11T08:00:00Z"),
+            mention,
+            change("https://claude.ai/code/session_01New", "2026-11-11T10:00:00Z"),
+            bridge("https://evil.example/code/session_01X", "2026-11-11T11:00:00Z"),
+            change("https://claude.ai/code/session_01New\\\"><script>", "2026-11-11T12:00:00Z"),
+        ]
+        .concat();
+        std::fs::write(folder.join("s1.jsonl"), text).unwrap();
+        // A subagent's copy of its parent's lines isn't its own.
+        std::fs::write(
+            folder.join("s1/subagents/a.jsonl"),
+            bridge("https://claude.ai/code/session_01Sub", "2026-11-11T13:00:00Z"),
+        )
+        .unwrap();
+
+        let db = Db::open_memory();
+        db.call_blocking(|c| {
+            let p = crate::projects::create(c, "office", "Office", "t")?;
+            let patch =
+                crate::projects::ProjectPatch { checkout: Some("/home/viber/office".into()), ..Default::default() };
+            crate::projects::update(c, p.id, &patch, "t")?;
+            for path in transcripts(root.path()) {
+                let (offset, first_at) = file_state(c, &path)?;
+                if let Some(read) = read_new(root.path(), &path, offset, first_at)? {
+                    store(c, &read)?;
+                }
+            }
+            let (url, _) = session_link(c, p.id)?.unwrap();
+            assert_eq!(url, "https://claude.ai/code/session_01New");
+            let calls: i64 = c.query_row("SELECT count(*) FROM usage", [], |r| r.get(0))?;
+            assert_eq!(calls, 1, "the call that mentions the words still counts");
+            Ok(())
+        })
+        .unwrap();
     }
 
     #[test]
