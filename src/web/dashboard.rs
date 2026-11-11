@@ -152,6 +152,32 @@ async fn dashboard(
                     items: more,
                 });
             }
+            // Questions an agent goes ahead on meanwhile: answer when you get to it.
+            let going: Vec<Item> = w
+                .going_ahead
+                .iter()
+                .map(|q| {
+                    let n = q.data.get("recommended").and_then(Value::as_u64).unwrap_or(0) as usize;
+                    let default = q
+                        .data
+                        .get("options")
+                        .and_then(Value::as_array)
+                        .and_then(|o| o.get(n.wrapping_sub(1)))
+                        .and_then(|o| o.get("title"))
+                        .and_then(Value::as_str)
+                        .unwrap_or("");
+                    Item {
+                        icon: icon("question"),
+                        title: q.title.clone(),
+                        sub: format!("{} · going ahead with {n}: {default}", name(&q.project)),
+                        url: q.url(),
+                        action: "Confirm or change",
+                    }
+                })
+                .collect();
+            if !going.is_empty() {
+                groups.push(Group { title: "Going ahead unless you say otherwise", items: going });
+            }
             let merges: Vec<Item> = w
                 .merges
                 .iter()
