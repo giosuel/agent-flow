@@ -291,7 +291,9 @@ fn url_encode(s: &str) -> String {
 
 pub fn whoami(config_path: &Path, args: ClientArgs) -> anyhow::Result<()> {
     let client = Client::new(config_path, &args)?;
-    let me = client.get("/api/whoami")?;
+    let mut me = client.get("/api/whoami")?;
+    // The same four characters the Settings page shows next to the token.
+    me["token"] = format!("…{}", &client.token[client.token.len().saturating_sub(4)..]).into();
     println!("{}", serde_json::to_string_pretty(&me)?);
     Ok(())
 }

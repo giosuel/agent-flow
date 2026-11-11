@@ -158,6 +158,8 @@ pub struct TokenInfo {
     pub last_used_at: Option<i64>,
     pub last_used_from: Option<String>,
     pub revoked_at: Option<i64>,
+    /// Its last four characters ("" for tokens made before they were kept).
+    pub hint: String,
 }
 
 /// Creates a token and returns `(id, secret)`. The secret is shown once and never stored.
@@ -184,15 +186,15 @@ pub fn create_token(
     };
     let secret = new_secret(kind.prefix());
     conn.execute(
-        "INSERT INTO tokens (kind, name, project_id, hash, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
-        params![kind.as_str(), name, project_id, hash_secret(&secret), now_ms()],
+        "INSERT INTO tokens (kind, name, project_id, hash, created_at, hint) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![kind.as_str(), name, project_id, hash_secret(&secret), now_ms(), &secret[secret.len() - 4..]],
     )?;
     Ok((conn.last_insert_rowid(), secret))
 }
 
 pub fn list_tokens(conn: &Connection) -> anyhow::Result<Vec<TokenInfo>> {
     let mut stmt = conn.prepare(
-        "SELECT t.id, t.kind, t.name, p.slug, t.created_at, t.last_used_at, t.last_used_from, t.revoked_at
+        "SELECT t.id, t.kind, t.name, p.slug, t.created_at, t.last_used_at, t.last_used_from, t.revoked_at, t.hint
          FROM tokens t LEFT JOIN projects p ON p.id = t.project_id ORDER BY t.id",
     )?;
     let rows = stmt.query_map([], |r| {
@@ -205,6 +207,7 @@ pub fn list_tokens(conn: &Connection) -> anyhow::Result<Vec<TokenInfo>> {
             last_used_at: r.get(5)?,
             last_used_from: r.get(6)?,
             revoked_at: r.get(7)?,
+            hint: r.get(8)?,
         })
     })?;
     Ok(rows.collect::<Result<_, _>>()?)

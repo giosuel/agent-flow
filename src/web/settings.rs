@@ -76,6 +76,8 @@ struct TokenView {
     used: String,
     added: String,
     from: String,
+    /// "…a1b2", the token's end.
+    hint: String,
 }
 
 struct SessionView {
@@ -187,6 +189,7 @@ async fn render_page(
             used: when(t.last_used_at),
             added: ago(t.created_at, now),
             from: t.last_used_from.clone().unwrap_or_default(),
+            hint: if t.hint.is_empty() { String::new() } else { format!("…{}", t.hint) },
             kind: t.kind,
         })
         .partition(|t| t.kind == "device");
