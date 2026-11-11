@@ -96,7 +96,7 @@
         <ol class="plain opts-ro">{% for o in options %}<li class="{% if o.chosen %}chosen{% endif %}"><span class="mono">{{ o.n }}</span> {{ o.title }}{% if o.recommended %} <span class="chip">recommended</span>{% endif %}{% if o.chosen %} <span class="chip ok">chosen</span>{% endif %}</li>{% endfor %}</ol>
         {% endif %}
         {% if !answer.is_empty() %}<blockquote class="quote">“{{ answer }}”</blockquote>{% endif %}
-        {% if !answer_line.is_empty() %}<p class="sub">{{ answer_line }}</p>{% else %}<p class="sub">{% if state == "open" %}Waiting for the owner.{% else %}{{ state }}{% endif %}</p>{% endif %}
+        {% if !answer_line.is_empty() %}<p class="sub">{{ answer_line }}</p>{% if state == "answered" && is_owner %}<p class="sub">Changed your mind? An answer stays as sent, since the agent may have acted on it already. Tell it in a conversation or on the task it belongs to.</p>{% endif %}{% else %}<p class="sub">{% if state == "open" %}Waiting for the owner.{% else %}{{ state }}{% endif %}</p>{% endif %}
       {% endif %}
     </section>
     {% endif %}
