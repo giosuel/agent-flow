@@ -857,6 +857,25 @@ mod tests {
     }
 
     #[test]
+    fn links_that_change_their_target_stay_in_the_project() {
+        let db = Db::open_memory();
+        db.call_blocking(|c| {
+            let a = setup(c);
+            let b = crate::projects::create(c, "other", "Other", "test")?.id;
+            let dec = |p: i64| create(c, p, "x", NewRecord { kind: Some(Kind::Decision), title: "d".into(), ..Default::default() });
+            let (mine, theirs) = (dec(a)?, dec(b)?);
+            for relation in ["supersedes", "blocks", "implements", "answers", "records", "feedback_on"] {
+                assert!(link(c, &mine, &theirs, relation, "vinculum").is_err(), "{relation}");
+            }
+            assert_eq!(get(c, theirs.id)?.state, "current", "untouched");
+            assert!(link(c, &mine, &theirs, "relates", "vinculum")?);
+            assert!(link(c, &mine, &theirs, "depends_on", "vinculum")?);
+            Ok(())
+        })
+        .unwrap();
+    }
+
+    #[test]
     fn links_supersede_and_staleness() {
         let db = Db::open_memory();
         db.call_blocking(|c| {
