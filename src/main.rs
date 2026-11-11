@@ -16,6 +16,7 @@ mod machine;
 mod markdown;
 mod mcp;
 mod messages;
+mod onboard;
 mod passkey;
 mod poller;
 mod projects;

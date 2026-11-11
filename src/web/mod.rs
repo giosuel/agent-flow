@@ -13,6 +13,7 @@ mod guides;
 mod icons;
 mod log;
 mod machine;
+mod new_project;
 mod pages;
 mod projects;
 mod pwa;
@@ -135,6 +136,7 @@ pub fn router(state: AppState) -> Router {
         .merge(guides::routes())
         .merge(log::routes())
         .merge(machine::routes())
+        .merge(new_project::routes())
         .merge(usage::routes())
         .merge(dashboard::routes())
         .merge(pwa::routes())
