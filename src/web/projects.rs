@@ -906,6 +906,7 @@ async fn record(
         "answered" => "This question was already answered.".to_owned(),
         "option" => "That option doesn't exist; pick one of the list.".to_owned(),
         "empty" => "Pick an option or write an answer.".to_owned(),
+        "both" => "Pick an option or write your own answer, not both. Nothing was sent.".to_owned(),
         _ => "That didn't work; nothing was saved. Try again.".to_owned(),
     });
     let mut page = load_record_page(&state, &actor, slug, id, error, tz).await?;
@@ -1189,6 +1190,10 @@ async fn answer(
         None => None,
     };
     let words = form.words.unwrap_or_default();
+    // An option or the owner's own words, never both (the owner, 2026-11-11).
+    if option.is_some() && !words.trim().is_empty() {
+        return Ok(Redirect::to(&format!("/p/{slug}/{id}?error=both")).into_response());
+    }
     let (s, i) = (slug.clone(), id.clone());
     let result = state
         .db
