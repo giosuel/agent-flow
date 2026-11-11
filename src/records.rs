@@ -115,6 +115,30 @@ impl fmt::Display for Kind {
     }
 }
 
+/// Has the record reached the end its kind works towards (a PR merged, a task done, …)?
+pub fn is_finished(r: &Record) -> bool {
+    r.state == finished_word(r.kind)
+}
+
+/// The state that counts as finished for a kind, for "unlocks once T-1 is done".
+pub fn finished_word(kind: Kind) -> &'static str {
+    match kind {
+        Kind::Pr => "merged",
+        Kind::Release => "tagged",
+        Kind::Question => "answered",
+        Kind::Build => "tried",
+        Kind::Contribution => "merged",
+        Kind::Decision | Kind::Adr => "current",
+        Kind::Feedback => "works",
+        Kind::Task => "done",
+    }
+}
+
+/// How the owner sees a record's id: GitHub's "#58" for PRs, "T-14" otherwise.
+pub fn display_id(r: &Record) -> String {
+    if r.kind == Kind::Pr { format!("#{}", r.number) } else { r.short_id() }
+}
+
 /// `vinculum/Q-12`, or `Q-12` within the caller's own project.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RecordRef {

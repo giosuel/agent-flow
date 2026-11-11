@@ -564,7 +564,7 @@ async fn prs_merge_in_order_from_the_owners_buttons() {
 
     let (_, order) = call("pull_requests", json!({})).await;
     assert_eq!(order["merge_order"][0]["mergeable_now"], true);
-    assert_eq!(order["merge_order"][1]["buttons"][0]["locked_because"], "merge PR-48 first");
+    assert_eq!(order["merge_order"][1]["buttons"][0]["locked_because"], "merge #48 first");
 
     let cookie = s.owner_cookie().await;
     let html =

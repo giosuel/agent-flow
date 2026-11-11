@@ -220,9 +220,8 @@ pub fn enabled(conn: &Connection, a: &ActionRow) -> anyhow::Result<Result<(), St
     }
     for req in &a.requires {
         let r = records::find_str(conn, req, None)?;
-        let ok = matches!(r.state.as_str(), "merged" | "done" | "tagged");
-        if !ok {
-            return Ok(Err(format!("unlocks once {} is merged", r.short_id())));
+        if !records::is_finished(&r) {
+            return Ok(Err(format!("unlocks once {} is {}", records::display_id(&r), records::finished_word(r.kind))));
         }
     }
     let record = records::get(conn, a.record_id)?;
@@ -235,7 +234,7 @@ pub fn enabled(conn: &Connection, a: &ActionRow) -> anyhow::Result<Result<(), St
             crate::prs::merge_order(conn, record.project_id)?.into_iter().find(|o| o.record.id == record.id)
             && let Some(after) = o.after
         {
-            return Ok(Err(format!("merge PR-{after} first")));
+            return Ok(Err(format!("merge #{after} first")));
         }
     }
     Ok(Ok(()))
@@ -382,7 +381,7 @@ mod tests {
         // Not ready (agent, task) → can't claim; a wrong hash never can.
         let (id, hash) = (a.id, a.hash());
         let err = db.call(move |c| claim(c, id, &hash)).await.unwrap_err().to_string();
-        assert!(err.contains("T-1 is merged") || err.contains("unlocks"), "{err}");
+        assert!(err.contains("unlocks once T-1 is done"), "{err}");
         db.call(move |c| {
             records::update(c, &task, "v", records::Patch { state: Some("done".into()), ..Default::default() })?;
             let r = records::find_str(c, "v/PR-48", None)?;
