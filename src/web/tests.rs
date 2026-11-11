@@ -1083,6 +1083,19 @@ async fn usage_and_machine_pages_show_the_counts() {
     let html = get("/usage").await.text().await.unwrap();
     assert!(html.contains("imaginarium") && html.contains("1.2 M"), "{html}");
     assert!(get("/usage?tab=tasks").await.text().await.unwrap().contains("Not in a task"));
+    // Days are the browser's: today's call is on today's local date at UTC+14 and at UTC−11 alike.
+    for zone in ["Pacific/Kiritimati", "Pacific/Pago_Pago"] {
+        let day = crate::tz::Tz::named(zone).unwrap().date(crate::util::now_ms());
+        let res = s
+            .http
+            .get(s.url(&format!("/usage?day={day}")))
+            .header(COOKIE, format!("{cookie}; af_tz={zone}"))
+            .send()
+            .await
+            .unwrap();
+        let html = res.text().await.unwrap();
+        assert!(html.contains(&format!("Hours in {zone}")) && html.contains("1.2 M"), "{zone}: {html}");
+    }
     let res = get("/machine?range=6h").await;
     assert_eq!(res.status(), StatusCode::OK);
     assert!(res.text().await.unwrap().contains("Disk free"));

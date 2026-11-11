@@ -415,14 +415,27 @@ fn tokens_row(r: &rusqlite::Row, from: usize) -> rusqlite::Result<Tokens> {
 
 const SUMS: &str = "count(*), sum(input), sum(cache_write), sum(output), sum(cache_read)";
 
-/// Totals per (bucket, project) between `from` and `to`, buckets of `step` ms (an hour, a day)
-/// counted from `from`. Project None is everything not in a project.
-pub fn buckets(conn: &Connection, from: i64, to: i64, step: i64) -> anyhow::Result<Vec<(i64, Option<i64>, Tokens)>> {
+/// Counted in quarter hours, which every time zone's hours and days are made of.
+const QUARTER: i64 = 15 * 60_000;
+
+/// Totals per (bucket, project) for the buckets between consecutive `bounds` (the owner's local
+/// hours or days, see [`crate::tz`]). Project None is everything not in a project.
+pub fn buckets(conn: &Connection, bounds: &[i64]) -> anyhow::Result<Vec<(usize, Option<i64>, Tokens)>> {
+    let (Some(&from), Some(&to)) = (bounds.first(), bounds.last()) else { return Ok(Vec::new()) };
     let mut stmt = conn.prepare(&format!(
-        "SELECT (at - ?1) / ?3, project_id, {SUMS} FROM usage WHERE at >= ?1 AND at < ?2 GROUP BY 1, 2 ORDER BY 1"
+        "SELECT (at - ?1) / ?3, project_id, {SUMS} FROM usage WHERE at >= ?1 AND at < ?2 GROUP BY 1, 2"
     ))?;
-    let rows = stmt.query_map(params![from, to, step], |r| Ok((r.get(0)?, r.get(1)?, tokens_row(r, 2)?)))?;
-    Ok(rows.collect::<Result<_, _>>()?)
+    let rows = stmt.query_map(params![from, to, QUARTER], |r| {
+        Ok((r.get::<_, i64>(0)?, r.get::<_, Option<i64>>(1)?, tokens_row(r, 2)?))
+    })?;
+    let mut by: std::collections::BTreeMap<(usize, Option<i64>), Tokens> = Default::default();
+    for row in rows {
+        let (q, project, t) = row?;
+        if let Some(i) = crate::tz::bucket(bounds, from + q * QUARTER) {
+            by.entry((i, project)).or_default().add(&t);
+        }
+    }
+    Ok(by.into_iter().map(|((i, p), t)| (i, p, t)).collect())
 }
 
 /// One row per project (None: outside any project) for the window, with its session count.
@@ -492,29 +505,23 @@ pub fn per_task(conn: &Connection, from: i64, to: i64) -> anyhow::Result<Vec<Tas
     Ok(by)
 }
 
-/// A project's new tokens per day for the last `days` days, oldest first (the agent card's strip).
-pub fn project_days(conn: &Connection, project_id: i64, day_start: i64, days: i64) -> anyhow::Result<Vec<i64>> {
-    let from = day_start - (days - 1) * DAY;
-    let mut out = vec![0; days as usize];
+/// A project's new tokens per bucket of `bounds` (the agent card's strip of local days).
+pub fn project_days(conn: &Connection, project_id: i64, bounds: &[i64]) -> anyhow::Result<Vec<i64>> {
+    let (Some(&from), Some(&to)) = (bounds.first(), bounds.last()) else { return Ok(Vec::new()) };
+    let mut out = vec![0; bounds.len() - 1];
     let mut stmt = conn.prepare(
-        "SELECT (at - ?2) / ?3, sum(input + cache_write + output) FROM usage
-         WHERE project_id = ?1 AND at >= ?2 GROUP BY 1",
+        "SELECT (at - ?2) / ?4, sum(input + cache_write + output) FROM usage
+         WHERE project_id = ?1 AND at >= ?2 AND at < ?3 GROUP BY 1",
     )?;
-    for row in stmt.query_map(params![project_id, from, DAY], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?)))? {
-        let (i, n) = row?;
-        if let Some(slot) = out.get_mut(i as usize) {
-            *slot = n;
+    for row in
+        stmt.query_map(params![project_id, from, to, QUARTER], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?)))?
+    {
+        let (q, n) = row?;
+        if let Some(i) = crate::tz::bucket(bounds, from + q * QUARTER) {
+            out[i] += n;
         }
     }
     Ok(out)
-}
-
-pub const HOUR: i64 = 3_600_000;
-pub const DAY: i64 = 24 * HOUR;
-
-/// The start of the UTC day `ms` falls in.
-pub fn day_start(ms: i64) -> i64 {
-    ms - ms.rem_euclid(DAY)
 }
 
 /// "1.2 M", "34 k", "980".
@@ -669,6 +676,5 @@ mod tests {
         assert_eq!(folder_for("/home/viber/my.app"), "-home-viber-my-app");
         assert_eq!(short(1_234_567), "1.2 M");
         assert_eq!(short(34_000), "34 k");
-        assert_eq!(day_start(DAY + 5), DAY);
     }
 }
