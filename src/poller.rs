@@ -20,11 +20,19 @@ pub fn spawn(state: AppState) {
     tokio::spawn(async move {
         let mut tick = tokio::time::interval(EVERY);
         tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        let mut round: u64 = 0;
         loop {
             tick.tick().await;
             if let Err(e) = poll_once(&state).await {
                 tracing::warn!("GitHub poll: {e:#}");
             }
+            // Other people's repositories change slowly: every tenth round (30 minutes).
+            if round % 10 == 0
+                && let Err(e) = poll_contributions(&state).await
+            {
+                tracing::warn!("contribution watch: {e:#}");
+            }
+            round += 1;
         }
     });
 }
@@ -166,6 +174,32 @@ async fn check_releases(state: &AppState) -> anyhow::Result<()> {
                 tag: Some(r.ref_id.clone()),
             },
         );
+    }
+    Ok(())
+}
+
+/// Checks every watched PR and issue on other people's repositories.
+pub async fn poll_contributions(state: &AppState) -> anyhow::Result<()> {
+    let list = state.db.call(|c| crate::contributions::watched(c)).await?;
+    for r in list {
+        let (repo, number) =
+            (r.str("repo").to_owned(), r.data.get("number").and_then(serde_json::Value::as_i64).unwrap_or(0));
+        match state.github.item(&repo, number).await {
+            Ok(info) => {
+                state.db.call(move |c| crate::contributions::update(c, &r, &info)).await?;
+            }
+            Err(e) => {
+                let e = Entry::new(
+                    &Actor::System("poller"),
+                    Via::Poller,
+                    Action::System,
+                    format!("watching {repo}#{number} failed: {e:#}"),
+                )
+                .project(r.project.clone())
+                .severity("warn");
+                activity::write(&state.db, e).await;
+            }
+        }
     }
     Ok(())
 }

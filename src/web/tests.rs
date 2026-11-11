@@ -809,3 +809,45 @@ async fn agents_and_the_consultant_talk_through_agentflow() {
     let (ok, _) = mcp_tool(&s, &a, &as_, "inbox", json!({})).await;
     assert!(!ok);
 }
+
+#[tokio::test]
+async fn contributions_are_watched_for_their_project() {
+    use crate::github::ItemInfo;
+    let s = TestServer::start().await;
+    let token = s.token(TokenKind::Project, Some("imaginarium")).await;
+    let consultant = s.token(TokenKind::Admin, None).await;
+    let item = |state: &str, comments| ItemInfo {
+        title: "Undo leaves content behind".into(),
+        url: "https://github.com/loro-dev/loro/issues/1255".into(),
+        is_pr: false,
+        state: state.into(),
+        comments,
+    };
+    s.github.items.lock().unwrap().insert(("loro-dev/loro".into(), 1255), item("open", 0));
+    let cs = mcp_session(&s, &consultant).await;
+    let (ok, r) = mcp_tool(
+        &s,
+        &consultant,
+        &cs,
+        "track_contribution",
+        json!({"project": "imaginarium", "repo": "loro-dev/loro", "number": 1255}),
+    )
+    .await;
+    assert!(ok, "{r}");
+    assert_eq!(r["id"], "imaginarium/C-1");
+    let (ok, _) = mcp_tool(
+        &s,
+        &consultant,
+        &cs,
+        "track_contribution",
+        json!({"project": "imaginarium", "repo": "bad repo", "number": 1}),
+    )
+    .await;
+    assert!(!ok);
+
+    s.github.items.lock().unwrap().insert(("loro-dev/loro".into(), 1255), item("open", 1));
+    crate::poller::poll_contributions(&s.state).await.unwrap();
+    let ts = mcp_session(&s, &token).await;
+    let (_, news) = mcp_tool(&s, &token, &ts, "since_last_check", json!({})).await;
+    assert!(news.to_string().contains("1 new comment"), "{news}");
+}

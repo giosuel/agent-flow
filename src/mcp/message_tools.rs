@@ -37,6 +37,16 @@ pub struct ConversationId {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct TrackContribution {
+    /// The project it came from (the consultant names it; an agent's own if left out).
+    pub project: Option<String>,
+    /// The other repository, e.g. "loro-dev/loro".
+    pub repo: String,
+    /// The PR's or issue's number there.
+    pub number: i64,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct ListConversations {
     /// At most this many, newest activity first (default 20).
     pub limit: Option<i64>,
@@ -137,6 +147,37 @@ impl FlowMcp {
             })
             .await;
         self.finish(&actor, "conversations", Action::Read, outcome).await
+    }
+
+    #[tool(
+        description = "Watch a PR or issue that was sent to someone else's repository (only after the owner agreed \
+        to it): AgentFlow checks it every 30 minutes and tells the project's agent about new comments, a merge or a close."
+    )]
+    async fn track_contribution(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(p): Parameters<TrackContribution>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let actor = actor_of(&parts);
+        let a = actor.clone();
+        let outcome = async {
+            crate::github::check_repo(p.repo.trim())?;
+            let (a2, proj) = (a.clone(), p.project.clone());
+            let project = self.state.db.call(move |c| super::target_project(c, &a2, proj.as_deref(), true)).await?;
+            let info = self.state.github.item(p.repo.trim(), p.number).await?;
+            let (repo, number, author) = (p.repo.trim().to_owned(), p.number, a.name());
+            let r = self
+                .state
+                .db
+                .call(move |c| crate::contributions::track(c, project.id, &repo, number, &info, &author))
+                .await?;
+            Ok(Outcome::new(json!({"id": r.ref_id, "state": r.state, "url": r.str("url")}))
+                .summary(format!("watching {}", r.title))
+                .project(r.project.clone())
+                .target(r.ref_id))
+        }
+        .await;
+        self.finish(&actor, "track_contribution", Action::Write, outcome).await
     }
 
     #[tool(description = "For the consultant: messages to you (or to everyone) you haven't read, oldest first. Marks \

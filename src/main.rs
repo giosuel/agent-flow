@@ -7,6 +7,7 @@ mod auth;
 mod builds;
 mod cli;
 mod config;
+mod contributions;
 mod db;
 mod github;
 mod machine;
