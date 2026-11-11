@@ -278,18 +278,18 @@ pre.wrap { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 40vh; ove
 .meta-txt { display: flex; flex-direction: column; gap: 2px; min-width: 0; font-size: 14px; }
 .i { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 ul.plain, ol.plain { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; }
-.ms-strip { margin: 0; padding: 0 0 4px; list-style: none; display: flex; gap: 8px; overflow-x: auto; }
-.ms { flex: none; display: flex; flex-direction: column; gap: 2px; min-width: 132px; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); font-size: 14px; }
+/* Every milestone in full, across the page; more wrap onto the next line (the owner, 2026-11-11:
+   "they should all become expanded, like the previous and current ones, no expand on hover"). */
+.ms-strip { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 8px; }
+.ms-wide { margin-bottom: 4px; }
+.ms { min-width: 0; display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); font-size: 14px; }
 .ms.done { background: var(--inset); color: var(--muted); }
 .ms.now { border: 2px solid var(--accent); padding: 9px 11px; background: var(--soft); }
 .ms .mt { font-weight: 500; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ms.done .mt { color: var(--ink2); }
 .ms .tag { font-size: 12px; color: var(--muted); white-space: nowrap; }
 .ms.now .tag { color: var(--chip-accent-ink); }
-.ms.up { min-width: 0; width: 52px; overflow: hidden; white-space: nowrap; border-style: dashed; transition: width .18s ease; }
-.ms.up .mt, .ms.up .tag { opacity: 0; transition: opacity .12s ease; }
-.ms.up:hover, .ms.up:focus { width: 160px; border-style: solid; outline: none; }
-.ms.up:hover .mt, .ms.up:hover .tag, .ms.up:focus .mt, .ms.up:focus .tag { opacity: 1; transition-delay: .06s; }
+.ms.up { border-style: dashed; }
 .steps { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
 .step { font-size: 13px; padding: 4px 10px; border-radius: 6px; background: var(--chip); color: var(--ink2); }
 .step.done { color: var(--muted); background: var(--inset); }
@@ -767,3 +767,28 @@ form.tt-active .tt-send { position: sticky; }
 .quiet-rows a { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 12px 16px; text-decoration: none; color: var(--ink2); }
 @media (max-width: 1100px) { .prow2 { grid-template-columns: 1fr 1fr; } .tok { align-items: flex-start; } }
 @media (max-width: 700px) { .prow2 { grid-template-columns: 1fr; gap: 12px; padding: 16px; } }
+
+/* A record over the page: a dialog on desktop, a sheet from below on the phone. */
+.rdlg-back { position: fixed; inset: 0; z-index: 60; background: rgba(0, 0, 0, .62); display: grid; place-items: start center; padding: 56px 24px; opacity: 0; pointer-events: none; transition: opacity .18s ease; }
+.rdlg-back.open { opacity: 1; pointer-events: auto; }
+.rdlg { width: min(860px, 100%); max-height: calc(100dvh - 112px); display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--border); border-radius: 14px; box-shadow: 0 24px 80px rgba(0, 0, 0, .6); transform: translateY(12px); transition: transform .2s ease; }
+.rdlg-back.open .rdlg { transform: none; }
+.rdlg-grab { display: none; }
+.rdlg-head { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+.rdlg-nav { display: flex; gap: 6px; }
+.rdlg-btn { width: 40px; height: 40px; border-radius: 10px; border: 1px solid var(--line); background: var(--ground); color: var(--ink2); font-size: 20px; line-height: 1; cursor: pointer; }
+.rdlg-btn:disabled { opacity: .35; cursor: default; }
+.rdlg-body { overflow: auto; padding: 20px 24px 24px; overscroll-behavior: contain; }
+.rdlg-body > .head { margin-bottom: 16px; }
+.rdlg-body .split { grid-template-columns: 1fr; }
+html.rdlg-on { overflow: hidden; }
+@media (max-width: 700px) {
+  .rdlg-back { padding: 0; place-items: end stretch; }
+  .rdlg { width: 100%; height: calc(100dvh - 10px); max-height: none; border-radius: 18px 18px 0 0; border-bottom: 0; transform: translateY(100%); transition: transform .26s cubic-bezier(.2, .8, .2, 1); }
+  .rdlg-grab { display: block; width: 44px; height: 5px; border-radius: 3px; background: var(--border); margin: 8px auto 0; flex: none; }
+  .rdlg-head { padding: 8px 12px 12px; }
+  .rdlg-nav { display: none; }
+  .rdlg-page { display: none; }
+  .rdlg-body { padding: 16px 16px calc(24px + env(safe-area-inset-bottom)); }
+}
+@media (prefers-reduced-motion: reduce) { .rdlg, .rdlg-back { transition: none; } }
