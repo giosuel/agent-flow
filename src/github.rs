@@ -147,6 +147,8 @@ pub mod fake {
     #[derive(Default)]
     pub struct FakeGitHub {
         pub prs: Mutex<HashMap<(String, i64), PrInfo>>,
+        /// PRs reported merged the next time they're fetched one by one (as after a merge button).
+        pub merge_on_fetch: Mutex<std::collections::HashSet<i64>>,
     }
 
     impl FakeGitHub {
@@ -157,7 +159,14 @@ pub mod fake {
 
     impl GitHub for FakeGitHub {
         fn pr<'a>(&'a self, repo: &'a str, number: i64) -> BoxFuture<'a, anyhow::Result<PrInfo>> {
-            let r = self.prs.lock().unwrap().get(&(repo.to_owned(), number)).cloned().context("no such PR");
+            let merge = self.merge_on_fetch.lock().unwrap().contains(&number);
+            let r =
+                self.prs.lock().unwrap().get(&(repo.to_owned(), number)).cloned().context("no such PR").map(|mut p| {
+                    if merge {
+                        p.state = "merged".into();
+                    }
+                    p
+                });
             Box::pin(async move { r })
         }
 

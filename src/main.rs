@@ -13,6 +13,7 @@ mod machine;
 mod markdown;
 mod mcp;
 mod passkey;
+mod poller;
 mod projects;
 mod prs;
 mod push;
@@ -82,7 +83,7 @@ fn main() -> anyhow::Result<()> {
             let db = db::Db::open(&config.db_path())?;
             let vapid = push::Vapid::load_or_create(&config.data_dir())?;
             let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().build()?;
-            runtime.block_on(web::serve(web::AppState::new(db, config, vapid)))
+            runtime.block_on(web::serve(web::AppState::new(db, config, vapid, std::sync::Arc::new(github::GhCli))))
         }
         Command::Admin { command } => cli::admin(&config_path, command),
         Command::Whoami(client) => cli::whoami(&config_path, client),
