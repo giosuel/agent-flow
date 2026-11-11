@@ -1126,11 +1126,11 @@ async fn usage_and_machine_pages_show_the_counts() {
     assert!(more.contains("Conversations") && more.contains("class=\"tabbar\""), "{more}");
     let res = get("/machine?range=6h").await;
     assert_eq!(res.status(), StatusCode::OK);
-    assert!(res.text().await.unwrap().contains("Disk free"));
+    assert!(res.text().await.unwrap().contains("GB free of"));
     // The live figures: one per tile, in the same order.
     let now: serde_json::Value = get("/machine/now").await.json().await.unwrap();
     assert_eq!(now["tiles"].as_array().unwrap().len(), 5);
-    assert!(now["tiles"][0]["value"].as_str().unwrap().contains(" cores"));
+    assert!(now["tiles"][0]["small"].as_str().unwrap().contains(" cores"));
     let res = s.http.get(s.url("/machine/now")).bearer_auth(&token).send().await.unwrap();
     assert_eq!(res.status(), StatusCode::FORBIDDEN);
     let html = get("/p/imaginarium").await.text().await.unwrap();

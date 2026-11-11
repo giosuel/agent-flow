@@ -480,6 +480,30 @@ button.opt { font: inherit; color: var(--ink); text-align: left; width: 100%; }
 
 /* Machine and Usage */
 .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 14px; }
+/* The Machine page's cards: icon, the number, its trend and the last hour (the owner chose these,
+   2026-11-11: "lets go with C"). */
+.mtiles { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 14px; }
+.card.pad.mtile { display: flex; flex-direction: column; gap: 10px; overflow: hidden; padding-bottom: 0; }
+.mtile-top { display: flex; align-items: center; gap: 10px; }
+.mtile-ico { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; background: var(--soft); color: var(--chip-accent-ink); flex: none; }
+.mtile-ico .i { width: 18px; height: 18px; }
+.mtile-ico.warn { background: var(--warn-bg); color: var(--warn-ink); }
+.mtile-big { font-family: var(--mono); line-height: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mtile-v { font-size: 28px; font-weight: 600; color: var(--ink); }
+.mtile-big small { font-size: 15px; color: var(--muted); }
+.mtile.warn-card .mtile-v { color: var(--warn-ink); }
+.mtile-trend { font-size: 13px; color: var(--muted); min-height: 1.4em; }
+.mtile .spark { display: block; width: calc(100% + 48px); margin: auto -24px 0; height: 46px; flex: none; }
+@media (max-width: 1100px) { .mtiles { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 700px) {
+  .mtiles { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .mtile:last-child:nth-child(odd) { grid-column: span 2; }
+  .mtile { gap: 8px; }
+  .mtile-v { font-size: 24px; }
+  .mtile-big small { display: block; font-size: 13px; margin-top: 4px; }
+  .mtile-trend { font-size: 12px; }
+  .mtile .spark { width: calc(100% + 32px); margin: auto -16px 0; height: 36px; }
+}
 .tile { display: flex; flex-direction: column; gap: 6px; }
 .tile-v { font-size: 22px; font-weight: 600; color: var(--ink); }
 .tile.warn-card .tile-v { color: var(--warn-ink); }
