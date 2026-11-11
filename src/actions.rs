@@ -102,6 +102,12 @@ pub fn add(
     if command.is_empty() || command.len() > 8000 {
         bail!("command: the exact lines to run, at most 8000 characters");
     }
+    // What the owner reads must be what runs: no invisible or reordering characters.
+    for (what, text) in [("label", label), ("command", command), ("workdir", workdir)] {
+        if let Some(c) = text.chars().find(|&c| hidden_char(c)) {
+            bail!("{what} contains an invisible character (U+{:04X}); write it in plain text", c as u32);
+        }
+    }
     // Check the required records exist now, so a typo doesn't leave a button that never unlocks.
     let mut resolved = Vec::new();
     for r in requires {
@@ -123,6 +129,17 @@ pub fn add(
     Ok(id)
 }
 
+/// After a restart, buttons that were running can't still be: mark them failed, so they can be
+/// looked at, pressed again or withdrawn.
+pub fn recover_interrupted(conn: &Connection) -> anyhow::Result<usize> {
+    Ok(conn.execute(
+        "UPDATE actions SET state = 'failed', finished_at = ?1,
+            output = output || 'AgentFlow restarted while this ran. Check the result on GitHub before pressing it again.'
+         WHERE state = 'running'",
+        [now_ms()],
+    )?)
+}
+
 pub fn withdraw(conn: &Connection, id: i64, by: &str) -> anyhow::Result<()> {
     let n =
         conn.execute("UPDATE actions SET state = 'withdrawn' WHERE id = ?1 AND state IN ('waiting', 'failed')", [id])?;
@@ -131,6 +148,19 @@ pub fn withdraw(conn: &Connection, id: i64, by: &str) -> anyhow::Result<()> {
     }
     let _ = by;
     Ok(())
+}
+
+/// Characters that don't show, or change how the rest shows: control codes (other than newline
+/// and tab), bidi overrides and isolates, zero-width characters, soft hyphens, BOMs.
+fn hidden_char(c: char) -> bool {
+    (c.is_control() && c != '\n' && c != '\t')
+        || matches!(c as u32, 0xAD | 0x061C | 0x180E | 0x200B..=0x200F | 0x202A..=0x202E | 0x2060..=0x2064 | 0x2066..=0x206F | 0xFEFF | 0xFFF9..=0xFFFB)
+}
+
+/// The text of the confirmation dialog: the command itself, not just the button's name.
+pub fn confirm_text(a: &ActionRow) -> String {
+    let dir = if a.workdir.is_empty() { "~" } else { &a.workdir };
+    format!("Run \"{}\" in {dir}?\n\n{}", a.label, crate::activity::clip(&a.command, 700))
 }
 
 /// Why the button is disabled, or Ok when it can be pressed.
@@ -279,6 +309,8 @@ mod tests {
                 )?;
                 assert!(add(c, &task, "Merge", "x", "", &[], "v").is_err(), "only PRs and releases");
                 assert!(add(c, &r, "Merge", "x", "", &["T-9".into()], "v").is_err(), "unknown requirement");
+                assert!(add(c, &r, "Merge", "echo safe\u{202E}lmth.exe", "", &[], "v").is_err(), "bidi override");
+                assert!(add(c, &r, "Merge", "echo a\u{200B}b", "", &[], "v").is_err(), "zero-width");
                 let id = add(c, &r, "Merge", "echo merged $PWD; echo warn >&2", &workdir, &["T-1".into()], "v")?;
                 Ok((get(c, id)?.unwrap(), task))
             })

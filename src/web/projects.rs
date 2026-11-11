@@ -824,7 +824,7 @@ async fn answer(
                 .target(q.ref_id.clone())
                 .ip(Some(ip.0));
             activity::write(&state.db, e).await;
-            let next = form.next.filter(|n| n.starts_with('/') && !n.starts_with("//")).unwrap_or_else(|| q.url());
+            let next = super::local_path(form.next.as_deref()).unwrap_or_else(|| q.url());
             Ok(Redirect::to(&next).into_response())
         }
         Err(e) => {

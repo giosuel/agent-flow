@@ -29,6 +29,34 @@ struct WaitQuery {
 }
 
 const POLL: Duration = Duration::from_secs(2);
+const MAX_WAITS_PER_PROJECT: u32 = 2;
+
+/// A running wait, counted per project and released when the request ends (even if the client
+/// goes away mid-wait).
+struct WaitSlot {
+    state: AppState,
+    project_id: i64,
+}
+
+impl WaitSlot {
+    fn take(state: &AppState, project_id: i64) -> Option<Self> {
+        let mut map = state.waits.lock().unwrap();
+        let n = map.entry(project_id).or_insert(0);
+        if *n >= MAX_WAITS_PER_PROJECT {
+            return None;
+        }
+        *n += 1;
+        Some(Self { state: state.clone(), project_id })
+    }
+}
+
+impl Drop for WaitSlot {
+    fn drop(&mut self) {
+        if let Some(n) = self.state.waits.lock().unwrap().get_mut(&self.project_id) {
+            *n = n.saturating_sub(1);
+        }
+    }
+}
 const MAX_WAIT: u64 = 25 * 60;
 
 async fn wait(
@@ -38,6 +66,11 @@ async fn wait(
 ) -> Response {
     let Actor::Project { project_id, slug, .. } = actor.clone() else {
         return (StatusCode::FORBIDDEN, Json(json!({"error": "wait is for a project's agent token"}))).into_response();
+    };
+    // One agent per project needs one or two waits at a time; more would only load the database.
+    let Some(_slot) = WaitSlot::take(&state, project_id) else {
+        return (StatusCode::TOO_MANY_REQUESTS, Json(json!({"error": "this project already has two waits running"})))
+            .into_response();
     };
     let record_ref = match q.record.as_deref().map(str::trim).filter(|r| !r.is_empty()) {
         Some(r) => {

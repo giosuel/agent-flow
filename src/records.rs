@@ -572,6 +572,11 @@ pub fn link(conn: &Connection, from: &Record, to: &Record, relation: &str, autho
     if from.id == to.id {
         bail!("a record can't link to itself");
     }
+    // These relations say something about (or change) the target, so they stay inside one project;
+    // only `relates` and `depends_on` may point at another project's records.
+    if from.project_id != to.project_id && !matches!(relation, "relates" | "depends_on") {
+        bail!("\"{relation}\" links stay inside one project; {} belongs to {}", to.ref_id, to.project);
+    }
     let n = conn.execute(
         "INSERT OR IGNORE INTO links (from_id, to_id, relation, author, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
         params![from.id, to.id, relation, author, now_ms()],
@@ -846,6 +851,25 @@ mod tests {
             assert!(answer_question(c, &a, Some(1), "", "owner").is_err(), "answered once");
             let ev = recent_events(c, Some(p), 1)?;
             assert!(ev[0].summary.contains("2: B"), "{}", ev[0].summary);
+            Ok(())
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn links_that_change_their_target_stay_in_the_project() {
+        let db = Db::open_memory();
+        db.call_blocking(|c| {
+            let a = setup(c);
+            let b = crate::projects::create(c, "other", "Other", "test")?.id;
+            let dec = |p: i64| create(c, p, "x", NewRecord { kind: Some(Kind::Decision), title: "d".into(), ..Default::default() });
+            let (mine, theirs) = (dec(a)?, dec(b)?);
+            for relation in ["supersedes", "blocks", "implements", "answers", "records", "feedback_on"] {
+                assert!(link(c, &mine, &theirs, relation, "vinculum").is_err(), "{relation}");
+            }
+            assert_eq!(get(c, theirs.id)?.state, "current", "untouched");
+            assert!(link(c, &mine, &theirs, "relates", "vinculum")?);
+            assert!(link(c, &mine, &theirs, "depends_on", "vinculum")?);
             Ok(())
         })
         .unwrap();

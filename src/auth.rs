@@ -252,7 +252,8 @@ pub const LINK_MINUTES: i64 = 15;
 
 /// Creates a one-time sign-in link secret, valid for 15 minutes.
 pub fn create_login_link(conn: &Connection, purpose: &str) -> anyhow::Result<String> {
-    let secret = new_secret("");
+    // The prefix lets the log's redaction recognise it anywhere.
+    let secret = new_secret("af_lnk_");
     let now = now_ms();
     conn.execute(
         "INSERT INTO login_links (hash, purpose, created_at, expires_at) VALUES (?1, ?2, ?3, ?4)",
@@ -286,7 +287,7 @@ pub fn create_session(
     user_agent: Option<&str>,
     ip: Option<&str>,
 ) -> anyhow::Result<String> {
-    let secret = new_secret("");
+    let secret = new_secret("af_ses_");
     let now = now_ms();
     conn.execute(
         "INSERT INTO web_sessions (hash, method, created_at, last_seen_at, expires_at, user_agent, ip)

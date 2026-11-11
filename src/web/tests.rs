@@ -623,3 +623,13 @@ async fn prs_merge_in_order_from_the_owners_buttons() {
     let what = news.to_string();
     assert!(what.contains("PR-48 merged") && what.contains("Push tag v0.0.5-m4") && what.contains("done"), "{what}");
 }
+
+#[test]
+fn return_addresses_stay_on_our_pages() {
+    assert_eq!(local_path(Some("/p/v/Q-1")).as_deref(), Some("/p/v/Q-1"));
+    assert_eq!(local_path(Some("/?answered=v/Q-1")).as_deref(), Some("/?answered=v/Q-1"));
+    for bad in ["//evil.example", "/\\evil.example", "https://evil.example", "/x\r\nSet-Cookie: a=b", "/ä", "", "p/v"]
+    {
+        assert_eq!(local_path(Some(bad)), None, "{bad:?}");
+    }
+}

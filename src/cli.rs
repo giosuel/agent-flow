@@ -85,7 +85,25 @@ fn log_cli(db: &Db, action: Action, summary: String) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Commands that hand out access (a sign-in link, a token) want a person at a terminal. Agents
+/// run as the same Unix user and could still fake one; this keeps them from doing it in passing.
+/// Real separation is AgentFlow running as its own user.
+fn require_terminal(what: &str) -> anyhow::Result<()> {
+    use std::io::IsTerminal;
+    if !std::io::stdin().is_terminal() {
+        bail!(
+            "{what} hands out access, so it only runs in an interactive terminal (yours), not from a script or an agent"
+        );
+    }
+    Ok(())
+}
+
 pub fn admin(config_path: &Path, command: AdminCommand) -> anyhow::Result<()> {
+    match &command {
+        AdminCommand::LoginLink => require_terminal("login-link")?,
+        AdminCommand::Token { command: TokenCommand::Create { .. } } => require_terminal("token create")?,
+        _ => {}
+    }
     let (config, db) = open_db(config_path)?;
     match command {
         AdminCommand::LoginLink => {

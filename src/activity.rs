@@ -87,7 +87,7 @@ impl Entry {
             project: actor.project().map(Into::into),
             via,
             action,
-            summary: redact(&summary.into()),
+            summary: clip(&redact(&summary.into()), 300),
             target: None,
             status: None,
             duration_ms: None,
@@ -160,6 +160,15 @@ pub fn write_conn(conn: &Connection, e: &Entry) -> rusqlite::Result<i64> {
 pub async fn write(db: &Db, e: Entry) {
     if let Err(err) = db.call(move |c| Ok(write_conn(c, &e)?)).await {
         tracing::error!("could not write to the activity log: {err:#}");
+    }
+}
+
+/// Cuts text to `max` characters, marking the cut. Keeps one row from being huge (an anonymous
+/// request with a 20 KB URL would otherwise be stored whole, for good).
+pub fn clip(text: &str, max: usize) -> String {
+    match text.char_indices().nth(max) {
+        Some((i, _)) => format!("{}…", &text[..i]),
+        None => text.to_owned(),
     }
 }
 

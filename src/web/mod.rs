@@ -30,8 +30,6 @@ use crate::github::GitHub;
 use crate::passkey::Passkeys;
 use crate::push::{Pusher, Vapid};
 
-pub const SESSION_COOKIE: &str = "af_session";
-
 #[derive(Clone)]
 pub struct AppState {
     pub db: Db,
@@ -39,13 +37,43 @@ pub struct AppState {
     pub passkeys: Passkeys,
     pub push: Pusher,
     pub github: Arc<dyn GitHub>,
+    /// Denied requests logged per client address in the current minute (flood guard).
+    denied: Arc<std::sync::Mutex<std::collections::HashMap<String, (i64, u32)>>>,
+    /// Running `/api/wait` calls per project.
+    pub waits: Arc<std::sync::Mutex<std::collections::HashMap<i64, u32>>>,
 }
 
 impl AppState {
     pub fn new(db: Db, config: Config, vapid: Vapid, github: Arc<dyn GitHub>) -> Self {
         let passkeys = Passkeys::new(&config);
         let push = Pusher::new(db.clone(), vapid);
-        Self { db, config: Arc::new(config), passkeys, push, github }
+        Self { db, config: Arc::new(config), passkeys, push, github, denied: Arc::default(), waits: Arc::default() }
+    }
+
+    /// The owner's session cookie. On https it's a `__Host-` cookie: never shared with another
+    /// host or path. On plain http (the WireGuard address) cookies aren't separated by port, so
+    /// the port goes into the name, keeping a dev instance and the live one apart.
+    pub fn session_cookie_name(&self) -> String {
+        if self.config.is_https() {
+            "__Host-af_session".into()
+        } else {
+            format!("af_session_{}", self.config.listen.port())
+        }
+    }
+
+    /// At most 20 logged denials per address and minute; the rest only count as noise.
+    fn log_denial(&self, ip: &str) -> bool {
+        let minute = crate::util::now_ms() / 60_000;
+        let mut map = self.denied.lock().unwrap();
+        if map.len() > 10_000 {
+            map.clear();
+        }
+        let e = map.entry(ip.to_owned()).or_insert((minute, 0));
+        if e.0 != minute {
+            *e = (minute, 0);
+        }
+        e.1 += 1;
+        e.1 <= 20
     }
 
     pub fn limits(&self) -> SessionLimits {
@@ -87,6 +115,10 @@ pub async fn serve(state: AppState) -> anyhow::Result<()> {
         env!("APP_VERSION"),
         state.config.public_url
     );
+    let recovered = state.db.call(|c| crate::actions::recover_interrupted(c)).await?;
+    if recovered > 0 {
+        tracing::warn!("{recovered} button(s) were running when AgentFlow stopped; marked failed");
+    }
     crate::poller::spawn(state.clone());
     let app = router(state).into_make_service_with_connect_info::<SocketAddr>();
     axum::serve(listener, app).with_graceful_shutdown(shutdown_signal()).await?;
@@ -137,7 +169,7 @@ async fn authenticate(State(state): State<AppState>, jar: CookieJar, mut req: Re
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.strip_prefix("Bearer "))
         .map(|t| t.trim().to_owned());
-    let cookie = jar.get(SESSION_COOKIE).map(|c| c.value().to_owned());
+    let cookie = jar.get(&state.session_cookie_name()).map(|c| c.value().to_owned());
     let via_cookie = bearer.is_none() && cookie.is_some();
 
     let limits = state.limits();
@@ -162,7 +194,7 @@ async fn authenticate(State(state): State<AppState>, jar: CookieJar, mut req: Re
         Some(a) => a,
         None if is_public(&path) => Actor::Anonymous,
         None => {
-            if tried_token {
+            if tried_token && state.log_denial(&ip) {
                 let e = Entry::new(
                     &Actor::Anonymous,
                     via_for(&path),
@@ -257,6 +289,10 @@ async fn log_requests(State(state): State<AppState>, req: Request, next: Next) -
         _ => Action::Write,
     };
     let status = res.status();
+    // Strangers probing for pages that don't exist aren't worth a row each.
+    if status == StatusCode::NOT_FOUND && matches!(actor, Actor::Anonymous) {
+        return res;
+    }
     let mut e = Entry::new(&actor, via, action, format!("{method} {path}"))
         .status(status.as_u16())
         .duration_ms(started.elapsed().as_millis() as i64)
@@ -283,7 +319,23 @@ async fn security_headers(req: Request, next: Next) -> Response {
     h.insert(header::X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff"));
     h.insert(header::REFERRER_POLICY, HeaderValue::from_static("same-origin"));
     h.insert(header::X_FRAME_OPTIONS, HeaderValue::from_static("DENY"));
+    // Pages show tokens, answers and the like: never keep them in a cache. Static files set
+    // their own caching.
+    if !h.contains_key(header::CACHE_CONTROL) {
+        h.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    }
     res
+}
+
+/// A return address from a form, if it's one of our own pages: a path, plain printable ASCII,
+/// not `//…` or `/\…` (both mean another host to a browser). Anything else is ignored.
+pub fn local_path(next: Option<&str>) -> Option<String> {
+    let n = next?.trim();
+    let ok = n.starts_with('/')
+        && !n.starts_with("//")
+        && n.len() <= 300
+        && n.bytes().all(|b| b.is_ascii_graphic() && b != b'\\');
+    ok.then(|| n.to_owned())
 }
 
 /// Errors a handler can return; each becomes a page (or JSON for API calls) with the right status.
