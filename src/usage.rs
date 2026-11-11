@@ -12,7 +12,7 @@
 //! started (the owner agreed, 2026-11-10). No even split.
 
 use std::collections::HashMap;
-use std::io::{BufRead, BufReader, Seek, SeekFrom};
+use std::io::{BufRead, BufReader, Read as _, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
 use rusqlite::{Connection, OptionalExtension, params};
@@ -165,7 +165,16 @@ pub fn file_state(conn: &Connection, path: &Path) -> anyhow::Result<(u64, Option
         .unwrap_or((0, None)))
 }
 
-/// Reads the whole lines after `offset` (None when there's nothing new).
+/// The longest transcript line read; longer ones (no call is) are skipped.
+const MAX_LINE: u64 = 8 * 1024 * 1024;
+/// At most this much of one file per round; the rest waits for the next round.
+const MAX_PER_ROUND: u64 = 512 * 1024 * 1024;
+/// The most tokens one call can count in any field; anything else is a forged or broken line.
+const MAX_TOKENS: i64 = 10_000_000;
+
+/// Reads the whole lines after `offset` (None when there's nothing new). Bounded: lines over
+/// MAX_LINE are skipped without being kept in memory, and one round reads at most MAX_PER_ROUND
+/// of a file.
 pub fn read_new(root: &Path, path: &Path, offset: u64, first_at: Option<i64>) -> anyhow::Result<Option<Read>> {
     let len = std::fs::metadata(path)?.len();
     // Rewritten from the start: read it again; the ids keep calls from counting twice.
@@ -181,12 +190,35 @@ pub fn read_new(root: &Path, path: &Path, offset: u64, first_at: Option<i64>) ->
     let mut reader = BufReader::new(file);
     let mut out =
         Read { path: path.to_string_lossy().to_string(), folder, subagent, calls: Vec::new(), offset, first_at };
+    let start = offset;
     let mut buf = Vec::new();
-    loop {
+    while offset - start < MAX_PER_ROUND {
         buf.clear();
-        let n = reader.read_until(b'\n', &mut buf)?;
-        if n == 0 || buf.last() != Some(&b'\n') {
-            break; // the rest is a line still being written
+        let n = (&mut reader).take(MAX_LINE).read_until(b'\n', &mut buf)?;
+        if n == 0 {
+            break;
+        }
+        if buf.last() != Some(&b'\n') {
+            if (n as u64) < MAX_LINE {
+                break; // the rest is a line still being written
+            }
+            // Too long to be a call: skip to the end of the line, a piece at a time.
+            let mut skipped = n as u64;
+            loop {
+                buf.clear();
+                let m = (&mut reader).take(MAX_LINE).read_until(b'\n', &mut buf)?;
+                skipped += m as u64;
+                if m == 0 || offset - start + skipped > MAX_PER_ROUND {
+                    // Not finished yet; come back to it next round.
+                    out.offset = offset;
+                    return Ok(Some(out));
+                }
+                if buf.last() == Some(&b'\n') {
+                    break;
+                }
+            }
+            offset += skipped;
+            continue;
         }
         offset += n as u64;
         // Cheap checks first: most lines are tool results and user turns.
@@ -196,6 +228,11 @@ pub fn read_new(root: &Path, path: &Path, offset: u64, first_at: Option<i64>) ->
         let Ok(line) = serde_json::from_slice::<Line>(&buf) else { continue };
         let (Some(msg), Some(at)) = (line.message, line.timestamp.as_deref().and_then(parse_time)) else { continue };
         let (Some(id), Some(usage)) = (msg.id, msg.usage) else { continue };
+        let counts =
+            [usage.input_tokens, usage.output_tokens, usage.cache_creation_input_tokens, usage.cache_read_input_tokens];
+        if counts.iter().any(|n| !(0..=MAX_TOKENS).contains(n)) || id.len() > 200 {
+            continue;
+        }
         if line.kind != "assistant" {
             continue;
         }
@@ -610,6 +647,20 @@ mod tests {
             Ok(())
         })
         .unwrap();
+    }
+
+    #[test]
+    fn long_lines_and_forged_counts_are_skipped() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().join("-home-viber-x");
+        std::fs::create_dir_all(&dir).unwrap();
+        let huge = format!("{{\"type\":\"user\",\"pad\":\"{}\"}}\n", "x".repeat(MAX_LINE as usize + 10));
+        let forged = call("bad", "2026-11-11T01:00:00Z", "s", 9_000_000_000_000_000_000);
+        let good = call("ok", "2026-11-11T01:00:00Z", "s", 3);
+        std::fs::write(dir.join("s.jsonl"), format!("{huge}{forged}{good}")).unwrap();
+        let read = read_new(root.path(), &dir.join("s.jsonl"), 0, None).unwrap().unwrap();
+        assert_eq!(read.calls.iter().map(|c| c.id.as_str()).collect::<Vec<_>>(), ["ok"]);
+        assert_eq!(read.offset, std::fs::metadata(dir.join("s.jsonl")).unwrap().len());
     }
 
     #[test]
