@@ -21,6 +21,7 @@ mod markdown;
 mod mcp;
 mod messages;
 mod onboard;
+mod outgoing;
 mod passkey;
 mod poller;
 mod projects;
@@ -66,6 +67,9 @@ enum Command {
     /// Upload a screenshot to your project's Screenshots (agents): a test build, a mockup, a
     /// spike test, a bug. Name and category required; a description and a record optional.
     Screenshot(cli::ScreenshotArgs),
+    /// Draft a PR, issue, comment or new commits for someone else's repository (agents). The
+    /// owner reads it in AgentFlow and sends it, as them; agents never post or push there.
+    Contribute(cli::ContributeArgs),
     /// Fetch and start a test build (the owner's machines; like viber-run). Without a product,
     /// lists the products; `run <product> list` lists its builds.
     Run(cli::RunArgs),
@@ -124,6 +128,7 @@ fn main() -> anyhow::Result<()> {
         Command::Whoami(client) => cli::whoami(&config_path, client),
         Command::Publish(args) => cli::publish(&config_path, args),
         Command::Screenshot(args) => cli::screenshot(&config_path, args),
+        Command::Contribute(args) => cli::contribute(&config_path, args),
         Command::Run(args) => cli::run(&config_path, args),
         Command::Wait { client, record, minutes } => cli::wait(&config_path, client, record, minutes),
         Command::McpHeaders { token_file } => cli::mcp_headers(&token_file),
