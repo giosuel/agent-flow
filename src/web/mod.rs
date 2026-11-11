@@ -46,7 +46,7 @@ pub struct AppState {
 impl AppState {
     pub fn new(db: Db, config: Config, vapid: Vapid, github: Arc<dyn GitHub>) -> Self {
         let passkeys = Passkeys::new(&config);
-        let push = Pusher::new(db.clone(), vapid);
+        let push = Pusher::new(db.clone(), vapid, &config.push_contact);
         Self { db, config: Arc::new(config), passkeys, push, github, denied: Arc::default(), waits: Arc::default() }
     }
 
