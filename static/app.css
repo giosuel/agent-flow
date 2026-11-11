@@ -112,6 +112,22 @@ code, pre, .mono { font-family: var(--mono); }
 .link-btn { background: none; border: 0; padding: 0; color: var(--muted); font: inherit; cursor: pointer; text-decoration: underline; }
 .link-btn:hover { color: var(--ink); }
 input, textarea, select { font: inherit; background: var(--ground); color: var(--ink); border: 1px solid var(--border); border-radius: 8px; min-height: 44px; padding: 0 12px; }
+/* One height for every one-line field, and selects drawn the same everywhere (Safari on the
+   iPhone otherwise draws its own, shorter and grey). The arrow follows the theme. */
+input:not([type=checkbox]):not([type=radio]):not([type=file]), select { box-sizing: border-box; height: 44px; line-height: normal; }
+select {
+  appearance: none; -webkit-appearance: none; padding-right: 36px; cursor: pointer;
+  background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+  background-position: calc(100% - 19px) 50%, calc(100% - 14px) 50%; background-size: 5px 5px; background-repeat: no-repeat;
+}
+/* Commands and tokens to copy: an icon button inside the field's corner (app.js adds it); the
+   text wraps clear of it. */
+.copy-wrap { position: relative; }
+.copy-wrap .cmd { padding-right: 48px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.copy-btn { position: absolute; top: 5px; right: 5px; width: 34px; height: 34px; display: inline-flex; align-items: center; justify-content: center; padding: 0; color: var(--muted); background: transparent; border: 0; border-radius: 6px; cursor: pointer; }
+.copy-btn:hover { color: var(--ink); background: var(--chip); }
+.copy-btn .i { width: 17px; height: 17px; }
+.copy-btn.done { color: var(--ok); }
 textarea { padding: 10px 12px; resize: vertical; }
 .cmd { display: block; padding: 10px 12px; background: var(--code); color: var(--ink); border: 1px solid var(--line); border-radius: 6px; font-size: 13px; overflow-x: auto; white-space: pre; margin: 0; }
 
@@ -421,6 +437,8 @@ button.opt { font: inherit; color: var(--ink); text-align: left; width: 100%; }
 .form-grid label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--ink2); }
 .form-grid label.span-all { grid-column: 1 / -1; }
 .form-grid input, .form-grid select { font-size: 15px; }
+/* Below 16px Safari zooms the page when a field is focused. */
+@media (max-width: 600px) { .form-grid input, .form-grid select { font-size: 16px; } }
 /* Review 3 (UX) */
 .only-phone { display: none; }
 .chart .y-zero { position: absolute; left: 0; bottom: 22px; font-size: 11px; transform: translateY(50%); }
@@ -431,3 +449,43 @@ button.opt { font: inherit; color: var(--ink); text-align: left; width: 100%; }
 }
 .form-grid input::placeholder { color: var(--muted); opacity: .7; }
 .explain { color: var(--ink2); font-size: 15px; display: flex; flex-direction: column; gap: 6px; margin: 0; padding-left: 20px; }
+
+/* Phone: an iOS-style tab bar at the bottom instead of the links at the top (the owner,
+   2026-11-11, after the viber console): floating glass held just above the home indicator, the
+   current tab in a soft violet lens. More (/more) lists the sections that don't fit. */
+.tabbar { display: none; }
+ul.more-list { list-style: none; margin: 0; padding: 0; gap: 0; overflow: hidden; }
+.more-list li + li { border-top: 1px solid var(--line2); }
+.more-list a { display: flex; align-items: center; gap: 14px; min-height: 56px; padding: 0 16px; color: var(--ink); text-decoration: none; }
+.more-list a:hover { background: var(--soft); }
+.more-list a > .i { width: 22px; height: 22px; color: var(--accent); }
+.more-list .chev { margin-left: auto; color: var(--dim); display: inline-flex; }
+@media (max-width: 700px) {
+  .top .nav, .top .icon-btn { display: none; }
+  .tabbar {
+    display: flex; position: fixed; z-index: 20; left: 10px; right: 10px; height: 64px;
+    bottom: max(10px, calc(env(safe-area-inset-bottom) - 12px));
+    gap: 2px; padding: 6px; border-radius: 32px;
+    background: rgba(18, 18, 24, .62); border: 1px solid rgba(255, 255, 255, .09);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .07), 0 14px 40px rgba(0, 0, 0, .55);
+    -webkit-backdrop-filter: blur(30px) saturate(180%); backdrop-filter: blur(30px) saturate(180%);
+  }
+  .tabbar a {
+    flex: 1; min-width: 0; position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 3px; border-radius: 26px; color: var(--muted); font-size: 11px; font-weight: 500; text-decoration: none;
+    -webkit-tap-highlight-color: transparent; transition: color .2s, background .2s;
+  }
+  .tabbar a .i { width: 24px; height: 24px; transition: scale .3s cubic-bezier(.34, 1.56, .64, 1); }
+  .tabbar a:active .i { scale: .86; }
+  .tabbar a.on {
+    color: var(--accent);
+    background: linear-gradient(180deg, rgba(167, 139, 250, .24), rgba(167, 139, 250, .11));
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .22), inset 0 -1px 0 rgba(0, 0, 0, .18), 0 6px 18px rgba(124, 58, 237, .25);
+  }
+  .tabbar .badge {
+    position: absolute; top: 3px; left: 56%; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px;
+    background: var(--warn); color: #1A1300; font-size: 11px; font-weight: 700; line-height: 18px; text-align: center;
+  }
+  /* Room for the bar below the last content. */
+  body { padding-bottom: calc(64px + 20px + env(safe-area-inset-bottom)); }
+}

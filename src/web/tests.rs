@@ -1096,6 +1096,9 @@ async fn usage_and_machine_pages_show_the_counts() {
         let html = res.text().await.unwrap();
         assert!(html.contains(&format!("Hours in {zone}")) && html.contains("1.2 M"), "{zone}: {html}");
     }
+    // The phone's More tab lists the sections that don't fit in the tab bar.
+    let more = get("/more").await.text().await.unwrap();
+    assert!(more.contains("Conversations") && more.contains("class=\"tabbar\""), "{more}");
     let res = get("/machine?range=6h").await;
     assert_eq!(res.status(), StatusCode::OK);
     assert!(res.text().await.unwrap().contains("Disk free"));

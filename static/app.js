@@ -57,3 +57,63 @@ document.addEventListener("change", (e) => {
   const out = form.querySelector("[data-fb-count]");
   if (out) out.textContent = `${marked} of ${groups.size} marked`;
 });
+
+// A copy button (an icon in the field's corner) on every command or token block (pre.cmd). Uses
+// the clipboard API where the page is secure (https), and falls back to selecting the text and
+// copying it (http on the WireGuard address). A check mark shows it worked.
+const COPY_ICON =
+  '<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h8"/></svg>';
+const DONE_ICON = '<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>';
+
+async function copyText(pre) {
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(pre.textContent.trim());
+      return true;
+    }
+  } catch {
+    // fall through to the selection
+  }
+  const range = document.createRange();
+  range.selectNodeContents(pre);
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(range);
+  let ok = false;
+  try {
+    ok = document.execCommand("copy");
+  } catch {
+    ok = false;
+  }
+  sel.removeAllRanges();
+  return ok;
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  for (const pre of document.querySelectorAll("pre.cmd")) {
+    const wrap = document.createElement("div");
+    wrap.className = "copy-wrap";
+    pre.replaceWith(wrap);
+    wrap.append(pre);
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "copy-btn";
+    btn.title = "Copy";
+    btn.setAttribute("aria-label", "Copy");
+    btn.innerHTML = COPY_ICON;
+    wrap.append(btn);
+    btn.addEventListener("click", async () => {
+      const ok = await copyText(pre);
+      btn.innerHTML = ok ? DONE_ICON : COPY_ICON;
+      btn.classList.toggle("done", ok);
+      btn.setAttribute("aria-label", ok ? "Copied" : "Copy didn't work; select the text and copy it");
+      btn.title = btn.getAttribute("aria-label");
+      setTimeout(() => {
+        btn.innerHTML = COPY_ICON;
+        btn.classList.remove("done");
+        btn.setAttribute("aria-label", "Copy");
+        btn.title = "Copy";
+      }, 2000);
+    });
+  }
+});
