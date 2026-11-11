@@ -3,13 +3,15 @@
 {% block content %}
 <div class="head">
   <div class="crumb-row"><nav class="crumbs" aria-label="Back"><a class="crumb-back" href="/p/{{ project_slug }}{% if kind == "screenshot" %}?tab=screenshots{% endif %}">{{ crate::web::icons::icon("back")|safe }}<span>{{ project_name }}</span></a><span class="crumb-where">{{ kind_label }}</span></nav>{% if let Some(u) = session_url %}<a class="session-link" href="{{ u }}" target="_blank" rel="noopener" title="The project agent's Claude Code session on claude.ai">{{ crate::web::icons::icon("session")|safe }}<span class="hide-phone">Open the agent's session</span><span class="only-phone">Agent session</span>{{ crate::web::icons::icon("out")|safe }}</a>{% endif %}</div>
-  <p class="row wrap"><span class="mono sub">{{ id }}</span><span class="chip{% if state == "open" %} warn{% endif %}{% if state == "current" || state == "answered" || state == "done" %} ok{% endif %}">{{ state }}</span>{% for t in tags %}<span class="chip">{{ t }}</span>{% endfor %}</p>
+  <p class="row wrap"><span class="mono sub">{{ id }}</span>{% if let Some(d) = draft %}<span class="chip{% if d.waiting %} accent{% endif %}">{% if d.waiting %}waiting on you{% else if d.with_agent %}changes asked{% else %}being sent{% endif %}</span>{% else %}<span class="chip{% if state == "open" %} warn{% endif %}{% if state == "current" || state == "answered" || state == "done" %} ok{% endif %}">{{ state }}</span>{% endif %}{% for t in tags %}<span class="chip">{{ t }}</span>{% endfor %}</p>
   <h1 class="rec-title">{{ title }}</h1>
 </div>
 {% if let Some(e) = error %}<p class="notice warn" role="alert">{{ e }}</p>{% endif %}
+{% if let Some((ok, text)) = draft_notice %}<p class="notice{% if *ok %} ok{% else %} warn{% endif %}" role="status">{{ text }}</p>{% endif %}
 
 <div class="split">
   <div class="split-main stack-lg">
+    {% if let Some(d) = draft %}{% include "draft.html" %}{% endif %}
     {% if let Some(sv) = shot %}
     <figure class="shot-full">
       <a href="{{ sv.image }}" target="_blank" rel="noopener" title="Open the full image"><img src="{{ sv.image }}" alt="{{ title }}"></a>
@@ -116,6 +118,20 @@
   </div>
 
   <aside class="split-side stack-lg">
+    {% if let Some(d) = draft %}
+    <section class="card pad stack-sm" aria-labelledby="draft-about-h">
+      <h2 class="label" id="draft-about-h">{{ d.heading }}</h2>
+      <p class="sub">{{ d.target }}<br>{{ d.drafted }}</p>
+      {% if !d.why.is_empty() %}<p>{{ d.why }}</p>{% endif %}
+      {% if let Some((t, u)) = d.task %}<dl class="kv"><dt>For</dt><dd><a href="{{ u }}">{{ t }}</a></dd></dl>{% endif %}
+    </section>
+    {% if let Some((name, text)) = d.template %}
+    <details class="card pad stack-sm"><summary class="label">Their PR template</summary><p class="sub mono">{{ name }}</p><pre class="cmd mono wrap">{{ text }}</pre></details>
+    {% endif %}
+    {% if let Some((name, text)) = d.contributing %}
+    <details class="card pad stack-sm"><summary class="label">Their contributing guide</summary><p class="sub mono">{{ name }}</p><pre class="cmd mono wrap">{{ text }}</pre></details>
+    {% endif %}
+    {% endif %}
     <section class="card pad stack" aria-labelledby="links-h">
       <h2 class="label" id="links-h">Linked records</h2>
       {% if links.is_empty() %}<p class="sub">Nothing linked yet.</p>{% endif %}

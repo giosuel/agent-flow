@@ -4,6 +4,7 @@
 mod api;
 mod assets;
 mod builds;
+pub mod outgoing;
 mod screenshots;
 pub use builds::notify_build;
 mod buttons;
@@ -47,6 +48,8 @@ pub struct AppState {
     pub passkeys: Passkeys,
     pub push: Pusher,
     pub github: Arc<dyn GitHub>,
+    /// Posts the owner's sent drafts to other people's repositories.
+    pub poster: Arc<dyn crate::outgoing::Poster>,
     /// Denied requests logged per client address in the current minute (flood guard).
     denied: Arc<std::sync::Mutex<std::collections::HashMap<String, (i64, u32)>>>,
     /// Running `/api/wait` calls per project.
@@ -73,12 +76,14 @@ impl AppState {
     pub fn new(db: Db, config: Config, vapid: Vapid, github: Arc<dyn GitHub>) -> Self {
         let passkeys = Passkeys::new(&config);
         let push = Pusher::new(db.clone(), vapid, &config.push_contact);
+        let poster = Arc::new(crate::outgoing::GhPoster { token_file: config.external_token_file.clone() });
         Self {
             db,
             config: Arc::new(config),
             passkeys,
             push,
             github,
+            poster,
             denied: Arc::default(),
             waits: Arc::default(),
             guide_prs: Arc::default(),
@@ -137,6 +142,7 @@ pub fn router(state: AppState) -> Router {
         .merge(buttons::routes())
         .merge(builds::routes())
         .merge(screenshots::routes())
+        .merge(outgoing::routes())
         .merge(conversations::routes())
         .merge(guides::routes())
         .merge(log::routes())
