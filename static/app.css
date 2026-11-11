@@ -224,9 +224,10 @@ ul.plain, ol.plain { margin: 0; padding-left: 18px; display: flex; flex-directio
 .opts { border: 0; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: 10px; }
 .opt { display: flex; align-items: flex-start; gap: 12px; min-height: 48px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); cursor: pointer; }
 .opt:hover { border-color: var(--accent); }
-.opt.rec { border-color: var(--accent); background: var(--soft); }
+/* "Recommended" is the chip; the chosen option is the one that stands out. */
 .opt input { position: absolute; opacity: 0; }
-.opt:has(input:checked) { border-color: var(--hover); box-shadow: 0 0 0 2px var(--accent) inset; }
+.opt:has(input:checked) { border-color: var(--accent); background: var(--chip-accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+.opt:has(input:checked) .opt-n { color: var(--hover); }
 .opt:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
 .opt-n { color: var(--accent); }
 .opt-t { display: flex; flex-direction: column; gap: 2px; }

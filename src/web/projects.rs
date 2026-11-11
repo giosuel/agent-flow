@@ -625,12 +625,25 @@ struct RecordPage {
     next: String,
 }
 
+#[derive(Deserialize)]
+struct RecordQuery {
+    error: Option<String>,
+}
+
 async fn record(
     State(state): State<AppState>,
     Extension(actor): Extension<Actor>,
     Path((slug, id)): Path<(String, String)>,
+    Query(q): Query<RecordQuery>,
 ) -> AppResult<Response> {
-    let page = load_record_page(&state, &actor, slug, id, None).await?;
+    // Only fixed messages come from the address, never text from it.
+    let error = q.error.as_deref().map(|code| match code {
+        "answered" => "This question was already answered.".to_owned(),
+        "option" => "That option doesn't exist; pick one of the list.".to_owned(),
+        "empty" => "Pick an option or write an answer.".to_owned(),
+        _ => "That didn't work; nothing was saved. Try again.".to_owned(),
+    });
+    let page = load_record_page(&state, &actor, slug, id, error).await?;
     render(page)
 }
 
@@ -830,12 +843,24 @@ async fn answer(
                 .target(q.ref_id.clone())
                 .ip(Some(ip.0));
             activity::write(&state.db, e).await;
-            let next = super::local_path(form.next.as_deref()).unwrap_or_else(|| q.url());
+            // Back to the Dashboard: it says where the answer went and shows the next question.
+            let next = super::local_path(form.next.as_deref()).unwrap_or_else(|| format!("/?answered={}", q.ref_id));
             Ok(Redirect::to(&next).into_response())
         }
         Err(e) => {
-            let page = load_record_page(&state, &actor, slug, id, Some(format!("{e:#}"))).await?;
-            render(page)
+            // Back to the question with the reason, so reloading doesn't send the form again.
+            let msg = format!("{e:#}");
+            let code = if msg.contains("already") {
+                "answered"
+            } else if msg.contains("no option") {
+                "option"
+            } else if msg.contains("Pick an option") {
+                "empty"
+            } else {
+                tracing::warn!("answering {slug}/{id}: {msg}");
+                "failed"
+            };
+            Ok(Redirect::to(&format!("/p/{slug}/{id}?error={code}")).into_response())
         }
     }
 }

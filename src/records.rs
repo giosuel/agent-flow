@@ -527,16 +527,16 @@ pub fn answer_question(
         bail!("{} isn't a question", q.ref_id);
     }
     if q.state != "open" {
-        bail!("{} is already {}", q.ref_id, q.state);
+        bail!("{} is already {}.", q.ref_id, q.state);
     }
     let options = q.data.get("options").and_then(Value::as_array).cloned().unwrap_or_default();
     let chosen = match option {
-        Some(n) if n == 0 || n as usize > options.len() => bail!("there is no option {n}"),
+        Some(n) if n == 0 || n as usize > options.len() => bail!("There's no option {n}."),
         Some(n) => Some((n, options[n as usize - 1].get("title").and_then(Value::as_str).unwrap_or("").to_owned())),
         None => None,
     };
     if chosen.is_none() && words.trim().is_empty() {
-        bail!("pick an option or write an answer");
+        bail!("Pick an option or write an answer.");
     }
     let mut data = Map::new();
     data.insert("answer".into(), words.to_owned().into());
