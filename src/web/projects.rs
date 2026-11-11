@@ -227,6 +227,8 @@ struct ProjectPage {
     questions: Vec<RecordRow>,
     prs: Vec<super::buttons::PrRow>,
     prs_total: usize,
+    has_stack_button: bool,
+    tabs: &'static [(&'static str, &'static str)],
     releases: Vec<super::buttons::ReleaseRow>,
     notice: Option<String>,
     notice_bad: bool,
@@ -259,12 +261,13 @@ fn press_notice(q: &TabQuery) -> (Option<String>, bool) {
     }
 }
 
+/// The project page's tabs, in order; questions come right after the overview.
 const TABS: &[(&str, &str)] = &[
     ("overview", "Overview"),
+    ("questions", "Questions"),
     ("tasks", "Tasks"),
     ("prs", "Pull requests"),
     ("decisions", "Decisions"),
-    ("questions", "Questions"),
 ];
 
 async fn project(
@@ -289,6 +292,7 @@ async fn project(
         .ok_or(AppError::NotFound)?;
     let mut page = page;
     page.prs_total = page.prs.len();
+    page.has_stack_button = page.prs.iter().any(|p| p.up_to.is_some());
     if tab == "overview" {
         // The overview shows the start of the order; the Pull requests tab has all of them.
         page.prs.truncate(8);
@@ -560,6 +564,8 @@ fn build_project_page(
         groups,
         questions,
         prs_total: 0,
+        has_stack_button: false,
+        tabs: TABS,
         // Merge order and releases appear on the overview and the Pull requests tab only.
         prs: if matches!(tab, "overview" | "prs") { super::buttons::pr_rows(c, p.id, now)? } else { Vec::new() },
         releases: if matches!(tab, "overview" | "prs") {
