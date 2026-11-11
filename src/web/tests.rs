@@ -851,3 +851,39 @@ async fn contributions_are_watched_for_their_project() {
     let (_, news) = mcp_tool(&s, &token, &ts, "since_last_check", json!({})).await;
     assert!(news.to_string().contains("1 new comment"), "{news}");
 }
+
+#[tokio::test]
+async fn the_owner_writes_into_a_conversation() {
+    let s = TestServer::start().await;
+    let v = s.token(TokenKind::Project, Some("vinculum")).await;
+    let vs = mcp_session(&s, &v).await;
+    let (_, r) = mcp_tool(
+        &s,
+        &v,
+        &vs,
+        "send_message",
+        json!({"to": ["consultant"], "subject": "Tags?", "body": "How?", "kind": "question"}),
+    )
+    .await;
+    let thread = r["conversation"].as_i64().unwrap();
+    let cookie = s.owner_cookie().await;
+    let page = s.http.get(s.url("/conversations")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
+    assert!(page.contains("Tags?") && page.contains("vinculum → consultant"));
+    let res = s
+        .http
+        .post(s.url(&format!("/conversations/{thread}/reply")))
+        .header(COOKIE, &cookie)
+        .header(ORIGIN, &s.base)
+        .form(&[("body", "Use the .a8 suffix.")])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.headers()[LOCATION], format!("/conversations?t={thread}&sent=1"));
+    let (_, news) = mcp_tool(&s, &v, &vs, "since_last_check", json!({})).await;
+    assert!(news.to_string().contains("Use the .a8 suffix."), "{news}");
+    // Tokens can't use the page.
+    assert_eq!(
+        s.http.get(s.url("/conversations")).bearer_auth(&v).send().await.unwrap().status(),
+        StatusCode::FORBIDDEN
+    );
+}

@@ -27,7 +27,7 @@ pub fn spawn(state: AppState) {
                 tracing::warn!("GitHub poll: {e:#}");
             }
             // Other people's repositories change slowly: every tenth round (30 minutes).
-            if round % 10 == 0
+            if round.is_multiple_of(10)
                 && let Err(e) = poll_contributions(&state).await
             {
                 tracing::warn!("contribution watch: {e:#}");
