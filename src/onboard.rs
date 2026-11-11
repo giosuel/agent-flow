@@ -13,7 +13,7 @@ use crate::auth::{self, TokenKind};
 use crate::projects::{self, NewMilestone, ProjectPatch};
 use crate::util::expand_home;
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct NewProject {
     pub name: String,
     pub slug: String,
@@ -27,7 +27,7 @@ pub struct NewProject {
 }
 
 /// What was done, step by step, and the commands left for the owner.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct Outcome {
     pub slug: String,
     pub steps: Vec<String>,
@@ -79,6 +79,7 @@ fn check_folder(folder: &str) -> anyhow::Result<PathBuf> {
 
 /// Folders a new project may not use: other projects' checkouts and AgentFlow's and Claude
 /// Code's own, with everything inside them (and their parents, which would contain them).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Taken {
     pub dirs: Vec<(PathBuf, String)>,
     pub token_dir: PathBuf,

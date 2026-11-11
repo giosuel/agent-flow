@@ -8,7 +8,7 @@ use axum::{Extension, Form, Router};
 use serde::Deserialize;
 
 use super::pages::{Nav, nav, render};
-use super::{AppError, AppResult, AppState, ClientIp};
+use super::{AppResult, AppState, ClientIp};
 use crate::activity::{self, Action, Entry, Via};
 use crate::auth::Actor;
 use crate::onboard::{self, NewProject};
@@ -95,8 +95,14 @@ async fn create(
         Ok(t) => t,
         Err(e) => return page(nav(&state, &actor, "/projects").await, &f, Some(format!("{e:#}")), None),
     };
-    let folder = match onboard::check(&mut p, &taken) {
-        Ok(folder) => folder,
+    // The folder is checked and made as the agents' user (see crate::hands).
+    let checked: anyhow::Result<(NewProject, std::path::PathBuf)> =
+        crate::hands::run_async(crate::hands::Job::OnboardCheck { project: p.clone(), taken }).await;
+    let folder = match checked {
+        Ok((checked_p, folder)) => {
+            p = checked_p;
+            folder
+        }
         Err(e) => return page(nav(&state, &actor, "/projects").await, &f, Some(format!("{e:#}")), None),
     };
     let (p2, f2) = (p.clone(), folder.clone());
@@ -106,11 +112,15 @@ async fn create(
     };
     let (token_dir, claude, url) =
         (state.config.token_dir(), crate::usage::root(&state.config), state.config.public_url.clone());
-    let p3 = p.clone();
-    let files =
-        tokio::task::spawn_blocking(move || onboard::create_files(&p3, &folder, &secret, &token_dir, &claude, &url))
-            .await
-            .map_err(|e| AppError::Internal(e.into()))?;
+    let job = crate::hands::Job::OnboardFiles {
+        project: p.clone(),
+        folder,
+        secret,
+        token_dir,
+        claude_projects: claude,
+        public_url: url,
+    };
+    let files: anyhow::Result<onboard::Outcome> = crate::hands::run_async(job).await;
     let summary = match &files {
         Ok(_) => format!("project {} created from the New project button", p.slug),
         Err(e) => format!("project {} created, but setting up its files failed: {e:#}", p.slug),

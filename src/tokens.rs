@@ -31,8 +31,12 @@ fn file_stem(name: &str) -> String {
     if out.is_empty() { "token".into() } else { out }
 }
 
-/// Writes a token file atomically, readable only by this user.
+/// Writes a token file atomically, readable only by the agents' user (see [`crate::hands`]).
 pub fn write_token_file(path: &Path, secret: &str) -> anyhow::Result<()> {
+    crate::hands::run(crate::hands::Job::WriteToken { path: path.to_owned(), secret: secret.to_owned() })
+}
+
+pub(crate) fn write_token_file_here(path: &Path, secret: &str) -> anyhow::Result<()> {
     use std::io::Write;
     use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
     let dir = path.parent().context("token path has no folder")?;
