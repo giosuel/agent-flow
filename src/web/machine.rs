@@ -282,7 +282,7 @@ async fn page(
         .flat_map(|p| p.ports.iter().map(move |port| PortRow { port: port.clone(), project: p.name.clone() }))
         .collect();
     let host = machine::hostname();
-    let builds = if state.config.build_servers.is_empty() {
+    let builds = if crate::remote::servers(&state).is_empty() {
         String::new()
     } else {
         use askama::Template as _;

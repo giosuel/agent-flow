@@ -50,6 +50,9 @@ struct SettingsForm {
     git_rules: String,
     ports: String,
     build_product: String,
+    /// The build server for `agentflow remote` ("" for none).
+    #[serde(default)]
+    build_server: String,
 }
 
 async fn save_settings(
@@ -87,11 +90,17 @@ async fn save_settings(
         ..Default::default()
     };
     let s = slug.clone();
+    let server = f.build_server.trim().to_owned();
     let result = state
         .db
         .call(move |c| {
             let p = projects::require(c, &s)?;
-            projects::update(c, p.id, &patch, "owner")
+            let mut changed = projects::update(c, p.id, &patch, "owner")?;
+            if crate::remote::project_server(c, p.id)?.unwrap_or_default() != server {
+                crate::remote::set_project_server(c, p.id, &server)?;
+                changed.push("build server");
+            }
+            Ok(changed)
         })
         .await;
     match result {
@@ -445,6 +454,9 @@ struct AgentCard {
 }
 
 pub struct EditView {
+    /// The build server its `agentflow remote` uses ("" for none), and the ones there are.
+    build_server: String,
+    servers: Vec<String>,
     name: String,
     description: String,
     repo: String,
@@ -887,7 +899,17 @@ fn build_project_page(
     } else {
         HashMap::new()
     };
+    let (build_server, servers) = if tab == "settings" {
+        (
+            crate::remote::project_server(c, p.id)?.unwrap_or_default(),
+            crate::remote::load_servers(c)?.into_iter().map(|b| b.name).collect(),
+        )
+    } else {
+        (String::new(), Vec::new())
+    };
     let edit = (tab == "settings").then(|| EditView {
+        build_server,
+        servers,
         name: p.name.clone(),
         description: p.description.clone(),
         repo: p.repo.clone(),

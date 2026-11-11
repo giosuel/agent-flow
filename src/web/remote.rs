@@ -29,6 +29,11 @@ pub fn routes() -> Router<AppState> {
         .route("/machine/jobs/{id}/cancel", post(cancel_page))
         .route("/machine/servers/{name}/pause", post(pause))
         .route("/machine/servers/{name}/resume", post(resume))
+        .route("/settings/build-servers", post(add_server))
+        .route("/settings/build-servers/{name}/check", post(check_server))
+        .route("/settings/build-servers/{name}/setup/{step}", post(setup_step))
+        .route("/settings/build-servers/{name}/limits", post(save_limits))
+        .route("/settings/build-servers/{name}/remove", post(remove_server))
 }
 
 #[derive(Deserialize)]
@@ -50,12 +55,18 @@ async fn start(State(state): State<AppState>, Extension(actor): Extension<Actor>
     let Actor::Project { project_id, slug, .. } = &actor else {
         return json_error(StatusCode::FORBIDDEN, "only project agents run jobs on build servers");
     };
-    let servers = &state.config.build_servers;
-    let Some(server) = (match &s.server {
-        Some(n) => servers.iter().find(|b| &b.name == n),
-        None => servers.first(),
-    }) else {
-        return json_error(StatusCode::NOT_FOUND, "no such build server; AgentFlow has none set up");
+    let servers = remote::servers(&state);
+    // The one asked for, else the one the owner picked for the project in its Settings.
+    let pid = *project_id;
+    let picked = state.db.call(move |c| remote::project_server(c, pid)).await.ok().flatten();
+    let wanted = s.server.clone().or(picked);
+    let Some(server) = wanted.as_ref().and_then(|n| servers.iter().find(|b| &b.name == n)) else {
+        // Nothing to build on: like offline, so the agent builds here.
+        let why = match wanted {
+            Some(n) => format!("there's no build server called {n}; build here instead"),
+            None => "this project has no build server (the owner picks one in its Settings); build here instead".into(),
+        };
+        return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({"error": why, "offline": true}))).into_response();
     };
     let online =
         state.remote.lock().unwrap_or_else(|e| e.into_inner()).servers.get(&server.name).map(|l| l.probe.online);
@@ -182,7 +193,7 @@ async fn cancel_page(
 
 async fn set_paused(state: &AppState, actor: &Actor, name: &str, paused: bool) -> AppResult<Response> {
     actor.require_owner()?;
-    if !state.config.build_servers.iter().any(|b| b.name == name) {
+    if !remote::servers(state).iter().any(|b| b.name == name) {
         return Err(AppError::NotFound);
     }
     state.remote.lock().unwrap_or_else(|e| e.into_inner()).servers.entry(name.to_owned()).or_default().paused = paused;
@@ -329,10 +340,9 @@ pub async fn section_data(state: &AppState, actor: &Actor) -> anyhow::Result<Sec
     state.remote.lock().unwrap_or_else(|e| e.into_inner()).watched_at = now_ms();
     let jobs = state.db.call(|c| remote::recent(c, None, 40)).await?;
     let now = now_ms();
+    let list = remote::servers(state);
     let live = state.remote.lock().unwrap_or_else(|e| e.into_inner());
-    let servers = state
-        .config
-        .build_servers
+    let servers = list
         .iter()
         .map(|b| {
             let l = live.servers.get(&b.name);
@@ -503,4 +513,260 @@ async fn job_page(
         is_owner: actor.is_owner(),
         job,
     })
+}
+
+// ---------------------------------------------------------------------------------------------
+// The Settings page's Build servers card: add a machine, its key, its tools, its limits
+
+pub struct ServerSetting {
+    pub name: String,
+    pub ssh: String,
+    pub online: bool,
+    pub line: String,
+    pub cargo: String,
+    pub sccache: String,
+    pub checked: bool,
+    pub setup: String,
+    pub setup_running: bool,
+    /// The line to add to the build user's authorized_keys there, when AgentFlow made the key.
+    pub key_line: Option<String>,
+    pub min_threads: String,
+    pub min_memory: String,
+    pub reserve_memory: String,
+    pub keep_days: i64,
+    pub projects: Vec<String>,
+}
+
+#[derive(Template)]
+#[template(path = "build_servers_settings.html")]
+pub struct ServersCard {
+    pub servers: Vec<ServerSetting>,
+    pub notice: Option<(bool, String)>,
+}
+
+/// Messages after the card's buttons; the query names one, never free text.
+fn card_notice(code: &str) -> Option<(bool, String)> {
+    Some(match code {
+        "added" => (
+            true,
+            "Added. If AgentFlow made a key for it, add the line below on that machine; then press Check.".into(),
+        ),
+        "removed" => (true, "Removed. Projects that used it build where their agent is.".into()),
+        "saved" => (true, "Limits saved.".into()),
+        "checking" => (true, "Checking; the result shows here in a few seconds (reload).".into()),
+        "started" => (true, "Started. It runs in the background; the result shows here and in the Log.".into()),
+        c if c.starts_with("error-") => (
+            false,
+            match c {
+                "error-name" => "That name is taken, or isn't letters, digits, - _ .".into(),
+                "error-target" => "Connect to user@host, or a Host from ~/.ssh/config.".into(),
+                "error-busy" => "It has jobs waiting or running; cancel them first.".into(),
+                "error-key" => "Couldn't make a key (is ssh-keygen installed?).".into(),
+                "error-limits" => "The limits can't be negative, and folders are kept at least a day.".into(),
+                _ => "That didn't work; see the Log.".into(),
+            },
+        ),
+        _ => return None,
+    })
+}
+
+pub async fn servers_card(state: &AppState, code: Option<&str>) -> anyhow::Result<String> {
+    let list = remote::servers(state);
+    let picks: Vec<(String, String)> = state
+        .db
+        .call(|c| {
+            let mut st = c.prepare("SELECT b.server, p.name FROM project_build_server b JOIN projects p ON p.id = b.project_id ORDER BY p.name")?;
+            let rows = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<Result<_, _>>()?;
+            Ok(rows)
+        })
+        .await?;
+    let now = now_ms();
+    let live = state.remote.lock().unwrap_or_else(|e| e.into_inner());
+    let servers = list
+        .iter()
+        .map(|b| {
+            let l = live.servers.get(&b.name);
+            let p = l.map(|l| l.probe.clone()).unwrap_or_default();
+            let line = match (p.at, p.online) {
+                (0, _) => "not reached yet".to_owned(),
+                (t, true) => format!(
+                    "online, checked {} · {} · {} threads · {:.0} GB{}",
+                    ago(t, now),
+                    p.model.replace(" 16-Core Processor", ""),
+                    p.threads,
+                    p.mem_total_gb,
+                    if p.gpu_name.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" · {}", p.gpu_name.replace("NVIDIA GeForce ", ""))
+                    }
+                ),
+                (t, false) => format!("can't be reached (checked {}): {}", ago(t, now), p.error),
+            };
+            let tools = l.map(|l| l.tools.clone()).unwrap_or_default();
+            ServerSetting {
+                name: b.name.clone(),
+                ssh: b.ssh.clone(),
+                online: p.online,
+                line,
+                cargo: tools.cargo.clone(),
+                sccache: tools.sccache.clone(),
+                checked: l.is_some_and(|l| l.tools_checked()),
+                setup: l.map(|l| l.setup.clone()).unwrap_or_default(),
+                setup_running: l.is_some_and(|l| l.setup_running),
+                key_line: remote::public_key(&b.key_file).map(|k| format!("restrict {k}")),
+                min_threads: num(b.min_threads),
+                min_memory: num(b.min_memory_gb),
+                reserve_memory: num(b.reserve_memory_gb),
+                keep_days: b.keep_days,
+                projects: picks.iter().filter(|(s, _)| s == &b.name).map(|(_, n)| n.clone()).collect(),
+            }
+        })
+        .collect();
+    drop(live);
+    Ok(ServersCard { servers, notice: code.and_then(card_notice) }.render()?)
+}
+
+fn back_to_card(code: &str) -> Response {
+    Redirect::to(&format!("/settings?bs={code}#s-builds")).into_response()
+}
+
+#[derive(Deserialize)]
+pub struct AddServer {
+    name: String,
+    ssh: String,
+    #[serde(default)]
+    make_key: Option<String>,
+}
+
+pub async fn add_server(
+    State(state): State<AppState>,
+    Extension(actor): Extension<Actor>,
+    axum::Form(f): axum::Form<AddServer>,
+) -> AppResult<Response> {
+    actor.require_owner()?;
+    let mut b = crate::config::BuildServer {
+        name: f.name.trim().to_owned(),
+        ssh: f.ssh.trim().to_owned(),
+        ..Default::default()
+    };
+    if remote::check_server(&b).is_err() {
+        let code = if b.ssh.is_empty()
+            || remote::check_server(&crate::config::BuildServer { ssh: "x".into(), ..b.clone() }).is_ok()
+        {
+            "error-target"
+        } else {
+            "error-name"
+        };
+        return Ok(back_to_card(code));
+    }
+    if remote::servers(&state).iter().any(|s| s.name == b.name) {
+        return Ok(back_to_card("error-name"));
+    }
+    if f.make_key.is_some() {
+        match remote::make_key(&state.config.data_dir(), &b.name).await {
+            Ok((path, _)) => b.key_file = path,
+            Err(e) => {
+                tracing::warn!("making a key for {}: {e:#}", b.name);
+                return Ok(back_to_card("error-key"));
+            }
+        }
+    }
+    let b2 = b.clone();
+    if state.db.call(move |c| remote::add_server(c, &b2)).await.is_err() {
+        return Ok(back_to_card("error-name"));
+    }
+    remote::reload(&state).await;
+    activity::write(
+        &state.db,
+        Entry::new(&actor, Via::Page, Action::Write, format!("added build server {} ({})", b.name, b.ssh)),
+    )
+    .await;
+    Ok(back_to_card("added"))
+}
+
+fn find_server(state: &AppState, name: &str) -> AppResult<crate::config::BuildServer> {
+    remote::servers(state).into_iter().find(|b| b.name == name).ok_or(AppError::NotFound)
+}
+
+pub async fn check_server(
+    State(state): State<AppState>,
+    Extension(actor): Extension<Actor>,
+    Path(name): Path<String>,
+) -> AppResult<Response> {
+    actor.require_owner()?;
+    let b = find_server(&state, &name)?;
+    let st = state.clone();
+    tokio::spawn(async move {
+        if let Err(e) = remote::refresh_tools(&st, &b).await {
+            let mut live = st.remote.lock().unwrap_or_else(|e| e.into_inner());
+            live.servers.entry(b.name.clone()).or_default().setup = format!("couldn't connect: {e:#}");
+        }
+    });
+    Ok(back_to_card("checking"))
+}
+
+pub async fn setup_step(
+    State(state): State<AppState>,
+    Extension(actor): Extension<Actor>,
+    Path((name, step)): Path<(String, String)>,
+) -> AppResult<Response> {
+    actor.require_owner()?;
+    let b = find_server(&state, &name)?;
+    let what = match step.as_str() {
+        "sccache" => "installing sccache",
+        "rust" => "setting up Rust",
+        _ => return Err(AppError::NotFound),
+    };
+    activity::write(&state.db, Entry::new(&actor, Via::Page, Action::Run, format!("{what} on {name}"))).await;
+    remote::spawn_setup(state, b, what);
+    Ok(back_to_card("started"))
+}
+
+#[derive(Deserialize)]
+pub struct Limits {
+    min_threads: f64,
+    min_memory_gb: f64,
+    reserve_memory_gb: f64,
+    keep_days: i64,
+}
+
+pub async fn save_limits(
+    State(state): State<AppState>,
+    Extension(actor): Extension<Actor>,
+    Path(name): Path<String>,
+    axum::Form(f): axum::Form<Limits>,
+) -> AppResult<Response> {
+    actor.require_owner()?;
+    let mut b = find_server(&state, &name)?;
+    (b.min_threads, b.min_memory_gb, b.reserve_memory_gb, b.keep_days) =
+        (f.min_threads, f.min_memory_gb, f.reserve_memory_gb, f.keep_days);
+    let n = name.clone();
+    if state.db.call(move |c| remote::set_limits(c, &n, &b)).await.is_err() {
+        return Ok(back_to_card("error-limits"));
+    }
+    remote::reload(&state).await;
+    Ok(back_to_card("saved"))
+}
+
+pub async fn remove_server(
+    State(state): State<AppState>,
+    Extension(actor): Extension<Actor>,
+    Path(name): Path<String>,
+) -> AppResult<Response> {
+    actor.require_owner()?;
+    let b = find_server(&state, &name)?;
+    let n = name.clone();
+    if state.db.call(move |c| remote::remove_server(c, &n)).await.is_err() {
+        return Ok(back_to_card("error-busy"));
+    }
+    if !b.key_file.is_empty() {
+        let _ = tokio::fs::remove_file(&b.key_file).await;
+        let _ = tokio::fs::remove_file(format!("{}.pub", b.key_file)).await;
+    }
+    remote::reload(&state).await;
+    state.remote.lock().unwrap_or_else(|e| e.into_inner()).servers.remove(&name);
+    activity::write(&state.db, Entry::new(&actor, Via::Page, Action::Write, format!("removed build server {name}")))
+        .await;
+    Ok(back_to_card("removed"))
 }

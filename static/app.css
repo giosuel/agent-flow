@@ -260,6 +260,9 @@ pre.wrap { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 40vh; ove
 .joblog .w, .blog .w { color: var(--warn); background: var(--warn-bg); }
 .joblog .e, .blog .e { color: var(--bad); background: var(--bad-bg); }
 @media (max-width: 700px) { .meters { grid-template-columns: 1fr; } .joblog { height: 70vh; } }
+.bsrv { padding: 14px 0; border-top: 1px solid var(--line2); }
+.bsrv:first-of-type { border-top: 0; padding-top: 0; }
+.bs-add { border-top: 1px solid var(--line); padding-top: 16px; }
 .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); overflow-x: auto; margin-top: -12px; }
 .tabs a { padding: 10px 14px; color: var(--nav-ink); text-decoration: none; border-bottom: 2px solid transparent; white-space: nowrap; }
 .tabs a.on { color: #fff; border-bottom-color: var(--accent); font-weight: 500; }

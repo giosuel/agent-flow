@@ -1637,6 +1637,13 @@ async fn jobs_run_on_a_build_server_and_bring_back_what_was_asked() {
     crate::remote::spawn(s.state.clone());
     let agent = s.token(TokenKind::Project, Some("imaginarium")).await;
     let other = s.token(TokenKind::Project, Some("vinculum")).await;
+    // The server from the config is in the list once the scheduler has started.
+    for _ in 0..100 {
+        if !crate::remote::servers(&s.state).is_empty() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
 
     // The agent's checkout: a commit, then a change and a new file not committed yet.
     let work = s.state.config.data_dir().join("checkout");
@@ -1666,6 +1673,15 @@ async fn jobs_run_on_a_build_server_and_bring_back_what_was_asked() {
                 .unwrap()
         }
     };
+    // A project without a build server builds where its agent is.
+    let res = start(work.join("crate"), agent.clone()).await;
+    assert_eq!(res.status(), StatusCode::SERVICE_UNAVAILABLE);
+    s.db.call(|c| {
+        let p = crate::projects::get(c, "imaginarium")?.unwrap();
+        crate::remote::set_project_server(c, p.id, "hq")
+    })
+    .await
+    .unwrap();
     let res = start(work.join("crate"), agent.clone()).await;
     assert_eq!(res.status(), StatusCode::OK, "{}", res.text().await.unwrap());
     let id = res.json::<Value>().await.unwrap()["id"].as_i64().unwrap();
@@ -1761,4 +1777,111 @@ async fn jobs_run_on_a_build_server_and_bring_back_what_was_asked() {
     s.state.remote.lock().unwrap().servers.get_mut("hq").unwrap().probe.online = false;
     let res = start(work.clone(), agent.clone()).await;
     assert_eq!(res.status(), StatusCode::SERVICE_UNAVAILABLE);
+}
+
+#[tokio::test]
+async fn build_servers_are_added_in_settings_and_picked_per_project() {
+    let s = TestServer::start().await;
+    crate::remote::spawn(s.state.clone());
+    let cookie = s.owner_cookie().await;
+    s.token(TokenKind::Project, Some("vinculum")).await;
+    let post = |path: &str, form: Vec<(&'static str, String)>| {
+        let s = &s;
+        let (path, cookie) = (path.to_owned(), cookie.clone());
+        async move {
+            let res = s
+                .http
+                .post(s.url(&path))
+                .header(COOKIE, &cookie)
+                .header(ORIGIN, &s.base)
+                .form(&form)
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(res.status(), StatusCode::SEE_OTHER, "{path}");
+            res.headers()[LOCATION].to_str().unwrap().to_owned()
+        }
+    };
+    // Bad names and targets are refused.
+    assert!(
+        post("/settings/build-servers", vec![("name", "a b".into()), ("ssh", "builder@10.0.8.2".into())])
+            .await
+            .contains("error-name")
+    );
+    assert!(
+        post("/settings/build-servers", vec![("name", "hq".into()), ("ssh", "-oProxyCommand=x".into())])
+            .await
+            .contains("error-target")
+    );
+    // Added with a key AgentFlow makes: the card shows the line to add over there.
+    let to = post(
+        "/settings/build-servers",
+        vec![("name", "hq".into()), ("ssh", "builder@10.0.8.2".into()), ("make_key", "1".into())],
+    )
+    .await;
+    assert!(to.contains("bs=added"), "{to}");
+    let key = s.state.config.data_dir().join("remote/keys/hq");
+    assert!(key.exists() && key.with_extension("pub").exists());
+    let page =
+        s.http.get(s.url("/settings?bs=added")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
+    assert!(page.contains("restrict ssh-ed25519") && page.contains("builder@10.0.8.2"), "the key line");
+    assert_eq!(crate::remote::servers(&s.state)[0].key_file, key.display().to_string());
+    // A project picks it in its Settings; the Settings card lists the project.
+    let page = s
+        .http
+        .get(s.url("/p/vinculum?tab=settings"))
+        .header(COOKIE, &cookie)
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(page.contains("<option value=\"hq\""));
+    let form = vec![
+        ("name", "Vinculum".into()),
+        ("description", String::new()),
+        ("repo", String::new()),
+        ("checkout", String::new()),
+        ("machine", String::new()),
+        ("stack", String::new()),
+        ("platform", String::new()),
+        ("model", String::new()),
+        ("effort", String::new()),
+        ("pm_rules", String::new()),
+        ("git_rules", String::new()),
+        ("ports", String::new()),
+        ("build_product", String::new()),
+        ("build_server", "hq".into()),
+    ];
+    assert!(post("/p/vinculum/settings", form).await.contains("settings=saved"));
+    let pick =
+        s.db.call(|c| crate::remote::project_server(c, crate::projects::get(c, "vinculum")?.unwrap().id))
+            .await
+            .unwrap();
+    assert_eq!(pick.as_deref(), Some("hq"));
+    let page = s.http.get(s.url("/settings")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
+    assert!(page.contains("Used by Vinculum"));
+    // Limits, then removal: the key goes, the project builds locally again.
+    assert!(
+        post(
+            "/settings/build-servers/hq/limits",
+            vec![
+                ("min_threads", "4".into()),
+                ("min_memory_gb", "8".into()),
+                ("reserve_memory_gb", "4".into()),
+                ("keep_days", "7".into())
+            ]
+        )
+        .await
+        .contains("bs=saved")
+    );
+    assert_eq!(crate::remote::servers(&s.state)[0].min_threads, 4.0);
+    assert!(post("/settings/build-servers/hq/remove", vec![]).await.contains("bs=removed"));
+    assert!(crate::remote::servers(&s.state).is_empty() && !key.exists());
+    let pick =
+        s.db.call(|c| crate::remote::project_server(c, crate::projects::get(c, "vinculum")?.unwrap().id))
+            .await
+            .unwrap();
+    assert_eq!(pick, None);
 }
