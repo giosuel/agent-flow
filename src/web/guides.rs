@@ -311,7 +311,11 @@ async fn merge(
     match pulled {
         Ok(o) if o.status.success() => Ok(Redirect::to(&format!("/guides?merged={}", form.number)).into_response()),
         Ok(o) => {
-            tracing::warn!("pulling the handbook after #{}: {}", form.number, String::from_utf8_lossy(&o.stderr).trim());
+            tracing::warn!(
+                "pulling the handbook after #{}: {}",
+                form.number,
+                String::from_utf8_lossy(&o.stderr).trim()
+            );
             Ok(Redirect::to("/guides?error=pull").into_response())
         }
         Err(e) => {

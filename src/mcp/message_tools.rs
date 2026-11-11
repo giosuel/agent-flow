@@ -194,10 +194,12 @@ impl FlowMcp {
         self.finish(&actor, "track_contribution", Action::Write, outcome).await
     }
 
-    #[tool(description = "For the consultant: messages to you (or to everyone) you haven't marked read, oldest first. \
+    #[tool(
+        description = "For the consultant: messages to you (or to everyone) you haven't marked read, oldest first. \
         Once you've handled some, pass the last one's id as read_up_to: it and everything before it are marked read, \
         and the rest come back. Until then they keep coming (and `agentflow wait` keeps waking you). Agents get their \
-        messages through since_last_check and `agentflow wait`.")]
+        messages through since_last_check and `agentflow wait`."
+    )]
     async fn inbox(
         &self,
         Extension(parts): Extension<Parts>,
