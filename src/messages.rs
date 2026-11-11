@@ -38,9 +38,13 @@ pub struct Thread {
     pub last_kind: String,
 }
 
-/// A recipient: a project's slug, "consultant", or "all" (every project).
+/// A recipient: a project's slug, "consultant", or "all" (every project). Not the owner: they
+/// read every conversation on the page, and questions for them are records with a push.
 fn check_member(conn: &Connection, m: &str) -> anyhow::Result<()> {
-    if m == CONSULTANT || m == ALL || m == OWNER {
+    if m == OWNER {
+        bail!("the owner reads every conversation; to ask them something, use ask_question");
+    }
+    if m == CONSULTANT || m == ALL {
         return Ok(());
     }
     crate::projects::get(conn, m)?
@@ -74,6 +78,10 @@ pub fn send(
             let members = members(conn, id)?;
             if members.is_empty() {
                 bail!("no conversation {id}");
+            }
+            let current: String = conn.query_row("SELECT subject FROM threads WHERE id = ?1", [id], |r| r.get(0))?;
+            if !subject.trim().is_empty() && subject.trim() != current {
+                bail!("a reply keeps the conversation's subject ({current:?}); leave subject out, or start a new one");
             }
             let is_member = members.iter().any(|m| m == sender || m == ALL) || sender == OWNER || sender == CONSULTANT;
             if !is_member {
@@ -252,6 +260,7 @@ mod tests {
             let i = crate::projects::create(c, "imaginarium", "Imaginarium", "t")?.id;
             assert!(send(c, "vinculum", &["nope".into()], "x", "y", "info", None).is_err());
             assert!(send(c, "vinculum", &["antimony".into()], "Port?", "y", "gossip", None).is_err());
+            assert!(send(c, "vinculum", &[OWNER.into()], "Hi", "y", "info", None).is_err(), "questions for the owner");
 
             let (t, _) = send(
                 c,
