@@ -28,6 +28,48 @@ pub fn routes() -> Router<AppState> {
         .route("/p/{slug}", get(project))
         .route("/p/{slug}/{id}", get(record))
         .route("/p/{slug}/{id}/answer", post(answer))
+        .route("/p/{slug}/status", post(set_status))
+}
+
+#[derive(Deserialize)]
+struct StatusForm {
+    status: String,
+}
+
+/// Archive a project, or bring it back (the owner, 2026-11-11: "how do I delete (or rather
+/// archive) projects?"). Nothing is deleted: an archived project leaves the Dashboard, the
+/// waiting count and the project list, and its page and records stay.
+async fn set_status(
+    State(state): State<AppState>,
+    Extension(actor): Extension<Actor>,
+    Extension(ip): Extension<ClientIp>,
+    Path(slug): Path<String>,
+    Form(f): Form<StatusForm>,
+) -> AppResult<Response> {
+    actor.require_owner()?;
+    if !matches!(f.status.as_str(), "active" | "archived") {
+        return Err(AppError::BadRequest("status is active or archived".into()));
+    }
+    let (s, st) = (slug.clone(), f.status.clone());
+    let name = state
+        .db
+        .call(move |c| {
+            let p = projects::require(c, &s)?;
+            projects::update(c, p.id, &projects::ProjectPatch { status: Some(st), ..Default::default() }, "owner")?;
+            Ok(p.name)
+        })
+        .await?;
+    let what = if f.status == "archived" { "archived" } else { "restored" };
+    let e = Entry::new(&actor, Via::Page, Action::Write, format!("project {name} {what}"))
+        .project(slug.clone())
+        .ip(Some(ip.0));
+    activity::write(&state.db, e).await;
+    Ok(Redirect::to(&format!("/p/{slug}")).into_response())
+}
+
+#[derive(Deserialize, Default)]
+struct ListQuery {
+    archived: Option<u8>,
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -110,11 +152,19 @@ struct ProjectCard {
 struct ProjectsPage {
     nav: Nav,
     cards: Vec<ProjectCard>,
+    /// Showing the archived projects instead of the others.
+    archived: bool,
+    archived_count: usize,
 }
 
-async fn list(State(state): State<AppState>, Extension(actor): Extension<Actor>) -> AppResult<Response> {
+async fn list(
+    State(state): State<AppState>,
+    Extension(actor): Extension<Actor>,
+    Query(q): Query<ListQuery>,
+) -> AppResult<Response> {
     let now = now_ms();
-    let cards = state
+    let archived = q.archived == Some(1);
+    let cards: Vec<ProjectCard> = state
         .db
         .call(move |c| {
             let counts = waiting_counts(c)?;
@@ -152,7 +202,15 @@ async fn list(State(state): State<AppState>, Extension(actor): Extension<Actor>)
             Ok(cards)
         })
         .await?;
-    render(ProjectsPage { nav: nav(&state, &actor, "/projects").await, cards })
+    let archived_count = cards.iter().filter(|c| c.status == "archived").count();
+    let cards = cards.into_iter().filter(|c| (c.status == "archived") == archived).collect();
+    let page_nav = nav(&state, &actor, "/projects").await;
+    render(ProjectsPage {
+        nav: if archived { page_nav.back_to("/projects", "Projects") } else { page_nav },
+        cards,
+        archived,
+        archived_count,
+    })
 }
 
 fn model_line(p: &Project) -> String {

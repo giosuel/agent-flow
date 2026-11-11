@@ -113,6 +113,16 @@
       {% if decisions.is_empty() %}<p class="sub">No decisions recorded yet.</p>{% endif %}
       <ul class="rows">{% for d in decisions %}<li class="item-row"><div class="ttl"><span class="sub mono">{{ d.id }} · {{ d.sub }}</span><a href="{{ d.url }}">{{ d.title }}</a></div></li>{% endfor %}</ul>
     </section>
+    <section class="card pad stack-sm" aria-labelledby="proj-h">
+      <h2 class="label" id="proj-h">Project</h2>
+      {% if status == "archived" %}
+      <p class="sub">Archived: it's out of the Dashboard and the project list.</p>
+      <form method="post" action="/p/{{ slug }}/status"><input type="hidden" name="status" value="active"><button class="btn sm ghost" type="submit">Restore the project</button></form>
+      {% else %}
+      <p class="sub">Done with it? Archiving takes it out of the Dashboard and the project list. Nothing is deleted.</p>
+      <form method="post" action="/p/{{ slug }}/status"><input type="hidden" name="status" value="archived"><button class="btn sm ghost" type="submit" data-confirm="Archive {{ name }}? It leaves the Dashboard and the project list. Nothing is deleted, and you can restore it here.">Archive the project</button></form>
+      {% endif %}
+    </section>
   </aside>
 </div>
 {% endif %}

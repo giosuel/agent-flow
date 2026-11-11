@@ -62,15 +62,30 @@ pub fn load(conn: &Connection) -> anyhow::Result<Waiting> {
     .into_iter()
     .filter(|r| r.data.get("ready_for_feedback").and_then(Value::as_bool).unwrap_or(false))
     .collect();
+    // An archived project waits for nothing.
+    let archived: Vec<i64> = {
+        let mut stmt = conn.prepare("SELECT id FROM projects WHERE status = 'archived'")?;
+        stmt.query_map([], |r| r.get(0))?.collect::<Result<_, _>>()?
+    };
+    let mut builds: Vec<Record> = builds;
+    for list in [&mut questions, &mut merges, &mut builds] {
+        list.retain(|r| !archived.contains(&r.project_id));
+    }
     Ok(Waiting { questions, merges, builds })
 }
 
+/// Leaves out archived projects' records.
+const LIVE: &str = "AND project_id NOT IN (SELECT id FROM projects WHERE status = 'archived')";
+
 /// Just the badge number, for every page's navigation.
 pub fn count(conn: &Connection) -> anyhow::Result<usize> {
-    let questions: i64 =
-        conn.query_row("SELECT count(*) FROM records WHERE kind = 'question' AND state = 'open'", [], |r| r.get(0))?;
+    let questions: i64 = conn.query_row(
+        &format!("SELECT count(*) FROM records WHERE kind = 'question' AND state = 'open' {LIVE}"),
+        [],
+        |r| r.get(0),
+    )?;
     let builds: i64 = conn.query_row(
-        "SELECT count(*) FROM records WHERE kind = 'build' AND state = 'published' AND json_extract(data, '$.ready_for_feedback')",
+        &format!("SELECT count(*) FROM records WHERE kind = 'build' AND state = 'published' AND json_extract(data, '$.ready_for_feedback') {LIVE}"),
         [],
         |r| r.get(0),
     )?;
