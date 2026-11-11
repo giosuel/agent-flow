@@ -3,6 +3,8 @@
 
 mod assets;
 mod pages;
+mod pwa;
+mod settings;
 
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
@@ -19,6 +21,8 @@ use crate::activity::{self, Action, Entry, Via};
 use crate::auth::{self, Actor, SessionLimits};
 use crate::config::Config;
 use crate::db::Db;
+use crate::passkey::Passkeys;
+use crate::push::{Pusher, Vapid};
 
 pub const SESSION_COOKIE: &str = "af_session";
 
@@ -26,11 +30,15 @@ pub const SESSION_COOKIE: &str = "af_session";
 pub struct AppState {
     pub db: Db,
     pub config: Arc<Config>,
+    pub passkeys: Passkeys,
+    pub push: Pusher,
 }
 
 impl AppState {
-    pub fn new(db: Db, config: Config) -> Self {
-        Self { db, config: Arc::new(config) }
+    pub fn new(db: Db, config: Config, vapid: Vapid) -> Self {
+        let passkeys = Passkeys::new(&config);
+        let push = Pusher::new(db.clone(), vapid);
+        Self { db, config: Arc::new(config), passkeys, push }
     }
 
     pub fn limits(&self) -> SessionLimits {
@@ -50,6 +58,8 @@ pub fn router(state: AppState) -> Router {
     let mcp = crate::mcp::service(state.clone());
     Router::new()
         .merge(pages::routes())
+        .merge(settings::routes())
+        .merge(pwa::routes())
         .nest_service("/mcp", mcp)
         .merge(assets::routes())
         .layer(middleware::from_fn_with_state(state.clone(), log_requests))
@@ -82,13 +92,13 @@ async fn shutdown_signal() {
 
 /// Paths anyone may load: the sign-in pages and what they need to render.
 fn is_public(path: &str) -> bool {
-    path == "/login" || path.starts_with("/login/") || assets::is_asset(path)
+    path == "/login" || path.starts_with("/login/") || assets::is_asset(path) || pwa::is_public(path)
 }
 
 /// Pages and API calls that don't get a row of their own in the activity log. MCP tool calls log
 /// themselves, with the tool name and record, which says more than "POST /mcp".
 fn is_unlogged(path: &str) -> bool {
-    assets::is_asset(path) || path == "/mcp" || path.starts_with("/mcp/")
+    assets::is_asset(path) || pwa::is_public(path) || path == "/mcp" || path.starts_with("/mcp/")
 }
 
 fn client_ip(config: &Config, peer: Option<IpAddr>, headers: &HeaderMap) -> String {

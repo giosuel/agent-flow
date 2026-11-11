@@ -8,6 +8,9 @@ mod cli;
 mod config;
 mod db;
 mod mcp;
+mod passkey;
+mod push;
+mod tokens;
 mod util;
 mod web;
 
@@ -57,8 +60,9 @@ fn main() -> anyhow::Result<()> {
         Command::Serve => {
             let config = config::Config::load(&config_path)?;
             let db = db::Db::open(&config.db_path())?;
+            let vapid = push::Vapid::load_or_create(&config.data_dir())?;
             let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().build()?;
-            runtime.block_on(web::serve(web::AppState::new(db, config)))
+            runtime.block_on(web::serve(web::AppState::new(db, config, vapid)))
         }
         Command::Admin { command } => cli::admin(&config_path, command),
         Command::Whoami(client) => cli::whoami(&config_path, client),

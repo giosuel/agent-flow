@@ -12,6 +12,8 @@ use axum_extra::extract::cookie::{Cookie, SameSite};
 use super::{AppResult, AppState, ClientIp, SESSION_COOKIE};
 use crate::activity::{self, Action, Entry, Via};
 use crate::auth::{self, Actor};
+use crate::passkey;
+use webauthn_rs::prelude::PublicKeyCredential;
 
 pub const VERSION: &str = env!("APP_VERSION");
 
@@ -20,6 +22,8 @@ pub fn routes() -> Router<AppState> {
         .route("/", get(dashboard))
         .route("/login", get(login))
         .route("/login/link/{secret}", get(link_confirm).post(link_use))
+        .route("/login/passkey/start", post(passkey_start))
+        .route("/login/passkey/finish", post(passkey_finish))
         .route("/logout", post(logout))
         .route("/api/whoami", get(whoami));
     for (path, _, milestone) in COMING {
@@ -47,7 +51,6 @@ const COMING: &[(&str, &str, &str)] = &[
     ("/conversations", "Conversations", "M6"),
     ("/guides", "Guides", "M7"),
     ("/log", "Log", "M8"),
-    ("/settings", "Settings", "M1"),
 ];
 
 pub struct NavItem {
@@ -75,7 +78,7 @@ impl Nav {
     }
 }
 
-fn render(t: impl Template) -> AppResult<Response> {
+pub fn render(t: impl Template) -> AppResult<Response> {
     Ok(Html(t.render()?).into_response())
 }
 
@@ -112,19 +115,97 @@ struct LoginPage {
     /// Set on the confirmation page of a one-time link.
     link: Option<String>,
     message: Option<String>,
+    /// Passkeys work here and at least one is enrolled.
+    passkeys: bool,
+    /// Passkeys exist but this address can't use them (plain http on the WireGuard IP).
+    passkey_elsewhere: bool,
 }
 
-async fn login(Extension(actor): Extension<Actor>) -> AppResult<Response> {
+impl LoginPage {
+    fn new(link: Option<String>, message: Option<String>) -> Self {
+        Self { version: VERSION, link, message, passkeys: false, passkey_elsewhere: false }
+    }
+}
+
+async fn login(State(state): State<AppState>, Extension(actor): Extension<Actor>) -> AppResult<Response> {
     if actor.is_owner() {
         return Ok(Redirect::to("/").into_response());
     }
-    render(LoginPage { version: VERSION, link: None, message: None })
+    let enrolled = state.db.call(|c| passkey::count(c)).await? > 0;
+    let mut page = LoginPage::new(None, None);
+    page.passkeys = enrolled && state.passkeys.available();
+    page.passkey_elsewhere = enrolled && !state.passkeys.available();
+    render(page)
 }
 
 /// Opening a link only shows a button; signing in takes a POST. Link previews (chat apps, mail
 /// scanners) fetch links with GET, and must not use them up.
 async fn link_confirm(Path(secret): Path<String>) -> AppResult<Response> {
-    render(LoginPage { version: VERSION, link: Some(secret), message: None })
+    render(LoginPage::new(Some(secret), None))
+}
+
+fn json_error(status: StatusCode, message: impl Into<String>) -> Response {
+    (status, Json(serde_json::json!({"error": message.into()}))).into_response()
+}
+
+async fn passkey_start(State(state): State<AppState>) -> Response {
+    let pk = state.passkeys.clone();
+    match state.db.call(move |c| pk.start_login(c)).await {
+        Ok(Some((id, options))) => Json(serde_json::json!({"id": id, "options": options})).into_response(),
+        Ok(None) => json_error(StatusCode::BAD_REQUEST, "no passkey is enrolled yet"),
+        Err(e) => json_error(StatusCode::BAD_REQUEST, format!("{e:#}")),
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct PasskeyFinish {
+    id: String,
+    credential: PublicKeyCredential,
+}
+
+async fn passkey_finish(
+    State(state): State<AppState>,
+    Extension(ClientIp(ip)): Extension<ClientIp>,
+    headers: HeaderMap,
+    jar: CookieJar,
+    Json(body): Json<PasskeyFinish>,
+) -> Response {
+    let ua = user_agent(&headers);
+    let limits = state.limits();
+    let pk = state.passkeys.clone();
+    let ip2 = ip.clone();
+    let result = state
+        .db
+        .call(move |c| {
+            let name = pk.finish_login(c, &body.id, &body.credential)?;
+            Ok((name, auth::create_session(c, "passkey", &limits, ua.as_deref(), Some(&ip2))?))
+        })
+        .await;
+    match result {
+        Ok((name, session)) => {
+            let e = Entry::new(
+                &Actor::Anonymous,
+                Via::Page,
+                Action::Login,
+                format!("owner signed in with passkey \"{name}\""),
+            )
+            .ip(Some(ip));
+            activity::write(&state.db, e).await;
+            let jar = jar.add(session_cookie(&state, session));
+            (jar, Json(serde_json::json!({"ok": true}))).into_response()
+        }
+        Err(e) => {
+            let entry =
+                Entry::new(&Actor::Anonymous, Via::Page, Action::Denied, format!("passkey sign-in failed: {e:#}"))
+                    .ip(Some(ip));
+            activity::write(&state.db, entry).await;
+            json_error(StatusCode::UNAUTHORIZED, "that passkey didn't work")
+        }
+    }
+}
+
+fn user_agent(headers: &HeaderMap) -> Option<String> {
+    headers.get(header::USER_AGENT).and_then(|v| v.to_str().ok()).map(|s| s.chars().take(300).collect::<String>())
 }
 
 async fn link_use(
@@ -149,11 +230,10 @@ async fn link_use(
         let e = Entry::new(&Actor::Anonymous, Via::Page, Action::Denied, "sign-in link unknown, used or expired")
             .ip(Some(ip));
         activity::write(&state.db, e).await;
-        let page = LoginPage {
-            version: VERSION,
-            link: None,
-            message: Some("This link has expired or was already used. Run `agentflow admin login-link` on the server for a new one.".into()),
-        };
+        let page = LoginPage::new(
+            None,
+            Some("This link has expired or was already used. Run `agentflow admin login-link` on the server for a new one.".into()),
+        );
         return Ok((StatusCode::GONE, Html(page.render()?)).into_response());
     };
     let e =

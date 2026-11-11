@@ -21,7 +21,8 @@ impl TestServer {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let config = Config { listen: addr, public_url: format!("http://{addr}"), ..Config::default() };
-        let app = router(AppState::new(db.clone(), config)).into_make_service_with_connect_info::<SocketAddr>();
+        let app = router(AppState::new(db.clone(), config, crate::push::Vapid::random()))
+            .into_make_service_with_connect_info::<SocketAddr>();
         tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
         let http = reqwest::Client::builder().redirect(reqwest::redirect::Policy::none()).build().unwrap();
         Self { base: format!("http://{addr}"), db, http }
@@ -221,4 +222,59 @@ async fn mcp_needs_a_token_and_logs_tool_calls() {
     assert!(ok);
     assert_eq!(me["project"], "imaginarium");
     assert!(s.log_summaries().await.contains(&"whoami".to_owned()));
+}
+
+#[tokio::test]
+async fn settings_are_owner_only() {
+    let s = TestServer::start().await;
+    let admin = s.token(TokenKind::Admin, None).await;
+    let res = s.http.get(s.url("/settings")).bearer_auth(&admin).send().await.unwrap();
+    assert_eq!(res.status(), StatusCode::FORBIDDEN, "not even the consultant");
+    let res = s.http.post(s.url("/settings/devices")).bearer_auth(&admin).form(&[("name", "x")]).send().await.unwrap();
+    assert_eq!(res.status(), StatusCode::FORBIDDEN);
+
+    let cookie = s.owner_cookie().await;
+    let page = s.http.get(s.url("/settings")).header(COOKIE, &cookie).send().await.unwrap();
+    assert_eq!(page.status(), StatusCode::OK);
+    // A device token is shown once, right after it's made, and works.
+    let res = s
+        .http
+        .post(s.url("/settings/devices"))
+        .header(COOKIE, &cookie)
+        .header(ORIGIN, &s.base)
+        .form(&[("name", "HEADQUARTERS viber-run")])
+        .send()
+        .await
+        .unwrap();
+    let html = res.text().await.unwrap();
+    let start = html.find("af_dev_").expect("token shown");
+    let token: String =
+        html[start..].chars().take_while(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-').collect();
+    let me: Value = s.http.get(s.url("/api/whoami")).bearer_auth(&token).send().await.unwrap().json().await.unwrap();
+    assert_eq!(me["kind"], "device");
+    assert!(
+        !s.http
+            .get(s.url("/settings"))
+            .header(COOKIE, &cookie)
+            .send()
+            .await
+            .unwrap()
+            .text()
+            .await
+            .unwrap()
+            .contains(&token)
+    );
+    // …and never lands in the log.
+    assert!(!s.log_summaries().await.iter().any(|l| l.contains(&token)));
+}
+
+#[tokio::test]
+async fn pwa_files_are_public() {
+    let s = TestServer::start().await;
+    let m: Value = s.http.get(s.url("/manifest.webmanifest")).send().await.unwrap().json().await.unwrap();
+    assert_eq!(m["display"], "standalone");
+    let sw = s.http.get(s.url("/sw.js")).send().await.unwrap();
+    assert_eq!(sw.headers()["cache-control"], "no-cache");
+    assert!(sw.text().await.unwrap().contains("showNotification"));
+    assert_eq!(s.http.get(s.url("/static/icons/apple-touch-icon.png")).send().await.unwrap().status(), StatusCode::OK);
 }

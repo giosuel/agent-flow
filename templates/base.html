@@ -8,9 +8,15 @@
 <meta name="htmx-config" content='{"includeIndicatorStyles": false, "allowEval": false}'>
 <title>{% block title %}AgentFlow{% endblock %} · AgentFlow</title>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="AgentFlow">
 <link rel="stylesheet" href="/static/app.css?v={{ nav.version }}">
 <script src="/static/htmx.min.js?v={{ nav.version }}" defer></script>
 <script src="/static/app.js?v={{ nav.version }}" defer></script>
+{% block scripts %}{% endblock %}
 </head>
 <body>
 <a class="skip" href="#main">Skip to content</a>
