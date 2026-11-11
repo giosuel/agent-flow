@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}Usage{% endblock %}
+{% block content %}
+<div class="head">
+  <h1>Usage</h1>
+  <p class="status-line">API token counts from the Claude Code transcripts on this machine, subagents included. These are not your plan's usage limits. Newest call {{ newest }}.</p>
+</div>
+<nav class="tabs" aria-label="Usage">
+  <a href="/usage"{% if tab == "overview" %} class="on" aria-current="page"{% endif %}>Overview</a>
+  <a href="/usage?tab=tasks"{% if tab == "tasks" %} class="on" aria-current="page"{% endif %}>Tasks</a>
+</nav>
+
+{% if tab == "overview" %}
+<div class="tiles">
+  {% for t in tiles %}<div class="card pad tile"><span class="label">{{ t.label }}</span><strong class="tile-v mono">{{ t.value }}</strong><span class="sub">{{ t.hint }}</span></div>{% endfor %}
+</div>
+
+<section class="card pad stack" aria-labelledby="chart-h">
+  <div class="sec wrap"><div class="stack-sm"><h2 id="chart-h">{{ chart_title }}</h2><span class="sub">{{ chart_sub }}</span></div>
+    <span class="row wrap">
+      {% if zoomed %}<a class="sub" href="/usage{% if cache %}?metric=cache{% endif %}">← Back to 14 days</a>{% endif %}
+      <span class="ranges" role="group" aria-label="What to count">
+        <a class="rng{% if !cache %} on{% endif %}" href="/usage?{{ day_q }}"{% if !cache %} aria-current="true"{% endif %}>New tokens</a>
+        <a class="rng{% if cache %} on{% endif %}" href="/usage?{{ day_q }}metric=cache"{% if cache %} aria-current="true"{% endif %}>Cache reads</a>
+      </span>
+    </span>
+  </div>
+  {% if empty %}<p class="sub">No tokens counted in this window yet. The transcripts are read every five minutes.</p>{% else %}
+  <ul class="legend plain" aria-label="Projects">{% for l in legend %}<li><span class="swatch" style="--c: {{ l.color }}"></span>{{ l.name }} <span class="sub mono">{{ l.total }}</span></li>{% endfor %}</ul>
+  <div class="chart">
+    <span class="y-max mono sub">{{ bars_max }}</span>
+    {{ bars|safe }}
+    <div class="x-labels mono sub" aria-hidden="true">{% for l in x_labels %}<span>{{ l }}</span>{% endfor %}</div>
+  </div>
+  {% endif %}
+</section>
+
+{% if !empty %}
+<section class="card pad stack" aria-labelledby="lines-h">
+  <div class="sec"><h2 id="lines-h">Per agent</h2><span class="sub">{% if cache %}cache reads{% else %}new tokens{% endif %} per {% if zoomed %}hour{% else %}day{% endif %}, one line per project's agent</span></div>
+  <ul class="legend plain" aria-label="Agents">{% for l in legend %}<li><span class="swatch line" style="--c: {{ l.color }}"></span>{{ l.name }}</li>{% endfor %}</ul>
+  <div class="chart">
+    <span class="y-max mono sub">{{ lines_max }}</span>
+    {{ lines|safe }}
+    <div class="x-labels mono sub" aria-hidden="true">{% for l in x_labels %}<span>{{ l }}</span>{% endfor %}</div>
+  </div>
+</section>
+{% endif %}
+
+<section class="card pad stack" aria-labelledby="proj-h">
+  <div class="sec"><h2 id="proj-h">Per project</h2><span class="sub">{{ range }}</span></div>
+  {% if projects.is_empty() %}<p class="sub">Nothing yet.</p>{% else %}
+  <div class="table-wrap"><table class="table nums">
+    <thead><tr><th scope="col">Project</th><th scope="col">Sessions</th><th scope="col">Calls</th><th scope="col">Input</th><th scope="col">Cache write</th><th scope="col">Output</th><th scope="col">New tokens</th><th scope="col">Cache reads</th></tr></thead>
+    <tbody>{% for p in projects %}<tr><th scope="row"><span class="swatch" style="--c: {{ p.color }}"></span>{{ p.name }}</th><td>{{ p.sessions }}</td><td>{{ p.t.calls }}</td><td>{{ p.t.input }}</td><td>{{ p.t.cache_write }}</td><td>{{ p.t.output }}</td><td><strong>{{ p.t.new_tokens }}</strong></td><td>{{ p.t.cache_read }}</td></tr>{% endfor %}</tbody>
+  </table></div>
+  {% endif %}
+</section>
+{% else %}
+<section class="card pad stack" aria-labelledby="tasks-h">
+  <div class="sec wrap"><div class="stack-sm"><h2 id="tasks-h">Tasks by tokens</h2><span class="sub">{{ tasks.len() }} with tokens in the last {{ days }} days, most first</span></div>
+    <span class="ranges" role="group" aria-label="Window">
+      <a class="rng{% if days == 7 %} on{% endif %}" href="/usage?tab=tasks&amp;days=7">7 days</a>
+      <a class="rng{% if days == 14 %} on{% endif %}" href="/usage?tab=tasks">14 days</a>
+    </span>
+  </div>
+  {% if tasks.is_empty() %}<p class="sub">No task has tokens yet. They count once an agent works on tasks through AgentFlow.</p>{% else %}
+  <div class="table-wrap"><table class="table nums tasks-usage">
+    <thead><tr><th scope="col">Task</th><th scope="col">Status</th><th scope="col">Worked</th><th scope="col">Calls</th><th scope="col">Input</th><th scope="col">Cache write</th><th scope="col">Output</th><th scope="col">New tokens</th><th scope="col">Cache reads</th><th scope="col">Estimate</th></tr></thead>
+    <tbody>{% for t in tasks %}
+      <tr><th scope="row"><details><summary><span class="swatch" style="--c: {{ t.color }}"></span>{% if !t.url.is_empty() %}<a href="{{ t.url }}"><span class="mono sub">{{ t.id }}</span> {{ t.title }}</a>{% else %}{{ t.title }} <span class="sub">· {{ t.project }}</span>{% endif %}</summary>
+        <p class="sub">Main session {{ t.main }} · subagents {{ t.subagents }}</p></details></th>
+        <td>{{ t.status }}</td><td class="sub">{{ t.worked }}</td><td>{{ t.t.calls }}</td><td>{{ t.t.input }}</td><td>{{ t.t.cache_write }}</td><td>{{ t.t.output }}</td><td><strong>{{ t.t.new_tokens }}</strong></td><td>{{ t.t.cache_read }}</td><td class="sub">{{ t.estimate }}</td></tr>
+    {% endfor %}</tbody>
+  </table></div>
+  {% endif %}
+  <p class="sub">A session's tokens go to the task its agent last worked on through AgentFlow, and a subagent's to the task its session was on when it started the subagent. Work outside any task is listed as "Not in a task". Counted: every session on this machine. Claude Code deletes transcripts after 30 days, so AgentFlow keeps its own counts.</p>
+</section>
+{% endif %}
+{% endblock %}
