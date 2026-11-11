@@ -4,6 +4,7 @@
 mod api;
 mod assets;
 mod builds;
+pub use builds::notify_build;
 mod buttons;
 mod dashboard;
 mod icons;
