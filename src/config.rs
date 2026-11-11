@@ -14,8 +14,9 @@ use crate::util::expand_home;
 pub struct Config {
     /// Where the server listens. Never a wildcard address: the machine has a public IP.
     pub listen: SocketAddr,
-    /// The address people and agents use, e.g. `https://flow.giosuel.io`. Decides the cookie's
-    /// Secure flag, the passkey relying party and which Host headers are accepted.
+    /// The address people and agents use, e.g. `https://flow.giosuel.io`. Decides the cookie, the
+    /// passkey relying party, the origin cookie posts must come from, and the MCP endpoint's
+    /// allowed Host headers.
     pub public_url: String,
     /// Database, VAPID keys, backups and log archives.
     pub data_dir: String,
