@@ -621,7 +621,7 @@ async fn prs_merge_in_order_from_the_owners_buttons() {
     assert_eq!(rel["state"], "tagged");
     let (_, news) = call("since_last_check", json!({})).await;
     let what = news.to_string();
-    assert!(what.contains("PR-48 merged") && what.contains("Push tag v0.0.5-m4") && what.contains("done"), "{what}");
+    assert!(what.contains("#48 merged") && what.contains("Push tag v0.0.5-m4") && what.contains("done"), "{what}");
 }
 
 #[test]
@@ -632,4 +632,25 @@ fn return_addresses_stay_on_our_pages() {
     {
         assert_eq!(local_path(Some(bad)), None, "{bad:?}");
     }
+}
+
+#[tokio::test]
+async fn one_broken_pr_doesnt_stop_the_poll() {
+    use crate::github::fake::pr;
+    let s = TestServer::start().await;
+    let token = s.token(TokenKind::Project, Some("vinculum")).await;
+    let sess = mcp_session(&s, &token).await;
+    mcp_tool(&s, &token, &sess, "update_project", json!({"repo": "giosuel/vinculum"})).await;
+    s.github.set("giosuel/vinculum", pr(70, "main", "b70"));
+    s.github.set("giosuel/vinculum", pr(71, "main", "b71"));
+    crate::poller::poll_once(&s.state).await.unwrap();
+    // #70 vanishes from GitHub entirely (the fake can't answer for it); #71 gets merged.
+    s.github.prs.lock().unwrap().remove(&("giosuel/vinculum".to_owned(), 70));
+    let mut merged = pr(71, "main", "b71");
+    merged.state = "merged".into();
+    s.github.set("giosuel/vinculum", merged);
+    crate::poller::poll_once(&s.state).await.unwrap();
+    let (_, r) = mcp_tool(&s, &token, &sess, "get_record", json!({"id": "PR-71"})).await;
+    assert_eq!(r["state"], "merged", "the other PR was still synced");
+    assert!(s.log_summaries().await.iter().any(|l| l.contains("giosuel/vinculum#70 failed")));
 }

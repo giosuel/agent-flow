@@ -100,7 +100,7 @@ impl FlowMcp {
             }
             // Fetch it now, so a brand-new PR is there without waiting for the poller.
             let info = self.state.github.pr(&project.repo, p.number).await?;
-            crate::poller::apply(&self.state, &project, info).await?;
+            crate::poller::apply(&self.state, &project, &project.repo, info).await?;
             let (proj, name) = (project.clone(), project.name.clone());
             let (r, newly_ready) = self
                 .state
@@ -175,7 +175,7 @@ impl FlowMcp {
                 let mut releases = Vec::new();
                 for r in records::query(c, &records::Query { project_id: Some(project.id), kinds: vec![Kind::Release], states: vec!["waiting".into(), "planned".into()], ..Default::default() })? {
                     releases.push(json!({"id": r.ref_id, "tag": r.str("tag"), "title": r.title, "waits_for": r.data.get("waits_for"),
-                        "all_merged": crate::poller::release_ready(c, &r)?, "buttons": buttons(c, r.id)?}));
+                        "all_merged": crate::prs::release_ready(c, &r)?, "buttons": buttons(c, r.id)?}));
                 }
                 Ok(Outcome::new(json!({"merge_order": list, "releases": releases})).summary("pull_requests").project(project.slug))
             })

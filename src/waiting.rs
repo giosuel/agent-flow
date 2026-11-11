@@ -49,7 +49,7 @@ pub fn load(conn: &Connection) -> anyhow::Result<Waiting> {
         conn,
         &Query { kinds: vec![Kind::Release], states: vec!["waiting".into()], limit: 0, ..Default::default() },
     )? {
-        if crate::poller::release_ready(conn, &r)? {
+        if crate::prs::release_ready(conn, &r)? {
             merges.push(r);
         }
     }

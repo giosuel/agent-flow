@@ -256,7 +256,7 @@ async fn refresh_pr(state: &AppState, record: &Record) {
     let repo = if record.str("repo").is_empty() { project.repo.clone() } else { record.str("repo").to_owned() };
     match state.github.pr(&repo, record.number).await {
         Ok(info) => {
-            if let Err(e) = poller::apply(state, &project, info).await {
+            if let Err(e) = poller::apply(state, &project, &repo, info).await {
                 tracing::warn!("refreshing {} after a press: {e:#}", record.ref_id);
             }
         }
