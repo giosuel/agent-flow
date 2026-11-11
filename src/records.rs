@@ -572,6 +572,11 @@ pub fn link(conn: &Connection, from: &Record, to: &Record, relation: &str, autho
     if from.id == to.id {
         bail!("a record can't link to itself");
     }
+    // These relations say something about (or change) the target, so they stay inside one project;
+    // only `relates` and `depends_on` may point at another project's records.
+    if from.project_id != to.project_id && !matches!(relation, "relates" | "depends_on") {
+        bail!("\"{relation}\" links stay inside one project; {} belongs to {}", to.ref_id, to.project);
+    }
     let n = conn.execute(
         "INSERT OR IGNORE INTO links (from_id, to_id, relation, author, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
         params![from.id, to.id, relation, author, now_ms()],
