@@ -822,7 +822,12 @@ fn build_view(r: &Record, links: &[records::LinkView], sent: bool) -> BuildView 
     if !r.str("commit").is_empty() {
         facts.push(("Commit".into(), format!("{} on {}", r.str("commit"), r.str("branch"))));
     }
-    facts.push(("Size".into(), format!("{:.1} MB, starts with {}", size as f64 / 1_048_576.0, r.str("entry"))));
+    let size = if size >= 1_048_576 {
+        format!("{:.1} MB", size as f64 / 1_048_576.0)
+    } else {
+        format!("{} KB", size.div_ceil(1024))
+    };
+    facts.push(("Size".into(), format!("{size}, starts with {}", r.str("entry"))));
     if !r.str("tag").is_empty() {
         facts.push(("Tag".into(), r.str("tag").into()));
     }

@@ -53,9 +53,9 @@
         <legend class="vh">{{ title }}</legend>
         <div class="stack-sm"><strong>{{ title }}</strong>{% if !what.is_empty() %}<span class="sub">{{ what }}</span>{% endif %}</div>
         <div class="verdicts">
-          <label class="verdict ok"><input type="radio" name="v{{ i }}" value="works"><span>Works</span></label>
-          <label class="verdict bad"><input type="radio" name="v{{ i }}" value="problem"><span>Problem</span></label>
-          <label class="verdict skip"><input type="radio" name="v{{ i }}" value="skip"><span>Skip</span></label>
+          <label class="verdict v-works"><input type="radio" name="v{{ i }}" value="works"><span>Works</span></label>
+          <label class="verdict v-problem"><input type="radio" name="v{{ i }}" value="problem"><span>Problem</span></label>
+          <label class="verdict v-skip"><input type="radio" name="v{{ i }}" value="skip"><span>Skip</span></label>
         </div>
         <label class="vh" for="n{{ i }}">What went wrong?</label>
         <textarea id="n{{ i }}" name="n{{ i }}" rows="2" class="problem-note" placeholder="What went wrong?"></textarea>
