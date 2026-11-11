@@ -17,7 +17,8 @@ use super::pages::{Nav, nav, render};
 use super::{AppResult, AppState};
 use crate::auth::Actor;
 use crate::logview::{self, Filter, LogRow};
-use crate::util::{fmt_short, fmt_utc, now_ms};
+use crate::tz::Tz;
+use crate::util::now_ms;
 
 pub fn routes() -> Router<AppState> {
     Router::new().route("/log", get(page)).route("/log/stream", get(stream))
@@ -71,6 +72,7 @@ struct EntryView {
 #[template(path = "log.html")]
 struct LogPage {
     nav: Nav,
+    tz: String,
     q: String,
     range: String,
     ranges: Vec<(&'static str, &'static str, bool)>,
@@ -127,11 +129,11 @@ fn record_url(target: &str) -> Option<String> {
     Some(format!("/p/{p}/{}-{}", r.kind.prefix(), r.number))
 }
 
-fn entry(r: &LogRow, archived: bool, q: &str) -> EntryView {
+fn entry(r: &LogRow, archived: bool, q: &str, tz: &Tz) -> EntryView {
     let opt = |v: &Option<String>| v.clone().unwrap_or_default();
     let mut fields = vec![
         ("seq".to_owned(), r.seq.to_string(), None),
-        ("time".into(), format!("{} UTC", fmt_utc(r.at)), None),
+        ("time".into(), format!("{} ({})", tz.full(r.at), crate::util::fmt_utc(r.at)), None),
         ("severity".into(), r.severity.clone(), Some(with_field(q, "severity", &r.severity))),
         ("actor".into(), format!("{} ({})", r.actor, r.actor_kind), Some(with_field(q, "actor", &r.actor))),
         ("via".into(), r.via.clone(), Some(with_field(q, "via", &r.via))),
@@ -157,7 +159,7 @@ fn entry(r: &LogRow, archived: bool, q: &str) -> EntryView {
     }
     EntryView {
         seq: r.seq,
-        time: fmt_utc(r.at),
+        time: tz.full(r.at),
         actor: r.actor.clone(),
         action: r.action.clone(),
         summary: r.summary.clone(),
@@ -173,6 +175,7 @@ async fn page(
     State(state): State<AppState>,
     Extension(actor): Extension<Actor>,
     Query(lq): Query<LogQuery>,
+    tz: Tz,
 ) -> AppResult<Response> {
     actor.require_owner()?;
     let now = now_ms();
@@ -217,7 +220,7 @@ async fn page(
     // Archived reads, when the range reaches back past what the database still holds.
     let cutoff = now - logview::READS_KEPT_DAYS * 86_400_000;
     let reaches_archive = filter.from.is_none_or(|f| f < cutoff);
-    let mut entries: Vec<EntryView> = rows.iter().map(|r| entry(r, false, &lq.q)).collect();
+    let mut entries: Vec<EntryView> = rows.iter().map(|r| entry(r, false, &lq.q, &tz)).collect();
     if reaches_archive && (rows.len() as i64) < PAGE {
         let data = state.config.data_dir();
         let (f, b, need) = (filter.clone(), rows.last().map(|r| r.seq).or(before), (PAGE as usize) - rows.len());
@@ -226,7 +229,7 @@ async fn page(
             .ok()
             .and_then(Result::ok)
             .unwrap_or_default();
-        entries.extend(archived.iter().map(|r| entry(r, true, &lq.q)));
+        entries.extend(archived.iter().map(|r| entry(r, true, &lq.q, &tz)));
     }
     let older =
         (entries.len() as i64 >= PAGE).then(|| url(&lq.q, &range, lq.from, lq.to, entries.last().map(|e| e.seq)));
@@ -242,18 +245,19 @@ async fn page(
             Bar {
                 height: if n == 0 { 0 } else { (n * 100 / max).max(4) },
                 href: url(&lq.q, &range, Some(b_from), Some(b_from + width), None),
-                label: format!("{n} between {} and {}", fmt_short(b_from), fmt_short(b_from + width)),
+                label: format!("{n} between {} and {}", tz.short(b_from), tz.short(b_from + width)),
             }
         })
         .collect();
-    let axis = (0..=4).map(|i| fmt_short(from + (to - from) * i / 4)).collect();
+    let axis = (0..=4).map(|i| tz.short(from + (to - from) * i / 4)).collect();
     let total = counts.iter().sum();
     let archive = logview::archive_months(&state.config.data_dir());
     let _ = first_at;
     render(LogPage {
         nav: nav(&state, &actor, "/log").await,
+        tz: tz.name().to_owned(),
         span: match (lq.from, lq.to) {
-            (Some(f), Some(t)) => format!("{} – {} UTC", fmt_short(f), fmt_short(t)),
+            (Some(f), Some(t)) => format!("{} – {}", tz.short(f), tz.short(t)),
             _ => RANGES.iter().find(|x| x.0 == range).map(|x| x.1.to_owned()).unwrap_or_default(),
         },
         ranges: RANGES.iter().map(|(k, l, _)| (*k, *l, *k == range && lq.from.is_none())).collect(),
@@ -303,6 +307,7 @@ async fn stream(
     State(state): State<AppState>,
     Extension(actor): Extension<Actor>,
     Query(sq): Query<StreamQuery>,
+    tz: Tz,
 ) -> Response {
     if actor.require_owner().is_err() {
         return super::json_error(axum::http::StatusCode::FORBIDDEN, "owner only");
@@ -317,7 +322,7 @@ async fn stream(
             for r in &rows {
                 after = after.max(r.seq);
                 let data = serde_json::json!({
-                    "seq": r.seq, "time": fmt_utc(r.at), "actor": r.actor, "action": r.action,
+                    "seq": r.seq, "time": tz.full(r.at), "actor": r.actor, "action": r.action,
                     "summary": r.summary, "severity": r.severity, "target": r.target,
                 });
                 if tx.send(Ok(Event::default().data(data.to_string()))).await.is_err() {

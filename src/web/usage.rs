@@ -13,7 +13,8 @@ use super::pages::{Nav, nav, render};
 use super::{AppResult, AppState};
 use crate::auth::Actor;
 use crate::records::{self, Kind};
-use crate::usage::{self, DAY, HOUR, Tokens, short};
+use crate::tz::Tz;
+use crate::usage::{self, Tokens, short};
 use crate::util::now_ms;
 
 pub fn routes() -> Router<AppState> {
@@ -117,47 +118,38 @@ struct UsagePage {
     empty: bool,
 }
 
-fn date_of(ms: i64) -> String {
-    crate::util::fmt_date(ms)
-}
-
-/// "Mon 10" for a day's bar label.
-fn day_label(ms: i64) -> String {
-    let t = time::OffsetDateTime::from_unix_timestamp(ms / 1000).unwrap_or(time::OffsetDateTime::UNIX_EPOCH);
-    let wd = t.weekday().to_string();
-    format!("{} {}", &wd[..3], t.day())
-}
-
-fn parse_day(s: &str) -> Option<i64> {
-    let f = time::macros::format_description!("[year]-[month]-[day]");
-    let d = time::Date::parse(s, &f).ok()?;
-    Some(d.midnight().assume_utc().unix_timestamp() * 1000)
-}
-
 async fn page(
     State(state): State<AppState>,
     Extension(actor): Extension<Actor>,
     Query(q): Query<UsageQuery>,
+    tz: Tz,
 ) -> AppResult<Response> {
     actor.require_owner()?;
     let now = now_ms();
-    let today = usage::day_start(now);
+    // The owner's local days (their browser's time zone): the last 14, today last.
+    let fortnight_days = tz.days(now, 14);
+    let today = fortnight_days[13];
+    let end = fortnight_days[14];
     let tab = if q.tab.as_deref() == Some("tasks") { "tasks" } else { "overview" }.to_owned();
     let cache = q.metric.as_deref() == Some("cache");
-    let day = q.day.as_deref().and_then(parse_day).filter(|d| *d <= today);
+    let day = q.day.as_deref().and_then(|s| tz.parse_day(s)).filter(|d| *d <= today);
     let days = if q.days == Some(7) { 7 } else { 14 };
-    let (from, to, step, n) = match day {
-        Some(d) => (d, d + DAY, HOUR, 24usize),
-        None => (today - 13 * DAY, today + DAY, DAY, 14usize),
+    // A bar per local hour of an opened day (23 or 25 when the clocks change), else per day.
+    let bounds = match day {
+        Some(d) => tz.hours(d),
+        None => fortnight_days.clone(),
     };
-    let task_from = today - (days - 1) * DAY;
+    let n = bounds.len() - 1;
+    let task_from = fortnight_days[14 - days as usize];
+    let fortnight_from = fortnight_days[0];
+    let bounds_q = bounds.clone();
     let data = state
         .db
         .call(move |c| {
             let projects = crate::projects::list(c)?;
-            let buckets = usage::buckets(c, from, to, step)?;
-            let per_project = usage::per_project(c, from, to)?;
-            let tasks = usage::per_task(c, task_from, today + DAY)?;
+            let buckets = usage::buckets(c, &bounds_q)?;
+            let per_project = usage::per_project(c, bounds_q[0], bounds_q[bounds_q.len() - 1])?;
+            let tasks = usage::per_task(c, task_from, end)?;
             let mut task_records = Vec::new();
             for t in &tasks {
                 task_records.push(match t.task_id {
@@ -165,8 +157,8 @@ async fn page(
                     None => None,
                 });
             }
-            let today_total = usage::per_project(c, today, today + DAY)?;
-            let fortnight = usage::per_project(c, today - 13 * DAY, today + DAY)?;
+            let today_total = usage::per_project(c, today, end)?;
+            let fortnight = usage::per_project(c, fortnight_from, end)?;
             let newest: Option<i64> = c.query_row("SELECT max(at) FROM usage", [], |r| r.get(0))?;
             Ok((projects, buckets, per_project, tasks, task_records, today_total, fortnight, newest))
         })
@@ -193,7 +185,7 @@ async fn page(
         let mut values = vec![0.0; n];
         for (b, p, t) in &buckets {
             if *p == id
-                && let Some(v) = values.get_mut(*b as usize)
+                && let Some(v) = values.get_mut(*b)
             {
                 *v += metric(t);
             }
@@ -208,9 +200,10 @@ async fn page(
         series.push(Series { name, color, values });
     }
     let labels: Vec<String> =
-        (0..n).map(|i| if day.is_some() { format!("{i:02}:00") } else { day_label(from + i as i64 * DAY) }).collect();
+        bounds[..n].iter().map(|t| if day.is_some() { tz.hm(*t) } else { tz.day_label(*t) }).collect();
     let metric_q = if cache { "&metric=cache" } else { "" };
-    let link = move |i: usize| format!("/usage?day={}{metric_q}", date_of(from + i as i64 * DAY));
+    let link_tz = tz.clone();
+    let link = move |i: usize| format!("/usage?day={}{metric_q}", link_tz.date(bounds[i]));
     let fmt = |v: f64| short(v as i64);
     let what = if cache { "cache reads" } else { "new tokens" };
     let (bars, bars_max) = charts::stacked_bars(
@@ -228,7 +221,7 @@ async fn page(
             let mut values = vec![0.0; n];
             for (b, p, t) in &buckets {
                 if *p == id
-                    && let Some(v) = values.get_mut(*b as usize)
+                    && let Some(v) = values.get_mut(*b)
                 {
                     *v += t.calls as f64;
                 }
@@ -262,7 +255,7 @@ async fn page(
     let tiles = match day {
         Some(d) => vec![
             Tile {
-                label: format!("New tokens on {}", date_of(d)),
+                label: format!("New tokens on {}", tz.date(d)),
                 value: short(window.new_tokens()),
                 hint: calls(&window),
             },
@@ -289,15 +282,10 @@ async fn page(
         .zip(&task_records)
         .map(|(t, r)| {
             let (project, color) = name_of(t.project_id);
-            let worked = if usage::day_start(t.first_at) == usage::day_start(t.last_at) {
-                format!(
-                    "{} {}–{}",
-                    date_of(t.first_at),
-                    crate::util::fmt_hm(t.first_at),
-                    crate::util::fmt_hm(t.last_at)
-                )
+            let worked = if tz.date(t.first_at) == tz.date(t.last_at) {
+                format!("{} {}–{}", tz.date(t.first_at), tz.hm(t.first_at), tz.hm(t.last_at))
             } else {
-                format!("{} – {}", date_of(t.first_at), date_of(t.last_at))
+                format!("{} – {}", tz.date(t.first_at), tz.date(t.last_at))
             };
             let total = t.total();
             TaskRow {
@@ -320,17 +308,17 @@ async fn page(
         })
         .collect();
 
-    let day_q = day.map(|d| format!("day={}&", date_of(d))).unwrap_or_default();
+    let day_q = day.map(|d| format!("day={}&", tz.date(d))).unwrap_or_default();
     render(UsagePage {
         nav: nav(&state, &actor, "/usage").await,
         tab,
         newest: newest.map(|t| crate::util::ago(t, now)).unwrap_or_else(|| "not yet".into()),
         tiles,
         chart_title: match day {
-            Some(d) => format!("{} by hour · {}", if cache { "Cache reads" } else { "New tokens" }, date_of(d)),
+            Some(d) => format!("{} by hour · {}", if cache { "Cache reads" } else { "New tokens" }, tz.date(d)),
             None => format!("{} per day · 14 days", if cache { "Cache reads" } else { "New tokens" }),
         },
-        chart_sub: if day.is_some() { "UTC hours".into() } else { "Open a day for its hours".into() },
+        chart_sub: if day.is_some() { format!("Hours in {}", tz.name()) } else { "Open a day for its hours".into() },
         bars,
         bars_max: short(bars_max as i64),
         x_labels,
@@ -343,7 +331,7 @@ async fn page(
         lines_max: crate::util::fmt_count(lines_max as i64),
         projects: project_rows,
         range: match day {
-            Some(d) => date_of(d),
+            Some(d) => tz.date(d),
             None => "14 days".into(),
         },
         any_task: task_rows.iter().any(|t| !t.url.is_empty()),

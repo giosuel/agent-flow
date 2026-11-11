@@ -60,6 +60,7 @@ dependencies = [
  "clap",
  "futures",
  "hkdf",
+ "jiff",
  "p256",
  "pulldown-cmark",
  "rand",

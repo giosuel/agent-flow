@@ -32,6 +32,7 @@ sha2 = "0.11"
 tar = "0.4"
 tempfile = "3"
 thiserror = "2"
+jiff = "0.2"
 time = { version = "0.3", features = ["formatting", "macros", "local-offset"] }
 tokio = { version = "1.54", features = ["rt-multi-thread", "macros", "net", "signal", "sync", "time", "process", "fs"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
