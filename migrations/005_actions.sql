@@ -5,6 +5,7 @@ CREATE TABLE actions (
     id          INTEGER PRIMARY KEY,
     record_id   INTEGER NOT NULL REFERENCES records (id),
     label       TEXT NOT NULL,              -- "Merge", "Push tag v0.0.5-m4"
+    kind        TEXT NOT NULL DEFAULT 'other' CHECK (kind IN ('merge', 'tag', 'other')),
     command     TEXT NOT NULL,              -- run with bash -c
     workdir     TEXT NOT NULL DEFAULT '',   -- e.g. ~/vinculum; home if empty
     requires    TEXT NOT NULL DEFAULT '[]', -- JSON: record ids that must be merged or done first

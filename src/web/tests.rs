@@ -411,14 +411,14 @@ async fn the_owner_answers_on_the_page_and_the_agent_reads_it() {
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::SEE_OTHER);
-    assert_eq!(res.headers()[LOCATION], "/p/vinculum/Q-1", "no open redirects");
+    assert_eq!(res.headers()[LOCATION], "/?answered=vinculum/Q-1", "no open redirects; back to the Dashboard");
 
     let (_, q) = mcp_tool(&s, &token, &sess, "get_record", json!({"id": "Q-1"})).await;
     assert_eq!(
         (q["state"].as_str(), q["data"]["answer"].as_str(), q["data"]["answer_option"].as_u64()),
         (Some("answered"), Some("B, smaller"), Some(2))
     );
-    // Answering twice shows the reason on the page instead of failing.
+    // Answering twice goes back to the question with the reason.
     let res = s
         .http
         .post(s.url("/p/vinculum/Q-1/answer"))
@@ -428,7 +428,9 @@ async fn the_owner_answers_on_the_page_and_the_agent_reads_it() {
         .send()
         .await
         .unwrap();
-    assert!(res.text().await.unwrap().contains("already answered"));
+    assert_eq!(res.headers()[LOCATION], "/p/vinculum/Q-1?error=answered");
+    let page = s.http.get(s.url("/p/vinculum/Q-1?error=answered")).header(COOKIE, &cookie).send().await.unwrap();
+    assert!(page.text().await.unwrap().contains("This question was already answered."));
 }
 
 #[tokio::test]
@@ -502,6 +504,11 @@ async fn the_dashboard_features_a_question_and_answers_in_one_tap() {
     )
     .await;
     let html = s.http.get(s.url("/")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
+    // The own-words box is in a form without option buttons: Enter there must not also pick one.
+    let words = html.find(r#"name="words""#).unwrap();
+    let form_start = html[..words].rfind("<form").unwrap();
+    let form_end = words + html[words..].find("</form>").unwrap();
+    assert!(!html[form_start..form_end].contains(r#"name="option""#), "Enter in the words box would send an option");
     // The urgent one is featured, the other is listed, and the badge counts both.
     let featured = html.find("Tabs A or B?").unwrap();
     assert!(featured < html.find("Old question").unwrap());
@@ -553,18 +560,18 @@ async fn prs_merge_in_order_from_the_owners_buttons() {
     for n in [48, 49] {
         let (ok, r) = call("update_pr", json!({"number": n, "ready": true})).await;
         assert!(ok, "{r}");
-        let (ok, r) = call("add_button", json!({"record": format!("PR-{n}"), "label": "Merge", "command": format!("echo merged {n} > merged-{n}"), "workdir": wd})).await;
+        let (ok, r) = call("add_button", json!({"record": format!("PR-{n}"), "label": "Merge", "kind": "merge", "command": format!("echo merged {n} > merged-{n}"), "workdir": wd})).await;
         assert!(ok, "{r}");
     }
     let (ok, r) =
         call("add_release", json!({"tag": "v0.0.5-m4", "title": "M4: Keybinds", "waits_for": ["PR-48", "PR-49"]}))
             .await;
     assert!(ok, "{r}");
-    call("add_button", json!({"record": "R-1", "label": "Push tag v0.0.5-m4", "command": "echo tagged > tagged", "workdir": wd, "requires": ["PR-49"]})).await;
+    call("add_button", json!({"record": "R-1", "label": "Push tag v0.0.5-m4", "kind": "tag", "command": "echo tagged > tagged", "workdir": wd, "requires": ["PR-49"]})).await;
 
     let (_, order) = call("pull_requests", json!({})).await;
     assert_eq!(order["merge_order"][0]["mergeable_now"], true);
-    assert_eq!(order["merge_order"][1]["buttons"][0]["locked_because"], "merge PR-48 first");
+    assert_eq!(order["merge_order"][1]["buttons"][0]["locked_because"], "merge #48 first");
 
     let cookie = s.owner_cookie().await;
     let html =
@@ -621,5 +628,36 @@ async fn prs_merge_in_order_from_the_owners_buttons() {
     assert_eq!(rel["state"], "tagged");
     let (_, news) = call("since_last_check", json!({})).await;
     let what = news.to_string();
-    assert!(what.contains("PR-48 merged") && what.contains("Push tag v0.0.5-m4") && what.contains("done"), "{what}");
+    assert!(what.contains("#48 merged") && what.contains("Push tag v0.0.5-m4") && what.contains("done"), "{what}");
+}
+
+#[test]
+fn return_addresses_stay_on_our_pages() {
+    assert_eq!(local_path(Some("/p/v/Q-1")).as_deref(), Some("/p/v/Q-1"));
+    assert_eq!(local_path(Some("/?answered=v/Q-1")).as_deref(), Some("/?answered=v/Q-1"));
+    for bad in ["//evil.example", "/\\evil.example", "https://evil.example", "/x\r\nSet-Cookie: a=b", "/ä", "", "p/v"]
+    {
+        assert_eq!(local_path(Some(bad)), None, "{bad:?}");
+    }
+}
+
+#[tokio::test]
+async fn one_broken_pr_doesnt_stop_the_poll() {
+    use crate::github::fake::pr;
+    let s = TestServer::start().await;
+    let token = s.token(TokenKind::Project, Some("vinculum")).await;
+    let sess = mcp_session(&s, &token).await;
+    mcp_tool(&s, &token, &sess, "update_project", json!({"repo": "giosuel/vinculum"})).await;
+    s.github.set("giosuel/vinculum", pr(70, "main", "b70"));
+    s.github.set("giosuel/vinculum", pr(71, "main", "b71"));
+    crate::poller::poll_once(&s.state).await.unwrap();
+    // #70 vanishes from GitHub entirely (the fake can't answer for it); #71 gets merged.
+    s.github.prs.lock().unwrap().remove(&("giosuel/vinculum".to_owned(), 70));
+    let mut merged = pr(71, "main", "b71");
+    merged.state = "merged".into();
+    s.github.set("giosuel/vinculum", merged);
+    crate::poller::poll_once(&s.state).await.unwrap();
+    let (_, r) = mcp_tool(&s, &token, &sess, "get_record", json!({"id": "PR-71"})).await;
+    assert_eq!(r["state"], "merged", "the other PR was still synced");
+    assert!(s.log_summaries().await.iter().any(|l| l.contains("giosuel/vinculum#70 failed")));
 }

@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use askama::Template;
 use axum::extract::{Path, Query, State};
-use axum::response::{Redirect, Response};
+use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use axum::{Extension, Form, Router};
 use rusqlite::Connection;
@@ -227,6 +227,8 @@ struct ProjectPage {
     questions: Vec<RecordRow>,
     prs: Vec<super::buttons::PrRow>,
     prs_total: usize,
+    has_stack_button: bool,
+    tabs: &'static [(&'static str, &'static str)],
     releases: Vec<super::buttons::ReleaseRow>,
     notice: Option<String>,
     notice_bad: bool,
@@ -259,12 +261,13 @@ fn press_notice(q: &TabQuery) -> (Option<String>, bool) {
     }
 }
 
+/// The project page's tabs, in order; questions come right after the overview.
 const TABS: &[(&str, &str)] = &[
     ("overview", "Overview"),
+    ("questions", "Questions"),
     ("tasks", "Tasks"),
     ("prs", "Pull requests"),
     ("decisions", "Decisions"),
-    ("questions", "Questions"),
 ];
 
 async fn project(
@@ -282,13 +285,14 @@ async fn project(
         .call(move |c| {
             let Some(p) = projects::get(c, &slug)? else { return Ok(None) };
             let ms = projects::milestones(c, p.id)?;
-            let all = records::query(c, &records::Query { project_id: Some(p.id), limit: 500, ..Default::default() })?;
+            let all = records::query(c, &records::Query { project_id: Some(p.id), limit: 0, ..Default::default() })?;
             Ok(Some(build_project_page(c, p, ms, all, &t, now)?))
         })
         .await?
         .ok_or(AppError::NotFound)?;
     let mut page = page;
     page.prs_total = page.prs.len();
+    page.has_stack_button = page.prs.iter().any(|p| p.up_to.is_some());
     if tab == "overview" {
         // The overview shows the start of the order; the Pull requests tab has all of them.
         page.prs.truncate(8);
@@ -380,9 +384,10 @@ fn build_project_page(
     {
         let mut stmt = c.prepare(
             "SELECT l.to_id, r.kind, r.number, p.slug FROM links l JOIN records r ON r.id = l.from_id JOIN projects p ON p.id = r.project_id
-             WHERE l.relation = 'blocks' AND r.state IN ('open', 'todo', 'doing', 'blocked')",
+             JOIN records t ON t.id = l.to_id
+             WHERE l.relation = 'blocks' AND r.state IN ('open', 'todo', 'doing', 'blocked') AND t.project_id = ?1",
         )?;
-        let rows = stmt.query_map([], |r| {
+        let rows = stmt.query_map([p.id], |r| {
             Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?, r.get::<_, String>(3)?))
         })?;
         for row in rows {
@@ -422,8 +427,7 @@ fn build_project_page(
     let tasks: Vec<&Record> = all.iter().filter(|r| r.kind == Kind::Task).collect();
 
     let board = current.as_ref().map(|cur| {
-        let ids: Vec<i64> =
-            std::iter::once(cur.id).chain(ms.iter().filter(|s| s.parent_id == Some(cur.id)).map(|s| s.id)).collect();
+        let ids: Vec<i64> = projects::with_steps(&ms, cur.id);
         let mut mine: Vec<&Record> =
             tasks.iter().copied().filter(|t| t.milestone_id.is_some_and(|m| ids.contains(&m))).collect();
         mine.sort_by(|a, b| a.position.partial_cmp(&b.position).unwrap_or(std::cmp::Ordering::Equal));
@@ -471,7 +475,7 @@ fn build_project_page(
         let sub = match r.kind {
             Kind::Decision => format!(
                 "{} · {}",
-                fmt_utc(r.data.get("said_at").and_then(Value::as_i64).unwrap_or(r.created_at)).get(..10).unwrap_or(""),
+                crate::util::fmt_date(r.data.get("said_at").and_then(Value::as_i64).unwrap_or(r.created_at)),
                 r.state
             ),
             Kind::Question if r.state == "answered" => format!("answered {}", ago(r.updated_at, now)),
@@ -480,8 +484,10 @@ fn build_project_page(
         };
         RecordRow::new(r, sub)
     };
+    // Decisions by when the owner said them, newest first.
     let mut decisions_all: Vec<&Record> = all.iter().filter(|r| r.kind == Kind::Decision).collect();
-    decisions_all.sort_by_key(|r| std::cmp::Reverse(r.number));
+    decisions_all
+        .sort_by_key(|r| std::cmp::Reverse(r.data.get("said_at").and_then(Value::as_i64).unwrap_or(r.created_at)));
     let mut questions_all: Vec<&Record> = all.iter().filter(|r| r.kind == Kind::Question).collect();
     questions_all.sort_by_key(|r| std::cmp::Reverse(r.number));
 
@@ -495,8 +501,7 @@ fn build_project_page(
     let groups = if tab == "tasks" {
         let mut groups = Vec::new();
         for m in ms.iter().filter(|m| m.parent_id.is_none()) {
-            let ids: Vec<i64> =
-                std::iter::once(m.id).chain(ms.iter().filter(|s| s.parent_id == Some(m.id)).map(|s| s.id)).collect();
+            let ids: Vec<i64> = projects::with_steps(&ms, m.id);
             let mut rows: Vec<&Record> =
                 tasks.iter().copied().filter(|t| t.milestone_id.is_some_and(|x| ids.contains(&x))).collect();
             rows.sort_by(|a, b| a.position.partial_cmp(&b.position).unwrap_or(std::cmp::Ordering::Equal));
@@ -561,8 +566,15 @@ fn build_project_page(
         groups,
         questions,
         prs_total: 0,
-        prs: super::buttons::pr_rows(c, p.id, now)?,
-        releases: super::buttons::release_rows(c, p.id, now)?,
+        has_stack_button: false,
+        tabs: TABS,
+        // Merge order and releases appear on the overview and the Pull requests tab only.
+        prs: if matches!(tab, "overview" | "prs") { super::buttons::pr_rows(c, p.id, now)? } else { Vec::new() },
+        releases: if matches!(tab, "overview" | "prs") {
+            super::buttons::release_rows(c, p.id, now)?
+        } else {
+            Vec::new()
+        },
         notice: None,
         notice_bad: false,
         next: String::new(),
@@ -621,12 +633,25 @@ struct RecordPage {
     next: String,
 }
 
+#[derive(Deserialize)]
+struct RecordQuery {
+    error: Option<String>,
+}
+
 async fn record(
     State(state): State<AppState>,
     Extension(actor): Extension<Actor>,
     Path((slug, id)): Path<(String, String)>,
+    Query(q): Query<RecordQuery>,
 ) -> AppResult<Response> {
-    let page = load_record_page(&state, &actor, slug, id, None).await?;
+    // Only fixed messages come from the address, never text from it.
+    let error = q.error.as_deref().map(|code| match code {
+        "answered" => "This question was already answered.".to_owned(),
+        "option" => "That option doesn't exist; pick one of the list.".to_owned(),
+        "empty" => "Pick an option or write an answer.".to_owned(),
+        _ => "That didn't work; nothing was saved. Try again.".to_owned(),
+    });
+    let page = load_record_page(&state, &actor, slug, id, error).await?;
     render(page)
 }
 
@@ -642,7 +667,9 @@ async fn load_record_page(
     let page = state
         .db
         .call(move |c| {
-            let Ok(r) = records::find_str(c, &format!("{slug}/{id}"), None) else { return Ok(None) };
+            // A malformed id is a page that doesn't exist; a database failure is an error.
+            let Ok(rref) = records::RecordRef::parse(&format!("{slug}/{id}")) else { return Ok(None) };
+            let Some(r) = records::try_find(c, &rref, None)? else { return Ok(None) };
             let project = projects::get_by_id(c, r.project_id)?;
             let links = records::links_of(c, &r)?;
             let history = records::revisions(c, r.id)?;
@@ -704,6 +731,19 @@ async fn load_record_page(
                 }
             }
         }
+        Kind::Release => {
+            extra.push(("Tag".into(), r.str("tag").into()));
+            if let Some(waits) = r.data.get("waits_for").and_then(Value::as_array) {
+                let list: Vec<String> = waits
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(|w| w.rsplit('/').next().unwrap_or(w).replace("PR-", "#"))
+                    .collect();
+                if !list.is_empty() {
+                    extra.push(("Waits for".into(), list.join(", ")));
+                }
+            }
+        }
         _ => {}
     }
 
@@ -746,11 +786,7 @@ async fn load_record_page(
         stale,
         history: history
             .iter()
-            .map(|h| HistoryRow {
-                rev: h.rev,
-                at: fmt_utc(h.at).get(5..16).unwrap_or("").into(),
-                text: describe_revision(h, &r),
-            })
+            .map(|h| HistoryRow { rev: h.rev, at: crate::util::fmt_short(h.at), text: describe_revision(h, &r) })
             .collect(),
         error,
         buttons,
@@ -760,9 +796,21 @@ async fn load_record_page(
 }
 
 fn describe_revision(h: &records::Revision, r: &Record) -> String {
-    let who = h.author.clone();
+    let who = if h.author == "owner" { "You".to_owned() } else { h.author.clone() };
     if h.rev == 1 {
         return format!("{who} created the {}.", r.kind.label().to_lowercase());
+    }
+    // The owner's answer reads as the answer, not as a list of fields.
+    if let Some(obj) = h.changes.as_object()
+        && obj.contains_key("answer")
+    {
+        let words = obj.get("answer").and_then(Value::as_str).unwrap_or("").trim();
+        let option = obj.get("answer_option_title").and_then(Value::as_str);
+        return match (option, words) {
+            (Some(o), "") => format!("{who} answered: {o}."),
+            (Some(o), w) => format!("{who} answered: {o}, “{w}”."),
+            (None, w) => format!("{who} answered: “{w}”."),
+        };
     }
     let mut parts: Vec<String> = Vec::new();
     if let Some(obj) = h.changes.as_object() {
@@ -824,14 +872,24 @@ async fn answer(
                 .target(q.ref_id.clone())
                 .ip(Some(ip.0));
             activity::write(&state.db, e).await;
-            let next = form.next.filter(|n| n.starts_with('/') && !n.starts_with("//")).unwrap_or_else(|| q.url());
+            // Back to the Dashboard: it says where the answer went and shows the next question.
+            let next = super::local_path(form.next.as_deref()).unwrap_or_else(|| format!("/?answered={}", q.ref_id));
             Ok(Redirect::to(&next).into_response())
         }
         Err(e) => {
-            let page = load_record_page(&state, &actor, slug, id, Some(format!("{e:#}"))).await?;
-            render(page)
+            // Back to the question with the reason, so reloading doesn't send the form again.
+            let msg = format!("{e:#}");
+            let code = if msg.contains("already") {
+                "answered"
+            } else if msg.contains("no option") {
+                "option"
+            } else if msg.contains("Pick an option") {
+                "empty"
+            } else {
+                tracing::warn!("answering {slug}/{id}: {msg}");
+                "failed"
+            };
+            Ok(Redirect::to(&format!("/p/{slug}/{id}?error={code}")).into_response())
         }
     }
 }
-
-use axum::response::IntoResponse;

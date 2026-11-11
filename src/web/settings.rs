@@ -12,7 +12,7 @@ use serde_json::json;
 use webauthn_rs::prelude::RegisterPublicKeyCredential;
 
 use super::pages::{Nav, nav, render};
-use super::{AppError, AppResult, AppState, ClientIp};
+use super::{AppError, AppResult, AppState, ClientIp, json_error};
 use crate::activity::{self, Action, Entry, Via};
 use crate::auth::{self, Actor, TokenKind};
 use crate::push::{self, Kind, Notification};
@@ -33,11 +33,6 @@ pub fn routes() -> Router<AppState> {
         .route("/settings/tokens/{id}/revoke", post(token_revoke))
         .route("/settings/tokens/{id}/rotate", post(token_rotate))
         .route("/settings/sessions/{id}/end", post(session_end))
-}
-
-/// A JSON error for the endpoints the page's scripts call.
-fn json_error(status: StatusCode, message: impl Into<String>) -> Response {
-    (status, Json(json!({"error": message.into()}))).into_response()
 }
 
 /// The refusal for a non-owner calling one of the JSON endpoints, if it isn't the owner.
@@ -79,6 +74,7 @@ struct TokenView {
     kind: String,
     can: &'static str,
     used: String,
+    added: String,
     from: String,
 }
 
@@ -189,6 +185,7 @@ async fn render_page(
                 _ => "read, CLI and viber-run",
             },
             used: when(t.last_used_at),
+            added: ago(t.created_at, now),
             from: t.last_used_from.clone().unwrap_or_default(),
             kind: t.kind,
         })

@@ -19,17 +19,10 @@ pub struct Waiting {
     pub builds: Vec<Record>,
 }
 
-impl Waiting {
-    /// The number in the navigation: everything with a button for the owner except merges.
-    pub fn count(&self) -> usize {
-        self.questions.len() + self.builds.len()
-    }
-}
-
 pub fn load(conn: &Connection) -> anyhow::Result<Waiting> {
     let mut questions = records::query(
         conn,
-        &Query { kinds: vec![Kind::Question], states: vec!["open".into()], limit: 200, ..Default::default() },
+        &Query { kinds: vec![Kind::Question], states: vec!["open".into()], limit: 0, ..Default::default() },
     )?;
     // Urgent first, then questions that block something, then the oldest.
     let blocking = blocking_ids(conn)?;
@@ -37,25 +30,34 @@ pub fn load(conn: &Connection) -> anyhow::Result<Waiting> {
         let urgent = q.data.get("urgent").and_then(Value::as_bool).unwrap_or(false);
         (!urgent, !blocking.contains(&q.id), q.created_at)
     });
-    // PRs the agent marked ready and GitHub would merge, and releases whose PRs are all merged.
-    let mut merges: Vec<Record> = records::query(
-        conn,
-        &Query { kinds: vec![Kind::Pr], states: vec!["open".into()], limit: 500, ..Default::default() },
-    )?
-    .into_iter()
-    .filter(|r| crate::prs::merge_ready(r).is_ok())
-    .collect();
+    // PRs that can be merged now (ready, and not waiting for a PR they're based on), in each
+    // project's merge order; then releases whose PRs are all merged.
+    let mut merges: Vec<Record> = Vec::new();
+    let mut with_prs: Vec<i64> =
+        records::query(conn, &Query { kinds: vec![Kind::Pr], states: vec!["open".into()], ..Default::default() })?
+            .iter()
+            .map(|r| r.project_id)
+            .collect();
+    with_prs.sort_unstable();
+    with_prs.dedup();
+    for project_id in with_prs {
+        for o in crate::prs::merge_order(conn, project_id)? {
+            if o.after.is_none() && crate::prs::merge_ready(&o.record).is_ok() {
+                merges.push(o.record);
+            }
+        }
+    }
     for r in records::query(
         conn,
-        &Query { kinds: vec![Kind::Release], states: vec!["waiting".into()], limit: 100, ..Default::default() },
+        &Query { kinds: vec![Kind::Release], states: vec!["waiting".into()], ..Default::default() },
     )? {
-        if crate::poller::release_ready(conn, &r)? {
+        if crate::prs::release_ready(conn, &r)? {
             merges.push(r);
         }
     }
     let builds = records::query(
         conn,
-        &Query { kinds: vec![Kind::Build], states: vec!["published".into()], limit: 100, ..Default::default() },
+        &Query { kinds: vec![Kind::Build], states: vec!["published".into()], limit: 0, ..Default::default() },
     )?
     .into_iter()
     .filter(|r| r.data.get("ready_for_feedback").and_then(Value::as_bool).unwrap_or(false))
@@ -81,18 +83,14 @@ fn blocking_ids(conn: &Connection) -> anyhow::Result<Vec<i64>> {
     Ok(rows.collect::<Result<_, _>>()?)
 }
 
-/// What a question blocks, e.g. ["T-14", "PR-56"], for the featured card's chip.
-pub fn blocks(conn: &Connection, q: &Record) -> anyhow::Result<Vec<String>> {
-    let mut stmt = conn.prepare(
-        "SELECT r.kind, r.number, p.slug FROM links l JOIN records r ON r.id = l.to_id JOIN projects p ON p.id = r.project_id
-         WHERE l.from_id = ?1 AND l.relation = 'blocks'",
-    )?;
-    let rows = stmt.query_map([q.id], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?, r.get::<_, String>(2)?)))?;
+/// What a question blocks, by name and page, for "Blocks: Sidebar layout".
+pub fn blocks(conn: &Connection, q: &Record) -> anyhow::Result<Vec<(String, String)>> {
+    let mut stmt = conn.prepare("SELECT to_id FROM links WHERE from_id = ?1 AND relation = 'blocks' ORDER BY id")?;
+    let ids: Vec<i64> = stmt.query_map([q.id], |r| r.get(0))?.collect::<Result<_, _>>()?;
     let mut out = Vec::new();
-    for row in rows {
-        let (kind, n, slug) = row?;
-        let prefix = Kind::parse(&kind).map(|k| k.prefix()).unwrap_or("?");
-        out.push(if slug == q.project { format!("{prefix}-{n}") } else { format!("{slug}/{prefix}-{n}") });
+    for id in ids {
+        let r = records::get(conn, id)?;
+        out.push((r.title.clone(), r.url()));
     }
     Ok(out)
 }
@@ -102,9 +100,22 @@ pub fn blocks(conn: &Connection, q: &Record) -> anyhow::Result<Vec<String>> {
 
 /// Events in the project that someone else caused (the owner answering, another agent, the
 /// consultant, AgentFlow itself), after the agent's cursor.
+/// Returns at most `UNREAD_PAGE`; the caller moves the cursor to the last one it handed out.
 pub fn unread(conn: &Connection, project_id: i64, slug: &str) -> anyhow::Result<Vec<Event>> {
     let after = cursor(conn, project_id)?;
-    Ok(records::events(conn, Some(project_id), after, 200)?.into_iter().filter(|e| e.actor != slug).collect())
+    records::events_by_others(conn, project_id, slug, after, UNREAD_PAGE)
+}
+
+pub const UNREAD_PAGE: i64 = 200;
+
+/// How many unread events there are, without a cap.
+pub fn unread_count(conn: &Connection, project_id: i64, slug: &str) -> anyhow::Result<i64> {
+    let after = cursor(conn, project_id)?;
+    Ok(conn.query_row(
+        "SELECT count(*) FROM events WHERE project_id = ?1 AND seq > ?2 AND actor != ?3",
+        params![project_id, after, slug],
+        |r| r.get(0),
+    )?)
 }
 
 pub fn cursor(conn: &Connection, project_id: i64) -> anyhow::Result<i64> {
@@ -114,7 +125,7 @@ pub fn cursor(conn: &Connection, project_id: i64) -> anyhow::Result<i64> {
         Some(c) => Ok(c),
         // A new agent starts from now, not from the project's whole history.
         None => {
-            let latest: i64 = conn.query_row("SELECT coalesce(max(seq), 0) FROM events", [], |r| r.get(0))?;
+            let latest = latest_seq(conn)?;
             set_cursor(conn, project_id, latest)?;
             Ok(latest)
         }
@@ -130,7 +141,7 @@ pub fn set_cursor(conn: &Connection, project_id: i64, seq: i64) -> anyhow::Resul
     Ok(())
 }
 
-/// The newest event seq overall; a reader that has seen everything moves its cursor here.
+/// The newest event seq overall; where a new agent starts reading.
 pub fn latest_seq(conn: &Connection) -> anyhow::Result<i64> {
     Ok(conn.query_row("SELECT coalesce(max(seq), 0) FROM events", [], |r| r.get(0))?)
 }
@@ -172,9 +183,8 @@ mod tests {
             let w = load(c)?;
             let order: Vec<_> = w.questions.iter().map(|q| q.title.as_str()).collect();
             assert_eq!(order, ["urgent", "blocker", "old"]);
-            assert_eq!(w.count(), 3);
             assert_eq!(count(c)?, 3);
-            assert_eq!(blocks(c, &blocker)?, ["T-1"]);
+            assert_eq!(blocks(c, &blocker)?, [("t".to_owned(), "/p/v/T-1".to_owned())]);
             let _ = urgent;
             Ok(())
         })
@@ -195,6 +205,31 @@ mod tests {
             assert!(unread(c, p, "v")?.is_empty());
             set_cursor(c, p, 1)?;
             assert_eq!(cursor(c, p)?, seq, "cursors never move back");
+            Ok(())
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn many_own_events_dont_hide_the_owners() {
+        let db = Db::open_memory();
+        db.call_blocking(|c| {
+            let p = crate::projects::create(c, "v", "V", "admin")?.id;
+            cursor(c, p)?;
+            for i in 0..250 {
+                records::event(c, Some(p), None, "task.created", &format!("own {i}"), "v")?;
+            }
+            records::event(c, Some(p), None, "question.answered", "Owner answered Q-1", "owner")?;
+            let u = unread(c, p, "v")?;
+            assert_eq!(u.len(), 1);
+            assert_eq!(unread_count(c, p, "v")?, 1);
+            for i in 0..(UNREAD_PAGE + 5) {
+                records::event(c, Some(p), None, "x", &format!("theirs {i}"), "owner")?;
+            }
+            let page = unread(c, p, "v")?;
+            assert_eq!(page.len() as i64, UNREAD_PAGE);
+            set_cursor(c, p, page.last().unwrap().seq)?;
+            assert_eq!(unread(c, p, "v")?.len(), 6, "the rest stays unread, nothing is skipped");
             Ok(())
         })
         .unwrap();

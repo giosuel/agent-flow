@@ -1,5 +1,5 @@
-// AgentFlow's small helpers. The pages work without JavaScript wherever they can; htmx does the
-// partial updates.
+// AgentFlow's small helpers. The pages are plain forms and links and work without JavaScript
+// wherever they can.
 "use strict";
 
 // Buttons with data-confirm ask before they submit (no inline handlers: the CSP forbids them).
@@ -10,3 +10,10 @@ document.addEventListener("click", (e) => {
     e.stopImmediatePropagation();
   }
 }, true);
+
+// Keep the current milestone in view in the (scrolling) milestone strip.
+document.addEventListener("DOMContentLoaded", () => {
+  const now = document.querySelector(".ms-strip .ms.now");
+  const strip = now && now.parentElement;
+  if (strip) strip.scrollLeft = now.offsetLeft - strip.offsetLeft - 24;
+});

@@ -4,7 +4,6 @@
 
 use std::time::Duration;
 
-use rusqlite::Connection;
 use serde_json::Value;
 
 use crate::activity::{self, Action, Entry, Via};
@@ -50,77 +49,58 @@ pub async fn poll_once(state: &AppState) -> anyhow::Result<()> {
 }
 
 pub async fn poll_project(state: &AppState, p: &projects::Project) -> anyhow::Result<()> {
-    let mut infos = state.github.open_prs(&p.repo).await?;
-    // PRs we still have as open but GitHub no longer lists: fetch them to learn merged or closed.
+    let infos = state.github.open_prs(&p.repo).await?;
+    let listed: Vec<i64> = infos.iter().map(|i| i.number).collect();
+    for info in infos {
+        apply(state, p, &p.repo, info).await?;
+    }
+    // PRs still open here that GitHub no longer lists: fetch each from its own repository to learn
+    // merged or closed. One that fails is logged and retried next round; the others go on.
     let pid = p.id;
-    let known_open: Vec<i64> = state
+    let known_open: Vec<(i64, String)> = state
         .db
         .call(move |c| {
-            Ok(records::query(
+            let open = records::query(
                 c,
                 &Query {
                     project_id: Some(pid),
                     kinds: vec![Kind::Pr],
                     states: vec!["open".into()],
-                    limit: 500,
                     ..Default::default()
                 },
-            )?
-            .into_iter()
-            .map(|r| r.number)
-            .collect())
+            )?;
+            Ok(open.into_iter().map(|r| (r.number, r.str("repo").to_owned())).collect())
         })
         .await?;
-    for n in known_open {
-        if !infos.iter().any(|i| i.number == n) {
-            infos.push(state.github.pr(&p.repo, n).await?);
+    for (n, repo) in known_open.into_iter().filter(|(n, _)| !listed.contains(n)) {
+        let repo = if repo.is_empty() { p.repo.clone() } else { repo };
+        let fetched = state.github.pr(&repo, n).await;
+        match fetched {
+            Ok(info) => apply(state, p, &repo, info).await?,
+            Err(e) => {
+                let e = Entry::new(
+                    &Actor::System("poller"),
+                    Via::Poller,
+                    Action::System,
+                    format!("GitHub poll of {repo}#{n} failed: {e:#}"),
+                )
+                .project(p.slug.clone())
+                .severity("warn");
+                activity::write(&state.db, e).await;
+            }
         }
-    }
-    for info in infos {
-        apply(state, p, info).await?;
     }
     Ok(())
 }
 
-/// Stores one PR's state and reacts to what changed.
-pub async fn apply(state: &AppState, p: &projects::Project, info: PrInfo) -> anyhow::Result<()> {
-    let project = p.clone();
+/// Stores one PR's state (with its events) and tells the owner when it became mergeable.
+pub async fn apply(state: &AppState, p: &projects::Project, repo: &str, info: PrInfo) -> anyhow::Result<()> {
+    let (project, repo) = (p.clone(), repo.to_owned());
     let (r, res) = state
         .db
         .call(move |c| {
             let tx = c.transaction()?;
-            let out = prs::sync(&tx, &project, &project.repo, &info, "poller")?;
-            let (r, res) = &out;
-            if res.merged {
-                records::event(
-                    &tx,
-                    Some(project.id),
-                    Some(r.id),
-                    "pr.merged",
-                    &format!("{} merged: {}", r.short_id(), r.title),
-                    "github",
-                )?;
-            }
-            if res.closed {
-                records::event(
-                    &tx,
-                    Some(project.id),
-                    Some(r.id),
-                    "pr.closed",
-                    &format!("{} closed without merging", r.short_id()),
-                    "github",
-                )?;
-            }
-            if res.ci_failed {
-                records::event(
-                    &tx,
-                    Some(project.id),
-                    Some(r.id),
-                    "pr.ci_failed",
-                    &format!("CI failing on {}", r.short_id()),
-                    "github",
-                )?;
-            }
+            let out = prs::sync(&tx, &project, &repo, &info, prs::GITHUB)?;
             tx.commit()?;
             Ok(out)
         })
@@ -150,17 +130,18 @@ async fn check_releases(state: &AppState) -> anyhow::Result<()> {
         .call(|c| {
             let waiting = records::query(
                 c,
-                &Query { kinds: vec![Kind::Release], states: vec!["waiting".into()], limit: 200, ..Default::default() },
+                &Query { kinds: vec![Kind::Release], states: vec!["waiting".into()], limit: 0, ..Default::default() },
             )?;
             let mut out = Vec::new();
             for r in waiting {
-                if r.data.get("notified_ready").and_then(Value::as_bool).unwrap_or(false) || !release_ready(c, &r)? {
+                if r.data.get("notified_ready").and_then(Value::as_bool).unwrap_or(false) || !prs::release_ready(c, &r)?
+                {
                     continue;
                 }
                 let mut data = serde_json::Map::new();
                 data.insert("notified_ready".into(), true.into());
                 let (r, _) =
-                    records::update(c, &r, "poller", records::Patch { data, quiet: true, ..Default::default() })?;
+                    records::update(c, &r, prs::GITHUB, records::Patch { data, quiet: true, ..Default::default() })?;
                 let name = projects::get_by_id(c, r.project_id)?.name;
                 records::event(
                     c,
@@ -168,7 +149,7 @@ async fn check_releases(state: &AppState) -> anyhow::Result<()> {
                     Some(r.id),
                     "release.ready",
                     &format!("{} can be tagged: every PR is merged", r.str("tag")),
-                    "github",
+                    prs::GITHUB,
                 )?;
                 out.push((name, r));
             }
@@ -187,20 +168,4 @@ async fn check_releases(state: &AppState) -> anyhow::Result<()> {
         );
     }
     Ok(())
-}
-
-/// Every PR the release waits for is merged.
-pub fn release_ready(c: &Connection, r: &records::Record) -> anyhow::Result<bool> {
-    let waits: Vec<String> = r
-        .data
-        .get("waits_for")
-        .and_then(Value::as_array)
-        .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_owned)).collect())
-        .unwrap_or_default();
-    for w in waits {
-        if records::find_str(c, &w, None)?.state != "merged" {
-            return Ok(false);
-        }
-    }
-    Ok(true)
 }

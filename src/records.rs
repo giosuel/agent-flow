@@ -115,6 +115,30 @@ impl fmt::Display for Kind {
     }
 }
 
+/// Has the record reached the end its kind works towards (a PR merged, a task done, …)?
+pub fn is_finished(r: &Record) -> bool {
+    r.state == finished_word(r.kind)
+}
+
+/// The state that counts as finished for a kind, for "unlocks once T-1 is done".
+pub fn finished_word(kind: Kind) -> &'static str {
+    match kind {
+        Kind::Pr => "merged",
+        Kind::Release => "tagged",
+        Kind::Question => "answered",
+        Kind::Build => "tried",
+        Kind::Contribution => "merged",
+        Kind::Decision | Kind::Adr => "current",
+        Kind::Feedback => "works",
+        Kind::Task => "done",
+    }
+}
+
+/// How the owner sees a record's id: GitHub's "#58" for PRs, "T-14" otherwise.
+pub fn display_id(r: &Record) -> String {
+    if r.kind == Kind::Pr { format!("#{}", r.number) } else { r.short_id() }
+}
+
 /// `vinculum/Q-12`, or `Q-12` within the caller's own project.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RecordRef {
@@ -227,13 +251,19 @@ pub fn get(conn: &Connection, id: i64) -> anyhow::Result<Record> {
 /// Looks up `vinculum/Q-12` (or `Q-12` in `default_project`).
 pub fn find(conn: &Connection, r: &RecordRef, default_project: Option<&str>) -> anyhow::Result<Record> {
     let project = r.project.as_deref().or(default_project).context("say which project, e.g. vinculum/Q-12")?;
-    conn.query_row(
-        &format!("{RECORD_SELECT} WHERE p.slug = ?1 AND r.kind = ?2 AND r.number = ?3"),
-        params![project, r.kind.as_str(), r.number],
-        record_from_row,
-    )
-    .optional()?
-    .with_context(|| format!("no record {project}/{}-{}", r.kind.prefix(), r.number))
+    try_find(conn, r, default_project)?.with_context(|| format!("no record {project}/{}-{}", r.kind.prefix(), r.number))
+}
+
+/// Like `find`, but "no such record" is `None` and only real failures are errors.
+pub fn try_find(conn: &Connection, r: &RecordRef, default_project: Option<&str>) -> anyhow::Result<Option<Record>> {
+    let project = r.project.as_deref().or(default_project).context("say which project, e.g. vinculum/Q-12")?;
+    Ok(conn
+        .query_row(
+            &format!("{RECORD_SELECT} WHERE p.slug = ?1 AND r.kind = ?2 AND r.number = ?3"),
+            params![project, r.kind.as_str(), r.number],
+            record_from_row,
+        )
+        .optional()?)
 }
 
 pub fn find_str(conn: &Connection, id: &str, default_project: Option<&str>) -> anyhow::Result<Record> {
@@ -322,7 +352,7 @@ pub fn create(conn: &Connection, project_id: i64, author: &str, new: NewRecord) 
         Some(project_id),
         Some(id),
         &format!("{kind}.created"),
-        &format!("{} {}: {}", kind.label(), record.short_id(), title),
+        &format!("{} {}: {}", kind.label(), display_id(&record), title),
         author,
     )?;
     Ok(record)
@@ -437,7 +467,7 @@ pub fn update(conn: &Connection, record: &Record, author: &str, patch: Patch) ->
         Some(record.project_id),
         Some(record.id),
         &format!("{}.updated", record.kind),
-        &format!("{} {}: {what}", record.kind.label(), record.short_id()),
+        &format!("{} {}: {what}", record.kind.label(), display_id(record)),
         author,
     )?;
     Ok((get(conn, record.id)?, true))
@@ -446,17 +476,26 @@ pub fn update(conn: &Connection, record: &Record, author: &str, patch: Patch) ->
 fn describe_changes(changes: &Map<String, Value>, note: &str) -> String {
     let mut parts: Vec<String> = changes
         .iter()
-        .filter(|(k, _)| !k.ends_with("_at"))
-        .map(|(k, v)| match (k.as_str(), v) {
-            ("state", Value::String(s)) => format!("now {s}"),
-            ("milestone", Value::String(m)) if !m.is_empty() => format!("moved to {m}"),
-            (k, _) => format!("{k} changed"),
+        .filter_map(|(k, v)| {
+            Some(match (k.as_str(), v) {
+                ("state", Value::String(s)) => format!("now {s}"),
+                ("milestone", Value::String(m)) if !m.is_empty() => format!("moved to {m}"),
+                ("ready", Value::Bool(true)) => "marked ready to merge".into(),
+                ("ready", Value::Bool(false)) => "no longer ready".into(),
+                ("title", _) => "renamed".into(),
+                ("body", _) => "details updated".into(),
+                ("tags", _) => "tags changed".into(),
+                ("resurface_when", Value::String(w)) => format!("comes back {w}"),
+                ("estimate", Value::String(e)) => format!("estimate {e}"),
+                // Bookkeeping (timestamps, GitHub's CI and merge state) isn't news.
+                _ => return None,
+            })
         })
         .collect();
     if !note.trim().is_empty() {
         parts.push(note.trim().to_owned());
     }
-    parts.join(", ")
+    if parts.is_empty() { "updated".into() } else { parts.join(", ") }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -497,16 +536,16 @@ pub fn answer_question(
         bail!("{} isn't a question", q.ref_id);
     }
     if q.state != "open" {
-        bail!("{} is already {}", q.ref_id, q.state);
+        bail!("{} is already {}.", q.ref_id, q.state);
     }
     let options = q.data.get("options").and_then(Value::as_array).cloned().unwrap_or_default();
     let chosen = match option {
-        Some(n) if n == 0 || n as usize > options.len() => bail!("there is no option {n}"),
+        Some(n) if n == 0 || n as usize > options.len() => bail!("There's no option {n}."),
         Some(n) => Some((n, options[n as usize - 1].get("title").and_then(Value::as_str).unwrap_or("").to_owned())),
         None => None,
     };
     if chosen.is_none() && words.trim().is_empty() {
-        bail!("pick an option or write an answer");
+        bail!("Pick an option or write an answer.");
     }
     let mut data = Map::new();
     data.insert("answer".into(), words.to_owned().into());
@@ -571,6 +610,11 @@ pub fn link(conn: &Connection, from: &Record, to: &Record, relation: &str, autho
     check_relation(relation)?;
     if from.id == to.id {
         bail!("a record can't link to itself");
+    }
+    // These relations say something about (or change) the target, so they stay inside one project;
+    // only `relates` and `depends_on` may point at another project's records.
+    if from.project_id != to.project_id && !matches!(relation, "relates" | "depends_on") {
+        bail!("\"{relation}\" links stay inside one project; {} belongs to {}", to.ref_id, to.project);
     }
     let n = conn.execute(
         "INSERT OR IGNORE INTO links (from_id, to_id, relation, author, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
@@ -681,8 +725,10 @@ pub fn query(conn: &Connection, q: &Query) -> anyhow::Result<Vec<Record>> {
         push(&mut sql, " AND r.updated_at >= ?", s.into());
     }
     sql.push_str(" ORDER BY r.updated_at DESC");
-    let limit = if q.limit > 0 { q.limit.min(500) } else { 100 };
-    sql.push_str(&format!(" LIMIT {limit}"));
+    // 0 means everything (AgentFlow's own views); agents ask for a page.
+    if q.limit > 0 {
+        sql.push_str(&format!(" LIMIT {}", q.limit.min(1000)));
+    }
     let params: Vec<rusqlite::types::Value> = args
         .into_iter()
         .map(|v| match v {
@@ -725,14 +771,20 @@ pub struct Event {
     pub actor: String,
 }
 
-/// Events after `after_seq`, oldest first; for one project or all.
-pub fn events(conn: &Connection, project_id: Option<i64>, after_seq: i64, limit: i64) -> anyhow::Result<Vec<Event>> {
+/// Events in one project after `after_seq` that `actor` didn't cause, oldest first.
+pub fn events_by_others(
+    conn: &Connection,
+    project_id: i64,
+    actor: &str,
+    after_seq: i64,
+    limit: i64,
+) -> anyhow::Result<Vec<Event>> {
     let mut stmt = conn.prepare(
         "SELECT e.seq, e.at, p.slug, r.kind, r.number, e.kind, e.summary, e.actor
          FROM events e LEFT JOIN projects p ON p.id = e.project_id LEFT JOIN records r ON r.id = e.record_id
-         WHERE e.seq > ?1 AND (?2 IS NULL OR e.project_id = ?2) ORDER BY e.seq LIMIT ?3",
+         WHERE e.project_id = ?1 AND e.seq > ?2 AND e.actor != ?3 ORDER BY e.seq LIMIT ?4",
     )?;
-    let rows = stmt.query_map(params![after_seq, project_id, limit], event_from_row)?;
+    let rows = stmt.query_map(params![project_id, after_seq, actor, limit], event_from_row)?;
     Ok(rows.collect::<Result<_, _>>()?)
 }
 
@@ -852,6 +904,27 @@ mod tests {
     }
 
     #[test]
+    fn links_that_change_their_target_stay_in_the_project() {
+        let db = Db::open_memory();
+        db.call_blocking(|c| {
+            let a = setup(c);
+            let b = crate::projects::create(c, "other", "Other", "test")?.id;
+            let dec = |p: i64| {
+                create(c, p, "x", NewRecord { kind: Some(Kind::Decision), title: "d".into(), ..Default::default() })
+            };
+            let (mine, theirs) = (dec(a)?, dec(b)?);
+            for relation in ["supersedes", "blocks", "implements", "answers", "records", "feedback_on"] {
+                assert!(link(c, &mine, &theirs, relation, "vinculum").is_err(), "{relation}");
+            }
+            assert_eq!(get(c, theirs.id)?.state, "current", "untouched");
+            assert!(link(c, &mine, &theirs, "relates", "vinculum")?);
+            assert!(link(c, &mine, &theirs, "depends_on", "vinculum")?);
+            Ok(())
+        })
+        .unwrap();
+    }
+
+    #[test]
     fn links_supersede_and_staleness() {
         let db = Db::open_memory();
         db.call_blocking(|c| {
@@ -882,7 +955,7 @@ mod tests {
             // The task depends on D-1, which changed (was replaced) after the task did.
             assert!(views.iter().any(|l| l.relation == "depends_on" && l.stale));
 
-            let evs = events(c, Some(p), 0, 100)?;
+            let evs = events_by_others(c, p, "nobody", 0, 100)?;
             assert!(evs.iter().any(|e| e.kind == "decision.updated" && e.summary.contains("now replaced")));
             assert_eq!(recent_events(c, None, 1)?[0].seq, evs.last().unwrap().seq);
             Ok(())

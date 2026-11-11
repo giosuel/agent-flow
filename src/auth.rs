@@ -74,19 +74,24 @@ impl Actor {
         if self.is_owner() { Ok(()) } else { Err(Forbidden("only the owner can do this in the browser")) }
     }
 
-    /// May this identity change records of `project_id`?
+    /// May this identity change records of `project_id` through MCP or the API? The one place
+    /// that decides it. The owner works through the pages (answers, buttons, feedback), which
+    /// check `require_owner` themselves; agents' records are read-only to them there.
     pub fn can_write_project(&self, project_id: i64) -> bool {
         match self {
-            Actor::Owner { .. } | Actor::Admin { .. } | Actor::System(_) => true,
+            Actor::Admin { .. } | Actor::System(_) => true,
             Actor::Project { project_id: own, .. } => *own == project_id,
-            Actor::Device { .. } | Actor::Anonymous => false,
+            Actor::Owner { .. } | Actor::Device { .. } | Actor::Anonymous => false,
         }
     }
 
     /// The owner's display line in the header, e.g. "giosuel · passkey".
     pub fn label(&self) -> String {
         match self {
-            Actor::Owner { method, .. } => format!("owner · {method}"),
+            Actor::Owner { method, .. } => match method.as_str() {
+                "passkey" => "signed in with a passkey".into(),
+                _ => "signed in with a one-time link".into(),
+            },
             other => format!("{} · {}", other.name(), other.kind()),
         }
     }
@@ -237,11 +242,12 @@ pub fn token_actor(conn: &Connection, secret: &str, from: &str) -> anyhow::Resul
     Ok(Some(match kind.as_str() {
         "device" => Actor::Device { token_id: id, name },
         "admin" => Actor::Admin { token_id: id, name },
-        _ => Actor::Project {
+        "project" => Actor::Project {
             token_id: id,
             project_id: project_id.context("project token without a project")?,
             slug: slug.unwrap_or_default(),
         },
+        other => bail!("token {id} has an unknown kind {other:?}"),
     }))
 }
 
@@ -252,7 +258,8 @@ pub const LINK_MINUTES: i64 = 15;
 
 /// Creates a one-time sign-in link secret, valid for 15 minutes.
 pub fn create_login_link(conn: &Connection, purpose: &str) -> anyhow::Result<String> {
-    let secret = new_secret("");
+    // The prefix lets the log's redaction recognise it anywhere.
+    let secret = new_secret("af_lnk_");
     let now = now_ms();
     conn.execute(
         "INSERT INTO login_links (hash, purpose, created_at, expires_at) VALUES (?1, ?2, ?3, ?4)",
@@ -286,7 +293,7 @@ pub fn create_session(
     user_agent: Option<&str>,
     ip: Option<&str>,
 ) -> anyhow::Result<String> {
-    let secret = new_secret("");
+    let secret = new_secret("af_ses_");
     let now = now_ms();
     conn.execute(
         "INSERT INTO web_sessions (hash, method, created_at, last_seen_at, expires_at, user_agent, ip)

@@ -9,7 +9,7 @@ use axum::{Extension, Json, Router};
 use axum_extra::extract::CookieJar;
 use axum_extra::extract::cookie::{Cookie, SameSite};
 
-use super::{AppResult, AppState, ClientIp, SESSION_COOKIE};
+use super::{AppResult, AppState, ClientIp, json_error};
 use crate::activity::{self, Action, Entry, Via};
 use crate::auth::{self, Actor};
 use crate::passkey;
@@ -143,13 +143,9 @@ async fn link_confirm(Path(secret): Path<String>) -> AppResult<Response> {
     render(LoginPage::new(Some(secret), None))
 }
 
-fn json_error(status: StatusCode, message: impl Into<String>) -> Response {
-    (status, Json(serde_json::json!({"error": message.into()}))).into_response()
-}
-
-async fn passkey_start(State(state): State<AppState>) -> Response {
+async fn passkey_start(State(state): State<AppState>, Extension(ClientIp(ip)): Extension<ClientIp>) -> Response {
     let pk = state.passkeys.clone();
-    match state.db.call(move |c| pk.start_login(c)).await {
+    match state.db.call(move |c| pk.start_login(c, &ip)).await {
         Ok(Some((id, options))) => Json(serde_json::json!({"id": id, "options": options})).into_response(),
         Ok(None) => json_error(StatusCode::BAD_REQUEST, "no passkey is enrolled yet"),
         Err(e) => json_error(StatusCode::BAD_REQUEST, format!("{e:#}")),
@@ -243,7 +239,7 @@ async fn link_use(
 }
 
 fn session_cookie(state: &AppState, value: String) -> Cookie<'static> {
-    Cookie::build((SESSION_COOKIE, value))
+    Cookie::build((state.session_cookie_name(), value))
         .path("/")
         .http_only(true)
         .secure(state.config.is_https())
@@ -260,7 +256,7 @@ async fn logout(
     if let Actor::Owner { session_id, .. } = actor {
         state.db.call(move |c| auth::end_session(c, session_id)).await?;
     }
-    let jar = jar.remove(Cookie::build(SESSION_COOKIE).path("/").build());
+    let jar = jar.remove(Cookie::build(state.session_cookie_name()).path("/").build());
     Ok((jar, Redirect::to("/login")).into_response())
 }
 

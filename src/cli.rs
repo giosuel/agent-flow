@@ -85,7 +85,25 @@ fn log_cli(db: &Db, action: Action, summary: String) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Commands that hand out access (a sign-in link, a token) want a person at a terminal. Agents
+/// run as the same Unix user and could still fake one; this keeps them from doing it in passing.
+/// Real separation is AgentFlow running as its own user.
+fn require_terminal(what: &str) -> anyhow::Result<()> {
+    use std::io::IsTerminal;
+    if !std::io::stdin().is_terminal() {
+        bail!(
+            "{what} hands out access, so it only runs in an interactive terminal (yours), not from a script or an agent"
+        );
+    }
+    Ok(())
+}
+
 pub fn admin(config_path: &Path, command: AdminCommand) -> anyhow::Result<()> {
+    match &command {
+        AdminCommand::LoginLink => require_terminal("login-link")?,
+        AdminCommand::Token { command: TokenCommand::Create { .. } } => require_terminal("token create")?,
+        _ => {}
+    }
     let (config, db) = open_db(config_path)?;
     match command {
         AdminCommand::LoginLink => {
@@ -135,18 +153,6 @@ pub fn admin(config_path: &Path, command: AdminCommand) -> anyhow::Result<()> {
             log_cli(&db, Action::Write, format!("project {slug} added"))?;
             eprintln!("Project {slug} added.");
         }
-    }
-    Ok(())
-}
-
-/// Slugs end up in record ids and URLs: lowercase letters, digits and dashes.
-pub fn check_slug(slug: &str) -> anyhow::Result<()> {
-    let ok = !slug.is_empty()
-        && slug.len() <= 40
-        && slug.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
-        && !slug.starts_with('-');
-    if !ok {
-        bail!("{slug:?}: use lowercase letters, digits and dashes, e.g. \"cold-trace\"");
     }
     Ok(())
 }
@@ -271,15 +277,14 @@ pub fn mcp_headers(token_file: &Path) -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
 
     #[test]
     fn slugs() {
         for ok in ["vinculum", "cold-trace", "p2"] {
-            assert!(check_slug(ok).is_ok(), "{ok}");
+            assert!(crate::projects::check_slug(ok).is_ok(), "{ok}");
         }
         for bad in ["", "Cold", "a b", "-x", "a/b", "ä"] {
-            assert!(check_slug(bad).is_err(), "{bad}");
+            assert!(crate::projects::check_slug(bad).is_err(), "{bad}");
         }
     }
 }
