@@ -3,8 +3,7 @@
 // page is hidden, so a forgotten tab doesn't keep asking.
 "use strict";
 (() => {
-  const tiles = document.getElementById("tiles");
-  if (!tiles) return;
+  if (!document.getElementById("tiles")) return;
   let lastCharts = Date.now();
   let busy = false;
 
@@ -12,10 +11,11 @@
     const r = await fetch("/machine/now", { headers: { accept: "application/json" } });
     if (!r.ok) return;
     const { tiles: fresh } = await r.json();
-    tiles.querySelectorAll(".tile").forEach((el, i) => {
+    document.querySelectorAll("#tiles .mtile").forEach((el, i) => {
       const t = fresh[i];
       if (!t) return;
-      el.querySelector(".tile-v").textContent = t.value;
+      el.querySelector(".mtile-v").textContent = t.big;
+      el.querySelector(".mtile-big small").textContent = t.small;
       el.classList.toggle("warn-card", t.warn);
     });
   }
@@ -24,6 +24,10 @@
     const r = await fetch(location.href);
     if (!r.ok) return;
     const doc = new DOMParser().parseFromString(await r.text(), "text/html");
+    // The cards' last hour too.
+    const freshTiles = doc.getElementById("tiles");
+    const oldTiles = document.getElementById("tiles");
+    if (freshTiles && oldTiles) oldTiles.replaceWith(document.importNode(freshTiles, true));
     const fresh = doc.getElementById("hist");
     const old = document.getElementById("hist");
     if (fresh && old) {

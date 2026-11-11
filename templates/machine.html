@@ -6,8 +6,8 @@
   <h1>Machine</h1>
   <p class="status-line">The server AgentFlow runs on, and how the agents use it: {{ host }}. The figures update every 5 seconds, the charts every minute.</p>
 </div>
-<div class="tiles" id="tiles" aria-live="off">
-  {% for t in tiles %}<div class="card pad tile{% if t.warn %} warn-card{% endif %}"><span class="label">{{ t.label }}</span><strong class="tile-v mono">{{ t.value }}</strong></div>{% endfor %}
+<div class="mtiles" id="tiles" aria-live="off">
+  {% for t in tiles %}<div class="card pad mtile{% if t.warn %} warn-card{% endif %}"><div class="mtile-top"><span class="mtile-ico{% if t.warn %} warn{% endif %}">{{ crate::web::icons::icon(t.icon)|safe }}</span><span class="label">{{ t.label }}</span></div><div class="mtile-big"><span class="mtile-v">{{ t.big }}</span> <small>{{ t.small }}</small></div><span class="mtile-trend">{{ t.trend }}</span>{{ t.spark|safe }}</div>{% endfor %}
 </div>
 
 {{ builds|safe }}
