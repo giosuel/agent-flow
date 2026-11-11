@@ -62,7 +62,7 @@ pub fn fmt_count(n: i64) -> String {
     let digits = n.unsigned_abs().to_string();
     let mut out = String::new();
     for (i, d) in digits.chars().enumerate() {
-        if i > 0 && (digits.len() - i) % 3 == 0 {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
             out.push(',');
         }
         out.push(d);
@@ -105,6 +105,13 @@ pub fn home_dir() -> std::path::PathBuf {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn counts_get_separators() {
+        assert_eq!(super::fmt_count(35_948), "35,948");
+        assert_eq!(super::fmt_count(999), "999");
+        assert_eq!(super::fmt_count(-1_234_567), "-1,234,567");
+    }
+
     use super::*;
 
     #[test]
