@@ -27,6 +27,7 @@ const ASSETS: &[Asset] = &[
     asset!("logo.svg", "image/svg+xml"),
     asset!("log.js", "text/javascript; charset=utf-8"),
     asset!("machine.js", "text/javascript; charset=utf-8"),
+    asset!("nav.js", "text/javascript; charset=utf-8"),
     asset!("passkey.js", "text/javascript; charset=utf-8"),
     asset!("settings.js", "text/javascript; charset=utf-8"),
     asset!("icons/apple-touch-icon.png", "image/png"),
