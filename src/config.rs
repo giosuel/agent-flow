@@ -55,6 +55,45 @@ pub struct Config {
     pub external_token_file: String,
     /// Where repositories are fetched from and pushed to (tests use a local folder).
     pub git_host: String,
+    /// Machines agents run builds and tests on (`agentflow remote`), reached with ssh.
+    pub build_servers: Vec<BuildServer>,
+}
+
+/// A build server: a machine reached with `ssh`, e.g. the owner's workstation over WireGuard.
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+#[serde(default, deny_unknown_fields)]
+pub struct BuildServer {
+    /// What it's called on the pages and in `agentflow remote --server`.
+    pub name: String,
+    /// What `ssh` connects to: a Host from ~/.ssh/config, or user@host.
+    pub ssh: String,
+    /// The folder in its home where each project gets its work folder and cache.
+    pub root: String,
+    /// Another job starts only while at least this many threads are free…
+    pub min_threads: f64,
+    /// …and this much memory (GB).
+    pub min_memory_gb: f64,
+    /// Below this much free memory (GB), running jobs pause until there's room again.
+    pub reserve_memory_gb: f64,
+    /// A project's work folder unused for this many days is deleted.
+    pub keep_days: i64,
+    /// The ssh program (tests use a stand-in that runs commands locally).
+    pub ssh_program: String,
+}
+
+impl Default for BuildServer {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            ssh: String::new(),
+            root: "agentflow".into(),
+            min_threads: 8.0,
+            min_memory_gb: 16.0,
+            reserve_memory_gb: 8.0,
+            keep_days: 14,
+            ssh_program: "ssh".into(),
+        }
+    }
 }
 
 impl Default for Config {
@@ -78,6 +117,7 @@ impl Default for Config {
             hands_socket: String::new(),
             external_token_file: String::new(),
             git_host: "https://github.com".into(),
+            build_servers: Vec::new(),
         }
     }
 }
@@ -119,6 +159,19 @@ impl Config {
         }
         if !self.agents_home.is_empty() && !Path::new(&self.agents_home).is_absolute() {
             bail!("agents_home must be an absolute path like /home/viber");
+        }
+        let mut names = std::collections::HashSet::new();
+        for b in &self.build_servers {
+            let simple = |s: &str| !s.is_empty() && s.bytes().all(|c| c.is_ascii_alphanumeric() || b"-_.".contains(&c));
+            if !simple(&b.name) || !names.insert(b.name.clone()) {
+                bail!("each build server needs a name of its own (letters, digits, - _ .)");
+            }
+            if b.ssh.is_empty() || b.ssh.starts_with('-') || !b.ssh.bytes().all(|c| c.is_ascii_graphic()) {
+                bail!("build server {}: ssh is a Host from ~/.ssh/config or user@host", b.name);
+            }
+            if !b.root.split('/').all(|p| simple(p) && p != "." && p != "..") {
+                bail!("build server {}: root is a folder in its home, like agentflow", b.name);
+            }
         }
         Ok(())
     }
