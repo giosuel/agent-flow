@@ -26,6 +26,7 @@ mod projects;
 mod prs;
 mod push;
 mod records;
+mod setup;
 mod tokens;
 mod tz;
 mod usage;
@@ -75,6 +76,9 @@ enum Command {
         #[arg(long, default_value_t = 480)]
         minutes: u64,
     },
+    /// Make AgentFlow a system service running as its own user (run once with sudo after
+    /// installing; `--dry-run` shows the steps).
+    Setup(setup::SetupArgs),
     /// Do the server's jobs as the agents' user (run as that user, when AgentFlow runs as its own):
     /// the owner's buttons, gh, guide edits, token files, new projects' folders, transcripts.
     Hands {
@@ -117,6 +121,7 @@ fn main() -> anyhow::Result<()> {
         Command::Run(args) => cli::run(&config_path, args),
         Command::Wait { client, record, minutes } => cli::wait(&config_path, client, record, minutes),
         Command::McpHeaders { token_file } => cli::mcp_headers(&token_file),
+        Command::Setup(a) => setup::setup(a),
         Command::Hands { socket, server_user } => hands::serve(&socket, util::uid_of(&server_user)?),
     }
 }
