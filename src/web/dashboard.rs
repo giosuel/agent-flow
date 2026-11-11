@@ -190,8 +190,12 @@ async fn dashboard(
             }
 
             let mut seen = std::collections::HashSet::new();
+            let archived: Vec<&str> =
+                all_projects.iter().filter(|p| p.status == "archived").map(|p| p.slug.as_str()).collect();
             let activity = records::recent_events(c, None, 60)?
                 .into_iter()
+                // An archived project has no news.
+                .filter(|e| e.project.as_deref().is_none_or(|p| !archived.contains(&p)))
                 // A button being added is part of the PR's story, each piece of feedback part of
                 // "Owner tried build #n", and a PR found on GitHub shows under "Merge and
                 // release"; none is news of its own (an import brings hundreds at once).

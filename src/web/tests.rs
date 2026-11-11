@@ -1223,3 +1223,70 @@ async fn screenshots_are_uploaded_shown_and_linked() {
     let res = s.http.get(s.url("/p/vinculum/S-1/image")).send().await.unwrap();
     assert!(res.status().is_client_error() || res.status().is_redirection(), "{}", res.status());
 }
+
+#[tokio::test]
+async fn projects_are_archived_and_restored() {
+    let s = TestServer::start().await;
+    let token = s.token(TokenKind::Project, Some("vinculum")).await;
+    let sess = mcp_session(&s, &token).await;
+    let (ok, q) = mcp_tool(&s, &token, &sess, "ask_question", json!({"title": "Tabs or list?"})).await;
+    assert!(ok, "{q}");
+    let cookie = s.owner_cookie().await;
+    let get = |path: &'static str| {
+        let (http, url, cookie) = (s.http.clone(), s.url(path), cookie.clone());
+        async move { http.get(url).header(COOKIE, cookie).send().await.unwrap().text().await.unwrap() }
+    };
+    let set = |status: &'static str| {
+        let (http, url, cookie, origin) = (s.http.clone(), s.url("/p/vinculum/status"), cookie.clone(), s.base.clone());
+        async move {
+            http.post(url)
+                .header(COOKIE, cookie)
+                .header(ORIGIN, origin)
+                .form(&[("status", status)])
+                .send()
+                .await
+                .unwrap()
+        }
+    };
+    let waiting = |s: &TestServer| {
+        let db = s.state.db.clone();
+        async move { db.call(|c| crate::waiting::count(c)).await.unwrap() }
+    };
+    assert_eq!(waiting(&s).await, 1);
+    assert!(set("archived").await.status().is_redirection());
+    assert_eq!(waiting(&s).await, 0, "an archived project waits for nothing");
+    assert!(!get("/").await.contains("Tabs or list?"), "not on the Dashboard");
+    let list = get("/projects").await;
+    assert!(!list.contains("/p/vinculum\"") && list.contains("1 archived"), "{list}");
+    assert!(get("/projects?archived=1").await.contains("/p/vinculum\""));
+    assert!(get("/p/vinculum").await.contains("Restore the project"));
+    // Only the owner, and only these two.
+    let res = s
+        .http
+        .post(s.url("/p/vinculum/status"))
+        .bearer_auth(&token)
+        .form(&[("status", "active")])
+        .send()
+        .await
+        .unwrap();
+    assert!(res.status().is_client_error());
+    assert!(set("deleted").await.status().is_client_error());
+    assert!(set("active").await.status().is_redirection());
+    assert_eq!(waiting(&s).await, 1);
+}
+
+#[tokio::test]
+async fn the_demo_project_shows_on_every_tab() {
+    let s = TestServer::start().await;
+    let data = s.state.config.data_dir();
+    s.state.db.call(move |c| crate::demo::create(c, &data)).await.unwrap();
+    let cookie = s.owner_cookie().await;
+    for tab in ["", "?tab=questions", "?tab=tasks", "?tab=prs", "?tab=builds", "?tab=decisions", "?tab=screenshots"] {
+        let res = s.http.get(s.url(&format!("/p/lumen-demo{tab}"))).header(COOKIE, &cookie).send().await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK, "{tab}");
+    }
+    let shots = s.http.get(s.url("/p/lumen-demo?tab=screenshots")).header(COOKIE, &cookie).send().await.unwrap();
+    assert!(shots.text().await.unwrap().contains("Album sidebar, variant A"));
+    let img = s.http.get(s.url("/p/lumen-demo/S-1/image")).header(COOKIE, &cookie).send().await.unwrap();
+    assert_eq!(img.headers()["content-type"], "image/png");
+}

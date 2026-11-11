@@ -2,10 +2,17 @@
 {% block title %}Projects{% endblock %}
 {% block content %}
 <div class="head">
+  {% if archived %}
+  <h1>Archived projects</h1>
+  <p class="status-line">Out of the Dashboard and the project list; their pages and records stay. Open one to restore it. <a href="/projects">Back to the projects</a></p>
+  {% else %}
   <div class="row wrap"><h1>Projects</h1><span class="grow"></span><a class="btn" href="/projects/new">New project</a></div>
-  <p class="status-line">One card per project and its agent. New project starts one, or onboards an existing folder.</p>
+  <p class="status-line">One card per project and its agent. New project starts one, or onboards an existing folder.{% if archived_count > 0 %} <a href="/projects?archived=1">{{ archived_count }} archived</a>{% endif %}</p>
+  {% endif %}
 </div>
-{% if cards.is_empty() %}
+{% if cards.is_empty() && archived %}
+<section class="card pad empty"><p class="sub">No archived projects.</p></section>
+{% else if cards.is_empty() %}
 <section class="card pad empty"><h2>No projects yet</h2><p class="sub">Start one with New project, or onboard an existing folder the same way.</p></section>
 {% else %}
 <div class="cards">
