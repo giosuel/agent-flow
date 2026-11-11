@@ -68,6 +68,8 @@ build_free_gb = 10                          # disk a build upload must leave fre
 transcripts_dir = "~/.claude/projects"      # Claude Code transcripts, read for token usage
 agents_home = "/home/agents"                # as its own user: where ~/ points (the agents' home)
 hands_socket = "/run/agentflow-hands/hands.sock"  # as its own user: the agents' helper
+external_token_file = "~/.config/gh/external-token"  # public_repo token; used only on the owner's Send
+git_host = "https://github.com"             # where drafts' repositories are fetched and pushed
 ```
 
 ## Behind Caddy (passkeys and push)
@@ -137,6 +139,22 @@ Agents upload screenshots with `agentflow screenshot <file> --name "…" --categ
 (test build, mockup, spike test, bug, …). Each one is a record (`S-4`) on the project's Screenshots
 tab, which can filter by category, and opens full size on its own page. With `--record` it's linked
 to that task, build or question and listed there too. The images are in `<data_dir>/screenshots/`.
+
+## Other people's repositories
+
+Agents never post or push to other people's repositories themselves. They draft: `agentflow
+contribute pr --repo <owner/name> --base main --branch <name> --title "…" --body-file <file>` in
+their checkout sends the commits on top of that branch (as a git bundle), `agentflow contribute
+issue|comment|commits` the rest, and the MCP tool `draft_contribution` does issues and comments.
+AgentFlow reads the commits into a repository of its own (`<data_dir>/outgoing/`) and shows the
+owner the diff it computed, the text and a few checks (their PR template's headings, Claude
+attribution, a linked decision). The owner can edit the text, then press **Send** (AgentFlow pushes
+to the owner's fork and opens the PR, issue or comment as them, with exactly that text), **Ask for
+changes** (the note goes to the agent word for word), or **Drop**. Sent ones are watched every 30
+minutes; new comments, reviews, merges and closes go to the project's agent.
+
+Sending needs `external_token_file`: a GitHub token with `public_repo`, read only when the owner
+presses Send and never shown or logged.
 
 ## Guides
 
