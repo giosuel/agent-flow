@@ -8,7 +8,7 @@
 {% if let Some(n) = notice %}<p class="notice ok" role="status">{{ n }}</p>{% endif %}
 {% if let Some(e) = error %}<p class="notice warn" role="alert">{{ e }}</p>{% endif %}
 {% if unpushed > 0 %}<p class="notice">{{ unpushed }} of your edit{% if unpushed != 1 %}s are{% else %} is{% endif %} committed but not pushed yet. Push from the checkout when you're ready.</p>{% endif %}
-<div class="split guides">
+<div class="split guides{% if file.is_some() %} picked{% endif %}">
   <nav class="split-side stack" aria-label="Guides">
     <div class="card list">
       <a class="item conv-row{% if file.is_none() %} on{% endif %}" href="/guides"{% if file.is_none() %} aria-current="true"{% endif %}>
@@ -28,6 +28,7 @@
 
   <section class="split-main stack">
   {% if let Some(name) = file %}
+    <a class="back phone-only" href="/guides">← All guides</a>
     <div class="sec"><h2 class="mono">{{ name }}</h2>
       <span class="row wrap"><a class="sub" href="https://github.com/{{ repo }}/commits/main/{{ name }}">History on GitHub</a><a class="sub" href="https://github.com/{{ repo }}/blob/main/{{ name }}">Open on GitHub</a>{% if editing.is_none() %}<a class="btn sm ghost" href="/guides?f={{ name }}&amp;edit=file">Edit file</a>{% endif %}</span></div>
     {% if let Some(ed) = editing %}

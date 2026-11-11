@@ -34,8 +34,8 @@ pub struct Thread {
     pub created_at: i64,
     pub last_at: i64,
     pub count: i64,
-    /// The newest message's kind, for the list.
-    pub last_kind: String,
+    /// The first message's kind: what the conversation is (a question, a resource claim).
+    pub kind: String,
 }
 
 /// A recipient: a project's slug, "consultant", or "all" (every project). Not the owner: they
@@ -193,7 +193,7 @@ pub fn threads(conn: &Connection, member: Option<&str>, limit: i64, only: Option
     let mut stmt = conn.prepare(
         "SELECT t.id, t.subject, t.started_by, t.created_at, t.last_at,
                 (SELECT count(*) FROM messages m WHERE m.thread_id = t.id),
-                coalesce((SELECT kind FROM messages m WHERE m.thread_id = t.id ORDER BY m.id DESC LIMIT 1), 'info')
+                coalesce((SELECT kind FROM messages m WHERE m.thread_id = t.id ORDER BY m.id LIMIT 1), 'info')
          FROM threads t
          WHERE (?1 IS NULL OR EXISTS (SELECT 1 FROM thread_members tm WHERE tm.thread_id = t.id AND tm.member IN (?1, 'all')))
            AND (?2 IS NULL OR t.id = ?2)
@@ -207,7 +207,7 @@ pub fn threads(conn: &Connection, member: Option<&str>, limit: i64, only: Option
             created_at: r.get(3)?,
             last_at: r.get(4)?,
             count: r.get(5)?,
-            last_kind: r.get(6)?,
+            kind: r.get(6)?,
             members: Vec::new(),
         })
     })?;
