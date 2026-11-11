@@ -152,6 +152,7 @@ impl FlowMcp {
         Parameters(p): Parameters<Hello>,
     ) -> Result<CallToolResult, ErrorData> {
         let actor = actor_of(&parts);
+        let token_dir = self.state.config.token_dir();
         let a = actor.clone();
         let outcome = self
             .state
@@ -185,6 +186,11 @@ impl FlowMcp {
                     "answered_this_week": answered.iter().map(|q| json!({"id": q.ref_id, "title": q.title, "answer": q.data.get("answer")})).collect::<Vec<_>>(),
                     "unread_events": unread,
                     "recent_events": recent.iter().map(|e| json!({"at": crate::util::fmt_utc(e.at), "what": e.summary, "by": e.actor})).collect::<Vec<_>>(),
+                    // The CLI (publish, screenshot, contribute, remote, wait) needs the same token.
+                    "cli": {
+                        "token_file": crate::tokens::token_path(&token_dir, Some(&project.slug), &project.name),
+                        "how": "Run agentflow commands with AGENTFLOW_TOKEN_FILE set to token_file (sessions started with AgentFlow's start command have it), or add --token-file token_file."
+                    },
                 });
                 Ok(Outcome::new(reply).summary(format!("hello from {} on {}", p.session, p.machine)).project(project.slug))
             })
