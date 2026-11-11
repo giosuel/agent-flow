@@ -77,8 +77,7 @@ fn display(names: &HashMap<String, String>, m: &str) -> String {
 
 /// "Vinculum → Antimony", "Cold Trace → everyone"
 fn members_line(names: &HashMap<String, String>, started_by: &str, members: &[String]) -> String {
-    let others: Vec<String> =
-        members.iter().filter(|m| *m != started_by).map(|m| display(names, m)).collect();
+    let others: Vec<String> = members.iter().filter(|m| *m != started_by).map(|m| display(names, m)).collect();
     format!("{} → {}", display(names, started_by), others.join(", "))
 }
 
