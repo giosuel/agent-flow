@@ -114,7 +114,7 @@ struct UsagePage {
 }
 
 fn date_of(ms: i64) -> String {
-    crate::util::fmt_utc(ms).get(..10).unwrap_or("").to_owned()
+    crate::util::fmt_date(ms)
 }
 
 /// "Mon 10" for a day's bar label.
@@ -225,11 +225,7 @@ async fn page(
 
     let sum = |rows: &[(Option<i64>, i64, Tokens)]| {
         rows.iter().fold(Tokens::default(), |mut a, (_, _, t)| {
-            a.calls += t.calls;
-            a.input += t.input;
-            a.cache_write += t.cache_write;
-            a.output += t.output;
-            a.cache_read += t.cache_read;
+            a.add(t);
             a
         })
     };
@@ -266,8 +262,8 @@ async fn page(
                 format!(
                     "{} {}–{}",
                     date_of(t.first_at),
-                    &crate::util::fmt_utc(t.first_at)[11..16],
-                    &crate::util::fmt_utc(t.last_at)[11..16]
+                    crate::util::fmt_hm(t.first_at),
+                    crate::util::fmt_hm(t.last_at)
                 )
             } else {
                 format!("{} – {}", date_of(t.first_at), date_of(t.last_at))

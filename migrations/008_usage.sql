@@ -27,12 +27,12 @@ CREATE INDEX usage_session ON usage (session);
 CREATE TABLE usage_files (
     path     TEXT PRIMARY KEY,
     offset   INTEGER NOT NULL,
-    -- The first call's time: a subagent's tokens go to the task its session was on then.
+    -- For a subagent, its first own call's time: its tokens go to the task its session was on then.
     first_at INTEGER
 );
 
--- The machine every minute: the whole machine (project_id NULL, group 'machine'), and each
--- project's agent with everything it started.
+-- The machine every minute, per group: a project's slug (its agent with everything it
+-- started), 'other' for the rest, and 'machine' for the whole machine.
 CREATE TABLE machine_samples (
     at         INTEGER NOT NULL,
     grp        TEXT NOT NULL,
