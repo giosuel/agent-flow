@@ -52,6 +52,9 @@ pub struct RepoPr {
     /// When it was opened, or merged for a merged one (RFC 3339).
     #[serde(default, alias = "mergedAt")]
     pub created_at: String,
+    /// The commit the PR's branch is at: Merge only merges what the owner saw.
+    #[serde(default)]
+    pub head_ref_oid: String,
 }
 
 fn file_paths<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<String>, D::Error> {
@@ -72,8 +75,9 @@ pub trait GitHub: Send + Sync {
     fn item<'a>(&'a self, repo: &'a str, number: i64) -> BoxFuture<'a, anyhow::Result<ItemInfo>>;
     /// Open PRs, or the most recently merged ones.
     fn repo_prs<'a>(&'a self, repo: &'a str, merged: bool) -> BoxFuture<'a, anyhow::Result<Vec<RepoPr>>>;
-    /// Merges a PR (the owner's button on the Guides page) and deletes its branch.
-    fn merge<'a>(&'a self, repo: &'a str, number: i64) -> BoxFuture<'a, anyhow::Result<String>>;
+    /// Merges a PR (the owner's button on the Guides page) and deletes its branch, but only if
+    /// its branch is still at `head`: a push after the owner looked makes it fail.
+    fn merge<'a>(&'a self, repo: &'a str, number: i64, head: &'a str) -> BoxFuture<'a, anyhow::Result<String>>;
 }
 
 const FIELDS: &str = "number,title,url,state,isDraft,baseRefName,headRefName,mergeable,statusCheckRollup";
@@ -171,9 +175,22 @@ impl GhCli {
 
 pub fn check_repo(repo: &str) -> anyhow::Result<()> {
     let ok = repo.split('/').count() == 2
-        && repo.split('/').all(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_alphanumeric() || "-_.".contains(c)));
+        && repo.split('/').all(|p| {
+            !p.is_empty()
+                && p != "."
+                && p != ".."
+                && !p.starts_with('-')
+                && p.chars().all(|c| c.is_ascii_alphanumeric() || "-_.".contains(c))
+        });
     if !ok {
         bail!("{repo:?} isn't a GitHub repository like owner/name");
+    }
+    Ok(())
+}
+
+fn check_number(number: i64) -> anyhow::Result<()> {
+    if number <= 0 {
+        bail!("#{number} isn't a pull request or issue number");
     }
     Ok(())
 }
@@ -192,9 +209,9 @@ impl GitHub for GhCli {
         Box::pin(async move {
             check_repo(repo)?;
             let (state, fields, limit) = if merged {
-                ("merged", "number,title,url,additions,deletions,files,author,mergedAt", "5")
+                ("merged", "number,title,url,additions,deletions,files,author,mergedAt,headRefOid", "5")
             } else {
-                ("open", "number,title,url,additions,deletions,files,author,createdAt", "50")
+                ("open", "number,title,url,additions,deletions,files,author,createdAt,headRefOid", "50")
             };
             let out =
                 Self::run(&["pr", "list", "-R", repo, "--state", state, "--limit", limit, "--json", fields]).await?;
@@ -202,11 +219,17 @@ impl GitHub for GhCli {
         })
     }
 
-    fn merge<'a>(&'a self, repo: &'a str, number: i64) -> BoxFuture<'a, anyhow::Result<String>> {
+    fn merge<'a>(&'a self, repo: &'a str, number: i64, head: &'a str) -> BoxFuture<'a, anyhow::Result<String>> {
         Box::pin(async move {
             check_repo(repo)?;
+            check_number(number)?;
+            if head.len() != 40 || !head.chars().all(|c| c.is_ascii_hexdigit()) {
+                bail!("the pull request's commit isn't known; reload the page");
+            }
             let n = number.to_string();
-            let out = Self::run(&["pr", "merge", &n, "-R", repo, "--merge", "--delete-branch"]).await?;
+            let out =
+                Self::run(&["pr", "merge", &n, "-R", repo, "--merge", "--delete-branch", "--match-head-commit", head])
+                    .await?;
             Ok(String::from_utf8_lossy(&out).trim().to_owned())
         })
     }
@@ -214,6 +237,7 @@ impl GitHub for GhCli {
     fn item<'a>(&'a self, repo: &'a str, number: i64) -> BoxFuture<'a, anyhow::Result<ItemInfo>> {
         Box::pin(async move {
             check_repo(repo)?;
+            check_number(number)?;
             // The issues endpoint answers for PRs too; only a PR's own endpoint knows "merged".
             let out = Self::run(&["api", &format!("repos/{repo}/issues/{number}")]).await?;
             let i: GhIssue = serde_json::from_slice(&out).context("reading gh's answer")?;
@@ -232,6 +256,7 @@ impl GitHub for GhCli {
     fn pr<'a>(&'a self, repo: &'a str, number: i64) -> BoxFuture<'a, anyhow::Result<PrInfo>> {
         Box::pin(async move {
             check_repo(repo)?;
+            check_number(number)?;
             let n = number.to_string();
             let out = pr_query(&["pr", "view", &n, "-R", repo]).await?;
             Ok(serde_json::from_slice::<GhPr>(&out).context("reading gh's answer")?.into())
@@ -292,7 +317,12 @@ pub mod fake {
             Box::pin(async move { Ok(list) })
         }
 
-        fn merge<'a>(&'a self, _repo: &'a str, number: i64) -> BoxFuture<'a, anyhow::Result<String>> {
+        fn merge<'a>(&'a self, _repo: &'a str, number: i64, head: &'a str) -> BoxFuture<'a, anyhow::Result<String>> {
+            let current =
+                self.repo_open.lock().unwrap().iter().find(|p| p.number == number).map(|p| p.head_ref_oid.clone());
+            if current.as_deref() != Some(head) {
+                return Box::pin(async move { Err(anyhow::anyhow!("Head branch was modified")) });
+            }
             self.merged.lock().unwrap().push(number);
             Box::pin(async move { Ok(format!("merged #{number}")) })
         }
@@ -351,7 +381,7 @@ mod tests {
     #[test]
     fn repos_are_checked() {
         assert!(check_repo("giosuel/agent-flow").is_ok());
-        for bad in ["giosuel", "a/b/c", "a/--x;rm", "/x", "a b/c"] {
+        for bad in ["giosuel", "a/b/c", "a/--x;rm", "/x", "a b/c", "../x", "a/..", "-R/x"] {
             assert!(check_repo(bad).is_err(), "{bad}");
         }
     }

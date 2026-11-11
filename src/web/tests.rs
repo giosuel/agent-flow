@@ -41,6 +41,7 @@ impl TestServer {
             public_url: format!("http://{addr}"),
             data_dir: data.path().display().to_string(),
             handbook_dir: handbook.display().to_string(),
+            build_free_gb: 0,
             ..Config::default()
         };
         let github = std::sync::Arc::new(crate::github::fake::FakeGitHub::default());
@@ -748,6 +749,19 @@ async fn a_build_goes_from_agent_to_owner_and_feedback_comes_back() {
         .await
         .unwrap();
     assert_eq!(back.as_ref(), tar.as_slice());
+    let detail: Value =
+        s.http.get(s.url("/api/builds/imaginarium/1")).bearer_auth(&device).send().await.unwrap().json().await.unwrap();
+    assert_eq!(detail["files"].as_array().map(Vec::len), Some(2), "{detail}");
+    // A commit becomes part of the file name, so only hex is taken.
+    let res = s
+        .http
+        .post(s.url("/api/builds?product=imaginarium&summary=x&commit=..%2F..%2Fx&entry=run.sh"))
+        .bearer_auth(&token)
+        .body(tar.clone())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
 
     // It waits for the owner, who gives feedback on its page.
     let cookie = s.owner_cookie().await;
@@ -968,6 +982,7 @@ async fn the_owner_edits_a_guide_and_agents_read_it() {
         files: vec!["MACHINE.md".into()],
         author: "giosuel".into(),
         created_at: String::new(),
+        head_ref_oid: "a".repeat(40),
     });
     crate::poller::refresh_guide_prs(&s.state).await.unwrap();
     let html = s.http.get(s.url("/")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
@@ -977,15 +992,32 @@ async fn the_owner_edits_a_guide_and_agents_read_it() {
         .post(s.url("/guides/prs/merge"))
         .header(COOKIE, &cookie)
         .header(ORIGIN, &s.base)
-        .form(&[("number", "27")])
+        .form(&[("number", "27"), ("head", &"b".repeat(40))])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST, "pushed to since the owner looked");
+    assert!(s.github.merged.lock().unwrap().is_empty());
+    let res = s
+        .http
+        .post(s.url("/guides/prs/merge"))
+        .header(COOKIE, &cookie)
+        .header(ORIGIN, &s.base)
+        .form(&[("number", "27"), ("head", &"a".repeat(40))])
         .send()
         .await
         .unwrap();
     // The test's checkout has no remote, so the pull after the merge reports a problem.
     assert_eq!(res.headers()[LOCATION], "/guides?error=pull");
     assert_eq!(*s.github.merged.lock().unwrap(), vec![27]);
-    let res =
-        s.http.post(s.url("/guides/prs/merge")).bearer_auth(&token).form(&[("number", "27")]).send().await.unwrap();
+    let res = s
+        .http
+        .post(s.url("/guides/prs/merge"))
+        .bearer_auth(&token)
+        .form(&[("number", "27"), ("head", "")])
+        .send()
+        .await
+        .unwrap();
     assert_eq!(res.status(), StatusCode::FORBIDDEN);
 }
 

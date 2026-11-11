@@ -79,7 +79,14 @@ pub fn send(
             if !is_member {
                 bail!("you aren't part of conversation {id}");
             }
-            // Someone new can be brought in.
+            // Someone new can be brought in, by whoever started it (or the consultant or owner):
+            // otherwise any member could pull every project into a thread.
+            let started_by: String =
+                conn.query_row("SELECT started_by FROM threads WHERE id = ?1", [id], |r| r.get(0))?;
+            let adds = !members.iter().any(|m| m == ALL) && to.iter().any(|m| !members.contains(m));
+            if adds && sender != started_by && sender != OWNER && sender != CONSULTANT {
+                bail!("only {started_by} (who started it) can bring someone into conversation {id}");
+            }
             for m in to {
                 check_member(conn, m)?;
                 conn.execute(
@@ -264,7 +271,12 @@ mod tests {
             // Imaginarium isn't in it and can't write to it.
             assert!(send(c, "imaginarium", &[], "", "me too", "info", Some(t)).is_err());
             send(c, "antimony", &[], "", "Yes, take it.", "answer", Some(t))?;
-            assert_eq!(messages(c, t)?.len(), 2);
+            assert!(
+                send(c, "antimony", &["imaginarium".into()], "", "fyi", "info", Some(t)).is_err(),
+                "not the starter"
+            );
+            send(c, "antimony", &["vinculum".into()], "", "already in", "info", Some(t))?;
+            assert_eq!(messages(c, t)?.len(), 3);
 
             // A message to everyone reaches every project but the sender; the consultant reads it.
             let token = crate::util::new_secret("af_prj_");

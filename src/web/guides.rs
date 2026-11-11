@@ -38,6 +38,7 @@ struct PrRow {
     files: String,
     changes: String,
     by: String,
+    head: String,
 }
 
 struct Editing {
@@ -107,6 +108,7 @@ fn pr_row(p: &crate::github::RepoPr) -> PrRow {
         files: p.files.join(", "),
         changes: format!("+{} −{}", p.additions, p.deletions),
         by: p.author.clone(),
+        head: p.head_ref_oid.clone(),
     }
 }
 
@@ -259,6 +261,8 @@ async fn save(
 #[derive(Deserialize)]
 struct MergeForm {
     number: i64,
+    /// The commit the page showed; GitHub refuses the merge if the branch has moved since.
+    head: String,
 }
 
 /// Merges one of the guides' PRs on GitHub, then brings the checkout up to date so agents read it.
@@ -276,7 +280,17 @@ async fn merge(
         return Err(AppError::BadRequest("This instance doesn't write to GitHub (github_writes = false).".into()));
     }
     let repo = state.config.handbook_repo.clone();
-    let out = state.github.merge(&repo, form.number).await.map_err(|e| AppError::BadRequest(format!("{e:#}")))?;
+    let out = state.github.merge(&repo, form.number, &form.head).await.map_err(|e| {
+        let msg = format!("{e:#}");
+        if msg.contains("Head branch was modified") || msg.contains("head commit") {
+            AppError::BadRequest(format!(
+                "#{} changed since you looked at it; nothing was merged. Reload the page and review it again.",
+                form.number
+            ))
+        } else {
+            AppError::BadRequest(msg)
+        }
+    })?;
     let e = Entry::new(
         &actor,
         Via::Button,
@@ -287,8 +301,9 @@ async fn merge(
     activity::write(&state.db, e).await;
     // Fast-forward only: the owner's own unpushed edits are never merged or rebased behind their back.
     let dir = state.config.handbook_dir();
-    let pulled =
-        tokio::process::Command::new("git").arg("-C").arg(&dir).args(["pull", "--ff-only", "-q"]).output().await;
+    let mut pull = guides::git_command(&dir);
+    pull.args(["pull", "--ff-only", "-q"]);
+    let pulled = tokio::process::Command::from(pull).output().await;
     let _ = crate::poller::refresh_guide_prs(&state).await;
     match pulled {
         Ok(o) if o.status.success() => Ok(Redirect::to(&format!("/guides?merged={}", form.number)).into_response()),

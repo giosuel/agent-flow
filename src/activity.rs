@@ -167,19 +167,58 @@ pub fn clip(text: &str, max: usize) -> String {
     }
 }
 
-/// Prefixes of secrets that must never reach the log: AgentFlow's own tokens and GitHub's.
-const SECRET_PREFIXES: &[&str] = &["af_", "ghp_", "gho_", "ghu_", "ghs_", "ghr_", "github_pat_"];
+/// Prefixes of secrets that must never be stored: AgentFlow's own tokens, GitHub's, and a few
+/// common others. Matched anywhere (`TOKEN=af_prj_…`, `x-af_prj_…`), with at least 16 token
+/// characters after the prefix so ordinary words stay.
+const SECRET_PREFIXES: &[&str] = &[
+    "af_dev_",
+    "af_prj_",
+    "af_adm_",
+    "af_lnk_",
+    "af_ses_", // AgentFlow
+    "ghp_",
+    "gho_",
+    "ghu_",
+    "ghs_",
+    "ghr_",
+    "github_pat_", // GitHub
+    "sk-ant-",
+    "glpat-",
+    "npm_",
+    "xoxb-",
+    "xoxp-",
+    "xoxa-",
+    "xoxs-",
+    "AKIA",
+];
 
-/// Replaces anything that looks like a token with `[redacted]`.
+fn token_char(c: char) -> bool {
+    c.is_ascii_alphanumeric() || c == '_' || c == '-'
+}
+
+/// Replaces anything that looks like a token with `[redacted]`, and private key blocks whole.
 pub fn redact(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut rest = text;
     'outer: while !rest.is_empty() {
+        if rest.starts_with("-----BEGIN ") && rest[..rest.find('\n').unwrap_or(rest.len())].contains("PRIVATE KEY-----")
+        {
+            let end = rest
+                .find("-----END ")
+                .and_then(|i| rest[i..].find("KEY-----").map(|j| i + j + 8))
+                .unwrap_or(rest.len());
+            out.push_str("[redacted private key]");
+            rest = &rest[end..];
+            continue;
+        }
         for prefix in SECRET_PREFIXES {
-            if rest.starts_with(prefix) && at_word_start(text, rest) {
-                let len =
-                    rest.find(|c: char| !(c.is_ascii_alphanumeric() || c == '_' || c == '-')).unwrap_or(rest.len());
+            if rest.starts_with(prefix) {
+                let len = rest.find(|c: char| !token_char(c)).unwrap_or(rest.len());
                 if len >= prefix.len() + 16 {
+                    // The whole token, including what came before the prefix in the same word.
+                    let word_start =
+                        out.char_indices().rev().find(|&(_, c)| !token_char(c)).map_or(0, |(i, c)| i + c.len_utf8());
+                    out.truncate(word_start);
                     out.push_str("[redacted]");
                     rest = &rest[len..];
                     continue 'outer;
@@ -193,9 +232,19 @@ pub fn redact(text: &str) -> String {
     out
 }
 
-fn at_word_start(whole: &str, rest: &str) -> bool {
-    let i = whole.len() - rest.len();
-    i == 0 || !whole[..i].chars().next_back().is_some_and(|c| c.is_ascii_alphanumeric() || c == '_')
+/// Redacts every string inside a JSON value.
+pub fn redact_value(v: &mut serde_json::Value) {
+    match v {
+        serde_json::Value::String(s) => {
+            let r = redact(s);
+            if r != *s {
+                *s = r;
+            }
+        }
+        serde_json::Value::Array(a) => a.iter_mut().for_each(redact_value),
+        serde_json::Value::Object(o) => o.values_mut().for_each(redact_value),
+        _ => {}
+    }
 }
 
 #[cfg(test)]
@@ -207,8 +256,17 @@ mod tests {
         let t = crate::util::new_secret("af_prj_");
         assert_eq!(redact(&format!("Bearer {t} done")), "Bearer [redacted] done");
         assert_eq!(redact("ghp_abcdefghijklmnopqrstuvwxyz0123"), "[redacted]");
-        // Short or embedded look-alikes stay.
-        assert_eq!(redact("leaf_node af_x"), "leaf_node af_x");
+        // Short look-alikes stay.
+        assert_eq!(redact("leaf_node af_x af_prj_short"), "leaf_node af_x af_prj_short");
         assert_eq!(redact("grüße af_"), "grüße af_");
+        // Anywhere in a word, and the word goes with it.
+        assert_eq!(redact(&format!("TOKEN={t};x_{t}")), "TOKEN=[redacted];[redacted]");
+        assert_eq!(redact("key sk-ant-api03-abcdefghijklmnopqrstuv end"), "key [redacted] end");
+        assert_eq!(redact("AKIAABCDEFGHIJKLMNOP"), "[redacted]");
+        let pem = "a\n-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaA\n-----END OPENSSH PRIVATE KEY-----\nb";
+        assert_eq!(redact(pem), "a\n[redacted private key]\nb");
+        let mut v = serde_json::json!({"features": [format!("Login: use {t}")]});
+        redact_value(&mut v);
+        assert_eq!(v["features"][0], "Login: use [redacted]");
     }
 }

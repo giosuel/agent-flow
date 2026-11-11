@@ -163,7 +163,15 @@ impl FlowMcp {
         let outcome = async {
             crate::github::check_repo(p.repo.trim())?;
             let (a2, proj) = (a.clone(), p.project.clone());
-            let project = self.state.db.call(move |c| super::target_project(c, &a2, proj.as_deref(), true)).await?;
+            let project = self
+                .state
+                .db
+                .call(move |c| {
+                    let p = super::target_project(c, &a2, proj.as_deref(), true)?;
+                    crate::contributions::check_room(c, p.id)?;
+                    Ok(p)
+                })
+                .await?;
             let info = self.state.github.item(p.repo.trim(), p.number).await?;
             let (repo, number, author) = (p.repo.trim().to_owned(), p.number, a.name());
             let r = self

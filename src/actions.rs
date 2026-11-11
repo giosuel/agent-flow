@@ -138,9 +138,7 @@ pub fn add(conn: &Connection, record: &Record, b: &NewButton, added_by: &str) ->
         bail!("label: a few words, e.g. \"Merge\" or \"Push tag v0.0.5-m4\"");
     }
     let command = command.trim();
-    if command.is_empty() || command.len() > 8000 {
-        bail!("command: the exact lines to run, at most 8000 characters");
-    }
+    check_shown_whole(command)?;
     // What the owner reads must be what runs: no invisible or reordering characters.
     for (what, text) in [("label", label), ("command", command), ("workdir", workdir)] {
         if let Some(c) = text.chars().find(|&c| hidden_char(c)) {
@@ -206,10 +204,22 @@ fn hidden_char(c: char) -> bool {
         || matches!(c as u32, 0xAD | 0x061C | 0x180E | 0x200B..=0x200F | 0x202A..=0x202E | 0x2060..=0x2064 | 0x2066..=0x206F | 0xFEFF | 0xFFF9..=0xFFFB)
 }
 
-/// The text of the confirmation dialog: the command itself, not just the button's name.
+/// The confirmation dialog shows a command whole, so it must fit one: short enough, and without
+/// blank stretches or runs of spaces that would push a line out of sight.
+fn check_shown_whole(command: &str) -> anyhow::Result<()> {
+    if command.is_empty() || command.chars().count() > 2000 || command.lines().count() > 40 {
+        bail!("command: the exact lines to run, at most 40 lines and 2000 characters (the owner reads all of it)");
+    }
+    if command.contains("\n\n\n") || command.lines().any(|l| l.contains(&" ".repeat(24)) || l.contains("\t\t\t")) {
+        bail!("command: no runs of blank lines or long runs of spaces; the confirmation shows it as written");
+    }
+    Ok(())
+}
+
+/// The text of the confirmation dialog: the command itself, whole, not just the button's name.
 pub fn confirm_text(a: &ActionRow) -> String {
     let dir = if a.workdir.is_empty() { "~" } else { &a.workdir };
-    format!("Run \"{}\" in {dir}?\n\n{}", a.label, crate::activity::clip(&a.command, 700))
+    format!("Run \"{}\" in {dir}?\n\n{}", a.label, a.command)
 }
 
 /// Why the button is disabled, or Ok when it can be pressed.
@@ -339,6 +349,19 @@ mod tests {
     use super::*;
     use crate::db::Db;
     use crate::github::fake::pr;
+
+    #[test]
+    fn commands_fit_their_confirmation() {
+        assert!(check_shown_whole("gh pr merge 12 --merge\n\ngit tag v1").is_ok());
+        for hidden in [
+            format!("echo ok\n\n\n\n{}rm -rf ~", ""),
+            format!("echo ok{}; rm -rf ~", " ".repeat(200)),
+            "x".repeat(2001),
+            "echo\n".repeat(41),
+        ] {
+            assert!(check_shown_whole(&hidden).is_err(), "{hidden:?}");
+        }
+    }
 
     #[tokio::test]
     async fn buttons_run_once_and_only_as_shown() {

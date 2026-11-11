@@ -6,7 +6,7 @@
 //! Like viber-run: each product's builds are numbered and numbers are never reused; a build never
 //! changes once published; its name is `<date>-<time>-<topic>-<commit>`.
 
-use std::io::Read;
+use std::io::{Read, Seek, SeekFrom};
 use std::path::{Component, Path, PathBuf};
 
 use anyhow::{Context, bail};
@@ -15,6 +15,11 @@ use sha2::{Digest, Sha256};
 
 /// Largest build accepted (the archive as uploaded).
 pub const MAX_BYTES: u64 = 2 * 1024 * 1024 * 1024;
+/// Most files in one build, and the longest path: the manifest is kept and sent whole.
+pub const MAX_FILES: usize = 20_000;
+pub const MAX_PATH: usize = 1024;
+/// Largest GNU long-name or PAX header; the tar crate reads these into memory whole.
+const MAX_EXTENSION: u64 = 64 * 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct FileEntry {
@@ -43,8 +48,24 @@ pub fn check_product(product: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// A commit as git prints it: 4 to 40 hex digits, or nothing. It becomes part of a file name.
+pub fn check_commit(commit: &str) -> anyhow::Result<()> {
+    if !commit.is_empty() && !(4..=40).contains(&commit.len()) || !commit.chars().all(|c| c.is_ascii_hexdigit()) {
+        bail!("commit {commit:?} isn't a git commit (4 to 40 hex digits)");
+    }
+    Ok(())
+}
+
+/// Branches and tags are shown and stored, so keep them short and printable.
+pub fn check_label(what: &str, value: &str) -> anyhow::Result<()> {
+    if value.len() > 200 || value.chars().any(char::is_control) {
+        bail!("{what} must be under 200 characters, on one line");
+    }
+    Ok(())
+}
+
 /// A path inside an archive that stays inside its folder: relative, no `..`, no odd components.
-fn safe_relative(p: &Path) -> anyhow::Result<String> {
+pub fn safe_relative(p: &Path) -> anyhow::Result<String> {
     let mut parts = Vec::new();
     for c in p.components() {
         match c {
@@ -56,12 +77,65 @@ fn safe_relative(p: &Path) -> anyhow::Result<String> {
     if parts.is_empty() {
         bail!("empty path in the archive");
     }
-    Ok(parts.join("/"))
+    let joined = parts.join("/");
+    if joined.len() > MAX_PATH {
+        bail!("a path in the build is longer than {MAX_PATH} bytes");
+    }
+    Ok(joined)
+}
+
+/// A first pass over the raw headers, before the tar crate reads them: it would read a GNU long
+/// name or a PAX header of any size into memory. Also bounds how many entries there are.
+fn check_headers(mut r: impl Read + Seek) -> anyhow::Result<()> {
+    let mut block = [0u8; 512];
+    let mut entries = 0usize;
+    let mut next_size: Option<u64> = None;
+    loop {
+        match r.read_exact(&mut block) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => return Ok(()),
+            Err(e) => return Err(e.into()),
+        }
+        if block.iter().all(|&b| b == 0) {
+            return Ok(());
+        }
+        let h = tar::Header::from_byte_slice(&block);
+        let t = h.entry_type();
+        let size = next_size.take().map_or_else(|| h.entry_size(), Ok)?;
+        let extension = t.is_gnu_longname() || t.is_gnu_longlink() || t.is_pax_local_extensions();
+        if (extension || t.is_pax_global_extensions()) && size > MAX_EXTENSION {
+            bail!("the archive has a {size}-byte extension header; that isn't a normal build");
+        }
+        if t.is_pax_local_extensions() {
+            // A PAX "size" record overrides the next header's size field.
+            let mut data = vec![0u8; size as usize];
+            r.read_exact(&mut data)?;
+            for ext in tar::PaxExtensions::new(&data) {
+                let ext = ext?;
+                if ext.key_bytes() == b"size" {
+                    next_size = Some(ext.value()?.parse().context("PAX size")?);
+                }
+            }
+            r.seek(SeekFrom::Current((size.div_ceil(512) * 512 - size) as i64))?;
+            continue;
+        }
+        if !extension {
+            entries += 1;
+            if entries > MAX_FILES {
+                bail!("the build has more than {MAX_FILES} files");
+            }
+        }
+        let skip = i64::try_from(size.div_ceil(512) * 512).context("entry size")?;
+        r.seek(SeekFrom::Current(skip))?;
+    }
 }
 
 /// Reads a tar archive and lists its regular files with checksums. Refuses anything that could
-/// write outside the folder it's unpacked into: absolute paths, `..`, links, devices.
-pub fn inspect(archive: impl Read) -> anyhow::Result<Manifest> {
+/// write outside the folder it's unpacked into: absolute paths, `..`, links, devices; and
+/// archives too large to list (see the limits above).
+pub fn inspect(mut archive: impl Read + Seek) -> anyhow::Result<Manifest> {
+    check_headers(&mut archive)?;
+    archive.rewind()?;
     let mut ar = tar::Archive::new(archive);
     let mut files = Vec::new();
     let mut total = 0u64;
@@ -80,6 +154,9 @@ pub fn inspect(archive: impl Read) -> anyhow::Result<Manifest> {
             other => bail!("{path}: only files and folders are allowed in a build, not {other:?}"),
         }
         let executable = entry.header().mode().map(|m| m & 0o111 != 0).unwrap_or(false);
+        if files.len() >= MAX_FILES {
+            bail!("the build has more than {MAX_FILES} files");
+        }
         let (sha256, size) = sha256_of(&mut entry)?;
         total += size;
         if total > MAX_BYTES {
@@ -132,13 +209,32 @@ pub fn build_name(stamp: time::OffsetDateTime, branch: &str, commit: &str) -> St
         .chars()
         .map(|c| if c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-' { c } else { '-' })
         .collect();
-    let topic = if topic.is_empty() { "-".to_owned() } else { topic };
+    let topic: String = topic.chars().take(40).collect();
+    let topic = if topic.is_empty() || topic.starts_with('.') { "-".to_owned() } else { topic };
+    // check_commit has refused anything else already; this keeps the name a plain file name anyway.
+    let commit: String = commit.chars().filter(char::is_ascii_hexdigit).take(40).collect();
     format!("{date}-{topic}-{commit}")
+}
+
+/// Where builds live on the server, under its data folder.
+pub fn dir(data_dir: &Path) -> PathBuf {
+    data_dir.join("builds")
 }
 
 /// Where a build's archive lives on the server.
 pub fn archive_path(builds_dir: &Path, product: &str, name: &str) -> PathBuf {
     builds_dir.join(product).join(format!("{name}.tar"))
+}
+
+/// Its manifest, kept beside the archive rather than in the record, so listing builds stays small.
+pub fn manifest_path(builds_dir: &Path, product: &str, name: &str) -> PathBuf {
+    builds_dir.join(product).join(format!("{name}.json"))
+}
+
+/// Uploads that never finished (AgentFlow stopped mid-upload): removed at start.
+pub fn sweep_incoming(builds_dir: &Path) -> usize {
+    let Ok(list) = std::fs::read_dir(builds_dir.join(".incoming")) else { return 0 };
+    list.filter_map(Result::ok).filter(|e| std::fs::remove_file(e.path()).is_ok()).count()
 }
 
 /// Packs a file or folder into a tar archive (the CLI's side of publishing). A single file is
@@ -156,17 +252,38 @@ pub fn pack(source: &Path, out: impl std::io::Write) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Unpacks into `dir` and checks every file against the manifest (the client's side).
+/// Unpacks into `dir` and checks every file against the manifest (the client's side). Only the
+/// listed files are written, as plain files with plain modes (no setuid, no links), whatever the
+/// archive says.
 pub fn unpack_verified(archive: impl Read, dir: &Path, manifest: &Manifest) -> anyhow::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
     std::fs::create_dir_all(dir)?;
+    let listed: std::collections::HashMap<&str, &FileEntry> =
+        manifest.files.iter().map(|f| (f.path.as_str(), f)).collect();
     let mut ar = tar::Archive::new(archive);
-    ar.set_preserve_permissions(true);
-    // unpack_in refuses paths that would leave `dir`.
     for entry in ar.entries()? {
         let mut entry = entry?;
-        if !entry.unpack_in(dir)? {
-            bail!("the archive tried to write outside its folder");
+        let kind = entry.header().entry_type();
+        if kind == tar::EntryType::Directory {
+            continue;
         }
+        let path = safe_relative(&entry.path()?)?;
+        if !matches!(kind, tar::EntryType::Regular | tar::EntryType::Continuous) {
+            bail!("{path}: the archive holds something other than a file");
+        }
+        let f = listed.get(path.as_str()).with_context(|| format!("{path} isn't in the build's file list"))?;
+        let target = dir.join(&path);
+        if let Some(parent) = target.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let mut out = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&target)
+            .with_context(|| format!("{path} is in the archive twice"))?;
+        std::io::copy(&mut entry, &mut out)?;
+        let mode = if f.executable { 0o755 } else { 0o644 };
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(mode))?;
     }
     for f in &manifest.files {
         let file = std::fs::File::open(dir.join(&f.path)).with_context(|| format!("{} is missing", f.path))?;
@@ -175,6 +292,20 @@ pub fn unpack_verified(archive: impl Read, dir: &Path, manifest: &Manifest) -> a
         }
     }
     Ok(())
+}
+
+/// The file to start: listed in the manifest as executable, inside `dir`, and a plain file there.
+pub fn entry_path(dir: &Path, manifest: &Manifest, entry: &str) -> anyhow::Result<PathBuf> {
+    let rel = safe_relative(Path::new(entry))?;
+    if !manifest.files.iter().any(|f| f.path == rel && f.executable) {
+        bail!("the build's entry {entry:?} isn't one of its executables");
+    }
+    let path = dir.join(&rel);
+    let meta = std::fs::symlink_metadata(&path).with_context(|| format!("{rel} is missing"))?;
+    if !meta.file_type().is_file() {
+        bail!("{rel} isn't a plain file");
+    }
+    Ok(path)
 }
 
 #[cfg(test)]
@@ -200,20 +331,20 @@ mod tests {
     #[test]
     fn archives_are_checked() {
         let ok = tar_with(&[("app/run", b"#!/bin/sh\necho hi\n", 0o755), ("app/data.txt", b"x", 0o644)]);
-        let m = inspect(ok.as_slice()).unwrap();
+        let m = inspect(std::io::Cursor::new(&ok)).unwrap();
         assert_eq!(m.files.len(), 2);
         assert!(m.files[0].executable && !m.files[1].executable);
         assert_eq!(m.total, 19);
         for bad in ["../evil", "/etc/evil", "a/../../evil"] {
             let ar = tar_with(&[(bad, b"x", 0o644)]);
-            assert!(inspect(ar.as_slice()).is_err(), "{bad}");
+            assert!(inspect(std::io::Cursor::new(&ar)).is_err(), "{bad}");
         }
         let mut b = tar::Builder::new(Vec::new());
         let mut h = tar::Header::new_gnu();
         h.set_entry_type(tar::EntryType::Symlink);
         h.set_size(0);
         b.append_link(&mut h, "link", "/etc/passwd").unwrap();
-        assert!(inspect(b.into_inner().unwrap().as_slice()).is_err(), "links");
+        assert!(inspect(std::io::Cursor::new(b.into_inner().unwrap())).is_err(), "links");
     }
 
     #[test]
@@ -226,7 +357,7 @@ mod tests {
         std::fs::set_permissions(src.path().join("app"), std::fs::Permissions::from_mode(0o755)).unwrap();
         let mut ar = Vec::new();
         pack(src.path(), &mut ar).unwrap();
-        let m = inspect(ar.as_slice()).unwrap();
+        let m = inspect(std::io::Cursor::new(&ar)).unwrap();
         assert!(m.files.iter().any(|f| f.path == "app" && f.executable));
         let out = tempfile::tempdir().unwrap();
         unpack_verified(ar.as_slice(), out.path(), &m).unwrap();
@@ -235,6 +366,55 @@ mod tests {
         let mut tampered = m.clone();
         tampered.files[0].sha256 = "00".into();
         assert!(unpack_verified(ar.as_slice(), tempfile::tempdir().unwrap().path(), &tampered).is_err());
+    }
+
+    #[test]
+    fn huge_headers_and_odd_commits_are_refused() {
+        // A GNU long name of 1 MB would be read into memory whole by the tar crate.
+        let mut b = tar::Builder::new(Vec::new());
+        let mut h = tar::Header::new_gnu();
+        h.set_entry_type(tar::EntryType::GNULongName);
+        h.set_size(1 << 20);
+        h.set_cksum();
+        b.append(&h, vec![b'a'; 1 << 20].as_slice()).unwrap();
+        let err = inspect(std::io::Cursor::new(b.into_inner().unwrap())).unwrap_err().to_string();
+        assert!(err.contains("extension header"), "{err}");
+        // A long but sane path is fine through the same check.
+        let long = format!("{}/app", "d".repeat(200));
+        let mut b = tar::Builder::new(Vec::new());
+        let mut h = tar::Header::new_gnu();
+        h.set_mode(0o755);
+        h.set_size(2);
+        b.append_data(&mut h, &long, b"hi".as_slice()).unwrap();
+        assert_eq!(inspect(std::io::Cursor::new(b.into_inner().unwrap())).unwrap().files[0].path, long);
+
+        assert!(check_commit("a1b2c3d").is_ok() && check_commit("").is_ok());
+        for bad in ["../../x", "abc", "a1b2c3d/", &"a".repeat(41), "zzzz"] {
+            assert!(check_commit(bad).is_err(), "{bad}");
+        }
+        let t = time::macros::datetime!(2026-11-11 02:15 UTC);
+        assert_eq!(build_name(t, "..", "../a1b2"), "2026-11-11-0215---a1b2", "never a path");
+    }
+
+    #[test]
+    fn unpack_writes_only_listed_plain_files() {
+        let ar = tar_with(&[("app", b"#!/bin/sh\n", 0o4755), ("extra", b"x", 0o644)]);
+        let m = inspect(std::io::Cursor::new(&ar)).unwrap();
+        let only_app = Manifest { files: m.files.iter().filter(|f| f.path == "app").cloned().collect(), total: 0 };
+        let out = tempfile::tempdir().unwrap();
+        let err = unpack_verified(ar.as_slice(), out.path(), &only_app).unwrap_err().to_string();
+        assert!(err.contains("extra isn't in the build's file list"), "{err}");
+        let out = tempfile::tempdir().unwrap();
+        unpack_verified(ar.as_slice(), out.path(), &m).unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            std::fs::metadata(out.path().join("app")).unwrap().permissions().mode() & 0o7777,
+            0o755,
+            "no setuid"
+        );
+        assert!(entry_path(out.path(), &m, "app").is_ok());
+        assert!(entry_path(out.path(), &m, "extra").is_err(), "not executable");
+        assert!(entry_path(out.path(), &m, "../app").is_err());
     }
 
     #[test]

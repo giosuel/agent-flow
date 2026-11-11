@@ -67,6 +67,11 @@ pub fn list(dir: &Path) -> anyhow::Result<Vec<String>> {
 
 pub fn read(dir: &Path, name: &str) -> anyhow::Result<Guide> {
     check_name(name)?;
+    // A link could point anywhere on the machine; guides are plain files in the checkout.
+    let meta = std::fs::symlink_metadata(dir.join(name)).with_context(|| format!("no guide {name}"))?;
+    if !meta.file_type().is_file() {
+        bail!("{name} isn't a plain file");
+    }
     let text = std::fs::read_to_string(dir.join(name)).with_context(|| format!("no guide {name}"))?;
     Ok(Guide { name: name.to_owned(), sections: split(&text), text })
 }
@@ -118,6 +123,14 @@ pub fn replace_section(g: &Guide, index: usize, new_text: &str) -> anyhow::Resul
     Ok(out)
 }
 
+/// git in the handbook checkout, with its hooks and fsmonitor off: whoever can write to the
+/// checkout's .git/config shouldn't get to run code as AgentFlow.
+pub fn git_command(dir: &Path) -> std::process::Command {
+    let mut c = std::process::Command::new("git");
+    c.arg("-C").arg(dir).args(["-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false"]);
+    c
+}
+
 /// Where the owner's edits are committed, and as whom.
 pub struct Repo {
     pub dir: PathBuf,
@@ -126,8 +139,7 @@ pub struct Repo {
 
 impl Repo {
     fn git(&self, args: &[&str]) -> anyhow::Result<String> {
-        let out =
-            std::process::Command::new("git").arg("-C").arg(&self.dir).args(args).output().context("running git")?;
+        let out = git_command(&self.dir).args(args).output().context("running git")?;
         if !out.status.success() {
             bail!("git {}: {}", args.first().unwrap_or(&""), String::from_utf8_lossy(&out.stderr).trim());
         }
@@ -163,6 +175,7 @@ impl Repo {
             &format!("user.email={email}"),
             "commit",
             "-q",
+            "--no-verify",
             "-m",
             &subject,
             "-m",
@@ -210,6 +223,9 @@ mod tests {
         for bad in ["../x.md", "a/b.md", ".hidden.md", "x.sh", "x.md\n"] {
             assert!(check_name(bad).is_err(), "{bad:?}");
         }
+        let dir = tempfile::tempdir().unwrap();
+        std::os::unix::fs::symlink("/etc/hostname", dir.path().join("HOST.md")).unwrap();
+        assert!(read(dir.path(), "HOST.md").is_err(), "links aren't followed");
     }
 
     #[test]

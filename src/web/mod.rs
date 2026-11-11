@@ -48,6 +48,8 @@ pub struct AppState {
     pub waits: Arc<std::sync::Mutex<std::collections::HashMap<i64, u32>>>,
     /// The guides repository's pull requests, refreshed by the poller.
     pub guide_prs: Arc<std::sync::Mutex<GuidePrs>>,
+    /// Held while a build uploads: one at a time.
+    pub uploads: Arc<tokio::sync::Mutex<()>>,
 }
 
 #[derive(Default, Clone)]
@@ -71,6 +73,7 @@ impl AppState {
             denied: Arc::default(),
             waits: Arc::default(),
             guide_prs: Arc::default(),
+            uploads: Arc::default(),
         }
     }
 
@@ -147,6 +150,10 @@ pub async fn serve(state: AppState) -> anyhow::Result<()> {
     let recovered = state.db.call(|c| crate::actions::recover_interrupted(c)).await?;
     if recovered > 0 {
         tracing::warn!("{recovered} button(s) were running when AgentFlow stopped; marked failed");
+    }
+    let swept = crate::builds::sweep_incoming(&crate::builds::dir(&state.config.data_dir()));
+    if swept > 0 {
+        tracing::info!("removed {swept} unfinished build upload(s)");
     }
     crate::poller::spawn(state.clone());
     spawn_archiver(state.clone());
