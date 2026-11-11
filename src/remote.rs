@@ -39,7 +39,13 @@ fn control_path(data_dir: &Path) -> PathBuf {
 }
 
 fn ssh_base(data_dir: &Path, timeout_s: u64) -> Vec<String> {
+    // Only the user's own config: AgentFlow's service runs with a private user namespace, where
+    // root's /etc/ssh files look foreign and ssh refuses to read them.
+    let user_config = crate::util::expand_home("~/.ssh/config");
+    let config = if user_config.is_file() { user_config.display().to_string() } else { "/dev/null".into() };
     vec![
+        "-F".into(),
+        config,
         "-o".into(),
         "BatchMode=yes".into(),
         "-o".into(),
@@ -481,11 +487,18 @@ async fn round(
         let had_prev = s.counters.is_some();
         match &probe {
             Ok(text) => {
+                if !s.probe.online {
+                    tracing::info!("build server {} is online", server.name);
+                }
                 let (p, c) = parse_probe(text, s.counters, now_ms());
                 s.probe = p;
                 s.counters = Some(c);
             }
             Err(e) => {
+                // Said once when it goes offline, not every minute while it stays off.
+                if s.probe.online || s.probe.at == 0 {
+                    tracing::info!("build server {} is offline: {e:#}", server.name);
+                }
                 s.probe = Probe { at: now_ms(), online: false, error: format!("{e:#}"), ..s.probe.clone() };
                 s.counters = None;
             }

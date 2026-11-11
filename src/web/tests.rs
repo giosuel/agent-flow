@@ -1615,7 +1615,7 @@ async fn jobs_run_on_a_build_server_and_bring_back_what_was_asked() {
         write(
             "ssh",
             format!(
-                "#!/bin/sh\nwhile [ $# -gt 0 ]; do case \"$1\" in -o) shift 2;; -*) shift;; *) break;; esac; done\nshift\ncd {h} || exit 255\nexport HOME={h} PATH={b}:$PATH\nexec sh -c \"$*\"\n",
+                "#!/bin/sh\nwhile [ $# -gt 0 ]; do case \"$1\" in -o|-F) shift 2;; -*) shift;; *) break;; esac; done\nshift\ncd {h} || exit 255\nexport HOME={h} PATH={b}:$PATH\nexec sh -c \"$*\"\n",
                 h = home.display(),
                 b = bin.display()
             ),
