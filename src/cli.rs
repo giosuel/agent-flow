@@ -255,6 +255,17 @@ impl Client {
         Ok(body)
     }
 
+    /// Sends JSON and returns the JSON answer.
+    pub fn post_json(&self, path: &str, body: &serde_json::Value) -> anyhow::Result<serde_json::Value> {
+        let res = self.http.post(format!("{}{path}", self.base)).bearer_auth(&self.token).json(body).send()?;
+        let status = res.status();
+        let body: serde_json::Value = res.json().unwrap_or(serde_json::Value::Null);
+        if !status.is_success() {
+            bail!("{status}: {}", body.get("error").and_then(|e| e.as_str()).unwrap_or("request failed"));
+        }
+        Ok(body)
+    }
+
     /// Streams a response body into a file.
     pub fn download(&self, path: &str, to: &Path) -> anyhow::Result<()> {
         let mut res = self.http.get(format!("{}{path}", self.base)).bearer_auth(&self.token).send()?;
@@ -385,6 +396,135 @@ pub struct ScreenshotArgs {
     /// The record it belongs to, e.g. T-12, B-3 or Q-4: it's linked and shows there.
     #[arg(long)]
     pub record: Option<String>,
+}
+
+#[derive(Args)]
+pub struct ContributeArgs {
+    #[command(flatten)]
+    pub client: ClientArgs,
+    /// pr (a new PR: your commits on top of their branch), issue (a new issue), comment (on one
+    /// already sent, --on C-4), or commits (new commits for a PR already sent, --on C-4).
+    pub kind: String,
+    /// Their repository, e.g. ophymx/formulary (pr, issue).
+    #[arg(long, default_value = "")]
+    pub repo: String,
+    /// Their branch the PR goes into (pr).
+    #[arg(long, default_value = "main")]
+    pub base: String,
+    /// The branch name on the owner's fork (pr), e.g. center-fences.
+    #[arg(long, default_value = "")]
+    pub branch: String,
+    /// The PR's or issue's title.
+    #[arg(long, default_value = "")]
+    pub title: String,
+    /// The text for them (Markdown), from a file; `-` reads it from stdin.
+    #[arg(long)]
+    pub body_file: Option<PathBuf>,
+    /// For the owner only: why, in a sentence or two.
+    #[arg(long, default_value = "")]
+    pub why: String,
+    /// Your project's task it's for, e.g. T-88.
+    #[arg(long, default_value = "")]
+    pub task: String,
+    /// The owner's decision that agreed to it, e.g. D-31.
+    #[arg(long, default_value = "")]
+    pub agreed: String,
+    /// The contribution a comment or commits are for, e.g. C-4.
+    #[arg(long, default_value = "")]
+    pub on: String,
+    /// A new version of this draft (after the owner asked for changes), e.g. C-7.
+    #[arg(long, default_value = "")]
+    pub revise: String,
+    /// The git checkout with the commits (pr, commits): everything on top of their branch up to
+    /// HEAD is sent.
+    #[arg(long, default_value = ".")]
+    pub dir: PathBuf,
+}
+
+/// Sends a draft for someone else's repository to the owner, who sends it (or not) from its page.
+pub fn contribute(config_path: &Path, a: ContributeArgs) -> anyhow::Result<()> {
+    let client = Client::new(config_path, &a.client)?.with_timeout(std::time::Duration::from_secs(10 * 60));
+    let body = match &a.body_file {
+        Some(p) if p.as_os_str() == "-" => {
+            let mut s = String::new();
+            std::io::Read::read_to_string(&mut std::io::stdin(), &mut s)?;
+            s
+        }
+        Some(p) => std::fs::read_to_string(p).with_context(|| format!("reading {}", p.display()))?,
+        None => String::new(),
+    };
+    let kind = a.kind.trim();
+    // The commits: everything on top of their branch (or the PR's branch on the fork), as a bundle.
+    let bundle = match kind {
+        "pr" | "commits" => {
+            let (url, branch) = if kind == "pr" {
+                if a.repo.trim().is_empty() {
+                    bail!("--repo names their repository, e.g. ophymx/formulary");
+                }
+                (format!("https://github.com/{}.git", a.repo.trim()), a.base.trim().to_owned())
+            } else {
+                let on = if a.on.trim().is_empty() { a.revise.trim() } else { a.on.trim() };
+                let me = client.get("/api/whoami")?;
+                let slug = me["project"].as_str().context("your token isn't a project's")?.to_owned();
+                let c = client.get(&format!("/api/contributions/{slug}/{on}"))?;
+                let fork =
+                    c["fork"].as_str().filter(|f| !f.is_empty()).context("that PR wasn't sent through AgentFlow")?;
+                (format!("https://github.com/{fork}.git"), c["branch"].as_str().unwrap_or("").to_owned())
+            };
+            let dir = &a.dir;
+            let fetch = std::process::Command::new("git")
+                .arg("-C")
+                .arg(dir)
+                .args(["fetch", "-q", "--no-tags", &url, &branch])
+                .status()
+                .context("running git")?;
+            if !fetch.success() {
+                bail!("couldn't fetch {branch} of {url}");
+            }
+            let base = git_out(dir, &["rev-parse", "FETCH_HEAD"]).context("no FETCH_HEAD")?;
+            let count = git_out(dir, &["rev-list", "--count", &format!("{base}..HEAD")]).unwrap_or_default();
+            if count == "0" || count.is_empty() {
+                bail!("HEAD has no commits on top of {branch}");
+            }
+            let tmp = tempfile::NamedTempFile::new_in(std::env::temp_dir())?;
+            let ok = std::process::Command::new("git")
+                .arg("-C")
+                .arg(dir)
+                .args(["bundle", "create", "-q"])
+                .arg(tmp.path())
+                .arg(format!("{base}..HEAD"))
+                .status()?;
+            if !ok.success() {
+                bail!("git bundle failed");
+            }
+            use base64::Engine as _;
+            println!("{count} commit(s) on top of {branch}.");
+            base64::engine::general_purpose::STANDARD.encode(std::fs::read(tmp.path())?)
+        }
+        _ => String::new(),
+    };
+    let draft = serde_json::json!({
+        "type": kind,
+        "repo": a.repo.trim(),
+        "base": a.base.trim(),
+        "branch": a.branch.trim(),
+        "title": a.title.trim(),
+        "body": body,
+        "why": a.why.trim(),
+        "task": a.task.trim(),
+        "agreed": a.agreed.trim(),
+        "on": a.on.trim(),
+        "revise": a.revise.trim(),
+        "bundle": bundle,
+    });
+    let res = client.post_json("/api/contributions", &draft)?;
+    println!(
+        "Draft {} is waiting for the owner: {}
+Nothing is posted until they press Send; their Send, \"Ask for changes\" or Drop reaches you like any other news.",
+        res["id"].as_str().unwrap_or(""),
+        res["url"].as_str().unwrap_or("")
+    );
+    Ok(())
 }
 
 /// Uploads a screenshot to the project's Screenshots.
