@@ -1,0 +1,14 @@
+# AgentFlow's hands: runs as the agents' user (a systemd --user service) and does what the server
+# does as that user: the owner's buttons, gh, guide edits, token files, new projects' folders,
+# reading transcripts. Only AgentFlow's own user may send it jobs.
+# Enable as the agents' user: systemctl --user enable --now agentflow-hands
+[Unit]
+Description=AgentFlow's hands (jobs run as you for the AgentFlow server)
+
+[Service]
+ExecStart=@BIN@ hands
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
