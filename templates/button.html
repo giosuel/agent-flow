@@ -3,7 +3,7 @@
     <form method="post" action="/actions/{{ b.id }}/run">
       <input type="hidden" name="hash" value="{{ b.hash }}">
       <input type="hidden" name="next" value="{{ next }}">
-      <button class="btn sm" type="submit"{% if !b.enabled %} disabled{% endif %} data-confirm="Run &quot;{{ b.label }}&quot;? It runs the command below in {{ b.workdir }}.">{{ b.label }}</button>
+      <button class="btn sm" type="submit"{% if !b.enabled %} disabled{% endif %} data-confirm="{{ b.confirm }}">{{ b.label }}</button>
     </form>
     {% if !b.why.is_empty() %}<span class="sub">{{ b.why }}</span>{% endif %}
     {% if !b.result.is_empty() %}<span class="sub{% if b.state == "failed" %} bad-text{% endif %}">{{ b.result }}</span>{% endif %}
