@@ -32,6 +32,7 @@ mod remote;
 mod screenshots;
 mod setup;
 mod tokens;
+mod totest;
 mod tz;
 mod usage;
 mod util;
