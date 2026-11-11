@@ -1,17 +1,17 @@
 {% extends "base.html" %}
 {% block title %}Guides{% endblock %}
 {% block content %}
-<div class="head{% if file.is_some() %} hide-on-phone{% endif %}">
+<div class="head{% if file.is_some() || prs_view %} hide-on-phone{% endif %}">
   <h1>Guides</h1>
   <p class="status-line">Your rules for every project, as files in the {{ repo }} repo. Agents read them through AgentFlow; the consultant changes them with pull requests, one file each.</p>
 </div>
 {% if let Some(n) = notice %}<p class="notice ok" role="status">{{ n }}</p>{% endif %}
 {% if let Some(e) = error %}<p class="notice warn" role="alert">{{ e }}</p>{% endif %}
 {% if unpushed > 0 %}<p class="notice">{{ unpushed }} of your edit{% if unpushed != 1 %}s are{% else %} is{% endif %} committed but not pushed yet. Push from the checkout when you're ready.</p>{% endif %}
-<div class="split guides{% if file.is_some() %} picked{% endif %}">
+<div class="split guides{% if file.is_some() || prs_view %} picked{% endif %}">
   <nav class="split-side stack" aria-label="Guides">
     <div class="card list">
-      <a class="item conv-row{% if file.is_none() %} on{% endif %}" href="/guides"{% if file.is_none() %} aria-current="true"{% endif %}>
+      <a class="item conv-row{% if file.is_none() %} on{% endif %}" href="/guides?view=prs"{% if file.is_none() %} aria-current="true"{% endif %}>
         <div class="ttl"><strong>Pull requests</strong><span class="sub">{{ open.len() }} open · {{ merged.len() }} recently merged</span></div>
         {% if !open.is_empty() %}<span class="mono count warn-text">{{ open.len() }}</span>{% endif %}
       </a>
@@ -34,7 +34,7 @@
     {% if let Some(ed) = editing %}
     <form method="post" action="/guides/save" class="card pad stack">
       <h3>Editing {% if ed.section.is_some() %}“{{ ed.label }}”{% else %}the whole file{% endif %}</h3>
-      {% if !clash.is_empty() %}<p class="notice warn" role="status">{% for n in clash %}{% if !loop.first %}, {% endif %}<a class="mono" href="/guides#pr-{{ n }}">{{ repo }}/pull/{{ n }}</a>{% endfor %} change{% if clash.len() == 1 %}s{% endif %} this file too. Whichever lands second may need redoing; you could merge {% if clash.len() == 1 %}it{% else %}them{% endif %} first.</p>{% endif %}
+      {% if !clash.is_empty() %}<p class="notice warn" role="status">{% for n in clash %}{% if !loop.first %}, {% endif %}<a class="mono" href="/guides?view=prs#pr-{{ n }}">{{ repo }}/pull/{{ n }}</a>{% endfor %} change{% if clash.len() == 1 %}s{% endif %} this file too. Whichever lands second may need redoing; you could merge {% if clash.len() == 1 %}it{% else %}them{% endif %} first.</p>{% endif %}
       <input type="hidden" name="f" value="{{ name }}">
       <input type="hidden" name="version" value="{{ version }}">
       <input type="hidden" name="section" value="{% if let Some(i) = ed.section %}{{ i }}{% endif %}">

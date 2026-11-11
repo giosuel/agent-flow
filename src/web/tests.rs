@@ -1024,7 +1024,7 @@ async fn the_owner_edits_a_guide_and_agents_read_it() {
         .await
         .unwrap();
     // The test's checkout has no remote, so the pull after the merge reports a problem.
-    assert_eq!(res.headers()[LOCATION], "/guides?error=pull");
+    assert_eq!(res.headers()[LOCATION], "/guides?view=prs&error=pull");
     assert_eq!(*s.github.merged.lock().unwrap(), vec![27]);
     let res = s
         .http

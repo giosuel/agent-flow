@@ -608,3 +608,7 @@ body { box-sizing: border-box; min-height: 100vh; min-height: 100dvh; }
 /* The answer form: Send stays dimmed until an option or an answer is given. */
 .answer-form .btn:disabled { opacity: .4; cursor: not-allowed; }
 .answer-row input { flex: 1; min-width: 200px; }
+@media (max-width: 700px) {
+  /* Guides on the phone: the list of files and "Pull requests" first; either opens on its own screen. */
+  .split.guides:not(.picked) > .split-main { display: none; }
+}
