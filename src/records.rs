@@ -473,6 +473,59 @@ pub fn revisions(conn: &Connection, record_id: i64) -> anyhow::Result<Vec<Revisi
     Ok(rows.collect::<Result<_, _>>()?)
 }
 
+/// The owner answers a question: a numbered option, their own words, or both. The words are
+/// stored exactly as typed.
+pub fn answer_question(
+    conn: &Connection,
+    q: &Record,
+    option: Option<u32>,
+    words: &str,
+    author: &str,
+) -> anyhow::Result<Record> {
+    if q.kind != Kind::Question {
+        bail!("{} isn't a question", q.ref_id);
+    }
+    if q.state != "open" {
+        bail!("{} is already {}", q.ref_id, q.state);
+    }
+    let options = q.data.get("options").and_then(Value::as_array).cloned().unwrap_or_default();
+    let chosen = match option {
+        Some(n) if n == 0 || n as usize > options.len() => bail!("there is no option {n}"),
+        Some(n) => Some((n, options[n as usize - 1].get("title").and_then(Value::as_str).unwrap_or("").to_owned())),
+        None => None,
+    };
+    if chosen.is_none() && words.trim().is_empty() {
+        bail!("pick an option or write an answer");
+    }
+    let mut data = Map::new();
+    data.insert("answer".into(), words.to_owned().into());
+    data.insert("answered_at".into(), now_ms().into());
+    if let Some((n, title)) = &chosen {
+        data.insert("answer_option".into(), (*n).into());
+        data.insert("answer_option_title".into(), title.clone().into());
+    }
+    let (q, _) = update(
+        conn,
+        q,
+        author,
+        Patch { state: Some("answered".into()), data, note: "answered by the owner".into(), ..Default::default() },
+    )?;
+    let what = match (&chosen, words.trim()) {
+        (Some((n, t)), "") => format!("{n}: {t}"),
+        (Some((n, t)), w) => format!("{n}: {t}. \"{w}\""),
+        (None, w) => format!("\"{w}\""),
+    };
+    event(
+        conn,
+        Some(q.project_id),
+        Some(q.id),
+        "question.answered",
+        &format!("Owner answered {}: {what}", q.short_id()),
+        author,
+    )?;
+    Ok(q)
+}
+
 // ---------------------------------------------------------------------------------------------
 // Links
 
@@ -748,6 +801,34 @@ mod tests {
             assert_eq!(found[0].ref_id, "vinculum/T-2");
             let found = query(c, &Query { text: Some("100%".into()), ..Default::default() })?;
             assert!(found.is_empty());
+            Ok(())
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn answers_are_verbatim() {
+        let db = Db::open_memory();
+        db.call_blocking(|c| {
+            let p = setup(c);
+            let mut data = Map::new();
+            data.insert("options".into(), json!([{"title": "A"}, {"title": "B"}]));
+            let q = create(
+                c,
+                p,
+                "v",
+                NewRecord { kind: Some(Kind::Question), title: "A or B?".into(), data, ..Default::default() },
+            )?;
+            assert!(answer_question(c, &q, None, "  ", "owner").is_err());
+            assert!(answer_question(c, &q, Some(3), "", "owner").is_err());
+            let a = answer_question(c, &q, Some(2), "B, but  smaller ", "owner")?;
+            assert_eq!(
+                (a.state.as_str(), a.str("answer"), a.str("answer_option_title")),
+                ("answered", "B, but  smaller ", "B")
+            );
+            assert!(answer_question(c, &a, Some(1), "", "owner").is_err(), "answered once");
+            let ev = recent_events(c, Some(p), 1)?;
+            assert!(ev[0].summary.contains("2: B"), "{}", ev[0].summary);
             Ok(())
         })
         .unwrap();
