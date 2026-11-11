@@ -119,11 +119,12 @@ async fn page(
 ) -> AppResult<Response> {
     actor.require_owner()?;
     let dir = state.config.handbook_dir();
-    if !state.guide_prs.lock().unwrap().fetched {
-        // First visit since start: fetch now rather than show nothing.
-        let _ = crate::poller::refresh_guide_prs(&state).await;
+    if !crate::util::lock(&state.guide_prs).fetched {
+        // First visit since start: fetch now rather than show nothing, but don't let an
+        // unreachable GitHub hold up the page (the poller keeps trying).
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(5), crate::poller::refresh_guide_prs(&state)).await;
     }
-    let prs = state.guide_prs.lock().unwrap().clone();
+    let prs = crate::util::lock(&state.guide_prs).clone();
     let file = q.f.clone().filter(|f| guides::check_name(f).is_ok());
     let (names, guide) = {
         let dir = dir.clone();
@@ -217,6 +218,7 @@ async fn save(
     let dir = state.config.handbook_dir();
     let repo = guides::Repo { dir: dir.clone(), author: state.config.git_author.clone() };
     let f = form.f.clone();
+    let _checkout = state.handbook.lock().await;
     let result = tokio::task::spawn_blocking(move || -> Result<(String, String), guides::SaveError> {
         let g = guides::read(&dir, &form.f)?;
         let (content, what) = match form.section.as_deref().filter(|s| !s.is_empty()) {
@@ -271,7 +273,7 @@ async fn merge(
     Form(form): Form<MergeForm>,
 ) -> AppResult<Response> {
     actor.require_owner()?;
-    if !state.guide_prs.lock().unwrap().open.iter().any(|p| p.number == form.number) {
+    if !crate::util::lock(&state.guide_prs).open.iter().any(|p| p.number == form.number) {
         return Err(AppError::BadRequest(format!("#{} isn't an open pull request of the guides", form.number)));
     }
     if !state.config.github_writes {
@@ -301,11 +303,21 @@ async fn merge(
     let dir = state.config.handbook_dir();
     let mut pull = guides::git_command(&dir);
     pull.args(["pull", "--ff-only", "-q"]);
-    let pulled = tokio::process::Command::from(pull).output().await;
+    let pulled = {
+        let _checkout = state.handbook.lock().await;
+        tokio::process::Command::from(pull).output().await
+    };
     let _ = crate::poller::refresh_guide_prs(&state).await;
     match pulled {
         Ok(o) if o.status.success() => Ok(Redirect::to(&format!("/guides?merged={}", form.number)).into_response()),
-        _ => Ok(Redirect::to("/guides?error=pull").into_response()),
+        Ok(o) => {
+            tracing::warn!("pulling the handbook after #{}: {}", form.number, String::from_utf8_lossy(&o.stderr).trim());
+            Ok(Redirect::to("/guides?error=pull").into_response())
+        }
+        Err(e) => {
+            tracing::warn!("pulling the handbook after #{}: {e}", form.number);
+            Ok(Redirect::to("/guides?error=pull").into_response())
+        }
     }
 }
 
