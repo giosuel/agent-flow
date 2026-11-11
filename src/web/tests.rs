@@ -553,14 +553,14 @@ async fn prs_merge_in_order_from_the_owners_buttons() {
     for n in [48, 49] {
         let (ok, r) = call("update_pr", json!({"number": n, "ready": true})).await;
         assert!(ok, "{r}");
-        let (ok, r) = call("add_button", json!({"record": format!("PR-{n}"), "label": "Merge", "command": format!("echo merged {n} > merged-{n}"), "workdir": wd})).await;
+        let (ok, r) = call("add_button", json!({"record": format!("PR-{n}"), "label": "Merge", "kind": "merge", "command": format!("echo merged {n} > merged-{n}"), "workdir": wd})).await;
         assert!(ok, "{r}");
     }
     let (ok, r) =
         call("add_release", json!({"tag": "v0.0.5-m4", "title": "M4: Keybinds", "waits_for": ["PR-48", "PR-49"]}))
             .await;
     assert!(ok, "{r}");
-    call("add_button", json!({"record": "R-1", "label": "Push tag v0.0.5-m4", "command": "echo tagged > tagged", "workdir": wd, "requires": ["PR-49"]})).await;
+    call("add_button", json!({"record": "R-1", "label": "Push tag v0.0.5-m4", "kind": "tag", "command": "echo tagged > tagged", "workdir": wd, "requires": ["PR-49"]})).await;
 
     let (_, order) = call("pull_requests", json!({})).await;
     assert_eq!(order["merge_order"][0]["mergeable_now"], true);

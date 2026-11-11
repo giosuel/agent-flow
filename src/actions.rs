@@ -23,6 +23,9 @@ pub struct ActionRow {
     pub id: i64,
     pub record_id: i64,
     pub label: String,
+    /// What pressing it means to AgentFlow: `merge` (a PR's merge, gated by merge order), `tag`
+    /// (a release's tag, which marks it tagged), or `other`.
+    pub kind: ButtonKind,
     pub command: String,
     pub workdir: String,
     pub requires: Vec<String>,
@@ -46,27 +49,55 @@ impl ActionRow {
     }
 
     pub fn is_merge(&self) -> bool {
-        self.label.to_lowercase().starts_with("merge")
+        self.kind == ButtonKind::Merge
     }
 }
 
-const COLUMNS: &str = "id, record_id, label, command, workdir, requires, added_by, created_at, state, pressed_at, finished_at, exit_code, output";
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ButtonKind {
+    Merge,
+    Tag,
+    Other,
+}
+
+impl ButtonKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ButtonKind::Merge => "merge",
+            ButtonKind::Tag => "tag",
+            ButtonKind::Other => "other",
+        }
+    }
+
+    pub fn parse(s: &str) -> anyhow::Result<Self> {
+        Ok(match s.trim() {
+            "merge" => ButtonKind::Merge,
+            "tag" => ButtonKind::Tag,
+            "other" | "" => ButtonKind::Other,
+            other => bail!("kind must be merge, tag or other, not {other:?}"),
+        })
+    }
+}
+
+const COLUMNS: &str = "id, record_id, label, kind, command, workdir, requires, added_by, created_at, state, pressed_at, finished_at, exit_code, output";
 
 fn from_row(r: &Row) -> rusqlite::Result<ActionRow> {
     Ok(ActionRow {
         id: r.get(0)?,
         record_id: r.get(1)?,
         label: r.get(2)?,
-        command: r.get(3)?,
-        workdir: r.get(4)?,
-        requires: serde_json::from_str(&r.get::<_, String>(5)?).unwrap_or_default(),
-        added_by: r.get(6)?,
-        created_at: r.get(7)?,
-        state: r.get(8)?,
-        pressed_at: r.get(9)?,
-        finished_at: r.get(10)?,
-        exit_code: r.get(11)?,
-        output: r.get(12)?,
+        kind: ButtonKind::parse(&r.get::<_, String>(3)?).unwrap_or(ButtonKind::Other),
+        command: r.get(4)?,
+        workdir: r.get(5)?,
+        requires: serde_json::from_str(&r.get::<_, String>(6)?).unwrap_or_default(),
+        added_by: r.get(7)?,
+        created_at: r.get(8)?,
+        state: r.get(9)?,
+        pressed_at: r.get(10)?,
+        finished_at: r.get(11)?,
+        exit_code: r.get(12)?,
+        output: r.get(13)?,
     })
 }
 
@@ -86,6 +117,7 @@ pub fn add(
     conn: &Connection,
     record: &Record,
     label: &str,
+    kind: ButtonKind,
     command: &str,
     workdir: &str,
     requires: &[String],
@@ -93,6 +125,11 @@ pub fn add(
 ) -> anyhow::Result<i64> {
     if !matches!(record.kind, Kind::Pr | Kind::Release) {
         bail!("buttons belong to a PR or a release, not a {}", record.kind);
+    }
+    match (kind, record.kind) {
+        (ButtonKind::Merge, Kind::Release) => bail!("a merge button belongs on a PR"),
+        (ButtonKind::Tag, Kind::Pr) => bail!("a tag button belongs on a release"),
+        _ => {}
     }
     let label = label.trim();
     if label.is_empty() || label.chars().count() > 60 {
@@ -114,8 +151,18 @@ pub fn add(
         resolved.push(records::find_str(conn, r, Some(&record.project))?.ref_id);
     }
     conn.execute(
-        "INSERT INTO actions (record_id, label, command, workdir, requires, added_by, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-        params![record.id, label, command, workdir.trim(), serde_json::to_string(&resolved)?, added_by, now_ms()],
+        "INSERT INTO actions (record_id, label, kind, command, workdir, requires, added_by, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        params![
+            record.id,
+            label,
+            kind.as_str(),
+            command,
+            workdir.trim(),
+            serde_json::to_string(&resolved)?,
+            added_by,
+            now_ms()
+        ],
     )?;
     let id = conn.last_insert_rowid();
     records::event(
@@ -275,7 +322,7 @@ pub fn finish(conn: &Connection, a: &ActionRow, r: &RunResult) -> anyhow::Result
     };
     records::event(conn, Some(record.project_id), Some(record.id), kind, &what, "owner")?;
     // A release whose tag command ran is tagged.
-    if r.ok && record.kind == Kind::Release && a.label.to_lowercase().contains("tag") {
+    if r.ok && record.kind == Kind::Release && a.kind == ButtonKind::Tag {
         records::update(
             conn,
             &record,
@@ -307,11 +354,26 @@ mod tests {
                     "v",
                     records::NewRecord { kind: Some(Kind::Task), title: "t".into(), ..Default::default() },
                 )?;
-                assert!(add(c, &task, "Merge", "x", "", &[], "v").is_err(), "only PRs and releases");
-                assert!(add(c, &r, "Merge", "x", "", &["T-9".into()], "v").is_err(), "unknown requirement");
-                assert!(add(c, &r, "Merge", "echo safe\u{202E}lmth.exe", "", &[], "v").is_err(), "bidi override");
-                assert!(add(c, &r, "Merge", "echo a\u{200B}b", "", &[], "v").is_err(), "zero-width");
-                let id = add(c, &r, "Merge", "echo merged $PWD; echo warn >&2", &workdir, &["T-1".into()], "v")?;
+                assert!(add(c, &task, "Merge", ButtonKind::Merge, "x", "", &[], "v").is_err(), "only PRs and releases");
+                assert!(
+                    add(c, &r, "Merge", ButtonKind::Merge, "x", "", &["T-9".into()], "v").is_err(),
+                    "unknown requirement"
+                );
+                assert!(
+                    add(c, &r, "Merge", ButtonKind::Merge, "echo safe\u{202E}lmth.exe", "", &[], "v").is_err(),
+                    "bidi override"
+                );
+                assert!(add(c, &r, "Merge", ButtonKind::Merge, "echo a\u{200B}b", "", &[], "v").is_err(), "zero-width");
+                let id = add(
+                    c,
+                    &r,
+                    "Merge",
+                    ButtonKind::Merge,
+                    "echo merged $PWD; echo warn >&2",
+                    &workdir,
+                    &["T-1".into()],
+                    "v",
+                )?;
                 Ok((get(c, id)?.unwrap(), task))
             })
             .await
@@ -350,6 +412,7 @@ mod tests {
             id: 1,
             record_id: 1,
             label: "Push tag".into(),
+            kind: ButtonKind::Tag,
             command: format!("echo token {}; exit 3", crate::util::new_secret("af_prj_")),
             workdir: String::new(),
             requires: vec![],

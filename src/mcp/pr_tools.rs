@@ -55,6 +55,9 @@ pub struct AddButton {
     pub record: String,
     /// What the owner sees on the button: "Merge", "Push tag v0.0.5-m4".
     pub label: String,
+    /// "merge" for a PR's merge (unlocks in merge order, and "Merge #a–#b" uses it), "tag" for a
+    /// release's tag (marks the release tagged once it ran), "other" for anything else.
+    pub kind: String,
     /// The exact commands, run with bash when the owner presses it, e.g.
     /// "gh pr merge 58 -R giosuel/vinculum --merge --delete-branch". In a stack, delete the
     /// branch on merge so GitHub moves the next PR onto main. Never run them yourself.
@@ -258,7 +261,8 @@ impl FlowMcp {
             .call(move |c| {
                 let tx = c.transaction()?;
                 let r = writable(&tx, &a, &p.record)?;
-                let id = actions::add(&tx, &r, &p.label, &p.command, &p.workdir, &p.requires, &a.name())?;
+                let kind = actions::ButtonKind::parse(&p.kind)?;
+                let id = actions::add(&tx, &r, &p.label, kind, &p.command, &p.workdir, &p.requires, &a.name())?;
                 tx.commit()?;
                 Ok(Outcome::new(json!({"button": id, "on": r.ref_id}))
                     .summary(format!("button \"{}\" added to {}", p.label.trim(), r.short_id()))
