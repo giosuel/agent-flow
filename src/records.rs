@@ -335,6 +335,8 @@ pub struct Patch {
     pub tags: Option<Vec<String>>,
     pub data: Map<String, Value>,
     pub note: String,
+    /// Skip the generic "updated" event because the caller records a clearer one.
+    pub quiet: bool,
 }
 
 /// Applies a patch, appends a revision with what changed, and records an event. Returns the
@@ -421,6 +423,9 @@ pub fn update(conn: &Connection, record: &Record, author: &str, patch: Patch) ->
         "INSERT INTO revisions (record_id, rev, at, author, changes, note) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
         params![record.id, rev, now, author, Value::Object(changes.clone()).to_string(), patch.note.trim()],
     )?;
+    if patch.quiet {
+        return Ok((get(conn, record.id)?, true));
+    }
     let what = describe_changes(&changes, &patch.note);
     event(
         conn,
@@ -436,6 +441,7 @@ pub fn update(conn: &Connection, record: &Record, author: &str, patch: Patch) ->
 fn describe_changes(changes: &Map<String, Value>, note: &str) -> String {
     let mut parts: Vec<String> = changes
         .iter()
+        .filter(|(k, _)| !k.ends_with("_at"))
         .map(|(k, v)| match (k.as_str(), v) {
             ("state", Value::String(s)) => format!("now {s}"),
             ("milestone", Value::String(m)) if !m.is_empty() => format!("moved to {m}"),
@@ -508,7 +514,13 @@ pub fn answer_question(
         conn,
         q,
         author,
-        Patch { state: Some("answered".into()), data, note: "answered by the owner".into(), ..Default::default() },
+        Patch {
+            state: Some("answered".into()),
+            data,
+            note: "answered by the owner".into(),
+            quiet: true,
+            ..Default::default()
+        },
     )?;
     let what = match (&chosen, words.trim()) {
         (Some((n, t)), "") => format!("{n}: {t}"),
