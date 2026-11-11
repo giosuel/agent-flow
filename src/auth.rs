@@ -239,11 +239,12 @@ pub fn token_actor(conn: &Connection, secret: &str, from: &str) -> anyhow::Resul
     Ok(Some(match kind.as_str() {
         "device" => Actor::Device { token_id: id, name },
         "admin" => Actor::Admin { token_id: id, name },
-        _ => Actor::Project {
+        "project" => Actor::Project {
             token_id: id,
             project_id: project_id.context("project token without a project")?,
             slug: slug.unwrap_or_default(),
         },
+        other => bail!("token {id} has an unknown kind {other:?}"),
     }))
 }
 
