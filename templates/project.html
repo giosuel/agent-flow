@@ -11,21 +11,8 @@
 {% if let Some(n) = notice %}<p class="notice{% if notice_bad %} warn{% else %} ok{% endif %}" role="status">{{ n }}</p>{% endif %}
 {% if tab == "overview" %} class="on" aria-current="page"{% endif %}>Overview</a>
   <a href="/p/{{ slug }}?tab=tasks"{% if tab == "tasks" %} class="on" aria-current="page"{% endif %}>Tasks</a>
-  <a href="/p/{{ slug }}?tab=prs"{% if tab == "prs" %} class="on" aria-current="page"{% endif %}>Pull requests{% if !prs.is_empty() %} <span class="mono sub">{{ prs.len() }}</span>{% endif %}</a>
-  <a href="/p/{{ slug }}?tab=decisions"{% if tab == "prs" %}
-<section class="card pad stack">
-  <div class="sec"><h2>Open pull requests</h2><span class="sub">in merge order · changes are on GitHub</span></div>
-  {% if prs.is_empty() %}<p class="sub">No open pull requests.</p>{% else %}{% include "pr_list.html" %}{% endif %}
-</section>
-{% for rel in releases %}
-<section class="card pad stack" aria-label="Release {{ rel.tag }}">
-  <div class="sec"><h2><span class="mono">{{ rel.tag }}</span> · {{ rel.title }}</h2><span class="sub">{{ rel.waits }}</span></div>
-  {% for b in rel.buttons %}{% include "button.html" %}{% endfor %}
-</section>
-{% endfor %}
-{% endif %}
-
-{% if tab == "decisions" %} class="on" aria-current="page"{% endif %}>Decisions</a>
+  <a href="/p/{{ slug }}?tab=prs"{% if tab == "prs" %} class="on" aria-current="page"{% endif %}>Pull requests{% if prs_total > 0 %} <span class="mono sub">{{ prs_total }}</span>{% endif %}</a>
+  <a href="/p/{{ slug }}?tab=decisions"{% if tab == "decisions" %} class="on" aria-current="page"{% endif %}>Decisions</a>
   <a href="/p/{{ slug }}?tab=questions"{% if tab == "questions" %} class="on" aria-current="page"{% endif %}>Questions{% if !open_questions.is_empty() %} <span class="mono count">{{ open_questions.len() }}</span>{% endif %}</a>
 </nav>
 
@@ -59,6 +46,7 @@
         <div class="sec"><h2 class="label" id="mo-h">Merge order</h2><span class="sub">from PR bases</span></div>
         <p class="sub">Each PR merges after the one it's based on. "Merge #a–#b" merges every PR up to that one, in order.</p>
         {% include "pr_list.html" %}
+        {% if prs_total > prs.len() %}<a class="sub" href="/p/{{ slug }}?tab=prs">All {{ prs_total }} open PRs</a>{% endif %}
       </section>
       {% endif %}
       {% for rel in releases %}
@@ -123,6 +111,19 @@
 <section class="card pad stack">
   <div class="sec"><h2>{% if !g.name.is_empty() %}<span class="mono">{{ g.name }}</span> {% endif %}{{ g.title }}</h2><span class="sub">{{ g.state }} · {{ g.rows.len() }} tasks</span></div>
   <ul class="rows">{% for t in g.rows %}<li class="item-row"><span class="mono sub id-col">{{ t.short }}</span><div class="ttl"><a href="{{ t.url }}">{{ t.title }}</a></div><span class="chip state-{{ t.state }}">{{ t.sub }}</span></li>{% endfor %}</ul>
+</section>
+{% endfor %}
+{% endif %}
+
+{% if tab == "prs" %}
+<section class="card pad stack">
+  <div class="sec"><h2>Open pull requests</h2><span class="sub">in merge order · changes are on GitHub</span></div>
+  {% if prs.is_empty() %}<p class="sub">No open pull requests.</p>{% else %}{% include "pr_list.html" %}{% endif %}
+</section>
+{% for rel in releases %}
+<section class="card pad stack" aria-label="Release {{ rel.tag }}">
+  <div class="sec"><h2><span class="mono">{{ rel.tag }}</span> · {{ rel.title }}</h2><span class="sub">{{ rel.waits }}</span></div>
+  {% for b in rel.buttons %}{% include "button.html" %}{% endfor %}
 </section>
 {% endfor %}
 {% endif %}

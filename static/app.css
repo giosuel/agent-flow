@@ -288,3 +288,7 @@ button.opt { font: inherit; color: var(--ink); text-align: left; width: 100%; }
 .cmd-box .cmd { margin-top: 6px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .bad-text { color: var(--bad); }
 .chip.accent { background: var(--chip-accent); color: var(--chip-accent-ink); }
+.pr-row > .row { flex-wrap: nowrap; align-items: baseline; }
+.pr-row .pr-title { flex: 1 1 auto; }
+.pr-row .chip { flex: none; }
+@media (max-width: 600px) { .pr-row > .row { flex-wrap: wrap; } }

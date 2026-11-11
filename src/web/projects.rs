@@ -226,6 +226,7 @@ struct ProjectPage {
     groups: Vec<TaskGroup>,
     questions: Vec<RecordRow>,
     prs: Vec<super::buttons::PrRow>,
+    prs_total: usize,
     releases: Vec<super::buttons::ReleaseRow>,
     notice: Option<String>,
     notice_bad: bool,
@@ -286,6 +287,12 @@ async fn project(
         })
         .await?
         .ok_or(AppError::NotFound)?;
+    let mut page = page;
+    page.prs_total = page.prs.len();
+    if tab == "overview" {
+        // The overview shows the start of the order; the Pull requests tab has all of them.
+        page.prs.truncate(8);
+    }
     let next = if tab == "overview" { format!("/p/{}", page.slug) } else { format!("/p/{}?tab={tab}", page.slug) };
     let page = ProjectPage { nav: nav(&state, &actor, "/projects").await, tab, notice, notice_bad, next, ..page };
     render(page)
@@ -553,6 +560,7 @@ fn build_project_page(
         decisions,
         groups,
         questions,
+        prs_total: 0,
         prs: super::buttons::pr_rows(c, p.id, now)?,
         releases: super::buttons::release_rows(c, p.id, now)?,
         notice: None,
