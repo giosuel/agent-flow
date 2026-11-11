@@ -411,14 +411,14 @@ async fn the_owner_answers_on_the_page_and_the_agent_reads_it() {
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::SEE_OTHER);
-    assert_eq!(res.headers()[LOCATION], "/p/vinculum/Q-1", "no open redirects");
+    assert_eq!(res.headers()[LOCATION], "/?answered=vinculum/Q-1", "no open redirects; back to the Dashboard");
 
     let (_, q) = mcp_tool(&s, &token, &sess, "get_record", json!({"id": "Q-1"})).await;
     assert_eq!(
         (q["state"].as_str(), q["data"]["answer"].as_str(), q["data"]["answer_option"].as_u64()),
         (Some("answered"), Some("B, smaller"), Some(2))
     );
-    // Answering twice shows the reason on the page instead of failing.
+    // Answering twice goes back to the question with the reason.
     let res = s
         .http
         .post(s.url("/p/vinculum/Q-1/answer"))
@@ -428,7 +428,9 @@ async fn the_owner_answers_on_the_page_and_the_agent_reads_it() {
         .send()
         .await
         .unwrap();
-    assert!(res.text().await.unwrap().contains("already answered"));
+    assert_eq!(res.headers()[LOCATION], "/p/vinculum/Q-1?error=answered");
+    let page = s.http.get(s.url("/p/vinculum/Q-1?error=answered")).header(COOKIE, &cookie).send().await.unwrap();
+    assert!(page.text().await.unwrap().contains("This question was already answered."));
 }
 
 #[tokio::test]
@@ -502,6 +504,11 @@ async fn the_dashboard_features_a_question_and_answers_in_one_tap() {
     )
     .await;
     let html = s.http.get(s.url("/")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
+    // The own-words box is in a form without option buttons: Enter there must not also pick one.
+    let words = html.find(r#"name="words""#).unwrap();
+    let form_start = html[..words].rfind("<form").unwrap();
+    let form_end = words + html[words..].find("</form>").unwrap();
+    assert!(!html[form_start..form_end].contains(r#"name="option""#), "Enter in the words box would send an option");
     // The urgent one is featured, the other is listed, and the badge counts both.
     let featured = html.find("Tabs A or B?").unwrap();
     assert!(featured < html.find("Old question").unwrap());
