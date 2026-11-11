@@ -6,6 +6,8 @@ CREATE TABLE usage (
     at          INTEGER NOT NULL,
     -- The transcript folder, e.g. "-home-viber-office": the session's starting directory.
     folder      TEXT NOT NULL,
+    -- Where the session was working at that call; decides the project.
+    cwd         TEXT NOT NULL DEFAULT '',
     session     TEXT NOT NULL,
     subagent    INTEGER NOT NULL DEFAULT 0,
     model       TEXT NOT NULL,
@@ -19,6 +21,7 @@ CREATE TABLE usage (
 CREATE INDEX usage_at ON usage (at);
 CREATE INDEX usage_project ON usage (project_id, at);
 CREATE INDEX usage_task ON usage (task_id);
+CREATE INDEX usage_session ON usage (session);
 
 -- How far each transcript has been read.
 CREATE TABLE usage_files (

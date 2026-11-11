@@ -222,7 +222,7 @@ async fn usage_round(state: &AppState) -> anyhow::Result<crate::usage::Stats> {
             }
         }
     }
-    state.db.call(|c| crate::usage::assign_folders(c)).await?;
+    state.db.call(|c| crate::usage::assign_projects(c)).await?;
     Ok(stats)
 }
 

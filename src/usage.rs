@@ -27,6 +27,7 @@ struct Line {
     timestamp: Option<String>,
     #[serde(rename = "sessionId")]
     session_id: Option<String>,
+    cwd: Option<String>,
     message: Option<Message>,
 }
 
@@ -56,13 +57,32 @@ pub fn folder_for(dir: &str) -> String {
     dir.to_string_lossy().chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect()
 }
 
-/// Which project each transcript folder belongs to, from the projects' checkouts.
-fn folder_projects(conn: &Connection) -> anyhow::Result<HashMap<String, i64>> {
-    Ok(crate::projects::list(conn)?
-        .into_iter()
-        .filter(|p| !p.checkout.trim().is_empty())
-        .map(|p| (folder_for(&p.checkout), p.id))
-        .collect())
+/// The projects' checkouts (expanded) and their transcript folders.
+struct Checkouts(Vec<(PathBuf, String, i64)>);
+
+impl Checkouts {
+    fn load(conn: &Connection) -> anyhow::Result<Self> {
+        Ok(Self(
+            crate::projects::list(conn)?
+                .into_iter()
+                .filter(|p| !p.checkout.trim().is_empty())
+                .map(|p| (expand_home(p.checkout.trim()), folder_for(&p.checkout), p.id))
+                .collect(),
+        ))
+    }
+
+    /// A call's project: the checkout its working directory is in (the deepest, for nested ones),
+    /// else the one whose folder the transcript is in. A project renamed since its session started
+    /// keeps a folder of the old name, so the directory comes first.
+    fn project(&self, cwd: &str, folder: &str) -> Option<i64> {
+        let cwd = Path::new(cwd);
+        self.0
+            .iter()
+            .filter(|(dir, _, _)| !cwd.as_os_str().is_empty() && cwd.starts_with(dir))
+            .max_by_key(|(dir, _, _)| dir.as_os_str().len())
+            .or_else(|| self.0.iter().find(|(_, f, _)| f == folder))
+            .map(|(_, _, id)| *id)
+    }
 }
 
 /// When the project's agent touched (created, changed, noted) which task, oldest first.
@@ -118,6 +138,7 @@ pub fn transcripts(root: &Path) -> Vec<PathBuf> {
 pub struct Call {
     id: String,
     at: i64,
+    cwd: String,
     session: String,
     model: String,
     usage: Usage,
@@ -182,6 +203,7 @@ pub fn read_new(root: &Path, path: &Path, offset: u64, first_at: Option<i64>) ->
         out.calls.push(Call {
             id,
             at,
+            cwd: line.cwd.unwrap_or_default(),
             session: line.session_id.unwrap_or_default(),
             model: msg.model.unwrap_or_default(),
             usage,
@@ -193,25 +215,32 @@ pub fn read_new(root: &Path, path: &Path, offset: u64, first_at: Option<i64>) ->
 
 /// Stores what was read and moves the file's offset; returns how many calls were new.
 pub fn store(conn: &mut Connection, read: &Read) -> anyhow::Result<usize> {
-    let project_id = folder_projects(conn)?.get(&read.folder).copied();
-    let touches = match project_id {
-        Some(p) => task_touches(conn, p)?,
-        None => Vec::new(),
-    };
+    let checkouts = Checkouts::load(conn)?;
+    let mut touches: HashMap<i64, Vec<(i64, i64)>> = HashMap::new();
     let tx = conn.transaction()?;
     let mut calls = 0;
     for c in &read.calls {
+        let project_id = checkouts.project(&c.cwd, &read.folder);
         // A subagent works for the task its session was on when it started.
         let when = if read.subagent { read.first_at.unwrap_or(c.at) } else { c.at };
-        let task = project_id.and_then(|_| task_at(&touches, when));
+        let task = match project_id {
+            Some(p) => {
+                if !touches.contains_key(&p) {
+                    touches.insert(p, task_touches(&tx, p)?);
+                }
+                task_at(&touches[&p], when)
+            }
+            None => None,
+        };
         calls += tx.execute(
-            "INSERT OR IGNORE INTO usage (message_id, at, folder, session, subagent, model, project_id, task_id,
+            "INSERT OR IGNORE INTO usage (message_id, at, folder, cwd, session, subagent, model, project_id, task_id,
                                           input, output, cache_write, cache_read)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
             params![
                 c.id,
                 c.at,
                 read.folder,
+                c.cwd,
                 c.session,
                 read.subagent,
                 c.model,
@@ -233,11 +262,25 @@ pub fn store(conn: &mut Connection, read: &Read) -> anyhow::Result<usize> {
     Ok(calls)
 }
 
-/// A project whose checkout was set after its calls were read gets them now.
-pub fn assign_folders(conn: &Connection) -> anyhow::Result<()> {
-    for (folder, id) in folder_projects(conn)? {
-        conn.execute("UPDATE usage SET project_id = ?1 WHERE folder = ?2 AND project_id IS NULL", params![id, folder])?;
+/// Calls without a project get one when they can: a checkout set since they were read, or the
+/// project the rest of their session works for (one agent per project, so a session is one
+/// project's, even the part spent in a directory of an older name).
+pub fn assign_projects(conn: &Connection) -> anyhow::Result<()> {
+    for (dir, folder, id) in Checkouts::load(conn)?.0 {
+        let dir = dir.to_string_lossy().to_string();
+        conn.execute(
+            "UPDATE usage SET project_id = ?1 WHERE project_id IS NULL
+               AND (cwd = ?2 OR substr(cwd, 1, length(?2) + 1) = ?2 || '/' OR (cwd = '' AND folder = ?3))",
+            params![id, dir, folder],
+        )?;
     }
+    conn.execute(
+        "UPDATE usage SET project_id = (SELECT u.project_id FROM usage u WHERE u.session = usage.session
+                                        AND u.project_id IS NOT NULL GROUP BY u.project_id ORDER BY count(*) DESC LIMIT 1)
+         WHERE project_id IS NULL AND session != ''
+           AND EXISTS (SELECT 1 FROM usage u WHERE u.session = usage.session AND u.project_id IS NOT NULL)",
+        [],
+    )?;
     Ok(())
 }
 
@@ -255,7 +298,7 @@ pub fn ingest(conn: &mut Connection, root: &Path) -> anyhow::Result<Stats> {
             }
         }
     }
-    assign_folders(conn)?;
+    assign_projects(conn)?;
     Ok(stats)
 }
 
@@ -509,6 +552,30 @@ mod tests {
                 rows,
                 vec![(Some(p.id), 1, Tokens { calls: 3, input: 21, cache_write: 300, output: 30, cache_read: 3000 })]
             );
+
+            // A session started in the home folder works in the checkout: the directory decides.
+            // One started under the project's old name belongs to it through its session.
+            let home = root.path().join("-home-viber");
+            std::fs::create_dir_all(&home)?;
+            let with_cwd = |id: &str, session: &str, cwd: &str| {
+                call(id, "2026-11-11T05:00:00Z", session, 1).replace("\"type\"", &format!("\"cwd\":\"{cwd}\",\"type\""))
+            };
+            std::fs::write(home.join("s2.jsonl"), with_cwd("m4", "s2", "/home/viber/office/crates/app"))?;
+            let old = root.path().join("-home-viber-oldname");
+            std::fs::create_dir_all(&old)?;
+            std::fs::write(
+                old.join("s3.jsonl"),
+                format!(
+                    "{}{}",
+                    with_cwd("m5", "s3", "/home/viber/oldname"),
+                    with_cwd("m6", "s3", "/home/viber/office")
+                ),
+            )?;
+            ingest(c, root.path())?;
+            let project_of = |id: &str| -> Option<i64> {
+                c.query_row("SELECT project_id FROM usage WHERE message_id = ?1", [id], |r| r.get(0)).unwrap()
+            };
+            assert_eq!((project_of("m4"), project_of("m5"), project_of("m6")), (Some(p.id), Some(p.id), Some(p.id)));
             Ok(())
         })
         .unwrap();
