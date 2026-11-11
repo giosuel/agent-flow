@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% block title %}Settings{% endblock %}
+{% block scripts %}<script src="/static/passkey.js?v={{ nav.version }}" defer></script>
+<script src="/static/settings.js?v={{ nav.version }}" defer></script>{% endblock %}
+{% block content %}
+<div class="head"><h1>Settings</h1></div>
+{% if let Some(notice) = notice %}<p class="notice ok" role="status">{{ notice }}</p>{% endif %}
+{% if let Some((name, secret)) = new_token %}
+<section class="card pad stack" aria-labelledby="new-token">
+  <h2 id="new-token">Token for {{ name }}</h2>
+  <p class="sub">Copy it now: AgentFlow stores only a hash and can't show it again. On that machine, save it to <code>~/.config/agentflow/token</code> (mode 600).</p>
+  <pre class="cmd mono" id="token-value">{{ secret }}</pre>
+</section>
+{% endif %}
+
+<div class="settings">
+<section class="card pad stack" aria-labelledby="s-passkeys">
+  <div class="sec"><h2 id="s-passkeys">Your passkeys</h2></div>
+  {% if passkeys.is_empty() %}<p class="sub">No passkey yet. You're signed in with a one-time link.</p>{% endif %}
+  <ul class="rows">
+  {% for p in passkeys %}
+    <li class="item-row"><div class="ttl"><strong>{{ p.name }}</strong><span class="sub">added {{ p.added }} · used {{ p.used }}</span></div>
+      <form method="post" action="/settings/passkeys/{{ p.id }}/remove"><button class="btn sm ghost" type="submit" data-confirm="Remove the passkey &quot;{{ p.name }}&quot;?">Remove</button></form></li>
+  {% endfor %}
+  </ul>
+  {% if passkeys_available %}
+  <div class="row wrap"><label class="vh" for="passkey-name">Name for the new passkey</label><input id="passkey-name" placeholder="e.g. iPhone" maxlength="60"><button class="btn" id="passkey-add" type="button">Add a passkey</button></div>
+  <p class="notice" id="passkey-status" role="status" hidden></p>
+  {% else %}
+  <p class="notice">Passkeys work only at AgentFlow's https address. This page is open at {{ public_url }}.</p>
+  {% endif %}
+  <p class="sub">Lost every passkey? Run <code>agentflow admin login-link</code> on the server for a one-time link.</p>
+</section>
+
+<section class="card pad stack" aria-labelledby="s-notify">
+  <div class="sec"><h2 id="s-notify">Notifications</h2></div>
+  <div class="row wrap"><button class="btn" id="push-on" type="button" data-key="{{ push_key }}">Turn on for this device</button>
+    <form method="post" action="/settings/push/test"><button class="btn ghost" type="submit">Send a test notification</button></form></div>
+  <p class="notice" id="push-status" role="status" hidden></p>
+  <ul class="rows">
+  {% for d in push_devices %}
+    <li class="item-row"><div class="ttl"><strong>{{ d.device }}</strong><span class="sub{% if d.failing %} warn-text{% endif %}">on since {{ d.added }} · {{ d.status }}</span></div>
+      <form method="post" action="/settings/push/{{ d.id }}/remove"><button class="btn sm ghost" type="submit">Turn off</button></form></li>
+  {% endfor %}
+  </ul>
+  <form method="post" action="/settings/notify" class="stack">
+    <fieldset class="toggles"><legend class="label">Send a notification for</legend>
+    {% for t in toggles %}
+      <label class="toggle"><input type="checkbox" name="notify.{{ t.key }}" {% if t.on %}checked{% endif %}><span>{{ t.label }}</span></label>
+    {% endfor %}
+    </fieldset>
+    <div><button class="btn sm ghost" type="submit">Save</button></div>
+  </form>
+</section>
+
+<section class="card pad stack" aria-labelledby="s-devices">
+  <div class="sec"><h2 id="s-devices">Your devices</h2></div>
+  <p class="sub">Tokens for viber-run and the agentflow CLI on your machines. They can read, not change.</p>
+  <ul class="rows">
+  {% for t in device_tokens %}
+    <li class="item-row"><div class="ttl"><strong>{{ t.holder }}</strong><span class="sub">used {{ t.used }}{% if !t.from.is_empty() %} from {{ t.from }}{% endif %}</span></div>
+      <form method="post" action="/settings/tokens/{{ t.id }}/revoke"><button class="btn sm ghost" type="submit" data-confirm="Revoke the token for {{ t.holder }}?">Revoke</button></form></li>
+  {% endfor %}
+  </ul>
+  <form method="post" action="/settings/devices" class="row wrap"><label class="vh" for="device-name">Device name</label><input id="device-name" name="name" placeholder="e.g. HEADQUARTERS viber-run" required maxlength="60"><button class="btn ghost" type="submit">Add a device token</button></form>
+</section>
+
+<section class="card pad stack" aria-labelledby="s-agents">
+  <div class="sec"><h2 id="s-agents">Agent tokens</h2></div>
+  {% if agent_tokens.is_empty() %}<p class="sub">No agent has a token yet. Projects get theirs when they're added.</p>{% else %}
+  <div class="table-wrap"><table class="table">
+    <thead><tr><th scope="col">Holder</th><th scope="col">Can</th><th scope="col">Last used</th><th scope="col"><span class="vh">Actions</span></th></tr></thead>
+    <tbody>
+    {% for t in agent_tokens %}
+      <tr><td>{{ t.holder }}</td><td class="muted">{{ t.can }}</td><td class="muted">{{ t.used }}{% if !t.from.is_empty() %} · {{ t.from }}{% endif %}</td>
+        <td class="actions"><form method="post" action="/settings/tokens/{{ t.id }}/rotate"><button class="btn sm ghost" type="submit" data-confirm="Replace {{ t.holder }}'s token? The agent reconnects with the new one.">Rotate</button></form></td></tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  {% endif %}
+  <p class="sub">Claude Code reads each token from its file in <code>~/.config/agentflow/tokens/</code> when it connects.</p>
+</section>
+
+<section class="card pad stack" aria-labelledby="s-sessions">
+  <div class="sec"><h2 id="s-sessions">Signed-in browsers</h2></div>
+  <ul class="rows">
+  {% for s in sessions %}
+    <li class="item-row"><div class="ttl"><strong>{{ s.device }}{% if s.current %} <span class="chip accent">this one</span>{% endif %}</strong><span class="sub">signed in with {{ s.how }} · last seen {{ s.seen }}</span></div>
+      {% if !s.current %}<form method="post" action="/settings/sessions/{{ s.id }}/end"><button class="btn sm ghost" type="submit">Sign out</button></form>{% endif %}</li>
+  {% endfor %}
+  </ul>
+</section>
+</div>
+{% endblock %}

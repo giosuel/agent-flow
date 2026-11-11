@@ -31,16 +31,40 @@ session_idle_days = 14
 session_max_days = 30
 ```
 
+## Behind Caddy (passkeys and push)
+
+Passkeys and push notifications need https on a domain name. With Caddy in front:
+
+```
+flow.example {
+    reverse_proxy 127.0.0.1:8790
+}
+```
+
+and in `config.toml`: `listen = "127.0.0.1:8790"`, `public_url = "https://flow.example"`. On a
+plain-http address (e.g. a VPN IP) everything else works and sign-in uses one-time links.
+
+## Home-screen app and notifications
+
+AgentFlow is a web app you can add to the home screen (on iPhone: Share, then Add to Home Screen;
+iOS 16.4 or later). Open it from there, go to Settings and press "Turn on for this device". Push
+messages are encrypted for each device (RFC 8291) and signed with the server's VAPID key
+(`vapid.key` in the data directory). Settings has a switch for each kind: new question, build
+ready to try, something to review, and urgent calls from an agent.
+
 ## Access
 
 Every request is authenticated, nothing is public but the sign-in page:
 
-- **The owner** signs in in the browser. On a new device, run `agentflow admin login-link` on the
-  server and open the one-time link it prints (valid 15 minutes).
+- **The owner** signs in in the browser with a passkey (enrolled in Settings). On a new device, or
+  if every passkey is lost, run `agentflow admin login-link` on the server and open the one-time
+  link it prints (valid 15 minutes).
 - **Tokens** for everything else: `agentflow admin token create --kind device|project|admin
   --name … [--project …] [--out FILE]`. A project token may change its own project and read the
   rest; an admin token (the consultant) may change anything. Only the owner's browser session can
-  press merge and tag buttons. `agentflow admin token list` and `… revoke ID` manage them.
+  press merge and tag buttons. `agentflow admin token list` and `… revoke ID` manage them, and so
+  does Settings, where project and consultant tokens can be rotated: the new token is written to
+  `~/.config/agentflow/tokens/<project>.token` for the agent's `headersHelper`.
 
 ## Connecting an agent
 

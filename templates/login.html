@@ -1,5 +1,6 @@
 {% extends "bare.html" %}
 {% block title %}Sign in · AgentFlow{% endblock %}
+{% block head %}<script src="/static/passkey.js?v={{ version }}" defer></script>{% endblock %}
 {% block content %}
 {% if let Some(link) = link %}
 <h1>Sign in on this device?</h1>
@@ -8,7 +9,14 @@
 {% else %}
 <h1>Sign in</h1>
 {% if let Some(message) = message %}<p class="notice warn" role="alert">{{ message }}</p>{% endif %}
+{% if passkeys %}
+<button class="btn wide" id="passkey-signin" type="button">Sign in with a passkey</button>
+<p class="notice" id="passkey-status" role="status" hidden></p>
+<p class="sub">Lost every passkey? Run <code>agentflow admin login-link</code> on the server and open the link it prints.</p>
+{% else %}
+{% if passkey_elsewhere %}<p class="notice">Passkeys work only at AgentFlow's https address, not on this one.</p>{% endif %}
 <p class="sub">To sign in on a new device, run this on the server and open the link it prints:</p>
 <pre class="cmd mono">agentflow admin login-link</pre>
+{% endif %}
 {% endif %}
 {% endblock %}
