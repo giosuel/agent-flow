@@ -1,0 +1,14 @@
+{% extends "bare.html" %}
+{% block title %}Sign in · AgentFlow{% endblock %}
+{% block content %}
+{% if let Some(link) = link %}
+<h1>Sign in on this device?</h1>
+<p class="sub">This one-time link signs this browser in as the owner. It works once and expires 15 minutes after it was made.</p>
+<form method="post" action="/login/link/{{ link }}"><button class="btn wide" type="submit">Sign in</button></form>
+{% else %}
+<h1>Sign in</h1>
+{% if let Some(message) = message %}<p class="notice warn" role="alert">{{ message }}</p>{% endif %}
+<p class="sub">To sign in on a new device, run this on the server and open the link it prints:</p>
+<pre class="cmd mono">agentflow admin login-link</pre>
+{% endif %}
+{% endblock %}

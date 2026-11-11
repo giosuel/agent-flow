@@ -1,0 +1,19 @@
+# AgentFlow as a systemd user service. Install with scripts/install.sh; the user needs lingering
+# (`loginctl enable-linger`) so it runs without a login session.
+[Unit]
+Description=AgentFlow server
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+ExecStart=%h/.local/bin/agentflow serve
+# Binding 10.0.8.1 fails until WireGuard is up after a reboot; keep trying.
+Restart=always
+RestartSec=5
+Environment=RUST_LOG=agentflow=info,warn
+NoNewPrivileges=yes
+PrivateTmp=yes
+UMask=0077
+
+[Install]
+WantedBy=default.target
