@@ -181,7 +181,7 @@ impl GitHub for GhCli {
             };
             let out =
                 Self::run(&["pr", "list", "-R", repo, "--state", state, "--limit", limit, "--json", fields]).await?;
-            Ok(serde_json::from_slice(&out).context("reading gh's answer")?)
+            serde_json::from_slice(&out).context("reading gh's answer")
         })
     }
 
