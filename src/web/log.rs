@@ -66,6 +66,9 @@ struct EntryView {
     record_url: Option<String>,
     around: String,
     archived: bool,
+    /// A build job's entry: its notable lines (class, text), its page and all its lines.
+    build_lines: Vec<(&'static str, String)>,
+    job: Option<(String, String)>,
 }
 
 #[derive(Template)]
@@ -86,6 +89,19 @@ struct LogPage {
     latest: i64,
     archive: Vec<(String, u64)>,
     reaches_archive: bool,
+    /// Build output lines are left out of this query.
+    output_hidden: bool,
+}
+
+/// The query as typed, plus: build and test output lines stay out unless the query is about them
+/// (via, action or target), since one build writes thousands. Returns whether they were left out.
+fn parse_query(q: &str) -> (Filter, bool) {
+    let mut f = Filter::parse(q);
+    let about_output = f.fields.iter().any(|(c, _, _)| matches!(c.as_str(), "via" | "action" | "target"));
+    if !about_output {
+        f.fields.push(("action".into(), "output".into(), true));
+    }
+    (f, !about_output)
 }
 
 fn url(q: &str, range: &str, from: Option<i64>, to: Option<i64>, before: Option<i64>) -> String {
@@ -154,7 +170,18 @@ fn entry(r: &LogRow, archived: bool, q: &str, tz: &Tz) -> EntryView {
     if r.ip.is_some() {
         fields.push(("ip".into(), opt(&r.ip), Some(with_field(q, "ip", &opt(&r.ip)))));
     }
-    if let Some(d) = &r.detail {
+    // A build job's lines show as output, not as JSON.
+    let build: Option<(i64, Vec<String>)> = (r.via == "build")
+        .then(|| r.detail.as_deref().and_then(|d| serde_json::from_str::<serde_json::Value>(d).ok()))
+        .flatten()
+        .and_then(|d| {
+            let id = d.get("job")?.as_i64()?;
+            let lines = d.get("lines")?.as_array()?.iter().filter_map(|l| l.as_str().map(str::to_owned)).collect();
+            Some((id, lines))
+        });
+    if let Some(d) = &r.detail
+        && build.is_none()
+    {
         fields.push(("detail".into(), d.clone(), None));
     }
     EntryView {
@@ -168,6 +195,12 @@ fn entry(r: &LogRow, archived: bool, q: &str, tz: &Tz) -> EntryView {
         record_url: r.target.as_deref().and_then(record_url),
         around: url("", "", Some(r.at - 5 * 60_000), Some(r.at + 5 * 60_000), None),
         archived,
+        build_lines: build
+            .as_ref()
+            .map(|(_, lines)| lines.iter().map(|l| (super::remote::line_class(l), l.clone())).collect())
+            .unwrap_or_default(),
+        job: build
+            .map(|(id, _)| (format!("/machine/jobs/{id}"), url(&format!("target:job-{id}"), "all", None, None, None))),
     }
 }
 
@@ -180,7 +213,7 @@ async fn page(
     actor.require_owner()?;
     let now = now_ms();
     let range = lq.range.clone().filter(|r| RANGES.iter().any(|x| x.0 == r)).unwrap_or_else(|| "24h".into());
-    let mut filter = Filter::parse(&lq.q);
+    let (mut filter, output_hidden) = parse_query(&lq.q);
     match (lq.from, lq.to) {
         (Some(f), Some(t)) if f < t => {
             filter.from = Some(f);
@@ -254,6 +287,7 @@ async fn page(
     let archive = logview::archive_months(&state.config.data_dir());
     let _ = first_at;
     render(LogPage {
+        output_hidden,
         nav: nav(&state, &actor, "/log").await,
         tz: tz.name().to_owned(),
         span: match (lq.from, lq.to) {
@@ -313,7 +347,7 @@ async fn stream(
         return super::json_error(axum::http::StatusCode::FORBIDDEN, "owner only");
     }
     let (tx, rx) = tokio::sync::mpsc::channel::<Result<Event, Infallible>>(32);
-    let filter = Filter::parse(&sq.q);
+    let (filter, _) = parse_query(&sq.q);
     let mut after = sq.after;
     tokio::spawn(async move {
         loop {

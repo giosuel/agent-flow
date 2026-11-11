@@ -216,8 +216,8 @@ fn read_token(path: &Path) -> anyhow::Result<String> {
 /// An HTTP client for the server, with the caller's token.
 pub struct Client {
     pub base: String,
-    token: String,
-    http: reqwest::blocking::Client,
+    pub(crate) token: String,
+    pub(crate) http: reqwest::blocking::Client,
 }
 
 impl Client {
@@ -396,6 +396,92 @@ pub struct ScreenshotArgs {
     /// The record it belongs to, e.g. T-12, B-3 or Q-4: it's linked and shows there.
     #[arg(long)]
     pub record: Option<String>,
+}
+
+#[derive(Args)]
+pub struct RemoteArgs {
+    #[command(flatten)]
+    pub client: ClientArgs,
+    /// Which build server (the first one if left out).
+    #[arg(long)]
+    pub server: Option<String>,
+    /// A file or folder to bring back when it succeeds, e.g. target/release/app (repeat for more).
+    /// target/… comes from the project's target folder there.
+    #[arg(long = "fetch")]
+    pub fetch: Vec<String>,
+    /// Wait until the GPU there is idle (GPU tests).
+    #[arg(long)]
+    pub gpu: bool,
+    /// Where to run it: a folder in your git checkout (default: here).
+    #[arg(long, default_value = ".")]
+    pub dir: PathBuf,
+    /// The command, after `--`, e.g. `-- cargo build --release`.
+    #[arg(last = true, required = true)]
+    pub command: Vec<String>,
+}
+
+/// Runs a build or test on a build server and prints its output as it comes; exits with its exit
+/// code. Exit code 75 means the server is offline: build here instead.
+pub fn remote(config_path: &Path, a: RemoteArgs) -> anyhow::Result<i32> {
+    let client = Client::new(config_path, &a.client)?.with_timeout(std::time::Duration::from_secs(60));
+    let dir = std::fs::canonicalize(&a.dir).with_context(|| format!("{} doesn't exist", a.dir.display()))?;
+    let body = serde_json::json!({
+        "dir": dir, "command": a.command, "fetch": a.fetch, "gpu": a.gpu, "server": a.server,
+    });
+    let res =
+        client.http.post(format!("{}/api/remote/jobs", client.base)).bearer_auth(&client.token).json(&body).send()?;
+    let status = res.status();
+    let v: serde_json::Value = res.json().unwrap_or(serde_json::Value::Null);
+    if status == reqwest::StatusCode::SERVICE_UNAVAILABLE {
+        eprintln!("{}", v["error"].as_str().unwrap_or("the build server is offline"));
+        return Ok(75);
+    }
+    if !status.is_success() {
+        bail!("{status}: {}", v["error"].as_str().unwrap_or("couldn't start the job"));
+    }
+    let id = v["id"].as_i64().context("no job id")?;
+    eprintln!("Job #{id} on {}: {}", v["server"].as_str().unwrap_or(""), v["url"].as_str().unwrap_or(""));
+    // Ctrl-C cancels the job there too.
+    let (cancel_base, cancel_token) = (client.base.clone(), client.token.clone());
+    std::thread::spawn(move || {
+        let Ok(rt) = tokio::runtime::Builder::new_current_thread().enable_all().build() else { return };
+        if rt.block_on(tokio::signal::ctrl_c()).is_ok() {
+            drop(rt);
+            let _ = reqwest::blocking::Client::new()
+                .post(format!("{cancel_base}/api/remote/jobs/{id}/cancel"))
+                .bearer_auth(&cancel_token)
+                .send();
+            eprintln!("\nCancelled job #{id}.");
+            std::process::exit(130);
+        }
+    });
+    let mut after = 0u64;
+    let mut last_reason = String::new();
+    loop {
+        let o = client.get(&format!("/api/remote/jobs/{id}/output?after={after}"))?;
+        let text = o["text"].as_str().unwrap_or("");
+        if !text.is_empty() {
+            print!("{text}");
+            std::io::Write::flush(&mut std::io::stdout())?;
+        }
+        after = o["next"].as_u64().unwrap_or(after);
+        let state = o["state"].as_str().unwrap_or("");
+        let reason = o["reason"].as_str().unwrap_or("").to_owned();
+        if matches!(state, "queued" | "paused") && reason != last_reason && !reason.is_empty() {
+            eprintln!("· {state}: {reason}");
+        }
+        last_reason = reason;
+        if o["finished"].as_bool().unwrap_or(false) && text.is_empty() {
+            return Ok(match state {
+                "done" => 0,
+                "cancelled" => 130,
+                _ => o["exit_code"].as_i64().filter(|c| *c != 0 && *c != 255).unwrap_or(1) as i32,
+            });
+        }
+        if text.is_empty() {
+            std::thread::sleep(std::time::Duration::from_millis(1000));
+        }
+    }
 }
 
 #[derive(Args)]

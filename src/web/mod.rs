@@ -5,6 +5,7 @@ mod api;
 mod assets;
 mod builds;
 pub mod outgoing;
+pub mod remote;
 mod screenshots;
 pub use builds::notify_build;
 mod buttons;
@@ -50,6 +51,8 @@ pub struct AppState {
     pub github: Arc<dyn GitHub>,
     /// Posts the owner's sent drafts to other people's repositories.
     pub poster: Arc<dyn crate::outgoing::Poster>,
+    /// The build servers as last seen, and their running jobs.
+    pub remote: crate::remote::Shared,
     /// Denied requests logged per client address in the current minute (flood guard).
     denied: Arc<std::sync::Mutex<std::collections::HashMap<String, (i64, u32)>>>,
     /// Running `/api/wait` calls per project.
@@ -84,6 +87,7 @@ impl AppState {
             push,
             github,
             poster,
+            remote: Arc::default(),
             denied: Arc::default(),
             waits: Arc::default(),
             guide_prs: Arc::default(),
@@ -143,6 +147,7 @@ pub fn router(state: AppState) -> Router {
         .merge(builds::routes())
         .merge(screenshots::routes())
         .merge(outgoing::routes())
+        .merge(remote::routes())
         .merge(conversations::routes())
         .merge(guides::routes())
         .merge(log::routes())
@@ -180,6 +185,7 @@ pub async fn serve(state: AppState) -> anyhow::Result<()> {
     spawn_usage(state.clone());
     crate::backup::spawn(state.clone());
     crate::machine::spawn_sampler(state.clone());
+    crate::remote::spawn(state.clone());
     spawn_archiver(state.clone());
     let app = router(state).into_make_service_with_connect_info::<SocketAddr>();
     axum::serve(listener, app).with_graceful_shutdown(shutdown_signal()).await?;

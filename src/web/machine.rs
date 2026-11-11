@@ -70,6 +70,8 @@ struct MachinePage {
     collecting: Option<String>,
     cores: usize,
     mem_total: String,
+    /// The Build servers section, when there are any.
+    builds: String,
 }
 
 /// The figures at the top, now. The page asks for them again every 5 seconds (`/machine/now`).
@@ -204,7 +206,14 @@ async fn page(
         .flat_map(|p| p.ports.iter().map(move |port| PortRow { port: port.clone(), project: p.name.clone() }))
         .collect();
     let host = machine::hostname();
+    let builds = if state.config.build_servers.is_empty() {
+        String::new()
+    } else {
+        use askama::Template as _;
+        super::remote::section_data(&state, &actor).await?.render().map_err(anyhow::Error::from)?
+    };
     render(MachinePage {
+        builds,
         nav: nav(&state, &actor, "/machine").await,
         host: format!("{host} · {} cores · {:.0} GB RAM", snap.cores, snap.mem_total_gb()),
         tiles,

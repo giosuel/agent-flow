@@ -22,6 +22,11 @@ pub struct TestServer {
 
 impl TestServer {
     pub async fn start() -> Self {
+        Self::start_with(|_, _| {}).await
+    }
+
+    /// With changes to the config (given the test's data folder).
+    pub async fn start_with(tweak: impl FnOnce(&mut Config, &std::path::Path)) -> Self {
         let db = Db::open_memory();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
@@ -49,6 +54,8 @@ impl TestServer {
             git_host: format!("file://{}", data.path().join("gh").display()),
             ..Config::default()
         };
+        let mut config = config;
+        tweak(&mut config, data.path());
         let github = std::sync::Arc::new(crate::github::fake::FakeGitHub::default());
         let mut state = AppState::new(db.clone(), config, crate::push::Vapid::random(), github.clone());
         let poster = std::sync::Arc::new(crate::outgoing::fake::FakePoster::default());
@@ -1589,4 +1596,169 @@ async fn drafts_for_other_repositories_go_out_only_when_the_owner_sends_them() {
     let (_, news) = mcp_tool(&s, &agent, &ts, "since_last_check", json!({})).await;
     assert!(news.to_string().contains("not yet"), "{news}");
     assert_eq!(s.poster.posted.lock().unwrap().len(), 2);
+}
+
+#[tokio::test]
+async fn jobs_run_on_a_build_server_and_bring_back_what_was_asked() {
+    use std::os::unix::fs::PermissionsExt;
+    // A stand-in for ssh: runs the command here, in a home of its own, with systemd-run and
+    // systemctl that just run the command / do nothing.
+    let s = TestServer::start_with(|c, data| {
+        let (home, bin) = (data.join("hq-home"), data.join("hq-bin"));
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::create_dir_all(&bin).unwrap();
+        let write = |name: &str, text: String| {
+            let p = bin.join(name);
+            std::fs::write(&p, text).unwrap();
+            std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+        };
+        write(
+            "ssh",
+            format!(
+                "#!/bin/sh\nwhile [ $# -gt 0 ]; do case \"$1\" in -o|-F) shift 2;; -*) shift;; *) break;; esac; done\nshift\ncd {h} || exit 255\nexport HOME={h} PATH={b}:$PATH\nexec sh -c \"$*\"\n",
+                h = home.display(),
+                b = bin.display()
+            ),
+        );
+        write("systemd-run", "#!/bin/sh\nwhile [ \"$1\" != \"--\" ]; do shift; done\nshift\nexec \"$@\"\n".into());
+        write("systemctl", "#!/bin/sh\nexit 0\n".into());
+        write("nvidia-smi", "#!/bin/sh\nexit 1\n".into());
+        c.build_servers = vec![crate::config::BuildServer {
+            name: "hq".into(),
+            ssh: "hq".into(),
+            ssh_program: bin.join("ssh").display().to_string(),
+            min_threads: 0.0,
+            min_memory_gb: 0.0,
+            reserve_memory_gb: 0.0,
+            ..Default::default()
+        }];
+    })
+    .await;
+    crate::remote::spawn(s.state.clone());
+    let agent = s.token(TokenKind::Project, Some("imaginarium")).await;
+    let other = s.token(TokenKind::Project, Some("vinculum")).await;
+
+    // The agent's checkout: a commit, then a change and a new file not committed yet.
+    let work = s.state.config.data_dir().join("checkout");
+    std::fs::create_dir_all(work.join("crate")).unwrap();
+    git_in(&work, &["init", "-q"]);
+    std::fs::write(work.join("a.txt"), "committed\n").unwrap();
+    std::fs::write(work.join(".gitignore"), "target/\n").unwrap();
+    std::fs::write(work.join("crate/c.txt"), "c\n").unwrap();
+    git_in(&work, &["add", "."]);
+    git_in(&work, &["commit", "-q", "-m", "init"]);
+    git_in(&work, &["tag", "v0.1.0"]);
+    std::fs::write(work.join("a.txt"), "changed, not committed\n").unwrap();
+    std::fs::write(work.join("new.txt"), "new\n").unwrap();
+    std::fs::create_dir_all(work.join("target")).unwrap();
+    std::fs::write(work.join("target/junk"), "never sent").unwrap();
+
+    let cmd = "cat ../a.txt ../new.txt; git describe --tags; echo 'warning: careful'; ls ../target 2>&1 | head -1; mkdir -p ../../target/release && echo built > ../../target/release/app";
+    let start = |dir: std::path::PathBuf, token: String| {
+        let s = &s;
+        async move {
+            s.http
+                .post(s.url("/api/remote/jobs"))
+                .bearer_auth(token)
+                .json(&json!({"dir": dir, "command": ["sh", "-c", cmd], "fetch": ["target/release/app"]}))
+                .send()
+                .await
+                .unwrap()
+        }
+    };
+    let res = start(work.join("crate"), agent.clone()).await;
+    assert_eq!(res.status(), StatusCode::OK, "{}", res.text().await.unwrap());
+    let id = res.json::<Value>().await.unwrap()["id"].as_i64().unwrap();
+
+    // Another project's agent can't read or stop it.
+    let res = s.http.get(s.url(&format!("/api/remote/jobs/{id}/output"))).bearer_auth(&other).send().await.unwrap();
+    assert_eq!(res.status(), StatusCode::FORBIDDEN);
+
+    // Follow it as the CLI does.
+    let mut text = String::new();
+    let mut after = 0;
+    let last = loop {
+        let o: Value = s
+            .http
+            .get(s.url(&format!("/api/remote/jobs/{id}/output?after={after}")))
+            .bearer_auth(&agent)
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        text.push_str(o["text"].as_str().unwrap());
+        after = o["next"].as_u64().unwrap();
+        if o["finished"].as_bool().unwrap() && o["text"].as_str().unwrap().is_empty() {
+            break o;
+        }
+        assert!(text.len() < 1_000_000);
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    };
+    assert_eq!(last["state"], "done", "{last}\n{text}");
+    assert!(
+        text.contains("changed, not committed") && text.contains("new\n"),
+        "uncommitted changes went over:\n{text}"
+    );
+    assert!(text.contains("v0.1.0"), "tags went over:\n{text}");
+    assert!(text.contains("No such file") || !text.contains("junk"), "ignored files stay here:\n{text}");
+    assert_eq!(std::fs::read_to_string(work.join("target/release/app")).unwrap(), "built\n", "brought back");
+    assert_eq!(last["warnings"], 1);
+
+    // The Log has every line, the warning marked, and the job's own entry.
+    let rows: Vec<(String, String, String)> =
+        s.db.call(|c| {
+            let mut st = c.prepare("SELECT action, severity, summary FROM log WHERE via = 'build' ORDER BY seq")?;
+            let r = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?.collect::<Result<_, _>>()?;
+            Ok(r)
+        })
+        .await
+        .unwrap();
+    assert!(rows.iter().any(|(a, sev, t)| a == "output" && sev == "warn" && t == "warning: careful"), "{rows:?}");
+    assert!(rows.iter().any(|(a, _, t)| a == "run" && t.contains(" · ok · ")), "{rows:?}");
+    let detail: String =
+        s.db.call(|c| {
+            Ok(c.query_row("SELECT detail FROM log WHERE via = 'build' AND detail IS NOT NULL", [], |r| r.get(0))?)
+        })
+        .await
+        .unwrap();
+    let lines: Vec<String> = serde_json::from_str::<Value>(&detail).unwrap()["lines"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|l| l.as_str().unwrap().to_owned())
+        .collect();
+    let mut unique = lines.clone();
+    unique.dedup();
+    assert_eq!(lines.len(), unique.len(), "no line twice: {lines:?}");
+    assert!(lines.iter().any(|l| l == "warning: careful"));
+
+    // A second run with nothing changed: nothing there is rewritten (so nothing is rebuilt).
+    let there = s.state.config.data_dir().join("hq-home/agentflow/imaginarium/work");
+    let mtime = |f: &str| std::fs::metadata(there.join(f)).unwrap().modified().unwrap();
+    let before = (mtime("a.txt"), mtime("crate/c.txt"), mtime("new.txt"));
+    // And a file deleted here goes there too.
+    std::fs::remove_file(work.join("new.txt")).unwrap();
+    let res = start(work.clone(), agent.clone()).await;
+    let id2 = res.json::<Value>().await.unwrap()["id"].as_i64().unwrap();
+    for _ in 0..200 {
+        let j = s.db.call(move |c| crate::remote::get(c, id2)).await.unwrap().unwrap();
+        if j.is_finished() {
+            assert_eq!(j.state, "done", "{}", j.reason);
+            assert_eq!(
+                (mtime("a.txt"), mtime("crate/c.txt")),
+                (before.0, before.1),
+                "unchanged files keep their times"
+            );
+            assert!(!there.join("new.txt").exists(), "deleted here, deleted there");
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    }
+
+    // Offline: refused at once, so the agent builds here.
+    s.state.remote.lock().unwrap().servers.get_mut("hq").unwrap().probe.online = false;
+    let res = start(work.clone(), agent.clone()).await;
+    assert_eq!(res.status(), StatusCode::SERVICE_UNAVAILABLE);
 }
