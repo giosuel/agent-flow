@@ -15,6 +15,7 @@ mod push;
 mod records;
 mod tokens;
 mod util;
+mod waiting;
 mod web;
 
 use std::path::PathBuf;
