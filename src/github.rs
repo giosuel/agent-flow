@@ -77,6 +77,23 @@ pub trait GitHub: Send + Sync {
 }
 
 const FIELDS: &str = "number,title,url,state,isDraft,baseRefName,headRefName,mergeable,statusCheckRollup";
+/// The same without CI: a fine-grained token without the "checks" permission on a repository
+/// gets "Resource not accessible" for statusCheckRollup, and then nothing else either.
+const FIELDS_NO_CI: &str = "number,title,url,state,isDraft,baseRefName,headRefName,mergeable";
+
+/// Runs a `gh pr` query, and once more without CI status when the token may not read checks.
+async fn pr_query(args: &[&str]) -> anyhow::Result<Vec<u8>> {
+    let mut with = args.to_vec();
+    with.extend(["--json", FIELDS]);
+    match GhCli::run(&with).await {
+        Err(e) if e.to_string().contains("Resource not accessible") => {
+            let mut without = args.to_vec();
+            without.extend(["--json", FIELDS_NO_CI]);
+            GhCli::run(&without).await
+        }
+        other => other,
+    }
+}
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -216,7 +233,7 @@ impl GitHub for GhCli {
         Box::pin(async move {
             check_repo(repo)?;
             let n = number.to_string();
-            let out = Self::run(&["pr", "view", &n, "-R", repo, "--json", FIELDS]).await?;
+            let out = pr_query(&["pr", "view", &n, "-R", repo]).await?;
             Ok(serde_json::from_slice::<GhPr>(&out).context("reading gh's answer")?.into())
         })
     }
@@ -224,8 +241,7 @@ impl GitHub for GhCli {
     fn open_prs<'a>(&'a self, repo: &'a str) -> BoxFuture<'a, anyhow::Result<Vec<PrInfo>>> {
         Box::pin(async move {
             check_repo(repo)?;
-            let out =
-                Self::run(&["pr", "list", "-R", repo, "--state", "open", "--limit", "100", "--json", FIELDS]).await?;
+            let out = pr_query(&["pr", "list", "-R", repo, "--state", "open", "--limit", "100"]).await?;
             let prs: Vec<GhPr> = serde_json::from_slice(&out).context("reading gh's answer")?;
             Ok(prs.into_iter().map(Into::into).collect())
         })
