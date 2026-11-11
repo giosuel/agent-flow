@@ -11,6 +11,7 @@ mod contributions;
 mod db;
 mod github;
 mod guides;
+mod logview;
 mod machine;
 mod markdown;
 mod mcp;
