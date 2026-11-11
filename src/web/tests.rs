@@ -41,6 +41,7 @@ impl TestServer {
             public_url: format!("http://{addr}"),
             data_dir: data.path().display().to_string(),
             handbook_dir: handbook.display().to_string(),
+            build_free_gb: 0,
             ..Config::default()
         };
         let github = std::sync::Arc::new(crate::github::fake::FakeGitHub::default());
@@ -748,6 +749,19 @@ async fn a_build_goes_from_agent_to_owner_and_feedback_comes_back() {
         .await
         .unwrap();
     assert_eq!(back.as_ref(), tar.as_slice());
+    let detail: Value =
+        s.http.get(s.url("/api/builds/imaginarium/1")).bearer_auth(&device).send().await.unwrap().json().await.unwrap();
+    assert_eq!(detail["files"].as_array().map(Vec::len), Some(2), "{detail}");
+    // A commit becomes part of the file name, so only hex is taken.
+    let res = s
+        .http
+        .post(s.url("/api/builds?product=imaginarium&summary=x&commit=..%2F..%2Fx&entry=run.sh"))
+        .bearer_auth(&token)
+        .body(tar.clone())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
 
     // It waits for the owner, who gives feedback on its page.
     let cookie = s.owner_cookie().await;

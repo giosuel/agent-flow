@@ -34,7 +34,22 @@ pub fn routes() -> Router<AppState> {
 }
 
 fn builds_dir(state: &AppState) -> PathBuf {
-    state.config.data_dir().join("builds")
+    builds::dir(&state.config.data_dir())
+}
+
+fn free_bytes(dir: &std::path::Path) -> anyhow::Result<u64> {
+    let s = rustix::fs::statvfs(dir)?;
+    Ok(s.f_bavail.saturating_mul(s.f_frsize))
+}
+
+/// An upload's temporary file, removed unless it was kept (also when the client disconnects and
+/// the handler is dropped mid-upload).
+struct Incoming(PathBuf);
+
+impl Drop for Incoming {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
 }
 
 #[derive(Deserialize)]
@@ -95,6 +110,7 @@ async fn upload(
     State(state): State<AppState>,
     Extension(actor): Extension<Actor>,
     Query(q): Query<UploadQuery>,
+    headers: axum::http::HeaderMap,
     body: Body,
 ) -> Response {
     if let Err(e) = builds::check_product(&q.product) {
@@ -102,6 +118,14 @@ async fn upload(
     }
     if q.summary.trim().is_empty() {
         return json_error(StatusCode::BAD_REQUEST, "summary: one line on what's in it");
+    }
+    let checks = builds::check_commit(q.commit.trim())
+        .and_then(|_| builds::check_label("branch", &q.branch))
+        .and_then(|_| builds::check_label("tag", &q.tag))
+        .and_then(|_| builds::check_label("summary", &q.summary))
+        .and_then(|_| if q.entry.trim().is_empty() { Ok(()) } else { builds::safe_relative(std::path::Path::new(q.entry.trim())).map(|_| ()) });
+    if let Err(e) = checks {
+        return json_error(StatusCode::BAD_REQUEST, format!("{e:#}"));
     }
     let features = match parse_features(&q.features) {
         Ok(f) => f,
@@ -113,59 +137,85 @@ async fn upload(
         Err(e) => return json_error(StatusCode::FORBIDDEN, format!("{e:#}")),
     };
 
+    // One upload at a time: each may take 2 GB of disk until it's checked.
+    let Ok(_uploading) = state.uploads.clone().try_lock_owned() else {
+        return json_error(StatusCode::TOO_MANY_REQUESTS, "another build is uploading; try again in a minute");
+    };
     // Stream the archive to a file first: builds are large, and nothing is kept unless it checks out.
     let incoming = builds_dir(&state).join(".incoming");
     if let Err(e) = tokio::fs::create_dir_all(&incoming).await {
         return json_error(StatusCode::INTERNAL_SERVER_ERROR, format!("{e}"));
     }
-    let tmp = incoming.join(format!("{}.tar", new_secret("")));
+    // The archive's size if the client said it, else the most it may be.
+    let declared: Option<u64> =
+        headers.get(header::CONTENT_LENGTH).and_then(|v| v.to_str().ok()).and_then(|v| v.parse().ok());
+    let limit = declared.unwrap_or(builds::MAX_BYTES).min(builds::MAX_BYTES);
+    let floor = state.config.build_free_gb << 30;
+    match free_bytes(&incoming) {
+        Ok(free) if free < floor + limit => {
+            return json_error(
+                StatusCode::INSUFFICIENT_STORAGE,
+                format!(
+                    "the server has {} GB free and keeps {} GB free for other projects; this build doesn't fit",
+                    free >> 30,
+                    state.config.build_free_gb
+                ),
+            );
+        }
+        Ok(_) => {}
+        Err(e) => return json_error(StatusCode::INTERNAL_SERVER_ERROR, format!("checking free space: {e:#}")),
+    }
+    let tmp = Incoming(incoming.join(format!("{}.tar", new_secret(""))));
     let result = async {
-        let mut file = tokio::fs::File::create(&tmp).await?;
+        let mut file = tokio::fs::File::create(&tmp.0).await?;
         let mut stream = body.into_data_stream();
         let mut size = 0u64;
         while let Some(chunk) = stream.next().await {
             let chunk = chunk.map_err(|e| anyhow::anyhow!("upload broke off: {e}"))?;
             size += chunk.len() as u64;
-            if size > builds::MAX_BYTES {
-                anyhow::bail!("the build is larger than 2 GB");
+            if size > limit {
+                anyhow::bail!("the build is larger than 2 GB (or than it said)");
             }
             file.write_all(&chunk).await?;
         }
         file.flush().await?;
-        let path = tmp.clone();
+        let path = tmp.0.clone();
         let manifest = tokio::task::spawn_blocking(move || builds::inspect(std::fs::File::open(&path)?)).await??;
         anyhow::Ok(manifest)
     }
     .await;
-    let manifest = match result {
+    let manifest = match result.and_then(|m| pick_entry(&m, q.entry.trim()).map(|e| (m, e))) {
         Ok(m) => m,
-        Err(e) => {
-            let _ = tokio::fs::remove_file(&tmp).await;
-            return json_error(StatusCode::BAD_REQUEST, format!("{e:#}"));
-        }
+        Err(e) => return json_error(StatusCode::BAD_REQUEST, format!("{e:#}")),
     };
-    let entry = match pick_entry(&manifest, q.entry.trim()) {
-        Ok(e) => e,
-        Err(e) => {
-            let _ = tokio::fs::remove_file(&tmp).await;
-            return json_error(StatusCode::BAD_REQUEST, format!("{e:#}"));
-        }
-    };
+    let (manifest, entry) = manifest;
 
     let dir = builds_dir(&state).join(&q.product);
-    let mut name = builds::build_name(time::OffsetDateTime::now_utc(), q.branch.trim(), q.commit.trim());
     if let Err(e) = tokio::fs::create_dir_all(&dir).await {
         return json_error(StatusCode::INTERNAL_SERVER_ERROR, format!("{e}"));
     }
-    // Two builds in the same minute from the same commit get a suffix; a build never changes.
-    let mut n = 2;
-    while dir.join(format!("{name}.tar")).exists() {
-        name = format!("{}-{n}", name.trim_end_matches(&format!("-{}", n - 1)));
-        n += 1;
+    // The name is taken atomically: a hard link fails if it exists, so two uploads in the same
+    // minute from the same commit never share one, and a build never changes.
+    let base = builds::build_name(time::OffsetDateTime::now_utc(), q.branch.trim(), q.commit.trim());
+    let mut name = base.clone();
+    let mut n = 1;
+    loop {
+        match std::fs::hard_link(&tmp.0, builds::archive_path(&builds_dir(&state), &q.product, &name)) {
+            Ok(()) => break,
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists && n < 100 => {
+                n += 1;
+                name = format!("{base}-{n}");
+            }
+            Err(e) => return json_error(StatusCode::INTERNAL_SERVER_ERROR, format!("{e}")),
+        }
     }
-    if let Err(e) = tokio::fs::rename(&tmp, builds::archive_path(&builds_dir(&state), &q.product, &name)).await {
-        let _ = tokio::fs::remove_file(&tmp).await;
-        return json_error(StatusCode::INTERNAL_SERVER_ERROR, format!("{e}"));
+    drop(tmp);
+    let archive = builds::archive_path(&builds_dir(&state), &q.product, &name);
+    let manifest_file = builds::manifest_path(&builds_dir(&state), &q.product, &name);
+    let written = serde_json::to_vec(&manifest).map_err(anyhow::Error::from).and_then(|j| Ok(std::fs::write(&manifest_file, j)?));
+    if let Err(e) = written {
+        let _ = std::fs::remove_file(&archive);
+        return json_error(StatusCode::INTERNAL_SERVER_ERROR, format!("{e:#}"));
     }
 
     let ready = !features.is_empty();
@@ -180,7 +230,7 @@ async fn upload(
             data.insert("branch".into(), q.branch.trim().into());
             data.insert("entry".into(), ent.into());
             data.insert("size".into(), manifest.total.into());
-            data.insert("files".into(), serde_json::to_value(&manifest.files)?);
+            data.insert("files_count".into(), manifest.files.len().into());
             data.insert("features".into(), features.into());
             data.insert("ready_for_feedback".into(), ready.into());
             if !q.tag.trim().is_empty() {
@@ -203,7 +253,11 @@ async fn upload(
         .await;
     let r = match created {
         Ok(r) => r,
-        Err(e) => return json_error(StatusCode::INTERNAL_SERVER_ERROR, format!("{e:#}")),
+        Err(e) => {
+            let _ = std::fs::remove_file(&archive);
+            let _ = std::fs::remove_file(&manifest_file);
+            return json_error(StatusCode::INTERNAL_SERVER_ERROR, format!("{e:#}"));
+        }
     };
     let e = Entry::new(&actor, Via::Api, Action::Write, format!("build {} published: {}", r.short_id(), name))
         .project(r.project.clone())
@@ -244,9 +298,11 @@ fn pick_entry(m: &Manifest, entry: &str) -> anyhow::Result<String> {
     }
 }
 
+/// A product's builds: only those of the project that publishes as it now.
 fn builds_of(c: &Connection, product: &str) -> anyhow::Result<Vec<Record>> {
+    let Some(owner) = projects::by_build_product(c, product)? else { return Ok(Vec::new()) };
     let mut list: Vec<Record> =
-        records::query(c, &RQuery { kinds: vec![Kind::Build], limit: 0, ..Default::default() })?
+        records::query(c, &RQuery { project_id: Some(owner.id), kinds: vec![Kind::Build], limit: 0, ..Default::default() })?
             .into_iter()
             .filter(|r| r.str("product") == product && r.state != "withdrawn")
             .collect();
@@ -268,8 +324,16 @@ async fn products(State(state): State<AppState>) -> Response {
         .call(|c| {
             let all = records::query(c, &RQuery { kinds: vec![Kind::Build], limit: 0, ..Default::default() })?;
             let mut by: std::collections::BTreeMap<String, (usize, Option<Record>)> = Default::default();
+            let mut owners: std::collections::HashMap<String, Option<i64>> = Default::default();
             for r in all.into_iter().filter(|r| r.state != "withdrawn") {
-                let e = by.entry(r.str("product").to_owned()).or_default();
+                let product = r.str("product").to_owned();
+                if !owners.contains_key(&product) {
+                    owners.insert(product.clone(), projects::by_build_product(c, &product)?.map(|p| p.id));
+                }
+                if owners[&product] != Some(r.project_id) {
+                    continue;
+                }
+                let e = by.entry(product).or_default();
                 e.0 += 1;
                 if e.1.as_ref().is_none_or(|l| l.created_at < r.created_at) {
                     e.1 = Some(r);
@@ -304,10 +368,18 @@ async fn find_build(state: &AppState, product: String, number: i64) -> Result<Re
 }
 
 async fn one(State(state): State<AppState>, Path((product, number)): Path<(String, i64)>) -> Response {
-    match find_build(&state, product, number).await {
+    if builds::check_product(&product).is_err() {
+        return json_error(StatusCode::BAD_REQUEST, "bad product");
+    }
+    match find_build(&state, product.clone(), number).await {
         Ok(r) => {
+            let path = builds::manifest_path(&builds_dir(&state), &product, r.str("name"));
+            let manifest: Manifest = match tokio::fs::read(&path).await.map_err(anyhow::Error::from).and_then(|b| Ok(serde_json::from_slice(&b)?)) {
+                Ok(m) => m,
+                Err(e) => return json_error(StatusCode::GONE, format!("the build's file list is missing: {e:#}")),
+            };
             let mut v = summary(&r);
-            v["files"] = r.data.get("files").cloned().unwrap_or(Value::Null);
+            v["files"] = serde_json::to_value(&manifest.files).unwrap_or(Value::Null);
             Json(v).into_response()
         }
         Err(res) => *res,

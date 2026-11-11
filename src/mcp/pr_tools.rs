@@ -372,12 +372,24 @@ impl FlowMcp {
                 Ok((Outcome::new(json!({"id": r.ref_id, "state": r.state, "ready_for_feedback": r.data.get("ready_for_feedback")}))
                     .summary(format!("build {} updated", r.short_id()))
                     .project(r.project.clone())
-                    .target(r.ref_id.clone()), newly_ready.then_some((name, r))))
+                    .target(r.ref_id.clone()), newly_ready.then(|| (name, r.clone())), p.withdraw.then_some(r)))
             })
             .await;
-        let outcome = outcome.map(|(o, notify)| {
+        let outcome = outcome.map(|(o, notify, withdrawn)| {
             if let Some((name, r)) = notify {
                 crate::web::notify_build(&self.state, &name, &r);
+            }
+            // A withdrawn build can't be downloaded any more; its archive only takes up space.
+            if let Some(r) = withdrawn {
+                let dir = crate::builds::dir(&self.state.config.data_dir());
+                for path in [
+                    crate::builds::archive_path(&dir, r.str("product"), r.str("name")),
+                    crate::builds::manifest_path(&dir, r.str("product"), r.str("name")),
+                ] {
+                    if crate::builds::check_product(r.str("product")).is_ok() && !r.str("name").is_empty() {
+                        let _ = std::fs::remove_file(path);
+                    }
+                }
             }
             o
         });

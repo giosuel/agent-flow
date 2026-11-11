@@ -38,6 +38,8 @@ pub struct Config {
     pub session_idle_days: i64,
     /// …and after this many days in any case.
     pub session_max_days: i64,
+    /// GB a build upload must leave free on the data disk, which other projects share.
+    pub build_free_gb: u64,
 }
 
 impl Default for Config {
@@ -55,6 +57,7 @@ impl Default for Config {
             trusted_proxies: vec!["127.0.0.1".parse().unwrap(), "::1".parse().unwrap()],
             session_idle_days: 14,
             session_max_days: 30,
+            build_free_gb: 10,
         }
     }
 }
