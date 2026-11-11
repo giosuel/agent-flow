@@ -324,3 +324,12 @@ button.opt { font: inherit; color: var(--ink); text-align: left; width: 100%; }
 /* The note box appears once "Problem" is chosen. */
 .feat .problem-note { display: none; }
 .feat:has(.verdict.v-problem input:checked) .problem-note { display: block; }
+
+/* Conversations */
+.split.conv .split-side { flex: 1 1 380px; max-width: 520px; }
+.conv-row { color: var(--ink); text-decoration: none; }
+.conv-row:hover { background: #121216; color: var(--ink); }
+.conv-row.on { background: var(--soft); }
+.conv-row .ttl strong { font-weight: 500; }
+.msgs { padding-left: 0; list-style: none; gap: 16px; }
+.msg { display: flex; flex-direction: column; gap: 6px; padding-bottom: 14px; border-bottom: 1px solid var(--line2); }

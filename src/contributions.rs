@@ -1,0 +1,129 @@
+//! PRs and issues on other people's repositories, kept as records of the project they came from
+//! and watched: a new comment, a merge or a close is told to that project's agent. (This replaces
+//! the consultant's external-watch timer once the agents move over.)
+
+use rusqlite::Connection;
+use serde_json::{Map, Value};
+
+use crate::github::ItemInfo;
+use crate::records::{self, Kind, NewRecord, Patch, Query, Record};
+
+/// Starts watching `repo#number` for a project. Idempotent.
+pub fn track(
+    conn: &Connection,
+    project_id: i64,
+    repo: &str,
+    number: i64,
+    info: &ItemInfo,
+    author: &str,
+) -> anyhow::Result<Record> {
+    let existing = records::query(
+        conn,
+        &Query { project_id: Some(project_id), kinds: vec![Kind::Contribution], ..Default::default() },
+    )?
+    .into_iter()
+    .find(|r| r.str("repo") == repo && r.data.get("number").and_then(Value::as_i64) == Some(number));
+    if let Some(r) = existing {
+        return Ok(r);
+    }
+    let mut data = Map::new();
+    data.insert("repo".into(), repo.into());
+    data.insert("number".into(), number.into());
+    data.insert("url".into(), info.url.clone().into());
+    data.insert("type".into(), if info.is_pr { "pr" } else { "issue" }.into());
+    data.insert("comments".into(), info.comments.into());
+    let state = match info.state.as_str() {
+        "merged" => "merged",
+        "closed" => "closed",
+        _ => "sent",
+    };
+    records::create(
+        conn,
+        project_id,
+        author,
+        NewRecord {
+            kind: Some(Kind::Contribution),
+            title: format!("{repo}#{number}: {}", info.title),
+            state: Some(state.into()),
+            data,
+            ..Default::default()
+        },
+    )
+}
+
+/// Applies what GitHub says now; returns what to tell the agent, if anything changed.
+pub fn update(conn: &Connection, r: &Record, info: &ItemInfo) -> anyhow::Result<Option<String>> {
+    let before = r.data.get("comments").and_then(Value::as_i64).unwrap_or(0);
+    let state = match info.state.as_str() {
+        "merged" => "merged",
+        "closed" => "closed",
+        _ => r.state.as_str(),
+    };
+    let mut news = Vec::new();
+    if info.comments > before {
+        let n = info.comments - before;
+        news.push(format!("{n} new comment{}", if n == 1 { "" } else { "s" }));
+    }
+    if state != r.state {
+        news.push(format!("now {state}"));
+    }
+    if news.is_empty() {
+        return Ok(None);
+    }
+    let mut data = Map::new();
+    data.insert("comments".into(), info.comments.into());
+    let (r, _) = records::update(
+        conn,
+        r,
+        "github",
+        Patch { state: Some(state.into()), data, quiet: true, ..Default::default() },
+    )?;
+    let what = format!("{}: {} ({})", r.title, news.join(", "), r.str("url"));
+    records::event(conn, Some(r.project_id), Some(r.id), "contribution.updated", &what, "github")?;
+    Ok(Some(what))
+}
+
+/// Contributions still worth watching: not merged or closed.
+pub fn watched(conn: &Connection) -> anyhow::Result<Vec<Record>> {
+    Ok(records::query(conn, &Query { kinds: vec![Kind::Contribution], ..Default::default() })?
+        .into_iter()
+        .filter(|r| !matches!(r.state.as_str(), "merged" | "closed"))
+        .collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::Db;
+
+    fn item(state: &str, comments: i64) -> ItemInfo {
+        ItemInfo {
+            title: "Undo leaves content".into(),
+            url: "https://github.com/loro-dev/loro/issues/1255".into(),
+            is_pr: false,
+            state: state.into(),
+            comments,
+        }
+    }
+
+    #[test]
+    fn watching_reports_comments_and_closes() {
+        let db = Db::open_memory();
+        db.call_blocking(|c| {
+            let p = crate::projects::create(c, "imaginarium", "Imaginarium", "t")?;
+            let r = track(c, p.id, "loro-dev/loro", 1255, &item("open", 0), "consultant")?;
+            assert_eq!(track(c, p.id, "loro-dev/loro", 1255, &item("open", 0), "consultant")?.id, r.id, "once");
+            assert_eq!(update(c, &r, &item("open", 0))?, None);
+            let news = update(c, &r, &item("open", 2))?.unwrap();
+            assert!(news.contains("2 new comments"), "{news}");
+            let r = records::get(c, r.id)?;
+            let news = update(c, &r, &item("closed", 2))?.unwrap();
+            assert!(news.contains("now closed"));
+            assert!(watched(c)?.is_empty());
+            let events = crate::waiting::unread(c, p.id, "imaginarium")?;
+            assert_eq!(events.iter().filter(|e| e.kind == "contribution.updated").count(), 2);
+            Ok(())
+        })
+        .unwrap();
+    }
+}

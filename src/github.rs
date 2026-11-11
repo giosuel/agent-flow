@@ -23,11 +23,23 @@ pub struct PrInfo {
     pub ci: String,
 }
 
+/// A PR or issue on someone else's repository, as the watcher sees it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ItemInfo {
+    pub title: String,
+    pub url: String,
+    pub is_pr: bool,
+    /// open, closed or merged
+    pub state: String,
+    pub comments: i64,
+}
+
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
 pub trait GitHub: Send + Sync {
     fn pr<'a>(&'a self, repo: &'a str, number: i64) -> BoxFuture<'a, anyhow::Result<PrInfo>>;
     fn open_prs<'a>(&'a self, repo: &'a str) -> BoxFuture<'a, anyhow::Result<Vec<PrInfo>>>;
+    fn item<'a>(&'a self, repo: &'a str, number: i64) -> BoxFuture<'a, anyhow::Result<ItemInfo>>;
 }
 
 const FIELDS: &str = "number,title,url,state,isDraft,baseRefName,headRefName,mergeable,statusCheckRollup";
@@ -115,7 +127,34 @@ pub fn check_repo(repo: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+#[derive(Deserialize)]
+struct GhIssue {
+    title: String,
+    html_url: String,
+    state: String,
+    comments: i64,
+    pull_request: Option<serde_json::Value>,
+}
+
 impl GitHub for GhCli {
+    fn item<'a>(&'a self, repo: &'a str, number: i64) -> BoxFuture<'a, anyhow::Result<ItemInfo>> {
+        Box::pin(async move {
+            check_repo(repo)?;
+            // The issues endpoint answers for PRs too; only a PR's own endpoint knows "merged".
+            let out = Self::run(&["api", &format!("repos/{repo}/issues/{number}")]).await?;
+            let i: GhIssue = serde_json::from_slice(&out).context("reading gh's answer")?;
+            let is_pr = i.pull_request.is_some();
+            let mut state = i.state.to_lowercase();
+            if is_pr && state == "closed" {
+                let out = Self::run(&["api", &format!("repos/{repo}/pulls/{number}"), "--jq", ".merged"]).await?;
+                if String::from_utf8_lossy(&out).trim() == "true" {
+                    state = "merged".into();
+                }
+            }
+            Ok(ItemInfo { title: i.title, url: i.html_url, is_pr, state, comments: i.comments })
+        })
+    }
+
     fn pr<'a>(&'a self, repo: &'a str, number: i64) -> BoxFuture<'a, anyhow::Result<PrInfo>> {
         Box::pin(async move {
             check_repo(repo)?;
@@ -146,6 +185,7 @@ pub mod fake {
     /// A GitHub that answers from a map tests can change.
     #[derive(Default)]
     pub struct FakeGitHub {
+        pub items: Mutex<HashMap<(String, i64), ItemInfo>>,
         pub prs: Mutex<HashMap<(String, i64), PrInfo>>,
         /// PRs reported merged the next time they're fetched one by one (as after a merge button).
         pub merge_on_fetch: Mutex<std::collections::HashSet<i64>>,
@@ -167,6 +207,11 @@ pub mod fake {
                     }
                     p
                 });
+            Box::pin(async move { r })
+        }
+
+        fn item<'a>(&'a self, repo: &'a str, number: i64) -> BoxFuture<'a, anyhow::Result<ItemInfo>> {
+            let r = self.items.lock().unwrap().get(&(repo.to_owned(), number)).cloned().context("no such item");
             Box::pin(async move { r })
         }
 

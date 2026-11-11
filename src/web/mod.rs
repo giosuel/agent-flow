@@ -6,6 +6,7 @@ mod assets;
 mod builds;
 pub use builds::notify_build;
 mod buttons;
+mod conversations;
 mod dashboard;
 mod icons;
 mod pages;
@@ -100,6 +101,7 @@ pub fn router(state: AppState) -> Router {
         .merge(api::routes())
         .merge(buttons::routes())
         .merge(builds::routes())
+        .merge(conversations::routes())
         .merge(dashboard::routes())
         .merge(pwa::routes())
         .nest_service("/mcp", mcp)

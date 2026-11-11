@@ -763,3 +763,127 @@ async fn a_build_goes_from_agent_to_owner_and_feedback_comes_back() {
     let (_, news) = mcp_tool(&s, &token, &sess, "since_last_check", json!({})).await;
     assert!(news.to_string().contains("1 works, 1 problem"), "{news}");
 }
+
+#[tokio::test]
+async fn agents_and_the_consultant_talk_through_agentflow() {
+    let s = TestServer::start().await;
+    let v = s.token(TokenKind::Project, Some("vinculum")).await;
+    let a = s.token(TokenKind::Project, Some("antimony")).await;
+    let consultant = s.token(TokenKind::Admin, None).await;
+    let (vs, as_, cs) = (mcp_session(&s, &v).await, mcp_session(&s, &a).await, mcp_session(&s, &consultant).await);
+
+    let (ok, r) = mcp_tool(&s, &v, &vs, "send_message", json!({"to": ["antimony"], "subject": "Port 21300?", "body": "Can I use 21300 for a demo?", "kind": "resource"})).await;
+    assert!(ok, "{r}");
+    let thread = r["conversation"].as_i64().unwrap();
+
+    // Antimony's next reply of any tool says something is waiting; since_last_check has it.
+    let (_, info) = mcp_tool(&s, &a, &as_, "project_info", json!({})).await;
+    assert!(info["unread"].as_str().unwrap_or("").starts_with("1 new"), "{info}");
+    let (_, news) = mcp_tool(&s, &a, &as_, "since_last_check", json!({})).await;
+    assert!(news.to_string().contains("Can I use 21300"), "{news}");
+    mcp_tool(
+        &s,
+        &a,
+        &as_,
+        "send_message",
+        json!({"conversation": thread, "body": "Yes, it's free.", "kind": "answer"}),
+    )
+    .await;
+    let (_, conv) = mcp_tool(&s, &v, &vs, "conversation", json!({"conversation": thread})).await;
+    assert_eq!(conv["messages"].as_array().unwrap().len(), 2);
+
+    // The consultant waits for its messages; a question to it ends the wait.
+    let waiter = {
+        let (http, url, t) = (s.http.clone(), s.url("/api/wait?timeout=20"), consultant.clone());
+        tokio::spawn(async move { http.get(url).bearer_auth(t).send().await.unwrap().json::<Value>().await.unwrap() })
+    };
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    mcp_tool(&s, &v, &vs, "send_message", json!({"to": ["consultant"], "subject": "Tags for A milestones", "body": "How do A milestones get tagged?", "kind": "question"})).await;
+    let got = tokio::time::timeout(std::time::Duration::from_secs(10), waiter).await.unwrap().unwrap();
+    assert!(got.to_string().contains("How do A milestones"), "{got}");
+    let (_, inbox) = mcp_tool(&s, &consultant, &cs, "inbox", json!({})).await;
+    assert_eq!(inbox["messages"].as_array().unwrap().len(), 0, "the wait marked it read");
+    // An agent can't read a conversation it isn't in, nor the consultant's inbox.
+    let (ok, _) = mcp_tool(&s, &a, &as_, "conversation", json!({"conversation": thread + 1})).await;
+    assert!(!ok);
+    let (ok, _) = mcp_tool(&s, &a, &as_, "inbox", json!({})).await;
+    assert!(!ok);
+}
+
+#[tokio::test]
+async fn contributions_are_watched_for_their_project() {
+    use crate::github::ItemInfo;
+    let s = TestServer::start().await;
+    let token = s.token(TokenKind::Project, Some("imaginarium")).await;
+    let consultant = s.token(TokenKind::Admin, None).await;
+    let item = |state: &str, comments| ItemInfo {
+        title: "Undo leaves content behind".into(),
+        url: "https://github.com/loro-dev/loro/issues/1255".into(),
+        is_pr: false,
+        state: state.into(),
+        comments,
+    };
+    s.github.items.lock().unwrap().insert(("loro-dev/loro".into(), 1255), item("open", 0));
+    let cs = mcp_session(&s, &consultant).await;
+    let (ok, r) = mcp_tool(
+        &s,
+        &consultant,
+        &cs,
+        "track_contribution",
+        json!({"project": "imaginarium", "repo": "loro-dev/loro", "number": 1255}),
+    )
+    .await;
+    assert!(ok, "{r}");
+    assert_eq!(r["id"], "imaginarium/C-1");
+    let (ok, _) = mcp_tool(
+        &s,
+        &consultant,
+        &cs,
+        "track_contribution",
+        json!({"project": "imaginarium", "repo": "bad repo", "number": 1}),
+    )
+    .await;
+    assert!(!ok);
+
+    s.github.items.lock().unwrap().insert(("loro-dev/loro".into(), 1255), item("open", 1));
+    crate::poller::poll_contributions(&s.state).await.unwrap();
+    let ts = mcp_session(&s, &token).await;
+    let (_, news) = mcp_tool(&s, &token, &ts, "since_last_check", json!({})).await;
+    assert!(news.to_string().contains("1 new comment"), "{news}");
+}
+
+#[tokio::test]
+async fn the_owner_writes_into_a_conversation() {
+    let s = TestServer::start().await;
+    let v = s.token(TokenKind::Project, Some("vinculum")).await;
+    let vs = mcp_session(&s, &v).await;
+    let (_, r) = mcp_tool(
+        &s,
+        &v,
+        &vs,
+        "send_message",
+        json!({"to": ["consultant"], "subject": "Tags?", "body": "How?", "kind": "question"}),
+    )
+    .await;
+    let thread = r["conversation"].as_i64().unwrap();
+    let cookie = s.owner_cookie().await;
+    let page = s.http.get(s.url("/conversations")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
+    assert!(page.contains("Tags?") && page.contains("vinculum → consultant"));
+    let res = s
+        .http
+        .post(s.url(&format!("/conversations/{thread}/reply")))
+        .header(COOKIE, &cookie)
+        .header(ORIGIN, &s.base)
+        .form(&[("body", "Use the .a8 suffix.")])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.headers()[LOCATION], format!("/conversations?t={thread}&sent=1"));
+    let (_, news) = mcp_tool(&s, &v, &vs, "since_last_check", json!({})).await;
+    assert!(news.to_string().contains("Use the .a8 suffix."), "{news}");
+    // Tokens can't use the page.
+    assert_eq!(
+        s.http.get(s.url("/conversations")).bearer_auth(&v).send().await.unwrap().status(),
+        StatusCode::FORBIDDEN
+    );
+}

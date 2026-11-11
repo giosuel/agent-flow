@@ -2,6 +2,7 @@
 //! already authenticated the request; each tool reads the identity from the request parts, does
 //! its work and writes its own activity-log row.
 
+mod message_tools;
 mod pr_tools;
 mod project_tools;
 mod record_tools;
@@ -54,7 +55,11 @@ impl FlowMcp {
     fn new(state: AppState) -> Self {
         Self {
             state,
-            tool_router: Self::tool_router() + Self::project_tools() + Self::record_tools() + Self::pr_tools(),
+            tool_router: Self::tool_router()
+                + Self::project_tools()
+                + Self::record_tools()
+                + Self::pr_tools()
+                + Self::message_tools(),
         }
     }
 
@@ -71,19 +76,23 @@ impl FlowMcp {
         action: Action,
         outcome: anyhow::Result<Outcome>,
     ) -> Result<CallToolResult, ErrorData> {
-        if let Actor::Project { project_id, .. } = actor {
-            let id = *project_id;
-            // A sign of life; the first call of a new agent also starts its read cursor here.
-            let _ = self
-                .state
-                .db
-                .call(move |c| {
-                    crate::projects::seen(c, id)?;
-                    crate::waiting::cursor(c, id)?;
-                    Ok(())
-                })
-                .await;
-        }
+        // Every reply says when something is waiting to be read, so a busy session notices a
+        // message without having to ask. (since_last_check and inbox are the reading itself.)
+        let a = actor.clone();
+        let unread = self
+            .state
+            .db
+            .call(move |c| match &a {
+                Actor::Project { project_id, slug, .. } => {
+                    // A sign of life; the first call of a new agent also starts its read cursor.
+                    crate::projects::seen(c, *project_id)?;
+                    crate::waiting::unread_count(c, *project_id, slug)
+                }
+                Actor::Admin { .. } => Ok(crate::messages::consultant_inbox(c, false)?.len() as i64),
+                _ => Ok(0),
+            })
+            .await
+            .unwrap_or(0);
         match outcome {
             Ok(o) => {
                 let mut e = Entry::new(actor, Via::Mcp, action, o.summary.unwrap_or_else(|| tool.to_owned()));
@@ -94,7 +103,15 @@ impl FlowMcp {
                     e = e.target(t);
                 }
                 activity::write(&self.state.db, e).await;
-                Ok(json_result(o.reply))
+                let mut reply = o.reply;
+                if unread > 0
+                    && !matches!(tool, "since_last_check" | "inbox" | "hello")
+                    && let Some(obj) = reply.as_object_mut()
+                {
+                    let how = if matches!(actor, Actor::Admin { .. }) { "inbox" } else { "since_last_check" };
+                    obj.insert("unread".into(), serde_json::json!(format!("{unread} new for you; call {how}")));
+                }
+                Ok(json_result(reply))
             }
             Err(err) => {
                 let msg = format!("{err:#}");
