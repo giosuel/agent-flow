@@ -13,6 +13,8 @@ pub struct TestServer {
     pub base: String,
     pub db: Db,
     pub http: reqwest::Client,
+    pub github: std::sync::Arc<crate::github::fake::FakeGitHub>,
+    pub state: AppState,
 }
 
 impl TestServer {
@@ -21,11 +23,12 @@ impl TestServer {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let config = Config { listen: addr, public_url: format!("http://{addr}"), ..Config::default() };
-        let app = router(AppState::new(db.clone(), config, crate::push::Vapid::random()))
-            .into_make_service_with_connect_info::<SocketAddr>();
+        let github = std::sync::Arc::new(crate::github::fake::FakeGitHub::default());
+        let state = AppState::new(db.clone(), config, crate::push::Vapid::random(), github.clone());
+        let app = router(state.clone()).into_make_service_with_connect_info::<SocketAddr>();
         tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
         let http = reqwest::Client::builder().redirect(reqwest::redirect::Policy::none()).build().unwrap();
-        Self { base: format!("http://{addr}"), db, http }
+        Self { base: format!("http://{addr}"), db, http, github, state }
     }
 
     pub fn url(&self, path: &str) -> String {
@@ -527,4 +530,96 @@ async fn the_dashboard_features_a_question_and_answers_in_one_tap() {
         .unwrap();
     assert!(html.contains("Sent to vinculum: vinculum/Q-2"), "notice");
     assert!(html.contains(r#"<span class="mono count">1</span>"#));
+}
+
+#[tokio::test]
+async fn prs_merge_in_order_from_the_owners_buttons() {
+    use crate::github::fake::pr;
+    let s = TestServer::start().await;
+    let token = s.token(TokenKind::Project, Some("vinculum")).await;
+    let sess = mcp_session(&s, &token).await;
+    let call = |name: &'static str, args: Value| {
+        let (s, token, sess) = (&s, token.clone(), sess.clone());
+        async move { mcp_tool(s, &token, &sess, name, args).await }
+    };
+    assert!(!call("update_pr", json!({"number": 48, "ready": true})).await.0, "no repo yet");
+    call("update_project", json!({"repo": "giosuel/vinculum"})).await;
+    s.github.set("giosuel/vinculum", pr(48, "main", "b48"));
+    s.github.set("giosuel/vinculum", pr(49, "b48", "b49"));
+    crate::poller::poll_once(&s.state).await.unwrap();
+
+    let dir = tempfile::tempdir().unwrap();
+    let wd = dir.path().display().to_string();
+    for n in [48, 49] {
+        let (ok, r) = call("update_pr", json!({"number": n, "ready": true})).await;
+        assert!(ok, "{r}");
+        let (ok, r) = call("add_button", json!({"record": format!("PR-{n}"), "label": "Merge", "command": format!("echo merged {n} > merged-{n}"), "workdir": wd})).await;
+        assert!(ok, "{r}");
+    }
+    let (ok, r) =
+        call("add_release", json!({"tag": "v0.0.5-m4", "title": "M4: Keybinds", "waits_for": ["PR-48", "PR-49"]}))
+            .await;
+    assert!(ok, "{r}");
+    call("add_button", json!({"record": "R-1", "label": "Push tag v0.0.5-m4", "command": "echo tagged > tagged", "workdir": wd, "requires": ["PR-49"]})).await;
+
+    let (_, order) = call("pull_requests", json!({})).await;
+    assert_eq!(order["merge_order"][0]["mergeable_now"], true);
+    assert_eq!(order["merge_order"][1]["buttons"][0]["locked_because"], "merge PR-48 first");
+
+    let cookie = s.owner_cookie().await;
+    let html =
+        s.http.get(s.url("/p/vinculum?tab=prs")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
+    assert!(html.contains("Merge #48–#49"), "stack button");
+    let start = html.find(r#"name="actions" value=""#).unwrap() + r#"name="actions" value=""#.len();
+    let ids = html[start..].split('"').next().unwrap().to_owned();
+
+    // A token can't press, not even the consultant's.
+    let admin = s.token(TokenKind::Admin, None).await;
+    let res = s
+        .http
+        .post(s.url("/p/vinculum/merge-up-to/49"))
+        .bearer_auth(&admin)
+        .form(&[("actions", ids.as_str())])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::FORBIDDEN);
+
+    s.github.merge_on_fetch.lock().unwrap().extend([48, 49]);
+    let res = s
+        .http
+        .post(s.url("/p/vinculum/merge-up-to/49"))
+        .header(COOKIE, &cookie)
+        .header(ORIGIN, &s.base)
+        .form(&[("actions", ids.as_str())])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.headers()[LOCATION], "/p/vinculum?tab=prs&merged=2&upto=49");
+    assert!(dir.path().join("merged-48").exists() && dir.path().join("merged-49").exists());
+
+    // The release unlocked; its tag button runs and marks it tagged; the agent hears about all of it.
+    let html = s.http.get(s.url("/p/vinculum/R-1")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
+    let hstart = html.find(r#"name="hash" value=""#).unwrap() + r#"name="hash" value=""#.len();
+    let hash = html[hstart..].split('"').next().unwrap().to_owned();
+    let tag_id = {
+        let i = html.find("/actions/").unwrap() + "/actions/".len();
+        html[i..].split('/').next().unwrap().to_owned()
+    };
+    let res = s
+        .http
+        .post(s.url(&format!("/actions/{tag_id}/run")))
+        .header(COOKIE, &cookie)
+        .header(ORIGIN, &s.base)
+        .form(&[("hash", hash.as_str()), ("next", "/p/vinculum/R-1")])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.headers()[LOCATION], format!("/p/vinculum/R-1?ran={tag_id}&ok=1"));
+    assert!(dir.path().join("tagged").exists());
+    let (_, rel) = call("get_record", json!({"id": "R-1"})).await;
+    assert_eq!(rel["state"], "tagged");
+    let (_, news) = call("since_last_check", json!({})).await;
+    let what = news.to_string();
+    assert!(what.contains("PR-48 merged") && what.contains("Push tag v0.0.5-m4") && what.contains("done"), "{what}");
 }
