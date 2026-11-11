@@ -17,3 +17,13 @@ document.addEventListener("DOMContentLoaded", () => {
   const strip = now && now.parentElement;
   if (strip) strip.scrollLeft = now.offsetLeft - strip.offsetLeft - 24;
 });
+
+// Build feedback: "2 of 3 marked" as the owner goes.
+document.addEventListener("change", (e) => {
+  const form = e.target.closest("form.fb");
+  if (!form) return;
+  const groups = new Set([...form.querySelectorAll(".verdicts input")].map((i) => i.name));
+  const marked = [...groups].filter((n) => form.querySelector(`input[name="${n}"]:checked`)).length;
+  const out = form.querySelector("[data-fb-count]");
+  if (out) out.textContent = `${marked} of ${groups.size} marked`;
+});
