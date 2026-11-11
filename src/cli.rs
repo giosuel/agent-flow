@@ -80,6 +80,7 @@ pub struct ClientArgs {
 
 fn open_db(config_path: &Path) -> anyhow::Result<(Config, Db)> {
     let config = Config::load(config_path)?;
+    config.apply();
     let db = Db::open(&config.db_path())?;
     Ok((config, db))
 }

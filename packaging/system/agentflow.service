@@ -1,0 +1,34 @@
+# AgentFlow as a system service, as its own user: agents (another user) can't read its database,
+# tokens or sessions. What it does as the agents' user goes through agentflow-hands.service.
+# Installed by the package, or by `agentflow setup` (which fills in @BIN@).
+[Unit]
+Description=AgentFlow server
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+User=agentflow
+Group=agentflow
+ExecStart=@BIN@ --config /etc/agentflow/config.toml serve
+Restart=always
+RestartSec=5
+Environment=RUST_LOG=agentflow=info,warn
+StateDirectory=agentflow
+StateDirectoryMode=0700
+UMask=0077
+# It never needs the home folders: the agents' helper does that part.
+ProtectHome=yes
+ProtectSystem=strict
+PrivateTmp=yes
+PrivateDevices=yes
+NoNewPrivileges=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target

@@ -202,24 +202,22 @@ fn spawn_usage(state: AppState) {
 }
 
 async fn usage_round(state: &AppState) -> anyhow::Result<crate::usage::Stats> {
+    use crate::hands::{Job, run_async};
+    // The transcripts are the agents' user's own files: read as that user (see crate::hands).
     let root = crate::usage::root(&state.config);
-    let r = root.clone();
-    let files = tokio::task::spawn_blocking(move || crate::usage::transcripts(&r)).await?;
+    let files: Vec<std::path::PathBuf> = run_async(Job::Transcripts { root: root.clone() }).await?;
     let mut stats = crate::usage::Stats::default();
     for path in files {
         let p = path.clone();
         let (offset, first_at) = state.db.call(move |c| crate::usage::file_state(c, &p)).await?;
-        let r = root.clone();
         let shown = path.display().to_string();
-        let read = match tokio::task::spawn_blocking(move || crate::usage::read_new(&r, &path, offset, first_at))
-            .await?
-        {
+        let job = Job::ReadTranscript { root: root.clone(), path, offset, first_at };
+        let read: Option<crate::usage::Read> = match run_async(job).await {
             Ok(read) => read,
             // Deleted meanwhile (Claude Code cleans up old ones) is expected; anything else is
             // worth a warning. Either way the rest go on.
             Err(e) => {
-                let gone = e.downcast_ref::<std::io::Error>().is_some_and(|e| e.kind() == std::io::ErrorKind::NotFound);
-                if gone {
+                if e.downcast_ref::<crate::hands::Coded>().is_some_and(|c| c.code == "gone") {
                     tracing::debug!("token usage: {shown}: {e:#}");
                 } else {
                     tracing::warn!("token usage: {shown}: {e:#}");

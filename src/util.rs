@@ -92,8 +92,36 @@ pub fn expand_home(path: &str) -> std::path::PathBuf {
     }
 }
 
+static AGENTS_HOME: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+
+/// The agents' home folder, where `~/` in paths points: $HOME, unless the server runs as its own
+/// user and the config names the agents' home (`agents_home`).
 pub fn home_dir() -> std::path::PathBuf {
+    if let Some(h) = AGENTS_HOME.get() {
+        return h.clone();
+    }
     std::env::var_os("HOME").map(Into::into).unwrap_or_else(|| "/".into())
+}
+
+/// A user's id by name, from /etc/passwd ("agentflow" → 997), or a plain number.
+pub fn uid_of(user: &str) -> anyhow::Result<u32> {
+    if let Ok(n) = user.parse() {
+        return Ok(n);
+    }
+    let passwd = std::fs::read_to_string("/etc/passwd")?;
+    passwd
+        .lines()
+        .filter_map(|l| {
+            let mut f = l.split(':');
+            Some((f.next()?, f.nth(1)?))
+        })
+        .find(|(name, _)| *name == user)
+        .and_then(|(_, uid)| uid.parse().ok())
+        .ok_or_else(|| anyhow::anyhow!("no user {user:?} on this machine"))
+}
+
+pub fn set_agents_home(dir: std::path::PathBuf) {
+    let _ = AGENTS_HOME.set(dir);
 }
 
 #[cfg(test)]

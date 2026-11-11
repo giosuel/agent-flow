@@ -9,6 +9,8 @@ use serde::Deserialize;
 
 use crate::util::expand_home;
 
+pub const SYSTEM_PATH: &str = "/etc/agentflow/config.toml";
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
@@ -42,6 +44,12 @@ pub struct Config {
     pub build_free_gb: u64,
     /// Claude Code's transcripts, read for token usage.
     pub transcripts_dir: String,
+    /// When AgentFlow runs as its own user: the agents' home folder, where `~/` in the other
+    /// paths points (e.g. "/home/viber"). Empty: this user's own home.
+    pub agents_home: String,
+    /// When AgentFlow runs as its own user: the socket of `agentflow hands`, which does what has
+    /// to happen as the agents' user. Empty: do it in the server (one user for everything).
+    pub hands_socket: String,
 }
 
 impl Default for Config {
@@ -61,13 +69,27 @@ impl Default for Config {
             session_max_days: 30,
             build_free_gb: 10,
             transcripts_dir: "~/.claude/projects".into(),
+            agents_home: String::new(),
+            hands_socket: String::new(),
         }
     }
 }
 
 impl Config {
+    /// `~/.config/agentflow/config.toml` (a single-user install), else `/etc/agentflow/config.toml`
+    /// (the packaged system service) when that exists.
     pub fn default_path() -> PathBuf {
-        expand_home("~/.config/agentflow/config.toml")
+        let user = expand_home("~/.config/agentflow/config.toml");
+        let system = PathBuf::from(SYSTEM_PATH);
+        if !user.exists() && system.exists() { system } else { user }
+    }
+
+    /// Points `~/` at the agents' home and jobs at the helper, as the config says. Once, at start.
+    pub fn apply(&self) {
+        if !self.agents_home.is_empty() {
+            crate::util::set_agents_home(self.agents_home.clone().into());
+        }
+        crate::hands::init((!self.hands_socket.is_empty()).then(|| PathBuf::from(&self.hands_socket)));
     }
 
     /// Reads the file if it exists; a missing file means all defaults.
@@ -87,6 +109,9 @@ impl Config {
         }
         if !(self.public_url.starts_with("http://") || self.public_url.starts_with("https://")) {
             bail!("public_url must start with http:// or https://");
+        }
+        if !self.agents_home.is_empty() && !Path::new(&self.agents_home).is_absolute() {
+            bail!("agents_home must be an absolute path like /home/viber");
         }
         Ok(())
     }

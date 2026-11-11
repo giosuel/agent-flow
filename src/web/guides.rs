@@ -322,21 +322,18 @@ async fn merge(
     activity::write(&state.db, e).await;
     // Fast-forward only: the owner's own unpushed edits are never merged or rebased behind their back.
     let dir = state.config.handbook_dir();
-    let mut pull = guides::git_command(&dir);
-    pull.args(["pull", "--ff-only", "-q"]);
+    let mut argv = guides::git_argv(&dir);
+    argv.extend(["pull", "--ff-only", "-q"].map(String::from));
     let pulled = {
         let _checkout = state.handbook.lock().await;
-        tokio::process::Command::from(pull).output().await
+        crate::hands::run_async::<crate::hands::ExecOut>(crate::hands::Job::Exec { argv, cwd: None, timeout_s: 120 })
+            .await
     };
     let _ = crate::poller::refresh_guide_prs(&state).await;
     match pulled {
-        Ok(o) if o.status.success() => Ok(Redirect::to(&format!("/guides?merged={}", form.number)).into_response()),
+        Ok(o) if o.success() => Ok(Redirect::to(&format!("/guides?merged={}", form.number)).into_response()),
         Ok(o) => {
-            tracing::warn!(
-                "pulling the handbook after #{}: {}",
-                form.number,
-                String::from_utf8_lossy(&o.stderr).trim()
-            );
+            tracing::warn!("pulling the handbook after #{}: {}", form.number, o.stderr.trim());
             Ok(Redirect::to("/guides?error=pull").into_response())
         }
         Err(e) => {

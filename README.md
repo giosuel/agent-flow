@@ -15,8 +15,33 @@ cargo build --release
 ./target/release/agentflow serve
 ```
 
-`scripts/install.sh` builds a release binary, installs it as `~/.local/bin/agentflow` and runs it as
-a systemd user service (`packaging/agentflow.service`).
+There are two ways to run it.
+
+**As its own user (recommended on a shared machine).** The agents can't read AgentFlow's
+database, tokens or sessions. Install the binary where only root can change it, then run setup once:
+
+```sh
+sudo install -m 755 target/release/agentflow /usr/local/bin/agentflow
+sudo /usr/local/bin/agentflow setup --public-url https://flow.example --agents-user <user> --dry-run  # the steps
+sudo /usr/local/bin/agentflow setup --public-url https://flow.example --agents-user <user>
+# then, as the agents' user:
+systemctl --user daemon-reload; systemctl --user enable --now agentflow-hands
+```
+
+Setup creates the user `agentflow` and writes `/etc/agentflow/config.toml`. It installs the
+system service (`packaging/system/agentflow.service`, data in `/var/lib/agentflow`, no access to
+`/home`) and `agentflow-hands`, a user service of the agents' user. `--import <dir>` brings
+a single-user instance's data along.
+
+The server runs as `agentflow`; what has to happen as the agents' user goes to `agentflow hands`
+over a Unix socket that only `agentflow` may use (`src/hands.rs`). That covers the buttons, `gh`
+with the agents' login, guide edits, token files, new projects' folders, transcripts and the
+agents' process folders. Admin commands then run as the server's user:
+`sudo -u agentflow agentflow --config /etc/agentflow/config.toml admin login-link`.
+
+**As one user (a personal machine).** `scripts/install.sh` builds a release binary, installs it as
+`~/.local/bin/agentflow` and runs it as a systemd user service (`packaging/agentflow.service`).
+Everything runs as you, so agents running as you can read its files.
 
 ## Configuration
 
@@ -37,6 +62,8 @@ git_author = "Name <you@example.com>"       # who your guide edits are committed
 github_writes = true                        # false on a test instance: no merges on GitHub
 build_free_gb = 10                          # disk a build upload must leave free
 transcripts_dir = "~/.claude/projects"      # Claude Code transcripts, read for token usage
+agents_home = "/home/agents"                # as its own user: where ~/ points (the agents' home)
+hands_socket = "/run/agentflow-hands/hands.sock"  # as its own user: the agents' helper
 ```
 
 ## Behind Caddy (passkeys and push)

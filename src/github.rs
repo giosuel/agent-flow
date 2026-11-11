@@ -158,18 +158,18 @@ fn ci_state(checks: &[serde_json::Value]) -> String {
 pub struct GhCli;
 
 impl GhCli {
+    /// As the agents' user, with its `gh` login (see [`crate::hands`]).
     async fn run(args: &[&str]) -> anyhow::Result<Vec<u8>> {
-        let out = tokio::time::timeout(
-            std::time::Duration::from_secs(60),
-            tokio::process::Command::new("gh").args(args).kill_on_drop(true).output(),
-        )
-        .await
-        .context("gh took longer than a minute")?
-        .context("running gh")?;
-        if !out.status.success() {
-            bail!("gh {}: {}", args.first().unwrap_or(&""), String::from_utf8_lossy(&out.stderr).trim());
+        let argv = std::iter::once("gh").chain(args.iter().copied()).map(String::from).collect();
+        let out: crate::hands::ExecOut =
+            crate::hands::run_async(crate::hands::Job::Exec { argv, cwd: None, timeout_s: 60 }).await?;
+        if out.timed_out {
+            bail!("gh took longer than a minute");
         }
-        Ok(out.stdout)
+        if !out.success() {
+            bail!("gh {}: {}", args.first().unwrap_or(&""), out.stderr.trim());
+        }
+        Ok(out.stdout.into_bytes())
     }
 }
 

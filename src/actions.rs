@@ -277,36 +277,36 @@ pub struct RunResult {
     pub output: String,
 }
 
-/// Runs the command with bash in its folder, with a 10-minute limit. Never called by an agent.
+/// Runs the command with bash in its folder, as the agents' user (see [`crate::hands`]), with a
+/// 10-minute limit. Never called by an agent.
 pub async fn execute(a: &ActionRow) -> RunResult {
     let dir: PathBuf = if a.workdir.is_empty() { crate::util::home_dir() } else { expand_home(&a.workdir) };
-    let child = tokio::process::Command::new("bash")
-        .arg("-c")
-        .arg(&a.command)
-        .current_dir(&dir)
-        .stdin(std::process::Stdio::null())
-        .kill_on_drop(true)
-        .output();
-    match tokio::time::timeout(TIMEOUT, child).await {
-        Err(_) => RunResult { ok: false, exit_code: None, output: "Stopped after 10 minutes.".into() },
-        Ok(Err(e)) => {
-            RunResult { ok: false, exit_code: None, output: format!("Couldn't start it in {}: {e}", dir.display()) }
+    let job = crate::hands::Job::Exec {
+        argv: vec!["bash".into(), "-c".into(), a.command.clone()],
+        cwd: Some(dir.clone()),
+        timeout_s: TIMEOUT.as_secs(),
+    };
+    match crate::hands::run_async::<crate::hands::ExecOut>(job).await {
+        Ok(out) if out.timed_out => {
+            RunResult { ok: false, exit_code: None, output: "Stopped after 10 minutes.".into() }
         }
-        Ok(Ok(out)) => {
-            let mut text = String::from_utf8_lossy(&out.stdout).into_owned();
-            let err = String::from_utf8_lossy(&out.stderr);
-            if !err.trim().is_empty() {
+        Err(e) => {
+            RunResult { ok: false, exit_code: None, output: format!("Couldn't start it in {}: {e:#}", dir.display()) }
+        }
+        Ok(out) => {
+            let mut text = out.stdout.clone();
+            if !out.stderr.trim().is_empty() {
                 if !text.is_empty() && !text.ends_with('\n') {
                     text.push('\n');
                 }
-                text.push_str(&err);
+                text.push_str(&out.stderr);
             }
             if text.len() > MAX_OUTPUT {
                 let cut = text.char_indices().map(|(i, _)| i).take_while(|&i| i <= MAX_OUTPUT).last().unwrap_or(0);
                 text.truncate(cut);
                 text.push_str("\n[output cut at 64 KB]");
             }
-            RunResult { ok: out.status.success(), exit_code: out.status.code(), output: crate::activity::redact(&text) }
+            RunResult { ok: out.success(), exit_code: out.code, output: crate::activity::redact(&text) }
         }
     }
 }

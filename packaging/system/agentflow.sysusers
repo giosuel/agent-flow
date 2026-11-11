@@ -1,0 +1,2 @@
+# AgentFlow's own user (systemd-sysusers; installed as /usr/lib/sysusers.d/agentflow.conf).
+u agentflow - "AgentFlow server" /var/lib/agentflow
