@@ -29,7 +29,7 @@ pub struct AddTask {
     pub tags: Vec<String>,
     /// Starting state: todo (default), doing, blocked or parked.
     pub state: Option<String>,
-    /// Your own estimate, e.g. "2 h" or "40 min"; Usage compares it with the tokens spent.
+    /// Your own estimate, e.g. "2 h" or "40 min"; shown with the task.
     pub estimate: Option<String>,
 }
 
@@ -37,7 +37,7 @@ pub struct AddTask {
 pub struct UpdateTask {
     /// The task, e.g. "T-14" or "vinculum/T-14".
     pub id: String,
-    /// todo, doing, review, done, blocked or parked. Setting doing makes it the task your tokens count towards.
+    /// todo, doing, review, done, blocked or parked. Set doing when you start it.
     pub state: Option<String>,
     pub title: Option<String>,
     pub body: Option<String>,

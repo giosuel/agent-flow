@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use askama::Template;
 use axum::extract::{Path, Query, State};
-use axum::response::{Redirect, Response};
+use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use axum::{Extension, Form, Router};
 use rusqlite::Connection;
@@ -839,5 +839,3 @@ async fn answer(
         }
     }
 }
-
-use axum::response::IntoResponse;
