@@ -12,6 +12,7 @@ mod github;
 mod machine;
 mod markdown;
 mod mcp;
+mod messages;
 mod passkey;
 mod poller;
 mod projects;
