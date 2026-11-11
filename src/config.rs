@@ -30,6 +30,8 @@ pub struct Config {
     pub handbook_repo: String,
     /// Who the owner's guide edits are committed as.
     pub git_author: String,
+    /// False on a test instance: the Guides page's Merge button refuses instead of merging on GitHub.
+    pub github_writes: bool,
     /// The contact push services ask senders for (Apple requires one): mailto: or https:.
     pub push_contact: String,
     /// Owner sessions end after this many days without a request…
@@ -49,6 +51,7 @@ impl Default for Config {
             handbook_dir: "~/ai-handbook".into(),
             handbook_repo: "giosuel/ai-handbook".into(),
             git_author: "giosuel <me@giosuel.ch>".into(),
+            github_writes: true,
             trusted_proxies: vec!["127.0.0.1".parse().unwrap(), "::1".parse().unwrap()],
             session_idle_days: 14,
             session_max_days: 30,

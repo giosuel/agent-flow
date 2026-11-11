@@ -256,6 +256,9 @@ async fn merge(
     if !state.guide_prs.lock().unwrap().open.iter().any(|p| p.number == form.number) {
         return Err(AppError::BadRequest(format!("#{} isn't an open pull request of the guides", form.number)));
     }
+    if !state.config.github_writes {
+        return Err(AppError::BadRequest("This instance doesn't write to GitHub (github_writes = false).".into()));
+    }
     let repo = state.config.handbook_repo.clone();
     let out = state.github.merge(&repo, form.number).await.map_err(|e| AppError::BadRequest(format!("{e:#}")))?;
     let e = Entry::new(
