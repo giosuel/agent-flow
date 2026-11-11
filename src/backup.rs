@@ -23,6 +23,13 @@ pub fn backup(conn: &Connection, data_dir: &Path, date: &str) -> anyhow::Result<
     if path.exists() {
         return Ok(None);
     }
+    // The disk is shared with production: a copy needs room for itself and 5 GB to spare.
+    let size: i64 =
+        conn.query_row("SELECT page_count * page_size FROM pragma_page_count(), pragma_page_size()", [], |r| r.get(0))?;
+    let free = rustix::fs::statvfs(&dir).map(|s| s.f_bavail.saturating_mul(s.f_frsize)).unwrap_or(0);
+    if free < size as u64 + 5 * 1024 * 1024 * 1024 {
+        anyhow::bail!("not backing up: {} GB free on the disk is too little", free >> 30);
+    }
     let tmp = dir.join(format!(".flow-{date}.db.tmp"));
     let _ = std::fs::remove_file(&tmp);
     conn.execute("VACUUM INTO ?1", [tmp.to_string_lossy()])?;

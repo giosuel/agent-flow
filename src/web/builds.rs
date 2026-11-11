@@ -116,6 +116,14 @@ async fn upload(
         .and_then(|_| builds::check_label("branch", &q.branch))
         .and_then(|_| builds::check_label("tag", &q.tag))
         .and_then(|_| builds::check_label("summary", &q.summary))
+        // Stored text is redacted; a branch that looks like a token would no longer match the
+        // build's file name.
+        .and_then(|_| {
+            if crate::activity::redact(&q.branch) != q.branch {
+                anyhow::bail!("the branch name looks like it contains a token");
+            }
+            Ok(())
+        })
         .and_then(|_| {
             if q.entry.trim().is_empty() {
                 Ok(())
@@ -169,7 +177,17 @@ async fn upload(
         let mut file = tokio::fs::File::create(&tmp.0).await?;
         let mut stream = body.into_data_stream();
         let mut size = 0u64;
-        while let Some(chunk) = stream.next().await {
+        // The upload holds the one upload slot, so a stalled or crawling client can't keep it:
+        // a minute without data, or half an hour in all, ends it.
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(30 * 60);
+        loop {
+            let next = tokio::time::timeout(std::time::Duration::from_secs(60), stream.next());
+            let chunk = match tokio::time::timeout_at(deadline, next).await {
+                Err(_) => anyhow::bail!("the upload took longer than 30 minutes"),
+                Ok(Err(_)) => anyhow::bail!("the upload stalled for a minute"),
+                Ok(Ok(None)) => break,
+                Ok(Ok(Some(chunk))) => chunk,
+            };
             let chunk = chunk.map_err(|e| anyhow::anyhow!("upload broke off: {e}"))?;
             size += chunk.len() as u64;
             if size > limit {

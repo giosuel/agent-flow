@@ -173,7 +173,7 @@ pub fn admin(config_path: &Path, command: AdminCommand) -> anyhow::Result<()> {
             }
             eprintln!("Exported {n} projects to {}", config.data_dir().join("export").display());
         }
-        AdminCommand::ManagedSettings => print!("{}", crate::hardening::managed_settings_command(&config)),
+        AdminCommand::ManagedSettings => print!("{}", crate::hardening::managed_settings_command(&config)?),
     }
     Ok(())
 }

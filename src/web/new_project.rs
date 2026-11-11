@@ -90,7 +90,12 @@ async fn create(
         model: f.model.trim().into(),
         effort: f.effort.trim().into(),
     };
-    let folder = match onboard::check(&mut p) {
+    let config = state.config.clone();
+    let taken = match state.db.call(move |c| onboard::Taken::load(c, &config)).await {
+        Ok(t) => t,
+        Err(e) => return page(nav(&state, &actor, "/projects").await, &f, Some(format!("{e:#}")), None),
+    };
+    let folder = match onboard::check(&mut p, &taken) {
         Ok(folder) => folder,
         Err(e) => return page(nav(&state, &actor, "/projects").await, &f, Some(format!("{e:#}")), None),
     };
