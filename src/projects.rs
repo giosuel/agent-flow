@@ -294,7 +294,10 @@ pub fn seen(conn: &Connection, project_id: i64) -> anyhow::Result<()> {
 
 /// What the agent says it's doing right now, shown on the project page.
 pub fn set_agent_note(conn: &Connection, project_id: i64, note: &str) -> anyhow::Result<()> {
-    conn.execute("UPDATE projects SET agent_note = ?1 WHERE id = ?2", params![crate::activity::redact(note.trim()), project_id])?;
+    conn.execute(
+        "UPDATE projects SET agent_note = ?1 WHERE id = ?2",
+        params![crate::activity::redact(note.trim()), project_id],
+    )?;
     Ok(())
 }
 

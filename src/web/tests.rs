@@ -1010,8 +1010,14 @@ async fn the_owner_edits_a_guide_and_agents_read_it() {
     // The test's checkout has no remote, so the pull after the merge reports a problem.
     assert_eq!(res.headers()[LOCATION], "/guides?error=pull");
     assert_eq!(*s.github.merged.lock().unwrap(), vec![27]);
-    let res =
-        s.http.post(s.url("/guides/prs/merge")).bearer_auth(&token).form(&[("number", "27"), ("head", "")]).send().await.unwrap();
+    let res = s
+        .http
+        .post(s.url("/guides/prs/merge"))
+        .bearer_auth(&token)
+        .form(&[("number", "27"), ("head", "")])
+        .send()
+        .await
+        .unwrap();
     assert_eq!(res.status(), StatusCode::FORBIDDEN);
 }
 

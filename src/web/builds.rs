@@ -123,7 +123,13 @@ async fn upload(
         .and_then(|_| builds::check_label("branch", &q.branch))
         .and_then(|_| builds::check_label("tag", &q.tag))
         .and_then(|_| builds::check_label("summary", &q.summary))
-        .and_then(|_| if q.entry.trim().is_empty() { Ok(()) } else { builds::safe_relative(std::path::Path::new(q.entry.trim())).map(|_| ()) });
+        .and_then(|_| {
+            if q.entry.trim().is_empty() {
+                Ok(())
+            } else {
+                builds::safe_relative(std::path::Path::new(q.entry.trim())).map(|_| ())
+            }
+        });
     if let Err(e) = checks {
         return json_error(StatusCode::BAD_REQUEST, format!("{e:#}"));
     }
@@ -212,7 +218,8 @@ async fn upload(
     drop(tmp);
     let archive = builds::archive_path(&builds_dir(&state), &q.product, &name);
     let manifest_file = builds::manifest_path(&builds_dir(&state), &q.product, &name);
-    let written = serde_json::to_vec(&manifest).map_err(anyhow::Error::from).and_then(|j| Ok(std::fs::write(&manifest_file, j)?));
+    let written =
+        serde_json::to_vec(&manifest).map_err(anyhow::Error::from).and_then(|j| Ok(std::fs::write(&manifest_file, j)?));
     if let Err(e) = written {
         let _ = std::fs::remove_file(&archive);
         return json_error(StatusCode::INTERNAL_SERVER_ERROR, format!("{e:#}"));
@@ -301,11 +308,13 @@ fn pick_entry(m: &Manifest, entry: &str) -> anyhow::Result<String> {
 /// A product's builds: only those of the project that publishes as it now.
 fn builds_of(c: &Connection, product: &str) -> anyhow::Result<Vec<Record>> {
     let Some(owner) = projects::by_build_product(c, product)? else { return Ok(Vec::new()) };
-    let mut list: Vec<Record> =
-        records::query(c, &RQuery { project_id: Some(owner.id), kinds: vec![Kind::Build], limit: 0, ..Default::default() })?
-            .into_iter()
-            .filter(|r| r.str("product") == product && r.state != "withdrawn")
-            .collect();
+    let mut list: Vec<Record> = records::query(
+        c,
+        &RQuery { project_id: Some(owner.id), kinds: vec![Kind::Build], limit: 0, ..Default::default() },
+    )?
+    .into_iter()
+    .filter(|r| r.str("product") == product && r.state != "withdrawn")
+    .collect();
     list.sort_by_key(|r| std::cmp::Reverse(r.created_at));
     Ok(list)
 }
@@ -374,7 +383,11 @@ async fn one(State(state): State<AppState>, Path((product, number)): Path<(Strin
     match find_build(&state, product.clone(), number).await {
         Ok(r) => {
             let path = builds::manifest_path(&builds_dir(&state), &product, r.str("name"));
-            let manifest: Manifest = match tokio::fs::read(&path).await.map_err(anyhow::Error::from).and_then(|b| Ok(serde_json::from_slice(&b)?)) {
+            let manifest: Manifest = match tokio::fs::read(&path)
+                .await
+                .map_err(anyhow::Error::from)
+                .and_then(|b| Ok(serde_json::from_slice(&b)?))
+            {
                 Ok(m) => m,
                 Err(e) => return json_error(StatusCode::GONE, format!("the build's file list is missing: {e:#}")),
             };

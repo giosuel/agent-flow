@@ -276,7 +276,10 @@ pub fn unpack_verified(archive: impl Read, dir: &Path, manifest: &Manifest) -> a
         if let Some(parent) = target.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        let mut out = std::fs::OpenOptions::new().write(true).create_new(true).open(&target)
+        let mut out = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&target)
             .with_context(|| format!("{path} is in the archive twice"))?;
         std::io::copy(&mut entry, &mut out)?;
         let mode = if f.executable { 0o755 } else { 0o644 };
@@ -404,7 +407,11 @@ mod tests {
         let out = tempfile::tempdir().unwrap();
         unpack_verified(ar.as_slice(), out.path(), &m).unwrap();
         use std::os::unix::fs::PermissionsExt;
-        assert_eq!(std::fs::metadata(out.path().join("app")).unwrap().permissions().mode() & 0o7777, 0o755, "no setuid");
+        assert_eq!(
+            std::fs::metadata(out.path().join("app")).unwrap().permissions().mode() & 0o7777,
+            0o755,
+            "no setuid"
+        );
         assert!(entry_path(out.path(), &m, "app").is_ok());
         assert!(entry_path(out.path(), &m, "extra").is_err(), "not executable");
         assert!(entry_path(out.path(), &m, "../app").is_err());

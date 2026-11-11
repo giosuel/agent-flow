@@ -171,9 +171,25 @@ pub fn clip(text: &str, max: usize) -> String {
 /// common others. Matched anywhere (`TOKEN=af_prj_…`, `x-af_prj_…`), with at least 16 token
 /// characters after the prefix so ordinary words stay.
 const SECRET_PREFIXES: &[&str] = &[
-    "af_dev_", "af_prj_", "af_adm_", "af_lnk_", "af_ses_", // AgentFlow
-    "ghp_", "gho_", "ghu_", "ghs_", "ghr_", "github_pat_", // GitHub
-    "sk-ant-", "glpat-", "npm_", "xoxb-", "xoxp-", "xoxa-", "xoxs-", "AKIA",
+    "af_dev_",
+    "af_prj_",
+    "af_adm_",
+    "af_lnk_",
+    "af_ses_", // AgentFlow
+    "ghp_",
+    "gho_",
+    "ghu_",
+    "ghs_",
+    "ghr_",
+    "github_pat_", // GitHub
+    "sk-ant-",
+    "glpat-",
+    "npm_",
+    "xoxb-",
+    "xoxp-",
+    "xoxa-",
+    "xoxs-",
+    "AKIA",
 ];
 
 fn token_char(c: char) -> bool {
@@ -185,8 +201,12 @@ pub fn redact(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut rest = text;
     'outer: while !rest.is_empty() {
-        if rest.starts_with("-----BEGIN ") && rest[..rest.find('\n').unwrap_or(rest.len())].contains("PRIVATE KEY-----") {
-            let end = rest.find("-----END ").and_then(|i| rest[i..].find("KEY-----").map(|j| i + j + 8)).unwrap_or(rest.len());
+        if rest.starts_with("-----BEGIN ") && rest[..rest.find('\n').unwrap_or(rest.len())].contains("PRIVATE KEY-----")
+        {
+            let end = rest
+                .find("-----END ")
+                .and_then(|i| rest[i..].find("KEY-----").map(|j| i + j + 8))
+                .unwrap_or(rest.len());
             out.push_str("[redacted private key]");
             rest = &rest[end..];
             continue;

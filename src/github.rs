@@ -227,18 +227,9 @@ impl GitHub for GhCli {
                 bail!("the pull request's commit isn't known; reload the page");
             }
             let n = number.to_string();
-            let out = Self::run(&[
-                "pr",
-                "merge",
-                &n,
-                "-R",
-                repo,
-                "--merge",
-                "--delete-branch",
-                "--match-head-commit",
-                head,
-            ])
-            .await?;
+            let out =
+                Self::run(&["pr", "merge", &n, "-R", repo, "--merge", "--delete-branch", "--match-head-commit", head])
+                    .await?;
             Ok(String::from_utf8_lossy(&out).trim().to_owned())
         })
     }
@@ -327,7 +318,8 @@ pub mod fake {
         }
 
         fn merge<'a>(&'a self, _repo: &'a str, number: i64, head: &'a str) -> BoxFuture<'a, anyhow::Result<String>> {
-            let current = self.repo_open.lock().unwrap().iter().find(|p| p.number == number).map(|p| p.head_ref_oid.clone());
+            let current =
+                self.repo_open.lock().unwrap().iter().find(|p| p.number == number).map(|p| p.head_ref_oid.clone());
             if current.as_deref() != Some(head) {
                 return Box::pin(async move { Err(anyhow::anyhow!("Head branch was modified")) });
             }
