@@ -105,7 +105,7 @@ pub fn pr_rows(c: &Connection, project_id: i64, now: i64) -> anyhow::Result<Vec<
         }
         let up_to = match (&ready, &merge_button) {
             (Ok(()), Some(a)) if o.after.is_none() || continues => {
-                chain.push((r.number, a.id, a.hash(), crate::activity::clip(&a.command, 200)));
+                chain.push((r.number, a.id, a.hash(), a.command.clone()));
                 (chain.len() > 1).then(|| {
                     let label = format!("Merge #{}–#{}", chain[0].0, r.number);
                     let ids = chain.iter().map(|(_, id, h, _)| format!("{id}:{h}")).collect::<Vec<_>>().join(",");
