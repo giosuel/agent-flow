@@ -96,6 +96,8 @@ struct SettingsPage {
     new_token: Option<(String, String)>,
     passkeys_available: bool,
     public_url: String,
+    /// This server's glibc: the downloaded program needs one at least as new.
+    glibc: String,
     passkeys: Vec<PasskeyView>,
     push_key: String,
     push_devices: Vec<DeviceView>,
@@ -206,6 +208,7 @@ async fn render_page(
         build_servers: super::remote::servers_card(state, bs).await?,
         passkeys_available: state.passkeys.available(),
         public_url: state.config.public_url.clone(),
+        glibc: glibc_version(),
         passkeys: passkeys
             .into_iter()
             .map(|p| PasskeyView { id: p.id, name: p.name, added: ago(p.created_at, now), used: when(p.last_used_at) })
@@ -476,6 +479,19 @@ async fn session_end(
         .await?;
     log(&state, &actor, &ip, Action::Login, format!("browser session {id} signed out")).await;
     Ok(Redirect::to("/settings?done=session-ended"))
+}
+
+/// "2.43", from `ldd --version`; empty if it can't be told.
+fn glibc_version() -> String {
+    static V: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    V.get_or_init(|| {
+        let out = std::process::Command::new("ldd").arg("--version").output();
+        out.ok()
+            .and_then(|o| String::from_utf8_lossy(&o.stdout).lines().next().map(str::to_owned))
+            .and_then(|l| l.split_whitespace().last().map(str::to_owned))
+            .unwrap_or_default()
+    })
+    .clone()
 }
 
 #[cfg(test)]

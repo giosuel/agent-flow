@@ -758,7 +758,7 @@ async fn a_build_goes_from_agent_to_owner_and_feedback_comes_back() {
         .await
         .unwrap();
     assert_eq!(res["number"], 1, "{res}");
-    assert_eq!(res["run"], "agentflow run imaginarium 1");
+    assert_eq!(res["run"], "flow-run imaginarium 1");
 
     // The owner's machine lists it and gets the same bytes back.
     let list: Value =
@@ -795,7 +795,7 @@ async fn a_build_goes_from_agent_to_owner_and_feedback_comes_back() {
     assert!(page.contains("Builds to try · 1"));
     let page =
         s.http.get(s.url("/p/imaginarium/B-1")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
-    assert!(page.contains("How did it go?") && page.contains("agentflow run imaginarium 1"));
+    assert!(page.contains("How did it go?") && page.contains("flow-run imaginarium 1"));
     let res = s
         .http
         .post(s.url("/p/imaginarium/B-1/feedback"))
@@ -1933,4 +1933,16 @@ async fn agents_can_go_ahead_with_a_default_while_a_question_waits() {
         ),
         "{news}"
     );
+}
+
+#[tokio::test]
+async fn devices_download_the_program_for_flow_run() {
+    let s = TestServer::start().await;
+    let res = s.http.get(s.url("/download/agentflow")).send().await.unwrap();
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+    let device = s.token(TokenKind::Device, None).await;
+    let res = s.http.get(s.url("/download/agentflow")).bearer_auth(&device).send().await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let bytes = res.bytes().await.unwrap();
+    assert_eq!(&bytes[..4], b"\x7fELF", "the program itself");
 }

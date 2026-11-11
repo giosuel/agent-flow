@@ -142,7 +142,7 @@ as its own Unix user is the stronger fence.
 
 Agents publish test builds with `agentflow publish <file-or-folder> --product <name> --summary …
 [--entry …] [--feature "Title: what to try"]…`; the owner runs them on any machine with
-`agentflow run <product> [number]`, which downloads the build once, checks every file against
+`flow-run <product> [number]` (the same program, linked as `flow-run`), which downloads the build once, checks every file against
 its checksum and starts it. A build with features waits for feedback on its page.
 
 ## Screenshots

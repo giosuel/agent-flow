@@ -75,8 +75,9 @@ enum Command {
     /// Copies only what changed, prints the output as it comes, exits with the command's exit code
     /// (75: the server is offline, build here instead).
     Remote(cli::RemoteArgs),
-    /// Fetch and start a test build (the owner's machines; like viber-run). Without a product,
-    /// lists the products; `run <product> list` lists its builds.
+    /// Fetch and start a test build (the owner's machines). Also `flow-run`: the same program
+    /// called by that name runs this. Without a product, lists the products; `run <product>
+    /// list` lists its builds.
     Run(cli::RunArgs),
     /// Wait until something happens in your project (the owner answers, presses a button…), print
     /// it and exit. Agents run this in the background, so the session is woken when it ends.
@@ -111,8 +112,19 @@ enum Command {
     },
 }
 
+/// Called as `flow-run` (a link to this program), it's `agentflow run`: the owner's command for
+/// test builds (the owner, 2026-11-11: "lets call the client tool flow-run").
+fn as_flow_run(mut argv: Vec<std::ffi::OsString>) -> Vec<std::ffi::OsString> {
+    let called = argv.first().and_then(|a| std::path::Path::new(a).file_name().map(|n| n.to_owned()));
+    if called.as_deref() == Some(std::ffi::OsStr::new("flow-run")) {
+        argv[0] = "agentflow".into();
+        argv.insert(1, "run".into());
+    }
+    argv
+}
+
 fn main() -> anyhow::Result<()> {
-    let args = Args::parse();
+    let args = Args::parse_from(as_flow_run(std::env::args_os().collect()));
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "agentflow=info,warn".into()),
@@ -143,5 +155,19 @@ fn main() -> anyhow::Result<()> {
         Command::McpHeaders { token_file } => cli::mcp_headers(&token_file),
         Command::Setup(a) => setup::setup(a),
         Command::Hands { socket, server_user } => hands::serve(&socket, util::uid_of(&server_user)?),
+    }
+}
+
+#[cfg(test)]
+mod flow_run_tests {
+    #[test]
+    fn called_as_flow_run_it_runs_builds() {
+        let args = |v: &[&str]| v.iter().map(std::ffi::OsString::from).collect::<Vec<_>>();
+        assert_eq!(
+            super::as_flow_run(args(&["/home/x/.local/bin/flow-run", "lumen", "2"])),
+            args(&["agentflow", "run", "lumen", "2"])
+        );
+        assert_eq!(super::as_flow_run(args(&["flow-run"])), args(&["agentflow", "run"]));
+        assert_eq!(super::as_flow_run(args(&["agentflow", "serve"])), args(&["agentflow", "serve"]));
     }
 }
