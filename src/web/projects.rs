@@ -227,10 +227,20 @@ struct AgentCard {
     strip: Vec<(u32, String)>,
 }
 
+pub struct Connect {
+    mcp_add: String,
+    start: String,
+    token_file: String,
+    has_file: bool,
+}
+
 #[derive(Template)]
 #[template(path = "project.html")]
 struct ProjectPage {
     nav: Nav,
+    /// How to connect its agent, again (the owner, 2026-11-11: "make it so I can still get the
+    /// mcp / setup commands for existing projects").
+    connect: Option<Connect>,
     slug: String,
     name: String,
     repo: String,
@@ -310,11 +320,20 @@ async fn project(
             let Some(p) = projects::get(c, &slug)? else { return Ok(None) };
             let ms = projects::milestones(c, p.id)?;
             let all = records::query(c, &records::Query { project_id: Some(p.id), limit: 0, ..Default::default() })?;
-            Ok(Some(build_project_page(c, p, ms, all, &t, now, &tz)?))
+            let checkout = p.checkout.trim().to_owned();
+            Ok(Some((build_project_page(c, p, ms, all, &t, now, &tz)?, checkout)))
         })
         .await?
         .ok_or(AppError::NotFound)?;
-    let mut page = page;
+    let (mut page, checkout) = page;
+    if tab == "overview" && actor.is_owner() && !checkout.is_empty() {
+        let folder = crate::util::expand_home(&checkout);
+        let token_file = crate::tokens::token_path(&state.config.token_dir(), Some(&page.slug), &page.name);
+        let (mcp_add, start) = crate::onboard::commands(&folder, &token_file, &state.config.public_url);
+        let has_file: bool =
+            crate::hands::run_async(crate::hands::Job::TokenExists { path: token_file.clone() }).await.unwrap_or(true);
+        page.connect = Some(Connect { mcp_add, start, token_file: token_file.display().to_string(), has_file });
+    }
     page.prs_total = page.prs.len();
     page.has_stack_button = page.prs.iter().any(|p| p.up_to.is_some());
     if tab == "overview" {
@@ -618,6 +637,7 @@ fn build_project_page(
 
     Ok(ProjectPage {
         nav: Nav::new(&Actor::Anonymous, ""),
+        connect: None,
         slug: p.slug.clone(),
         name: p.name.clone(),
         repo: p.repo.clone(),

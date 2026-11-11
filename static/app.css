@@ -489,3 +489,33 @@ ul.more-list { list-style: none; margin: 0; padding: 0; gap: 0; overflow: hidden
   /* Room for the bar below the last content. */
   body { padding-bottom: calc(64px + 20px + env(safe-area-inset-bottom)); }
 }
+
+/* Mobile layout (the owner, 2026-11-11). */
+/* The footer sits at the bottom of short pages, and a short page doesn't scroll: the body is
+   exactly the visible height (dvh: iOS counts 100vh taller than what's visible), padding included. */
+body { box-sizing: border-box; min-height: 100vh; min-height: 100dvh; }
+/* Nothing widens the page sideways (which pans it off centre on iOS): wide tables scroll in
+   their own box, and long words and paths break. */
+.prose table { display: block; max-width: 100%; overflow-x: auto; }
+.prose { overflow-wrap: break-word; }
+.page { min-width: 0; }
+/* Small icon buttons, e.g. a guide's edit pencils. */
+.icon-only { display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; flex: none; border-radius: 8px; color: var(--muted); border: 1px solid var(--line); background: transparent; }
+.icon-only:hover { color: var(--accent); border-color: var(--accent); }
+.icon-only .i { width: 17px; height: 17px; }
+.guide-sec > .sec { align-items: center; }
+.guide-head { align-items: center; flex-wrap: wrap; }
+.guide-head > .row { gap: 12px; align-items: center; }
+.connect summary { cursor: pointer; width: fit-content; min-height: 32px; display: inline-flex; align-items: center; color: var(--accent); font-size: 14px; }
+.connect[open] summary { margin-bottom: 8px; }
+@media (max-width: 700px) {
+  /* Header like the viber console: the logo and name on the page's own black, below the status
+     bar (the home-screen app draws under it), with no band that clashes with the island. */
+  .top { background: transparent; }
+  .top-in { padding: calc(10px + env(safe-area-inset-top)) 16px 0; min-height: 0; }
+  /* A project's six tabs as a grid of pills: all visible, nothing cut off. */
+  .proj-tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; border-bottom: 0; overflow: visible; margin-top: -8px; }
+  .proj-tabs a { display: flex; align-items: center; justify-content: center; gap: 4px; min-height: 40px; padding: 0 8px; border: 1px solid var(--line); border-bottom: 1px solid var(--line); border-radius: 10px; background: var(--panel); font-size: 14px; }
+  .proj-tabs a.on { background: var(--chip-accent); border-color: var(--accent); color: var(--chip-accent-ink); }
+  .guide-head h2 { width: 100%; }
+}
