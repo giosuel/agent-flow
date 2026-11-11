@@ -57,7 +57,7 @@
       <div class="row wrap"><a class="mono" href="{{ p.url }}">{{ repo }}/pull/{{ p.number }}</a><span class="sub">{{ p.changes }} · {{ p.files }} · {{ p.by }}</span></div>
       <strong>{{ p.title }}</strong>
       <div class="row wrap"><a class="btn sm ghost" href="{{ p.url }}/files">View changes on GitHub</a>
-        <form method="post" action="/guides/prs/merge"><input type="hidden" name="number" value="{{ p.number }}"><button class="btn sm" type="submit" data-confirm="Merge {{ repo }}#{{ p.number }} (“{{ p.title }}”) on GitHub and update the checkout?">Merge</button></form></div>
+        <form method="post" action="/guides/prs/merge"><input type="hidden" name="number" value="{{ p.number }}"><input type="hidden" name="head" value="{{ p.head }}"><button class="btn sm" type="submit" data-confirm="Merge {{ repo }}#{{ p.number }} (“{{ p.title }}”) on GitHub and update the checkout?">Merge</button></form></div>
     </article>
     {% endfor %}
     {% if !merged.is_empty() %}
