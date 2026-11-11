@@ -173,6 +173,9 @@ pub fn with_steps(all: &[Milestone], id: i64) -> Vec<i64> {
 
 pub fn create(conn: &Connection, slug: &str, name: &str, actor: &str) -> anyhow::Result<Project> {
     check_slug(slug)?;
+    if get(conn, slug)?.is_some() {
+        bail!("project {slug} exists already");
+    }
     if by_build_product(conn, slug)?.is_some() {
         bail!("another project publishes builds as {slug:?}; pick another slug");
     }

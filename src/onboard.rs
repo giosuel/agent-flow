@@ -59,6 +59,10 @@ fn check_folder(folder: &str) -> anyhow::Result<PathBuf> {
     if path.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
         bail!("the folder can't contain ..");
     }
+    // It goes into shell commands shown to the owner; keep it plain so they work as copied.
+    if !path.to_string_lossy().chars().all(|c| c.is_ascii_alphanumeric() || "/._-".contains(c)) {
+        bail!("use letters, digits, dots, dashes and underscores in the folder's name");
+    }
     if path.exists() && !path.is_dir() {
         bail!("{} exists and isn't a folder", path.display());
     }
@@ -144,6 +148,9 @@ pub fn create_files(
         )?;
         let index = memory.join("MEMORY.md");
         let mut text = std::fs::read_to_string(&index).unwrap_or_default();
+        if !text.is_empty() && !text.ends_with('\n') {
+            text.push('\n');
+        }
         text.push_str("- [AgentFlow](agentflow.md) — start each session with hello; records live in AgentFlow\n");
         std::fs::write(&index, text)?;
         steps.push(format!("Left the agent a first note in its memory ({}).", note.display()));
@@ -220,7 +227,7 @@ mod tests {
 
     #[test]
     fn folders_stay_in_home() {
-        for bad in ["/etc/x", "~", "~/../x"] {
+        for bad in ["/etc/x", "~", "~/../x", "~/my app", "~/it's"] {
             let mut p = NewProject { name: "X".into(), folder: bad.into(), ..Default::default() };
             assert!(check(&mut p).is_err(), "{bad}");
         }

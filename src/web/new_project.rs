@@ -117,7 +117,10 @@ async fn create(
         Err(e) => page(
             nav(&state, &actor, "/projects").await,
             &f,
-            Some(format!("The project {} exists now, but its files weren't set up: {e:#}", p.slug)),
+            Some(format!(
+                "The project {} exists now, but its files weren't set up: {e:#}. Fix that, then rotate its token in Settings (that writes the token file) and run the commands from the README.",
+                p.slug
+            )),
             None,
         ),
     }
