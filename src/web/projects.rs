@@ -475,7 +475,7 @@ fn build_project_page(
         let sub = match r.kind {
             Kind::Decision => format!(
                 "{} · {}",
-                fmt_utc(r.data.get("said_at").and_then(Value::as_i64).unwrap_or(r.created_at)).get(..10).unwrap_or(""),
+                crate::util::fmt_date(r.data.get("said_at").and_then(Value::as_i64).unwrap_or(r.created_at)),
                 r.state
             ),
             Kind::Question if r.state == "answered" => format!("answered {}", ago(r.updated_at, now)),
@@ -484,8 +484,10 @@ fn build_project_page(
         };
         RecordRow::new(r, sub)
     };
+    // Decisions by when the owner said them, newest first.
     let mut decisions_all: Vec<&Record> = all.iter().filter(|r| r.kind == Kind::Decision).collect();
-    decisions_all.sort_by_key(|r| std::cmp::Reverse(r.number));
+    decisions_all
+        .sort_by_key(|r| std::cmp::Reverse(r.data.get("said_at").and_then(Value::as_i64).unwrap_or(r.created_at)));
     let mut questions_all: Vec<&Record> = all.iter().filter(|r| r.kind == Kind::Question).collect();
     questions_all.sort_by_key(|r| std::cmp::Reverse(r.number));
 
@@ -729,6 +731,19 @@ async fn load_record_page(
                 }
             }
         }
+        Kind::Release => {
+            extra.push(("Tag".into(), r.str("tag").into()));
+            if let Some(waits) = r.data.get("waits_for").and_then(Value::as_array) {
+                let list: Vec<String> = waits
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(|w| w.rsplit('/').next().unwrap_or(w).replace("PR-", "#"))
+                    .collect();
+                if !list.is_empty() {
+                    extra.push(("Waits for".into(), list.join(", ")));
+                }
+            }
+        }
         _ => {}
     }
 
@@ -771,11 +786,7 @@ async fn load_record_page(
         stale,
         history: history
             .iter()
-            .map(|h| HistoryRow {
-                rev: h.rev,
-                at: fmt_utc(h.at).get(5..16).unwrap_or("").into(),
-                text: describe_revision(h, &r),
-            })
+            .map(|h| HistoryRow { rev: h.rev, at: crate::util::fmt_short(h.at), text: describe_revision(h, &r) })
             .collect(),
         error,
         buttons,
@@ -785,9 +796,21 @@ async fn load_record_page(
 }
 
 fn describe_revision(h: &records::Revision, r: &Record) -> String {
-    let who = h.author.clone();
+    let who = if h.author == "owner" { "You".to_owned() } else { h.author.clone() };
     if h.rev == 1 {
         return format!("{who} created the {}.", r.kind.label().to_lowercase());
+    }
+    // The owner's answer reads as the answer, not as a list of fields.
+    if let Some(obj) = h.changes.as_object()
+        && obj.contains_key("answer")
+    {
+        let words = obj.get("answer").and_then(Value::as_str).unwrap_or("").trim();
+        let option = obj.get("answer_option_title").and_then(Value::as_str);
+        return match (option, words) {
+            (Some(o), "") => format!("{who} answered: {o}."),
+            (Some(o), w) => format!("{who} answered: {o}, “{w}”."),
+            (None, w) => format!("{who} answered: “{w}”."),
+        };
     }
     let mut parts: Vec<String> = Vec::new();
     if let Some(obj) = h.changes.as_object() {

@@ -467,7 +467,7 @@ pub fn update(conn: &Connection, record: &Record, author: &str, patch: Patch) ->
         Some(record.project_id),
         Some(record.id),
         &format!("{}.updated", record.kind),
-        &format!("{} {}: {what}", record.kind.label(), record.short_id()),
+        &format!("{} {}: {what}", record.kind.label(), display_id(record)),
         author,
     )?;
     Ok((get(conn, record.id)?, true))
@@ -476,17 +476,26 @@ pub fn update(conn: &Connection, record: &Record, author: &str, patch: Patch) ->
 fn describe_changes(changes: &Map<String, Value>, note: &str) -> String {
     let mut parts: Vec<String> = changes
         .iter()
-        .filter(|(k, _)| !k.ends_with("_at"))
-        .map(|(k, v)| match (k.as_str(), v) {
-            ("state", Value::String(s)) => format!("now {s}"),
-            ("milestone", Value::String(m)) if !m.is_empty() => format!("moved to {m}"),
-            (k, _) => format!("{k} changed"),
+        .filter_map(|(k, v)| {
+            Some(match (k.as_str(), v) {
+                ("state", Value::String(s)) => format!("now {s}"),
+                ("milestone", Value::String(m)) if !m.is_empty() => format!("moved to {m}"),
+                ("ready", Value::Bool(true)) => "marked ready to merge".into(),
+                ("ready", Value::Bool(false)) => "no longer ready".into(),
+                ("title", _) => "renamed".into(),
+                ("body", _) => "details updated".into(),
+                ("tags", _) => "tags changed".into(),
+                ("resurface_when", Value::String(w)) => format!("comes back {w}"),
+                ("estimate", Value::String(e)) => format!("estimate {e}"),
+                // Bookkeeping (timestamps, GitHub's CI and merge state) isn't news.
+                _ => return None,
+            })
         })
         .collect();
     if !note.trim().is_empty() {
         parts.push(note.trim().to_owned());
     }
-    parts.join(", ")
+    if parts.is_empty() { "updated".into() } else { parts.join(", ") }
 }
 
 #[derive(Debug, Clone, Serialize)]

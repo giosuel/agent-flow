@@ -170,8 +170,11 @@ async fn dashboard(
                 groups.push(Group { title: "Builds to try", items: builds });
             }
 
-            let activity = records::recent_events(c, None, 12)?
+            let activity = records::recent_events(c, None, 30)?
                 .into_iter()
+                // A button being added is part of the PR's story, not news of its own.
+                .filter(|e| e.kind != "action.added")
+                .take(12)
                 .map(|e| Activity {
                     time: crate::util::fmt_utc(e.at).get(11..16).unwrap_or("").into(),
                     who: match e.actor.as_str() {

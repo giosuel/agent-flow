@@ -28,7 +28,7 @@
     {% if !pr_url.is_empty() %}<p><a href="{{ pr_url }}">Open on GitHub</a> · <a href="{{ pr_url }}/files">View changes on GitHub</a></p>{% endif %}
     {% if !buttons.is_empty() %}
     <section class="card pad stack" aria-labelledby="btn-h">
-      <h2 class="label" id="btn-h">Buttons</h2>
+      <h2 class="label" id="btn-h">{% if kind == "release" %}Push the tag{% else %}Buttons{% endif %}</h2>
       {% for b in buttons %}{% include "button.html" %}{% endfor %}
     </section>
     {% endif %}
