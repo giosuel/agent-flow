@@ -1,6 +1,8 @@
-//! Keeps PRs in step with GitHub: every few minutes, each active project's open PRs and every PR
-//! AgentFlow still thinks is open. Merges, closes and CI failures become events for the project's
-//! agent; a PR or release that becomes ready is a "something to review" notification.
+//! Keeps AgentFlow in step with GitHub. Every three minutes: each active project's open PRs and
+//! every PR AgentFlow still thinks is open, releases whose PRs are all merged, and the guides'
+//! PRs. Every 30 minutes: contributions on other people's repositories. Merges, closes, CI
+//! failures and contribution news become events for the project's agent; a PR, release or guide
+//! PR that becomes ready is a "something to review" notification.
 
 use std::time::Duration;
 
@@ -40,20 +42,20 @@ pub fn spawn(state: AppState) {
     });
 }
 
+/// A failed check, in the log as a warning of the project's; the round goes on.
+async fn warn(state: &AppState, project: &str, what: String) {
+    let e = Entry::new(&Actor::System("poller"), Via::Poller, Action::System, what)
+        .project(project.to_owned())
+        .severity("warn");
+    activity::write(&state.db, e).await;
+}
+
 /// One round over every active project with a repository.
 pub async fn poll_once(state: &AppState) -> anyhow::Result<()> {
     let list = state.db.call(|c| projects::list(c)).await?;
     for p in list.into_iter().filter(|p| p.status == "active" && !p.repo.is_empty()) {
         if let Err(e) = poll_project(state, &p).await {
-            let e = Entry::new(
-                &Actor::System("poller"),
-                Via::Poller,
-                Action::System,
-                format!("GitHub poll of {} failed: {e:#}", p.repo),
-            )
-            .project(p.slug.clone())
-            .severity("warn");
-            activity::write(&state.db, e).await;
+            warn(state, &p.slug, format!("GitHub poll of {} failed: {e:#}", p.repo)).await;
         }
     }
     check_releases(state).await
@@ -88,17 +90,7 @@ pub async fn poll_project(state: &AppState, p: &projects::Project) -> anyhow::Re
         let fetched = state.github.pr(&repo, n).await;
         match fetched {
             Ok(info) => apply(state, p, &repo, info).await?,
-            Err(e) => {
-                let e = Entry::new(
-                    &Actor::System("poller"),
-                    Via::Poller,
-                    Action::System,
-                    format!("GitHub poll of {repo}#{n} failed: {e:#}"),
-                )
-                .project(p.slug.clone())
-                .severity("warn");
-                activity::write(&state.db, e).await;
-            }
+            Err(e) => warn(state, &p.slug, format!("GitHub poll of {repo}#{n} failed: {e:#}")).await,
         }
     }
     Ok(())
@@ -187,21 +179,13 @@ pub async fn poll_contributions(state: &AppState) -> anyhow::Result<()> {
     for r in list {
         let (repo, number) =
             (r.str("repo").to_owned(), r.data.get("number").and_then(serde_json::Value::as_i64).unwrap_or(0));
-        match state.github.item(&repo, number).await {
-            Ok(info) => {
-                state.db.call(move |c| crate::contributions::update(c, &r, &info)).await?;
-            }
-            Err(e) => {
-                let e = Entry::new(
-                    &Actor::System("poller"),
-                    Via::Poller,
-                    Action::System,
-                    format!("watching {repo}#{number} failed: {e:#}"),
-                )
-                .project(r.project.clone())
-                .severity("warn");
-                activity::write(&state.db, e).await;
-            }
+        let project = r.project.clone();
+        let result = match state.github.item(&repo, number).await {
+            Ok(info) => state.db.call(move |c| crate::contributions::update(c, &r, &info)).await.map(|_| ()),
+            Err(e) => Err(e),
+        };
+        if let Err(e) = result {
+            warn(state, &project, format!("watching {repo}#{number} failed: {e:#}")).await;
         }
     }
     Ok(())
