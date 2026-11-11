@@ -42,12 +42,11 @@ pub fn sync(
     data.insert("mergeable".into(), info.mergeable.clone().into());
     data.insert("ci".into(), info.ci.clone().into());
 
-    let existing = records::find(
+    let existing = records::try_find(
         conn,
         &records::RecordRef { project: Some(project.slug.clone()), kind: Kind::Pr, number: info.number },
         None,
-    )
-    .ok();
+    )?;
     let Some(old) = existing else {
         let r = records::create(
             conn,
@@ -126,7 +125,7 @@ pub fn merge_order(conn: &Connection, project_id: i64) -> anyhow::Result<Vec<Ord
             project_id: Some(project_id),
             kinds: vec![Kind::Pr],
             states: vec!["open".into()],
-            limit: 500,
+            limit: 0,
             ..Default::default()
         },
     )?;

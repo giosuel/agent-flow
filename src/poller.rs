@@ -62,7 +62,7 @@ pub async fn poll_project(state: &AppState, p: &projects::Project) -> anyhow::Re
                     project_id: Some(pid),
                     kinds: vec![Kind::Pr],
                     states: vec!["open".into()],
-                    limit: 500,
+                    limit: 0,
                     ..Default::default()
                 },
             )?
@@ -150,7 +150,7 @@ async fn check_releases(state: &AppState) -> anyhow::Result<()> {
         .call(|c| {
             let waiting = records::query(
                 c,
-                &Query { kinds: vec![Kind::Release], states: vec!["waiting".into()], limit: 200, ..Default::default() },
+                &Query { kinds: vec![Kind::Release], states: vec!["waiting".into()], limit: 0, ..Default::default() },
             )?;
             let mut out = Vec::new();
             for r in waiting {

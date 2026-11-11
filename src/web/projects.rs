@@ -282,7 +282,7 @@ async fn project(
         .call(move |c| {
             let Some(p) = projects::get(c, &slug)? else { return Ok(None) };
             let ms = projects::milestones(c, p.id)?;
-            let all = records::query(c, &records::Query { project_id: Some(p.id), limit: 500, ..Default::default() })?;
+            let all = records::query(c, &records::Query { project_id: Some(p.id), limit: 0, ..Default::default() })?;
             Ok(Some(build_project_page(c, p, ms, all, &t, now)?))
         })
         .await?
@@ -642,7 +642,9 @@ async fn load_record_page(
     let page = state
         .db
         .call(move |c| {
-            let Ok(r) = records::find_str(c, &format!("{slug}/{id}"), None) else { return Ok(None) };
+            // A malformed id is a page that doesn't exist; a database failure is an error.
+            let Ok(rref) = records::RecordRef::parse(&format!("{slug}/{id}")) else { return Ok(None) };
+            let Some(r) = records::try_find(c, &rref, None)? else { return Ok(None) };
             let project = projects::get_by_id(c, r.project_id)?;
             let links = records::links_of(c, &r)?;
             let history = records::revisions(c, r.id)?;

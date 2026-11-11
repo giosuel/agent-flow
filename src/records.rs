@@ -227,13 +227,19 @@ pub fn get(conn: &Connection, id: i64) -> anyhow::Result<Record> {
 /// Looks up `vinculum/Q-12` (or `Q-12` in `default_project`).
 pub fn find(conn: &Connection, r: &RecordRef, default_project: Option<&str>) -> anyhow::Result<Record> {
     let project = r.project.as_deref().or(default_project).context("say which project, e.g. vinculum/Q-12")?;
-    conn.query_row(
-        &format!("{RECORD_SELECT} WHERE p.slug = ?1 AND r.kind = ?2 AND r.number = ?3"),
-        params![project, r.kind.as_str(), r.number],
-        record_from_row,
-    )
-    .optional()?
-    .with_context(|| format!("no record {project}/{}-{}", r.kind.prefix(), r.number))
+    try_find(conn, r, default_project)?.with_context(|| format!("no record {project}/{}-{}", r.kind.prefix(), r.number))
+}
+
+/// Like `find`, but "no such record" is `None` and only real failures are errors.
+pub fn try_find(conn: &Connection, r: &RecordRef, default_project: Option<&str>) -> anyhow::Result<Option<Record>> {
+    let project = r.project.as_deref().or(default_project).context("say which project, e.g. vinculum/Q-12")?;
+    Ok(conn
+        .query_row(
+            &format!("{RECORD_SELECT} WHERE p.slug = ?1 AND r.kind = ?2 AND r.number = ?3"),
+            params![project, r.kind.as_str(), r.number],
+            record_from_row,
+        )
+        .optional()?)
 }
 
 pub fn find_str(conn: &Connection, id: &str, default_project: Option<&str>) -> anyhow::Result<Record> {
@@ -686,8 +692,10 @@ pub fn query(conn: &Connection, q: &Query) -> anyhow::Result<Vec<Record>> {
         push(&mut sql, " AND r.updated_at >= ?", s.into());
     }
     sql.push_str(" ORDER BY r.updated_at DESC");
-    let limit = if q.limit > 0 { q.limit.min(500) } else { 100 };
-    sql.push_str(&format!(" LIMIT {limit}"));
+    // 0 means everything (AgentFlow's own views); agents ask for a page.
+    if q.limit > 0 {
+        sql.push_str(&format!(" LIMIT {}", q.limit.min(1000)));
+    }
     let params: Vec<rusqlite::types::Value> = args
         .into_iter()
         .map(|v| match v {
