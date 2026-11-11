@@ -61,12 +61,28 @@ fn current_milestone(ms: &[Milestone]) -> Option<&Milestone> {
     top().find(|m| m.state == "active").or_else(|| top().find(|m| m.state == "planned"))
 }
 
-fn open_question_counts(c: &Connection) -> anyhow::Result<HashMap<i64, i64>> {
+/// What waits on the owner per project, as the nav's count has it: open questions and builds to try.
+fn waiting_counts(c: &Connection) -> anyhow::Result<HashMap<i64, (i64, i64)>> {
     let mut stmt = c.prepare(
-        "SELECT project_id, count(*) FROM records WHERE kind = 'question' AND state = 'open' GROUP BY project_id",
+        "SELECT project_id,
+                sum(kind = 'question' AND state = 'open'),
+                sum(kind = 'build' AND state = 'published' AND coalesce(json_extract(data, '$.ready_for_feedback'), 0))
+         FROM records WHERE kind IN ('question', 'build') GROUP BY project_id",
     )?;
-    let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
+    let rows = stmt.query_map([], |r| Ok((r.get(0)?, (r.get(1)?, r.get(2)?))))?;
     Ok(rows.collect::<Result<_, _>>()?)
+}
+
+/// "2 questions · 1 build to try", or "nothing waiting on you".
+fn waiting_line((questions, builds): (i64, i64)) -> String {
+    let mut parts = Vec::new();
+    if questions > 0 {
+        parts.push(plural(questions, "question", "questions"));
+    }
+    if builds > 0 {
+        parts.push(plural(builds, "build to try", "builds to try"));
+    }
+    if parts.is_empty() { "nothing waiting on you".into() } else { parts.join(" · ") }
 }
 
 fn plural(n: i64, one: &str, many: &str) -> String {
@@ -84,7 +100,7 @@ struct ProjectCard {
     agent_state: &'static str,
     facts: Vec<String>,
     milestone: Option<(String, String)>,
-    questions: String,
+    waiting: String,
     status: String,
 }
 
@@ -100,7 +116,7 @@ async fn list(State(state): State<AppState>, Extension(actor): Extension<Actor>)
     let cards = state
         .db
         .call(move |c| {
-            let counts = open_question_counts(c)?;
+            let counts = waiting_counts(c)?;
             let mut cards = Vec::new();
             for p in projects::list(c)? {
                 let ms = projects::milestones(c, p.id)?;
@@ -124,7 +140,7 @@ async fn list(State(state): State<AppState>, Extension(actor): Extension<Actor>)
                         "no agent yet"
                     },
                     milestone: current_milestone(&ms).map(|m| (m.name.clone(), m.title.clone())),
-                    questions: plural(counts.get(&p.id).copied().unwrap_or(0), "open question", "open questions"),
+                    waiting: waiting_line(counts.get(&p.id).copied().unwrap_or((0, 0))),
                     facts,
                     status: p.status.clone(),
                     slug: p.slug,
