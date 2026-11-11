@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}New project{% endblock %}
+{% block content %}
+<div class="head">
+  <nav class="crumbs" aria-label="Breadcrumb"><a href="/projects">Projects</a> / New project</nav>
+  <h1>{% if done.is_some() %}Project ready{% else %}New project{% endif %}</h1>
+  <p class="status-line">A new project, or an existing folder to onboard: fill in the same form. Everything is logged.</p>
+</div>
+{% if let Some(e) = error %}<p class="notice warn" role="alert">{{ e }}</p>{% endif %}
+
+{% if let Some(d) = done %}
+<section class="card pad stack" aria-labelledby="done-h">
+  <h2 id="done-h">What happened</h2>
+  <ol class="plain history">{% for s in d.steps %}<li>{{ s }}</li>{% endfor %}<li>The project, its details and an empty M0 milestone are in AgentFlow.</li></ol>
+</section>
+<section class="card pad stack" aria-labelledby="next-h">
+  <h2 id="next-h">Your turn</h2>
+  <p class="sub">1. Register AgentFlow with Claude Code for that folder only. The token is fetched when Claude connects, never stored in its config:</p>
+  <pre class="cmd mono">{{ d.mcp_add }}</pre>
+  <p class="sub">2. Start the agent there (in tmux, with Remote Control if you like):</p>
+  <pre class="cmd mono">{{ d.start }}</pre>
+  <p class="sub">Its first note tells it to start with <span class="mono">hello</span>; it shows up as online on the project page once it does.</p>
+  <div><a class="btn" href="/p/{{ d.slug }}">Open the project</a></div>
+</section>
+{% else %}
+<form method="post" action="/projects/new" class="card pad stack" aria-labelledby="form-h">
+  <h2 id="form-h" class="vh">The project</h2>
+  <div class="form-grid">
+    <label>Name<input name="name" required maxlength="60" value="{{ name }}" placeholder="Speculum" autofocus></label>
+    <label>Folder<input name="folder" value="{{ folder }}" placeholder="~/speculum (from the name if left empty)"></label>
+    <label class="wide">What it is<input name="description" maxlength="300" value="{{ description }}" placeholder="Screenshot and screen recording tool for Hyprland."></label>
+    <label>Tech stack<input name="stack" value="{{ stack }}" placeholder="Rust, Slint"></label>
+    <label>Target platform<input name="platform" value="{{ platform }}" placeholder="Linux · Hyprland"></label>
+    <label>Model<select name="model">{% for m in ["Claude Opus 5.5", "Claude Sonnet 5.5", "Claude Fable 5.1"] %}<option{% if *m == model %} selected{% endif %}>{{ m }}</option>{% endfor %}</select></label>
+    <label>Effort<select name="effort">{% for e in ["high", "medium", "low"] %}<option{% if *e == effort %} selected{% endif %}>{{ e }}</option>{% endfor %}</select></label>
+  </div>
+  <div class="stack-sm">
+    <span class="label">What happens</span>
+    <ul class="sub">
+      <li>The project record and an empty M0 milestone, on {{ host }}.</li>
+      <li>The folder with a local git repository (an existing folder or repository is left as it is). You create the GitHub repo later and tell the agent the remote.</li>
+      <li>A project token, in a file only you can read, and the command to register AgentFlow for that folder.</li>
+      <li>The agent's first note, in its memory, not the repository.</li>
+    </ul>
+  </div>
+  <div><button class="btn" type="submit">Create project</button></div>
+</form>
+{% endif %}
+{% endblock %}

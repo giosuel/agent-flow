@@ -1,12 +1,12 @@
 {% extends "base.html" %}
 {% block title %}Projects{% endblock %}
 {% block content %}
-<div class="head">
-  <h1>Projects</h1>
+<div class="head row wrap">
+  <h1>Projects</h1><span class="grow"></span><a class="btn" href="/projects/new">New project</a>
 
 </div>
 {% if cards.is_empty() %}
-<section class="card pad empty"><h2>No projects yet</h2><p class="sub">Projects are added with <code>agentflow admin project add</code> for now; the New project button comes later.</p></section>
+<section class="card pad empty"><h2>No projects yet</h2><p class="sub">Start one with New project, or onboard an existing folder the same way.</p></section>
 {% else %}
 <div class="cards">
 {% for c in cards %}

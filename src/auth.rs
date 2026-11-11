@@ -57,6 +57,16 @@ impl Actor {
         }
     }
 
+    /// The token behind a device, agent or consultant.
+    pub fn token_id(&self) -> Option<i64> {
+        match self {
+            Actor::Device { token_id, .. } | Actor::Project { token_id, .. } | Actor::Admin { token_id, .. } => {
+                Some(*token_id)
+            }
+            _ => None,
+        }
+    }
+
     pub fn project(&self) -> Option<&str> {
         match self {
             Actor::Project { slug, .. } => Some(slug),
@@ -220,29 +230,36 @@ pub fn revoke_token(conn: &Connection, id: i64) -> anyhow::Result<bool> {
 }
 
 /// Looks up a bearer token and records where it was used from.
+#[cfg(test)]
 pub fn token_actor(conn: &Connection, secret: &str, from: &str) -> anyhow::Result<Option<Actor>> {
-    let row = conn
+    Ok(token_lookup(conn, secret, from)?.map(|(a, _)| a))
+}
+
+/// A token used from two addresses within this long is in two places at once.
+pub const TWO_PLACES_MS: i64 = 10 * 60_000;
+
+/// Like `token_actor`, and also says where else the token was used in the last ten minutes, if
+/// that was another address: a copied token, most likely (the owner, 2026-11-07: "alert when a
+/// token is used from two places").
+pub fn token_lookup(conn: &Connection, secret: &str, from: &str) -> anyhow::Result<Option<(Actor, Option<String>)>> {
+    type Row = (i64, String, String, Option<i64>, Option<String>, Option<i64>, Option<String>);
+    let row: Option<Row> = conn
         .query_row(
-            "SELECT t.id, t.kind, t.name, t.project_id, p.slug FROM tokens t LEFT JOIN projects p ON p.id = t.project_id
+            "SELECT t.id, t.kind, t.name, t.project_id, p.slug, t.last_used_at, t.last_used_from
+             FROM tokens t LEFT JOIN projects p ON p.id = t.project_id
              WHERE t.hash = ?1 AND t.revoked_at IS NULL",
             [hash_secret(secret)],
-            |r| {
-                Ok((
-                    r.get::<_, i64>(0)?,
-                    r.get::<_, String>(1)?,
-                    r.get::<_, String>(2)?,
-                    r.get::<_, Option<i64>>(3)?,
-                    r.get::<_, Option<String>>(4)?,
-                ))
-            },
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?)),
         )
         .optional()?;
-    let Some((id, kind, name, project_id, slug)) = row else { return Ok(None) };
-    conn.execute(
-        "UPDATE tokens SET last_used_at = ?1, last_used_from = ?2 WHERE id = ?3",
-        params![now_ms(), from, id],
-    )?;
-    Ok(Some(match kind.as_str() {
+    let Some((id, kind, name, project_id, slug, last_at, last_from)) = row else { return Ok(None) };
+    let now = now_ms();
+    let elsewhere = match (last_at, last_from) {
+        (Some(at), Some(prev)) if now - at < TWO_PLACES_MS && prev != from => Some(prev),
+        _ => None,
+    };
+    conn.execute("UPDATE tokens SET last_used_at = ?1, last_used_from = ?2 WHERE id = ?3", params![now, from, id])?;
+    let actor = match kind.as_str() {
         "device" => Actor::Device { token_id: id, name },
         "admin" => Actor::Admin { token_id: id, name },
         "project" => Actor::Project {
@@ -251,7 +268,8 @@ pub fn token_actor(conn: &Connection, secret: &str, from: &str) -> anyhow::Resul
             slug: slug.unwrap_or_default(),
         },
         other => bail!("token {id} has an unknown kind {other:?}"),
-    }))
+    };
+    Ok(Some((actor, elsewhere)))
 }
 
 // ---------------------------------------------------------------------------------------------

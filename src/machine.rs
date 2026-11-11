@@ -43,6 +43,11 @@ pub fn snapshot() -> Snapshot {
     Snapshot { cores, load1, mem_total_kb: field("MemTotal:"), mem_available_kb: field("MemAvailable:") }
 }
 
+/// This machine's name, e.g. "giosuelio".
+pub fn hostname() -> String {
+    std::fs::read_to_string("/proc/sys/kernel/hostname").unwrap_or_default().trim().to_owned()
+}
+
 /// Load averages over 1, 5 and 15 minutes.
 pub fn loads() -> (f64, f64, f64) {
     let s = std::fs::read_to_string("/proc/loadavg").unwrap_or_default();

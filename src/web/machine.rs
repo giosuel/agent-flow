@@ -173,7 +173,7 @@ async fn page(
         .iter()
         .flat_map(|p| p.ports.iter().map(move |port| PortRow { port: port.clone(), project: p.name.clone() }))
         .collect();
-    let host = std::fs::read_to_string("/proc/sys/kernel/hostname").unwrap_or_default().trim().to_owned();
+    let host = machine::hostname();
     render(MachinePage {
         nav: nav(&state, &actor, "/machine").await,
         host: format!("{host} · {} cores · {:.0} GB RAM", snap.cores, snap.mem_total_gb()),

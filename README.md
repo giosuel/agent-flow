@@ -31,6 +31,12 @@ session_idle_days = 14
 session_max_days = 30
 token_dir = "~/.config/agentflow/tokens"   # project tokens for headersHelper
 push_contact = "mailto:you@example.com"     # the sender contact push services ask for
+handbook_dir = "~/ai-handbook"              # the guides: a git checkout agents read through AgentFlow
+handbook_repo = "owner/ai-handbook"         # its GitHub repository, for pull requests
+git_author = "Name <you@example.com>"       # who your guide edits are committed as
+github_writes = true                        # false on a test instance: no merges on GitHub
+build_free_gb = 10                          # disk a build upload must leave free
+transcripts_dir = "~/.claude/projects"      # Claude Code transcripts, read for token usage
 ```
 
 ## Behind Caddy (passkeys and push)
@@ -70,13 +76,50 @@ Every request is authenticated, nothing is public but the sign-in page:
 
 ## Connecting an agent
 
-Register the MCP endpoint with Claude Code and let it fetch the token itself, so the token never
-sits in `~/.claude.json`:
+**New project** on the Projects page creates the project and an empty M0, its folder with a local
+git repository (an existing folder or repository is left alone, so it onboards existing projects
+too), a project token in `~/.config/agentflow/tokens/<project>.token`, and a first note in the
+agent's memory. It then shows the command that registers AgentFlow with Claude Code for that
+folder, letting Claude fetch the token itself so it never sits in `~/.claude.json`:
 
 ```sh
 claude mcp add-json agentflow '{"type": "http", "url": "https://flow.example/mcp",
   "headersHelper": "agentflow mcp-headers --token-file ~/.config/agentflow/tokens/<project>.token"}'
 ```
+
+`agentflow admin managed-settings` prints Claude Code managed settings that keep every session's
+Read and Edit tools away from AgentFlow's tokens, data and config, and the root command to
+install them. Shell commands run as the same user can still read those files; running AgentFlow
+as its own Unix user is the stronger fence.
+
+## Builds
+
+Agents publish test builds with `agentflow publish <file-or-folder> --product <name> --summary …
+[--entry …] [--feature "Title: what to try"]…`; the owner runs them on any machine with
+`agentflow run <product> [number]`, which downloads the build once, checks every file against
+its checksum and starts it. A build with features waits for feedback on its page.
+
+## Guides
+
+The guides are the Markdown files of a git repository (`handbook_dir`). Agents read them through
+MCP (`guides`, `guide`). The Guides page shows them by section; your edits are committed to the
+checkout's main branch as `git_author` and never pushed. The consultant changes them with pull
+requests, which the page lists with a Merge button pinned to the commit you saw.
+
+## Usage and Machine
+
+Every five minutes AgentFlow reads what's new in Claude Code's transcripts and keeps one row per
+model call (keyed by its message id, so subagents' repeats count once): the Usage page shows
+tokens per day or hour, per agent, per project and per task. Claude Code deletes transcripts
+after 30 days; the counts stay. The Machine page samples the machine every minute and puts each
+process under the agent session that started it.
+
+## Backups
+
+Once a day the database is copied to `<data_dir>/backups/flow-<date>.db` (the last 30 are kept)
+and every project is exported to `<data_dir>/export/<slug>.md`. `agentflow admin backup` does
+both now. Reads older than 90 days move to monthly compressed archives in `<data_dir>/log-archive/`;
+nothing in the log is ever deleted.
 
 ## Development
 

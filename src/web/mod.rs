@@ -13,6 +13,7 @@ mod guides;
 mod icons;
 mod log;
 mod machine;
+mod new_project;
 mod pages;
 mod projects;
 mod pwa;
@@ -55,6 +56,8 @@ pub struct AppState {
     pub uploads: Arc<tokio::sync::Mutex<()>>,
     /// Held while AgentFlow changes the handbook checkout (an edit's commit, a merge's pull).
     pub handbook: Arc<tokio::sync::Mutex<()>>,
+    /// Tokens already reported as used from two places, with the day: one alert a day each.
+    two_places: Arc<std::sync::Mutex<std::collections::HashMap<i64, i64>>>,
 }
 
 #[derive(Default, Clone)]
@@ -80,6 +83,7 @@ impl AppState {
             guide_prs: Arc::default(),
             uploads: Arc::default(),
             handbook: Arc::default(),
+            two_places: Arc::default(),
         }
     }
 
@@ -135,6 +139,7 @@ pub fn router(state: AppState) -> Router {
         .merge(guides::routes())
         .merge(log::routes())
         .merge(machine::routes())
+        .merge(new_project::routes())
         .merge(usage::routes())
         .merge(dashboard::routes())
         .merge(pwa::routes())
@@ -165,6 +170,7 @@ pub async fn serve(state: AppState) -> anyhow::Result<()> {
     }
     crate::poller::spawn(state.clone());
     spawn_usage(state.clone());
+    crate::backup::spawn(state.clone());
     crate::machine::spawn_sampler(state.clone());
     spawn_archiver(state.clone());
     let app = router(state).into_make_service_with_connect_info::<SocketAddr>();
@@ -275,6 +281,31 @@ fn client_ip(config: &Config, peer: Option<IpAddr>, headers: &HeaderMap) -> Stri
 }
 
 /// Works out the identity of every request and refuses anonymous ones.
+/// A token used from two addresses within ten minutes: a warning in the log every time, and an
+/// urgent notification once a day per token.
+async fn two_places(state: &AppState, actor: &Actor, other: &str, here: &str) {
+    let what = format!(
+        "{}'s token was used from {other} and {here} within ten minutes; if one of them isn't its agent, rotate it in Settings",
+        actor.name()
+    );
+    let e = Entry::new(actor, Via::Api, Action::System, what.clone()).severity("warn").ip(Some(here.to_owned()));
+    activity::write(&state.db, e).await;
+    let Some(id) = actor.token_id() else { return };
+    let day = crate::util::now_ms() / 86_400_000;
+    if crate::util::lock(&state.two_places).insert(id, day) == Some(day) {
+        return;
+    }
+    state.push.spawn(
+        crate::push::Kind::Urgent,
+        crate::push::Notification {
+            title: "A token is in two places".into(),
+            body: what,
+            url: "/settings".into(),
+            tag: Some(format!("two-places-{id}")),
+        },
+    );
+}
+
 async fn authenticate(State(state): State<AppState>, jar: CookieJar, mut req: Request, next: Next) -> Response {
     let peer = req.extensions().get::<ConnectInfo<SocketAddr>>().map(|c| c.0.ip());
     let ip = client_ip(&state.config, peer, req.headers());
@@ -295,13 +326,21 @@ async fn authenticate(State(state): State<AppState>, jar: CookieJar, mut req: Re
     let looked_up = state
         .db
         .call(move |c| match (bearer, cookie) {
-            (Some(token), _) => auth::token_actor(c, &token, &from).map(|a| (a, true)),
-            (None, Some(secret)) => auth::session_actor(c, &secret, &limits).map(|a| (a, false)),
-            (None, None) => Ok((None, false)),
+            (Some(token), _) => auth::token_lookup(c, &token, &from).map(|a| match a {
+                Some((actor, elsewhere)) => (Some(actor), true, elsewhere),
+                None => (None, true, None),
+            }),
+            (None, Some(secret)) => auth::session_actor(c, &secret, &limits).map(|a| (a, false, None)),
+            (None, None) => Ok((None, false, None)),
         })
         .await;
     let (actor, tried_token) = match looked_up {
-        Ok(found) => found,
+        Ok((actor, tried, elsewhere)) => {
+            if let (Some(a), Some(other)) = (&actor, elsewhere) {
+                two_places(&state, a, &other, &ip).await;
+            }
+            (actor, tried)
+        }
         Err(e) => {
             tracing::error!("authentication lookup failed: {e:#}");
             return StatusCode::INTERNAL_SERVER_ERROR.into_response();
