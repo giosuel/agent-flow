@@ -96,7 +96,7 @@ impl Kind {
             Kind::Pr => &["open", "merged", "closed"],
             Kind::Release => &["planned", "waiting", "tagged", "dropped"],
             Kind::Build => &["published", "tried", "withdrawn"],
-            Kind::Feedback => &["works", "problem", "skipped"],
+            Kind::Feedback => &["works", "problem", "skipped", "note"],
             Kind::Contribution => &["draft", "shown", "approved", "sent", "merged", "closed"],
         }
     }
