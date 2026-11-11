@@ -9,10 +9,10 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, bail};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Section {
     /// The heading line without its #s; "Introduction" for the text before the first `##`.
     pub title: String,
@@ -21,7 +21,7 @@ pub struct Section {
     pub text: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Guide {
     /// e.g. "MACHINE.md"
     pub name: String,
@@ -52,8 +52,18 @@ pub fn check_name(name: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// The guides: every top-level `.md` file, README last.
+/// The guides: every top-level `.md` file, README last. Read as the agents' user (see
+/// [`crate::hands`]), like everything in the checkout.
 pub fn list(dir: &Path) -> anyhow::Result<Vec<String>> {
+    crate::hands::run(crate::hands::Job::GuideList { dir: dir.to_owned() })
+}
+
+pub fn read(dir: &Path, name: &str) -> anyhow::Result<Guide> {
+    check_name(name)?;
+    crate::hands::run(crate::hands::Job::GuideRead { dir: dir.to_owned(), name: name.to_owned() })
+}
+
+pub(crate) fn list_here(dir: &Path) -> anyhow::Result<Vec<String>> {
     let mut names: Vec<String> = std::fs::read_dir(dir)
         .with_context(|| format!("reading {}", dir.display()))?
         .filter_map(|e| e.ok())
@@ -65,7 +75,7 @@ pub fn list(dir: &Path) -> anyhow::Result<Vec<String>> {
     Ok(names)
 }
 
-pub fn read(dir: &Path, name: &str) -> anyhow::Result<Guide> {
+pub(crate) fn read_here(dir: &Path, name: &str) -> anyhow::Result<Guide> {
     check_name(name)?;
     // A link could point anywhere on the machine; guides are plain files in the checkout.
     let meta = std::fs::symlink_metadata(dir.join(name)).with_context(|| format!("no guide {name}"))?;
@@ -126,9 +136,17 @@ pub fn replace_section(g: &Guide, index: usize, new_text: &str) -> anyhow::Resul
 /// git in the handbook checkout, with its hooks and fsmonitor off: whoever can write to the
 /// checkout's .git/config shouldn't get to run code as AgentFlow.
 pub fn git_command(dir: &Path) -> std::process::Command {
-    let mut c = std::process::Command::new("git");
-    c.arg("-C").arg(dir).args(["-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false"]);
+    let argv = git_argv(dir);
+    let mut c = std::process::Command::new(&argv[0]);
+    c.args(&argv[1..]);
     c
+}
+
+/// The same as a command line, for a job.
+pub fn git_argv(dir: &Path) -> Vec<String> {
+    ["git", "-C", &dir.to_string_lossy(), "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false"]
+        .map(String::from)
+        .to_vec()
 }
 
 /// Why a save didn't happen; the page says each in its own words.
@@ -144,6 +162,29 @@ pub enum SaveError {
     Unchanged,
     #[error(transparent)]
     Other(#[from] anyhow::Error),
+}
+
+impl SaveError {
+    /// Its name across the agents' helper's socket.
+    pub fn code(&self) -> &'static str {
+        match self {
+            SaveError::Stale => "stale",
+            SaveError::NotOnMain => "not_on_main",
+            SaveError::Dirty => "dirty",
+            SaveError::Unchanged => "unchanged",
+            SaveError::Other(_) => "other",
+        }
+    }
+
+    fn from_code(code: &str) -> Option<Self> {
+        Some(match code {
+            "stale" => SaveError::Stale,
+            "not_on_main" => SaveError::NotOnMain,
+            "dirty" => SaveError::Dirty,
+            "unchanged" => SaveError::Unchanged,
+            _ => return None,
+        })
+    }
 }
 
 impl From<std::io::Error> for SaveError {
@@ -167,12 +208,29 @@ impl Repo {
         Ok(String::from_utf8_lossy(&out.stdout).trim().to_owned())
     }
 
-    /// Writes `content` to a guide and commits it on main as the owner. Refuses when the file
-    /// changed since the page showed it (`version`), when the checkout isn't on main, or when the
-    /// file has uncommitted changes of someone else's.
+    /// Writes `content` to a guide and commits it on main as the owner, as the agents' user.
+    /// Refuses when the file changed since the page showed it (`version`), when the checkout isn't
+    /// on main, or when the file has uncommitted changes of someone else's.
     pub fn save(&self, name: &str, version: &str, content: &str, what: &str) -> Result<String, SaveError> {
+        let job = crate::hands::Job::GuideSave {
+            dir: self.dir.clone(),
+            author: self.author.clone(),
+            name: name.to_owned(),
+            version: version.to_owned(),
+            content: content.to_owned(),
+            what: what.to_owned(),
+        };
+        crate::hands::run(job).map_err(|e| {
+            match e.downcast_ref::<crate::hands::Coded>().and_then(|c| SaveError::from_code(&c.code)) {
+                Some(known) => known,
+                None => SaveError::Other(e),
+            }
+        })
+    }
+
+    pub(crate) fn save_here(&self, name: &str, version: &str, content: &str, what: &str) -> Result<String, SaveError> {
         check_name(name)?;
-        let current = read(&self.dir, name)?;
+        let current = read_here(&self.dir, name)?;
         if current.version() != version {
             return Err(SaveError::Stale);
         }
@@ -214,6 +272,10 @@ impl Repo {
 
     /// Commits on main that aren't on origin/main yet (the owner's own edits, waiting for a push).
     pub fn unpushed(&self) -> usize {
+        crate::hands::run(crate::hands::Job::GuideUnpushed { dir: self.dir.clone() }).unwrap_or(0)
+    }
+
+    pub(crate) fn unpushed_here(&self) -> usize {
         self.git(&["rev-list", "--count", "origin/main..main"]).ok().and_then(|n| n.parse().ok()).unwrap_or(0)
     }
 }
@@ -246,7 +308,7 @@ mod tests {
         }
         let dir = tempfile::tempdir().unwrap();
         std::os::unix::fs::symlink("/etc/hostname", dir.path().join("HOST.md")).unwrap();
-        assert!(read(dir.path(), "HOST.md").is_err(), "links aren't followed");
+        assert!(read_here(dir.path(), "HOST.md").is_err(), "links aren't followed");
     }
 
     #[test]
