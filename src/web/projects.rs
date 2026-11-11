@@ -12,7 +12,7 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use super::icons::icon;
-use super::pages::{Nav, render};
+use super::pages::{Nav, nav, render};
 use super::{AppError, AppResult, AppState, ClientIp};
 use crate::activity::{self, Action, Entry, Via};
 use crate::auth::Actor;
@@ -135,7 +135,7 @@ async fn list(State(state): State<AppState>, Extension(actor): Extension<Actor>)
             Ok(cards)
         })
         .await?;
-    render(ProjectsPage { nav: Nav::new(&actor, "/projects"), cards })
+    render(ProjectsPage { nav: nav(&state, &actor, "/projects").await, cards })
 }
 
 fn model_line(p: &Project) -> String {
@@ -254,7 +254,7 @@ async fn project(
         })
         .await?
         .ok_or(AppError::NotFound)?;
-    let page = ProjectPage { nav: Nav::new(&actor, "/projects"), tab, ..page };
+    let page = ProjectPage { nav: nav(&state, &actor, "/projects").await, tab, ..page };
     render(page)
 }
 
@@ -674,7 +674,7 @@ async fn load_record_page(
     };
 
     Ok(RecordPage {
-        nav: Nav::new(actor, "/projects"),
+        nav: nav(state, actor, "/projects").await,
         project_slug: project.slug,
         project_name: project.name,
         kind_label: r.kind.label(),

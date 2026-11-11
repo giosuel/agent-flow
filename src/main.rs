@@ -7,6 +7,7 @@ mod auth;
 mod cli;
 mod config;
 mod db;
+mod machine;
 mod markdown;
 mod mcp;
 mod passkey;
@@ -15,6 +16,7 @@ mod push;
 mod records;
 mod tokens;
 mod util;
+mod waiting;
 mod web;
 
 use std::path::PathBuf;
@@ -42,6 +44,18 @@ enum Command {
     },
     /// Ask the server who your token belongs to.
     Whoami(cli::ClientArgs),
+    /// Wait until something happens in your project (the owner answers, presses a button…), print
+    /// it and exit. Agents run this in the background, so the session is woken when it ends.
+    Wait {
+        #[command(flatten)]
+        client: cli::ClientArgs,
+        /// Only wake for this record, e.g. Q-12.
+        #[arg(long)]
+        record: Option<String>,
+        /// Give up after this many minutes (exit code 2).
+        #[arg(long, default_value_t = 480)]
+        minutes: u64,
+    },
     /// Print the Authorization header for Claude Code's `headersHelper`, from a token file.
     McpHeaders {
         /// File holding the token, e.g. ~/.config/agentflow/tokens/<project>.token
@@ -69,6 +83,7 @@ fn main() -> anyhow::Result<()> {
         }
         Command::Admin { command } => cli::admin(&config_path, command),
         Command::Whoami(client) => cli::whoami(&config_path, client),
+        Command::Wait { client, record, minutes } => cli::wait(&config_path, client, record, minutes),
         Command::McpHeaders { token_file } => cli::mcp_headers(&token_file),
     }
 }

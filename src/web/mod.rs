@@ -1,7 +1,9 @@
 //! The HTTP server: the owner's pages, the JSON API, and the MCP endpoint, all behind one
 //! authentication step.
 
+mod api;
 mod assets;
+mod dashboard;
 mod icons;
 mod pages;
 mod projects;
@@ -62,6 +64,8 @@ pub fn router(state: AppState) -> Router {
         .merge(pages::routes())
         .merge(settings::routes())
         .merge(projects::routes())
+        .merge(api::routes())
+        .merge(dashboard::routes())
         .merge(pwa::routes())
         .nest_service("/mcp", mcp)
         .merge(assets::routes())

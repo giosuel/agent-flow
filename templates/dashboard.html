@@ -3,10 +3,66 @@
 {% block content %}
 <div class="head">
   <h1>Dashboard</h1>
-  <p class="status-line"><span class="dot ok" aria-hidden="true"></span><span>AgentFlow is running</span><span class="grow"></span><span>{{ today }}</span></p>
+  <p class="status-line"><span class="dot{% if online > 0 %} ok{% endif %}" aria-hidden="true"></span><span>{{ online }} of {{ agents }} agents online</span><span aria-hidden="true">·</span><a href="/machine">machine {{ machine }}</a>{% if warnings > 0 %}<span aria-hidden="true">·</span><a href="/log" class="warn-text">{{ warnings }} warning{% if warnings != 1 %}s{% endif %}</a>{% endif %}<span class="grow"></span><span>{{ today }}</span></p>
 </div>
-<section class="card pad empty">
-  <h2>Nothing is waiting on you</h2>
-  <p class="sub">Questions, merges and builds from the project agents will show up here. Projects arrive with the next milestones; until then this page only proves you're signed in.</p>
-</section>
+{% if let Some(n) = notice %}<p class="notice ok" role="status">{{ n }}. The agent gets your answer word for word.</p>{% endif %}
+
+<div class="split">
+  <section class="split-main stack" aria-labelledby="waiting-h">
+    <div class="sec"><h2 id="waiting-h">Waiting on you</h2>{% if merge_count > 0 %}<span class="sub">{{ merge_count }} to merge or release</span>{% endif %}</div>
+
+    {% if let Some(f) = featured %}
+    <article class="card pad stack featured">
+      <div class="row wrap"><span class="sub">{{ f.project }} · {{ f.when }}</span><span class="grow"></span>{% if !f.blocks.is_empty() %}<span class="chip bad">blocks {{ f.blocks }}</span>{% endif %}</div>
+      <h3 class="ftitle"><a href="{{ f.url }}">{{ f.title }}</a></h3>
+      {% if !f.body_html.is_empty() %}<div class="prose clamp">{{ f.body_html|safe }}</div>{% endif %}
+      <form method="post" action="/p/{{ f.slug }}/{{ f.short }}/answer" class="stack">
+        <input type="hidden" name="next" value="/?answered={{ f.id }}">
+        {% if !f.options.is_empty() %}
+        <div class="opts">
+          {% for (n, t, d, rec) in f.options %}
+          <button class="opt{% if *rec %} rec{% endif %}" type="submit" name="option" value="{{ n }}"><span class="mono opt-n">{{ n }}</span><span class="opt-t"><strong>{{ t }}{% if *rec %} <span class="chip accent">Recommended</span>{% endif %}</strong>{% if !d.is_empty() %}<span class="sub">{{ d }}</span>{% endif %}</span></button>
+          {% endfor %}
+        </div>
+        {% endif %}
+        <div class="row wrap"><label class="vh" for="words">Answer in your own words</label><input id="words" name="words" placeholder="{% if f.options.is_empty() %}Your answer{% else %}Or answer in your own words{% endif %}"><button class="btn" type="submit">Send answer</button></div>
+      </form>
+    </article>
+    {% endif %}
+
+    {% if !groups.is_empty() %}
+    <div class="card list">
+      {% for g in groups %}
+      <div class="grp"><span>{{ g.title }} · {{ g.items.len() }}</span></div>
+      {% for i in g.items %}
+      <div class="item"><span class="ico">{{ i.icon|safe }}</span><div class="ttl"><a href="{{ i.url }}">{{ i.title }}</a><span class="sub">{{ i.sub }}</span></div><a class="btn sm ghost" href="{{ i.url }}">{{ i.action }}</a></div>
+      {% endfor %}
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    {% if featured.is_none() && groups.is_empty() %}
+    <section class="card pad empty"><h2>Nothing is waiting on you</h2><p class="sub">Questions, merges and builds from the project agents show up here, and on your phone as notifications.</p></section>
+    {% endif %}
+  </section>
+
+  <aside class="split-side stack-lg">
+    <section class="stack" aria-labelledby="act-h">
+      <div class="sec"><h2 id="act-h">Latest activity</h2><a class="sub" href="/log">Open the log</a></div>
+      {% if activity.is_empty() %}<p class="sub">Nothing has happened yet.</p>{% else %}
+      <ol class="tl">
+        {% for a in activity %}
+        <li class="ev" style="--c: {{ a.color }}"><span class="mono sub">{{ a.time }}</span> <strong>{{ a.who }}</strong> {% if let Some(u) = a.url %}<a href="{{ u }}">{{ a.what }}</a>{% else %}{{ a.what }}{% endif %}</li>
+        {% endfor %}
+      </ol>
+      {% endif %}
+    </section>
+    <section class="stack-sm" aria-labelledby="proj-h">
+      <div class="sec"><h2 id="proj-h">Projects</h2><span class="sub">milestone · waiting</span></div>
+      {% for p in projects %}
+      <div class="prow"><span class="dot{% if p.online %} ok{% endif %}" aria-hidden="true"></span><a class="pn" href="/p/{{ p.slug }}">{{ p.name }}</a><span class="sub pm">{{ p.milestone }}</span><span class="bar" role="img" aria-label="{{ p.percent }}% of the milestone's tasks done"><i style="width: {{ p.percent }}%"></i></span><span class="mono pw{% if p.waiting > 0 %} warn-text{% endif %}">{{ p.waiting }}</span></div>
+      {% endfor %}
+    </section>
+  </aside>
+</div>
 {% endblock %}

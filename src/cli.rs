@@ -195,6 +195,11 @@ impl Client {
         Ok(Self { base: base.trim_end_matches('/').to_owned(), token, http })
     }
 
+    pub fn with_timeout(mut self, timeout: std::time::Duration) -> Self {
+        self.http = reqwest::blocking::Client::builder().timeout(timeout).build().expect("http client");
+        self
+    }
+
     pub fn get(&self, path: &str) -> anyhow::Result<serde_json::Value> {
         let res = self.http.get(format!("{}{path}", self.base)).bearer_auth(&self.token).send()?;
         let status = res.status();
@@ -204,6 +209,49 @@ impl Client {
         }
         Ok(body)
     }
+}
+
+pub fn wait(config_path: &Path, args: ClientArgs, record: Option<String>, minutes: u64) -> anyhow::Result<()> {
+    let client = Client::new(config_path, &args)?.with_timeout(std::time::Duration::from_secs(30 * 60));
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(minutes * 60);
+    loop {
+        let left = deadline.saturating_duration_since(std::time::Instant::now()).as_secs();
+        if left == 0 {
+            eprintln!("Nothing happened within {minutes} minutes.");
+            std::process::exit(2);
+        }
+        let mut path = format!("/api/wait?timeout={}", left.min(25 * 60));
+        if let Some(r) = &record {
+            path.push_str(&format!("&record={}", url_encode(r)));
+        }
+        let res = match client.get(&path) {
+            Ok(r) => r,
+            Err(e) => {
+                // The server restarting or a network blip shouldn't end the wait.
+                eprintln!("waiting: {e:#}; retrying in 10 s");
+                std::thread::sleep(std::time::Duration::from_secs(10));
+                continue;
+            }
+        };
+        let events = res.get("events").and_then(|e| e.as_array()).cloned().unwrap_or_default();
+        if events.is_empty() {
+            continue;
+        }
+        for e in events {
+            let s = |k: &str| e.get(k).and_then(|v| v.as_str()).unwrap_or("").to_owned();
+            println!("{} UTC  {}  (by {})", s("at"), s("what"), s("by"));
+        }
+        return Ok(());
+    }
+}
+
+fn url_encode(s: &str) -> String {
+    s.bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => (b as char).to_string(),
+            _ => format!("%{b:02X}"),
+        })
+        .collect()
 }
 
 pub fn whoami(config_path: &Path, args: ClientArgs) -> anyhow::Result<()> {
