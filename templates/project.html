@@ -2,7 +2,7 @@
 {% block title %}{{ name }}{% endblock %}
 {% block content %}
 <div class="head">
-  <nav class="crumbs" aria-label="Breadcrumb"><a href="/projects">Projects</a></nav>
+  <nav class="crumbs" aria-label="Back"><a class="crumb-back" href="/projects">{{ crate::web::icons::icon("back")|safe }}<span>All projects</span></a></nav>
   <h1>{{ name }}{% if status != "active" %} <span class="chip">{{ status }}</span>{% endif %}</h1>
   <p class="status-line"><span class="dot{% if agent.online %} ok{% endif %}" aria-hidden="true"></span>{% if !repo.is_empty() %}<a href="https://github.com/{{ repo }}">github.com/{{ repo }}</a> · {% endif %}<span>{{ headline }}</span></p>
 </div>

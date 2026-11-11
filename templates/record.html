@@ -2,7 +2,7 @@
 {% block title %}{{ short }} · {{ project_name }}{% endblock %}
 {% block content %}
 <div class="head">
-  <nav class="crumbs" aria-label="Breadcrumb"><a href="/projects">Projects</a> / <a href="/p/{{ project_slug }}">{{ project_name }}</a> / {{ kind_label }}</nav>
+  <nav class="crumbs" aria-label="Back"><a class="crumb-back" href="/p/{{ project_slug }}{% if kind == "screenshot" %}?tab=screenshots{% endif %}">{{ crate::web::icons::icon("back")|safe }}<span>{{ project_name }}</span></a><span class="crumb-where">{{ kind_label }}</span></nav>
   <p class="row wrap"><span class="mono sub">{{ id }}</span><span class="chip{% if state == "open" %} warn{% endif %}{% if state == "current" || state == "answered" || state == "done" %} ok{% endif %}">{{ state }}</span>{% for t in tags %}<span class="chip">{{ t }}</span>{% endfor %}</p>
   <h1 class="rec-title">{{ title }}</h1>
 </div>
