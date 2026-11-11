@@ -7,7 +7,7 @@
   <p class="status-line">Out of the Dashboard and the project list; their pages and records stay. Open one to restore it. <a href="/projects">Back to the projects</a></p>
   {% else %}
   <div class="row wrap"><h1>Projects</h1><span class="grow"></span><a class="btn" href="/projects/new">New project</a></div>
-  <p class="status-line">One card per project and its agent. New project starts one, or onboards an existing folder.{% if archived_count > 0 %} <a href="/projects?archived=1">{{ archived_count }} archived</a>{% endif %}</p>
+  <p class="status-line">One row per project and its agent. New project starts one, or onboards an existing folder.{% if archived_count > 0 %} <a href="/projects?archived=1">{{ archived_count }} archived</a>{% endif %}</p>
   {% endif %}
 </div>
 {% if cards.is_empty() && archived %}
@@ -15,15 +15,14 @@
 {% else if cards.is_empty() %}
 <section class="card pad empty"><h2>No projects yet</h2><p class="sub">Start one with New project, or onboard an existing folder the same way.</p></section>
 {% else %}
-<div class="cards">
-{% for c in cards %}
-  <a class="card pcard{% if c.status != "active" %} dimmed{% endif %}" href="/p/{{ c.slug }}">
-    <div class="row"><strong class="pname">{{ c.name }}</strong><span class="grow"></span><span class="chip{% if c.online %} ok{% endif %}"><span class="dot{% if c.online %} ok{% endif %}" aria-hidden="true"></span>{{ c.agent_state }}</span></div>
-    {% if !c.description.is_empty() %}<p class="pdesc">{{ c.description }}</p>{% endif %}
-    {% if !c.facts.is_empty() %}<p class="facts">{% for f in c.facts %}<span>{{ f }}</span>{% endfor %}</p>{% endif %}
-    <div class="row pfoot"><span class="pms">{% if let Some((n, t)) = c.milestone %}<span class="mono">{{ n }}</span> · {{ t }}{% else %}<span class="sub">no milestones yet</span>{% endif %}</span><span class="grow"></span><span class="sub">{{ c.waiting }}{% if c.status != "active" %} · {{ c.status }}{% endif %}</span></div>
-  </a>
-{% endfor %}
-</div>
+{% if archived %}
+<div class="prow-list">{% for c in cards %}{% include "project_row.html" %}{% endfor %}</div>
+{% else %}
+<div class="prow-list">{% for c in cards %}{% if !c.not_started %}{% include "project_row.html" %}{% endif %}{% endfor %}</div>
+{% if any_not_started %}
+<div class="sec prow-quiet-h"><h2>Not started</h2><span class="sub">no agent has connected yet</span></div>
+<div class="quiet-rows">{% for c in cards %}{% if c.not_started %}<a class="card" href="/p/{{ c.slug }}"><span>{{ c.name }}</span><span class="sub">{% if let Some((n, t)) = c.milestone %}<span class="mono">{{ n }}</span> · {{ t }}{% endif %}</span></a>{% endif %}{% endfor %}</div>
+{% endif %}
+{% endif %}
 {% endif %}
 {% endblock %}
