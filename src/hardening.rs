@@ -29,25 +29,32 @@ pub fn managed_settings(config: &Config) -> serde_json::Value {
     serde_json::json!({ "permissions": { "deny": deny } })
 }
 
-/// The text `agentflow admin managed-settings` prints: the settings, and the root commands for
-/// the owner to run (fish works too).
-pub fn managed_settings_command(config: &Config) -> String {
-    let json = serde_json::to_string_pretty(&managed_settings(config)).unwrap_or_default();
-    let exists = std::path::Path::new(PATH).exists();
+/// Writes the settings to a file in the data folder and returns the text `agentflow admin
+/// managed-settings` prints: the settings, and the root command for the owner to run (fish works
+/// too). The command only names files, so nothing in the config ends up inside a root command.
+pub fn managed_settings_command(config: &Config) -> anyhow::Result<String> {
+    let json = serde_json::to_string_pretty(&managed_settings(config))?;
+    let file = config.data_dir().join("managed-settings.json");
+    let plain = file.to_string_lossy().chars().all(|c| c.is_ascii_alphanumeric() || "/._-".contains(c));
+    if !plain {
+        anyhow::bail!("the data folder's path has unusual characters; copy the settings below by hand:\n{json}");
+    }
+    std::fs::write(&file, format!("{json}\n"))?;
     let mut out = format!(
         "These settings stop every Claude Code session's Read and Edit tools on AgentFlow's files:\n\n{json}\n\n"
     );
-    if exists {
+    if std::path::Path::new(PATH).exists() {
         out.push_str(&format!(
             "{PATH} exists already. Add the \"deny\" entries above to its permissions by hand:\n\n  sudoedit {PATH}\n"
         ));
     } else {
-        let one_line = serde_json::to_string(&managed_settings(config)).unwrap_or_default();
         out.push_str(&format!(
-            "Install them (needs root; run it yourself):\n\n  echo '{one_line}' | sudo install -D -m 644 /dev/stdin {PATH}\n\nSessions pick them up when they start.\n"
+            "They're in {}. Install them (needs root; run it yourself):\n\n  sudo install -D -m 644 {} {PATH}\n\nSessions pick them up when they start.\n",
+            file.display(),
+            file.display()
         ));
     }
-    out
+    Ok(out)
 }
 
 #[cfg(test)]
@@ -60,6 +67,10 @@ mod tests {
         {
             assert!(v.contains(want), "{want} in {v}");
         }
-        assert!(super::managed_settings_command(&c).contains("sudo"));
+        let dir = tempfile::tempdir().unwrap();
+        let c = crate::config::Config { data_dir: dir.path().display().to_string(), ..c };
+        let text = super::managed_settings_command(&c).unwrap();
+        assert!(text.contains("sudo") && !text.contains("echo '"), "the command names a file: {text}");
+        assert!(dir.path().join("managed-settings.json").exists());
     }
 }
