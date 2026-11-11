@@ -34,6 +34,7 @@
     {% if let Some(ed) = editing %}
     <form method="post" action="/guides/save" class="card pad stack">
       <h3>Editing {% if ed.section.is_some() %}“{{ ed.label }}”{% else %}the whole file{% endif %}</h3>
+      {% if !clash.is_empty() %}<p class="notice warn" role="status">{% for n in clash %}{% if !loop.first %}, {% endif %}<a class="mono" href="/guides#pr-{{ n }}">{{ repo }}/pull/{{ n }}</a>{% endfor %} change{% if clash.len() == 1 %}s{% endif %} this file too. Whichever lands second may need redoing; you could merge {% if clash.len() == 1 %}it{% else %}them{% endif %} first.</p>{% endif %}
       <input type="hidden" name="f" value="{{ name }}">
       <input type="hidden" name="version" value="{{ version }}">
       <input type="hidden" name="section" value="{% if let Some(i) = ed.section %}{{ i }}{% endif %}">
@@ -54,7 +55,7 @@
     <div class="sec"><h2>Open pull requests · {{ open.len() }}</h2><span class="sub">changes open on GitHub</span></div>
     {% if open.is_empty() %}<p class="sub">None. The consultant opens one per change, one file each.</p>{% endif %}
     {% for p in open %}
-    <article class="card pad stack-sm">
+    <article class="card pad stack-sm" id="pr-{{ p.number }}">
       <div class="row wrap"><a class="mono" href="{{ p.url }}">{{ repo }}/pull/{{ p.number }}</a><span class="sub">{{ p.changes }} · {{ p.files }} · {{ p.by }}</span></div>
       <strong>{{ p.title }}</strong>
       <div class="row wrap"><a class="btn sm ghost" href="{{ p.url }}/files">View changes on GitHub</a>

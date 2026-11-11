@@ -60,6 +60,8 @@ struct GuidesPage {
     version: String,
     sections: Vec<SectionView>,
     editing: Option<Editing>,
+    /// Open PRs that change the file being edited.
+    clash: Vec<i64>,
     notice: Option<String>,
     error: Option<String>,
     unpushed: usize,
@@ -98,6 +100,15 @@ fn blurb(text: &str) -> String {
     }
     out.push_str(rest);
     crate::activity::clip(&out.replace(['*', '`'], ""), 90)
+}
+
+/// A section's text without its heading line: the card shows the title already.
+fn without_heading(text: &str) -> &str {
+    match text.split_once('\n') {
+        Some((first, rest)) if first.starts_with('#') => rest,
+        None if text.starts_with('#') => "",
+        _ => text,
+    }
 }
 
 fn pr_row(p: &crate::github::RepoPr) -> PrRow {
@@ -153,6 +164,11 @@ async fn page(
             .map(|(i, s)| Editing { section: Some(i), label: s.title.clone(), text: s.text.clone() }),
         _ => None,
     };
+    // Editing a file an open PR also changes: one of the two will need redoing after the other.
+    let clash: Vec<i64> = match (&file, &editing) {
+        (Some(f), Some(_)) => prs.open.iter().filter(|p| p.files.iter().any(|x| x == f)).map(|p| p.number).collect(),
+        _ => Vec::new(),
+    };
     let repo = guides::Repo { dir: dir.clone(), author: state.config.git_author.clone() };
     let unpushed = tokio::task::spawn_blocking(move || repo.unpushed()).await.unwrap_or(0);
     let notice = match (&q.saved, q.merged) {
@@ -186,12 +202,17 @@ async fn page(
                 g.sections
                     .iter()
                     .enumerate()
-                    .map(|(i, s)| SectionView { index: i, title: s.title.clone(), html: markdown::to_html(&s.text) })
+                    .map(|(i, s)| SectionView {
+                        index: i,
+                        title: s.title.clone(),
+                        html: markdown::to_html(without_heading(&s.text)),
+                    })
                     .collect()
             })
             .unwrap_or_default(),
         file,
         editing,
+        clash,
         notice,
         error,
         unpushed,

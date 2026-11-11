@@ -98,18 +98,16 @@ async fn dashboard(
     let answered = q.answered.clone();
     // The guides' open pull requests, from the poller's cache.
     let repo = state.config.handbook_repo.clone();
-    let guide_prs: Vec<Item> = state
-        .guide_prs
-        .lock()
-        .unwrap()
+    let guide_prs: Vec<Item> = crate::util::lock(&state.guide_prs)
         .open
         .iter()
         .map(|p| Item {
             icon: icon("doc"),
             title: p.title.clone(),
             sub: format!("{} · {repo}/pull/{}", p.files.join(", "), p.number),
-            url: format!("{}/files", p.url),
-            action: "View on GitHub",
+            // The Guides page has the diff link and the Merge button together.
+            url: format!("/guides#pr-{}", p.number),
+            action: "Review",
         })
         .collect();
     let data = state
