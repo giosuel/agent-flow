@@ -18,6 +18,11 @@ pub fn lock<T>(m: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
+/// Lowercase hex, two digits a byte.
+pub fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
 pub fn new_secret(prefix: &str) -> String {
     let mut bytes = [0u8; 32];
     rand::rng().fill_bytes(&mut bytes);

@@ -32,7 +32,7 @@ pub struct Guide {
 impl Guide {
     /// A short fingerprint of the content, so a save can tell the file changed meanwhile.
     pub fn version(&self) -> String {
-        Sha256::digest(self.text.as_bytes()).iter().take(8).map(|b| format!("{b:02x}")).collect()
+        crate::util::hex(&Sha256::digest(self.text.as_bytes())[..8])
     }
 
     pub fn find_section(&self, title: &str) -> Option<usize> {

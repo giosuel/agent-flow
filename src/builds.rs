@@ -199,12 +199,9 @@ impl std::io::Write for HashWriter {
 pub fn sha256_of(mut r: impl Read) -> std::io::Result<(String, u64)> {
     let mut w = HashWriter(Sha256::new());
     let n = std::io::copy(&mut r, &mut w)?;
-    Ok((hex(&w.0.finalize()), n))
+    Ok((crate::util::hex(&w.0.finalize()), n))
 }
 
-pub fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
-}
 
 /// `2026-11-11-0215-shortcuts-a1b2c3d`, or just the date and time without a commit.
 pub fn build_name(stamp: time::OffsetDateTime, branch: &str, commit: &str) -> String {
