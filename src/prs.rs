@@ -185,6 +185,22 @@ pub fn set_ready(conn: &Connection, pr: &Record, ready: bool, note: &str, author
     Ok(r)
 }
 
+/// Every PR the release waits for is merged.
+pub fn release_ready(c: &Connection, r: &Record) -> anyhow::Result<bool> {
+    let waits: Vec<String> = r
+        .data
+        .get("waits_for")
+        .and_then(Value::as_array)
+        .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_owned)).collect())
+        .unwrap_or_default();
+    for w in waits {
+        if records::find_str(c, &w, None)?.state != "merged" {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -230,20 +246,4 @@ mod tests {
         })
         .unwrap();
     }
-}
-
-/// Every PR the release waits for is merged.
-pub fn release_ready(c: &Connection, r: &Record) -> anyhow::Result<bool> {
-    let waits: Vec<String> = r
-        .data
-        .get("waits_for")
-        .and_then(Value::as_array)
-        .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_owned)).collect())
-        .unwrap_or_default();
-    for w in waits {
-        if records::find_str(c, &w, None)?.state != "merged" {
-            return Ok(false);
-        }
-    }
-    Ok(true)
 }

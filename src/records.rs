@@ -762,17 +762,6 @@ pub struct Event {
     pub actor: String,
 }
 
-/// Events after `after_seq`, oldest first; for one project or all.
-pub fn events(conn: &Connection, project_id: Option<i64>, after_seq: i64, limit: i64) -> anyhow::Result<Vec<Event>> {
-    let mut stmt = conn.prepare(
-        "SELECT e.seq, e.at, p.slug, r.kind, r.number, e.kind, e.summary, e.actor
-         FROM events e LEFT JOIN projects p ON p.id = e.project_id LEFT JOIN records r ON r.id = e.record_id
-         WHERE e.seq > ?1 AND (?2 IS NULL OR e.project_id = ?2) ORDER BY e.seq LIMIT ?3",
-    )?;
-    let rows = stmt.query_map(params![after_seq, project_id, limit], event_from_row)?;
-    Ok(rows.collect::<Result<_, _>>()?)
-}
-
 /// Events in one project after `after_seq` that `actor` didn't cause, oldest first.
 pub fn events_by_others(
     conn: &Connection,
@@ -957,7 +946,7 @@ mod tests {
             // The task depends on D-1, which changed (was replaced) after the task did.
             assert!(views.iter().any(|l| l.relation == "depends_on" && l.stale));
 
-            let evs = events(c, Some(p), 0, 100)?;
+            let evs = events_by_others(c, p, "nobody", 0, 100)?;
             assert!(evs.iter().any(|e| e.kind == "decision.updated" && e.summary.contains("now replaced")));
             assert_eq!(recent_events(c, None, 1)?[0].seq, evs.last().unwrap().seq);
             Ok(())

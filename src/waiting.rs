@@ -19,13 +19,6 @@ pub struct Waiting {
     pub builds: Vec<Record>,
 }
 
-impl Waiting {
-    /// The number in the navigation: everything with a button for the owner except merges.
-    pub fn count(&self) -> usize {
-        self.questions.len() + self.builds.len()
-    }
-}
-
 pub fn load(conn: &Connection) -> anyhow::Result<Waiting> {
     let mut questions = records::query(
         conn,
@@ -185,7 +178,6 @@ mod tests {
             let w = load(c)?;
             let order: Vec<_> = w.questions.iter().map(|q| q.title.as_str()).collect();
             assert_eq!(order, ["urgent", "blocker", "old"]);
-            assert_eq!(w.count(), 3);
             assert_eq!(count(c)?, 3);
             assert_eq!(blocks(c, &blocker)?, ["T-1"]);
             let _ = urgent;

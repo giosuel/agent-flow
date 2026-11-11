@@ -262,7 +262,14 @@ impl FlowMcp {
                 let tx = c.transaction()?;
                 let r = writable(&tx, &a, &p.record)?;
                 let kind = actions::ButtonKind::parse(&p.kind)?;
-                let id = actions::add(&tx, &r, &p.label, kind, &p.command, &p.workdir, &p.requires, &a.name())?;
+                let button = actions::NewButton {
+                    label: &p.label,
+                    kind,
+                    command: &p.command,
+                    workdir: &p.workdir,
+                    requires: &p.requires,
+                };
+                let id = actions::add(&tx, &r, &button, &a.name())?;
                 tx.commit()?;
                 Ok(Outcome::new(json!({"button": id, "on": r.ref_id}))
                     .summary(format!("button \"{}\" added to {}", p.label.trim(), r.short_id()))

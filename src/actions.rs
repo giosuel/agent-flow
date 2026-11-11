@@ -113,16 +113,18 @@ pub fn for_record(conn: &Connection, record_id: i64) -> anyhow::Result<Vec<Actio
 }
 
 /// Adds a button. `requires` lists records (PRs) that must be merged, or tasks done, first.
-pub fn add(
-    conn: &Connection,
-    record: &Record,
-    label: &str,
-    kind: ButtonKind,
-    command: &str,
-    workdir: &str,
-    requires: &[String],
-    added_by: &str,
-) -> anyhow::Result<i64> {
+/// A button as an agent describes it.
+pub struct NewButton<'a> {
+    pub label: &'a str,
+    pub kind: ButtonKind,
+    pub command: &'a str,
+    pub workdir: &'a str,
+    /// Records that must be merged (or done) first.
+    pub requires: &'a [String],
+}
+
+pub fn add(conn: &Connection, record: &Record, b: &NewButton, added_by: &str) -> anyhow::Result<i64> {
+    let NewButton { label, kind, command, workdir, requires } = *b;
     if !matches!(record.kind, Kind::Pr | Kind::Release) {
         bail!("buttons belong to a PR or a release, not a {}", record.kind);
     }
@@ -353,24 +355,80 @@ mod tests {
                     "v",
                     records::NewRecord { kind: Some(Kind::Task), title: "t".into(), ..Default::default() },
                 )?;
-                assert!(add(c, &task, "Merge", ButtonKind::Merge, "x", "", &[], "v").is_err(), "only PRs and releases");
                 assert!(
-                    add(c, &r, "Merge", ButtonKind::Merge, "x", "", &["T-9".into()], "v").is_err(),
+                    add(
+                        c,
+                        &task,
+                        &NewButton {
+                            label: "Merge",
+                            kind: ButtonKind::Merge,
+                            command: "x",
+                            workdir: "",
+                            requires: &[]
+                        },
+                        "v"
+                    )
+                    .is_err(),
+                    "only PRs and releases"
+                );
+                assert!(
+                    add(
+                        c,
+                        &r,
+                        &NewButton {
+                            label: "Merge",
+                            kind: ButtonKind::Merge,
+                            command: "x",
+                            workdir: "",
+                            requires: &["T-9".into()]
+                        },
+                        "v"
+                    )
+                    .is_err(),
                     "unknown requirement"
                 );
                 assert!(
-                    add(c, &r, "Merge", ButtonKind::Merge, "echo safe\u{202E}lmth.exe", "", &[], "v").is_err(),
+                    add(
+                        c,
+                        &r,
+                        &NewButton {
+                            label: "Merge",
+                            kind: ButtonKind::Merge,
+                            command: "echo safe\u{202E}lmth.exe",
+                            workdir: "",
+                            requires: &[]
+                        },
+                        "v"
+                    )
+                    .is_err(),
                     "bidi override"
                 );
-                assert!(add(c, &r, "Merge", ButtonKind::Merge, "echo a\u{200B}b", "", &[], "v").is_err(), "zero-width");
+                assert!(
+                    add(
+                        c,
+                        &r,
+                        &NewButton {
+                            label: "Merge",
+                            kind: ButtonKind::Merge,
+                            command: "echo a\u{200B}b",
+                            workdir: "",
+                            requires: &[]
+                        },
+                        "v"
+                    )
+                    .is_err(),
+                    "zero-width"
+                );
                 let id = add(
                     c,
                     &r,
-                    "Merge",
-                    ButtonKind::Merge,
-                    "echo merged $PWD; echo warn >&2",
-                    &workdir,
-                    &["T-1".into()],
+                    &NewButton {
+                        label: "Merge",
+                        kind: ButtonKind::Merge,
+                        command: "echo merged $PWD; echo warn >&2",
+                        workdir: &workdir,
+                        requires: &["T-1".into()],
+                    },
                     "v",
                 )?;
                 Ok((get(c, id)?.unwrap(), task))

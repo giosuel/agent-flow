@@ -39,7 +39,6 @@ impl Via {
 pub enum Action {
     Read,
     Write,
-    Message,
     Run,
     Login,
     Push,
@@ -53,7 +52,6 @@ impl Action {
         match self {
             Action::Read => "read",
             Action::Write => "write",
-            Action::Message => "message",
             Action::Run => "run",
             Action::Login => "login",
             Action::Push => "push",
@@ -119,11 +117,6 @@ impl Entry {
 
     pub fn ip(mut self, ip: Option<String>) -> Self {
         self.ip = ip;
-        self
-    }
-
-    pub fn detail(mut self, detail: Value) -> Self {
-        self.detail = Some(redact_value(detail));
         self
     }
 
@@ -203,15 +196,6 @@ fn at_word_start(whole: &str, rest: &str) -> bool {
     i == 0 || !whole[..i].chars().next_back().is_some_and(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
-pub fn redact_value(v: Value) -> Value {
-    match v {
-        Value::String(s) => Value::String(redact(&s)),
-        Value::Array(a) => Value::Array(a.into_iter().map(redact_value).collect()),
-        Value::Object(o) => Value::Object(o.into_iter().map(|(k, v)| (k, redact_value(v))).collect()),
-        other => other,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -224,12 +208,5 @@ mod tests {
         // Short or embedded look-alikes stay.
         assert_eq!(redact("leaf_node af_x"), "leaf_node af_x");
         assert_eq!(redact("grüße af_"), "grüße af_");
-    }
-
-    #[test]
-    fn json_is_redacted_deeply() {
-        let t = crate::util::new_secret("af_adm_");
-        let v = serde_json::json!({"a": [format!("x {t}")], "b": 1});
-        assert_eq!(redact_value(v), serde_json::json!({"a": ["x [redacted]"], "b": 1}));
     }
 }

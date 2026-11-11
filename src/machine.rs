@@ -19,9 +19,9 @@ impl Snapshot {
         self.mem_total_kb as f64 / 1024.0 / 1024.0
     }
 
-    /// "3.1 cores, 9.4 of 22 GB"
+    /// "3.1 of 8 cores, 9.4 of 22 GB"
     pub fn summary(&self) -> String {
-        format!("{:.1} cores, {:.1} of {:.0} GB", self.load1, self.mem_used_gb(), self.mem_total_gb())
+        format!("{:.1} of {} cores, {:.1} of {:.0} GB", self.load1, self.cores, self.mem_used_gb(), self.mem_total_gb())
     }
 }
 
