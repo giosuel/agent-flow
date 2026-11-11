@@ -183,8 +183,17 @@ pre code { background: none; padding: 0; }
 .pdesc { color: var(--ink2); font-size: 14px; }
 .facts { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 13px; color: var(--muted); }
 .pfoot { font-size: 13px; padding-top: 8px; border-top: 1px solid var(--line2); }
-.crumbs { font-size: 13px; color: var(--muted); }
-.crumbs a { color: var(--muted); }
+/* The way back up, as an obvious button: "‹ All projects", "‹ Vinculum" (the owner, 2026-11-11:
+   "this navigation it not very obvious, please make it better"). */
+.crumbs { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.crumb-back {
+  display: inline-flex; align-items: center; gap: 4px; min-height: 36px; padding: 0 14px 0 8px;
+  border: 1px solid var(--line); border-radius: 18px; background: var(--panel);
+  color: var(--accent); font-size: 14px; font-weight: 500; text-decoration: none;
+}
+.crumb-back:hover { border-color: var(--accent); background: var(--soft); color: var(--hover); }
+.crumb-back .i { width: 18px; height: 18px; stroke-width: 2.2; }
+.crumb-where { font-size: 13px; color: var(--muted); }
 .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); overflow-x: auto; margin-top: -12px; }
 .tabs a { padding: 10px 14px; color: var(--nav-ink); text-decoration: none; border-bottom: 2px solid transparent; white-space: nowrap; }
 .tabs a.on { color: #fff; border-bottom-color: var(--accent); font-weight: 500; }
@@ -611,4 +620,9 @@ body { box-sizing: border-box; min-height: 100vh; min-height: 100dvh; }
 @media (max-width: 700px) {
   /* Guides on the phone: the list of files and "Pull requests" first; either opens on its own screen. */
   .split.guides:not(.picked) > .split-main { display: none; }
+}
+@media (max-width: 700px) {
+  /* The desktop's column widths don't apply on the phone: full width, whatever the phone's size
+     (a 430 px iPhone left the guide list 380 px wide, short of the right edge). */
+  .split.guides .split-side, .split.conv .split-side, .split.guides .split-main, .split.conv .split-main { flex: none; width: 100%; max-width: none; }
 }
