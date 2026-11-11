@@ -294,6 +294,11 @@ pub struct NewRecord {
 
 /// Creates a record with revision 1 and an event. The caller decides who may.
 pub fn create(conn: &Connection, project_id: i64, author: &str, new: NewRecord) -> anyhow::Result<Record> {
+    // Agents paste logs and commands; tokens in them are never stored.
+    let mut new = new;
+    new.title = crate::activity::redact(&new.title);
+    new.body = crate::activity::redact(&new.body);
+    new.data.values_mut().for_each(crate::activity::redact_value);
     let kind = new.kind.context("record kind missing")?;
     let title = new.title.trim();
     if title.is_empty() {
@@ -377,6 +382,11 @@ pub struct Patch {
 /// Applies a patch, appends a revision with what changed, and records an event. Returns the
 /// record and whether anything changed.
 pub fn update(conn: &Connection, record: &Record, author: &str, patch: Patch) -> anyhow::Result<(Record, bool)> {
+    let mut patch = patch;
+    patch.title = patch.title.map(|t| crate::activity::redact(&t));
+    patch.body = patch.body.map(|b| crate::activity::redact(&b));
+    patch.note = crate::activity::redact(&patch.note);
+    patch.data.values_mut().for_each(crate::activity::redact_value);
     let mut changes = Map::new();
     let mut title = record.title.clone();
     let mut body = record.body.clone();
