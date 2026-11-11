@@ -80,7 +80,6 @@ struct TokenView {
     can: &'static str,
     used: String,
     from: String,
-    rotatable: bool,
 }
 
 struct SessionView {
@@ -189,7 +188,6 @@ async fn render_page(
                 "admin" => "admin",
                 _ => "read, CLI and viber-run",
             },
-            rotatable: t.kind != "device",
             used: when(t.last_used_at),
             from: t.last_used_from.clone().unwrap_or_default(),
             kind: t.kind,
