@@ -38,14 +38,18 @@ fn control_path(data_dir: &Path) -> PathBuf {
     data_dir.join("remote").join("ssh-%C")
 }
 
-fn ssh_base(data_dir: &Path, timeout_s: u64) -> Vec<String> {
+fn ssh_base(data_dir: &Path, server: &BuildServer, timeout_s: u64) -> Vec<String> {
     // Only the user's own config: AgentFlow's service runs with a private user namespace, where
     // root's /etc/ssh files look foreign and ssh refuses to read them.
     let user_config = crate::util::expand_home("~/.ssh/config");
     let config = if user_config.is_file() { user_config.display().to_string() } else { "/dev/null".into() };
-    vec![
+    let mut args = vec![
         "-F".into(),
         config,
+        // A server added on the Settings page is trusted on first contact (its fingerprint is
+        // kept in known_hosts); a changed host key is refused.
+        "-o".into(),
+        "StrictHostKeyChecking=accept-new".into(),
         "-o".into(),
         "BatchMode=yes".into(),
         "-o".into(),
@@ -58,12 +62,16 @@ fn ssh_base(data_dir: &Path, timeout_s: u64) -> Vec<String> {
         format!("ControlPath={}", control_path(data_dir).display()),
         "-o".into(),
         "ControlPersist=120".into(),
-    ]
+    ];
+    if !server.key_file.is_empty() {
+        args.extend(["-i".into(), server.key_file.clone(), "-o".into(), "IdentitiesOnly=yes".into()]);
+    }
+    args
 }
 
 /// The `ssh` command git and rsync use for this server.
 fn ssh_command(data_dir: &Path, server: &BuildServer) -> String {
-    format!("{} {}", server.ssh_program, ssh_base(data_dir, 10).join(" "))
+    format!("{} {}", server.ssh_program, ssh_base(data_dir, server, 10).join(" "))
 }
 
 /// Runs a shell script there (with `sh`, whatever the login shell is) and returns its output.
@@ -75,7 +83,7 @@ pub async fn run_script(
 ) -> anyhow::Result<String> {
     tokio::fs::create_dir_all(data_dir.join("remote")).await.ok();
     let mut cmd = tokio::process::Command::new(&server.ssh_program);
-    cmd.args(ssh_base(data_dir, 5)).arg(&server.ssh).arg("sh -s");
+    cmd.args(ssh_base(data_dir, server, 5)).arg(&server.ssh).arg("sh -s");
     cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
     let mut child = cmd.spawn().context("running ssh")?;
     let mut stdin = child.stdin.take().context("ssh stdin")?;
@@ -217,10 +225,178 @@ pub struct ServerLive {
     /// Each project's work folder there (and the shared cache), in GB, and when that was measured.
     pub sizes: Vec<(String, f64)>,
     sizes_at: i64,
+    /// What's installed there, and when that was checked.
+    pub tools: Tools,
+    tools_at: i64,
+    /// A setup step running or just finished: "installing sccache…", "sccache installed".
+    pub setup: String,
+    pub setup_running: bool,
+}
+
+impl ServerLive {
+    /// Whether the tools have been looked at since AgentFlow started.
+    pub fn tools_checked(&self) -> bool {
+        self.tools_at > 0 && !self.setup_running
+    }
+}
+
+/// The tools a build server has for Rust builds.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct Tools {
+    /// "cargo 1.99.1 (…)", empty when cargo or a default toolchain is missing.
+    pub cargo: String,
+    pub rustup: bool,
+    /// "sccache 0.10.0", empty when it isn't installed.
+    pub sccache: String,
+    pub curl: bool,
+}
+
+/// Where the tools agents need are, for scripts and jobs there (non-login shells miss them).
+const PATH_LINE: &str = "export PATH=\"$HOME/.local/bin:$HOME/.cargo/bin:$PATH\"\n";
+
+pub async fn check_tools(data_dir: &Path, server: &BuildServer) -> anyhow::Result<Tools> {
+    let script = format!(
+        "{PATH_LINE}echo \"cargo $(cargo --version 2>/dev/null)\"\necho \"rustup $(command -v rustup)\"\necho \"sccache $(sccache --version 2>/dev/null)\"\necho \"curl $(command -v curl)\"\n"
+    );
+    let text = run_script(data_dir, server, &script, Duration::from_secs(30)).await?;
+    let mut t = Tools::default();
+    for line in text.lines() {
+        let (k, v) = line.split_once(' ').unwrap_or((line, ""));
+        let v = v.trim();
+        match k {
+            "cargo" => t.cargo = v.to_owned(),
+            "rustup" => t.rustup = !v.is_empty(),
+            "sccache" => t.sccache = v.to_owned(),
+            "curl" => t.curl = !v.is_empty(),
+            _ => {}
+        }
+    }
+    Ok(t)
+}
+
+/// Checks the tools again and keeps the answer for the Settings page.
+pub async fn refresh_tools(state: &crate::web::AppState, server: &BuildServer) -> anyhow::Result<Tools> {
+    let t = check_tools(&state.config.data_dir(), server).await?;
+    let mut live = state.remote.lock().unwrap_or_else(|e| e.into_inner());
+    let s = live.servers.entry(server.name.clone()).or_default();
+    s.tools = t.clone();
+    s.tools_at = now_ms();
+    Ok(t)
+}
+
+/// A setup step on a build server, in the background: its output goes to the Log
+/// (`target:server-<name>`), its outcome to the Settings page.
+pub fn spawn_setup(state: crate::web::AppState, server: BuildServer, what: &'static str) {
+    {
+        let mut live = state.remote.lock().unwrap_or_else(|e| e.into_inner());
+        let s = live.servers.entry(server.name.clone()).or_default();
+        if s.setup_running {
+            return;
+        }
+        s.setup_running = true;
+        s.setup = format!("{what}…");
+    }
+    tokio::spawn(async move {
+        let script = match what {
+            "installing sccache" => INSTALL_SCCACHE.to_owned(),
+            _ => SETUP_RUST.to_owned(),
+        };
+        let data_dir = state.config.data_dir();
+        let result = run_script(&data_dir, &server, &format!("{PATH_LINE}{script}"), Duration::from_secs(1800)).await;
+        let target = format!("server-{}", server.name);
+        let (outcome, sev) = match &result {
+            Ok(out) => (format!("{what}: done. {}", out.lines().last().unwrap_or("").trim()), "info"),
+            Err(e) => (format!("{what} failed: {e:#}"), "error"),
+        };
+        let lines: Vec<String> = match &result {
+            Ok(out) => out.lines().map(str::to_owned).collect(),
+            Err(e) => vec![format!("{e:#}")],
+        };
+        let e = crate::activity::Entry {
+            actor_kind: "system".into(),
+            actor: "build servers".into(),
+            project: None,
+            via: crate::activity::Via::Build,
+            action: crate::activity::Action::System,
+            summary: crate::activity::clip(&format!("{} on {}", outcome, server.name), 300),
+            target: Some(target),
+            status: None,
+            duration_ms: None,
+            ip: None,
+            detail: Some(
+                serde_json::json!({"lines": lines.iter().rev().take(40).rev().map(|l| crate::activity::redact(l)).collect::<Vec<_>>()}),
+            ),
+            severity: sev,
+        };
+        crate::activity::write(&state.db, e).await;
+        let _ = refresh_tools(&state, &server).await;
+        let mut live = state.remote.lock().unwrap_or_else(|e| e.into_inner());
+        let s = live.servers.entry(server.name.clone()).or_default();
+        s.setup_running = false;
+        s.setup = outcome;
+    });
+}
+
+/// sccache from its release on GitHub (a single file, into ~/.local/bin); with cargo when there's
+/// no curl.
+const INSTALL_SCCACHE: &str = r#"set -e
+if command -v curl >/dev/null 2>&1; then
+  v=$(curl -fsSL https://api.github.com/repos/mozilla/sccache/releases/latest | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1)
+  [ -n "$v" ] || { echo "couldn't find sccache's latest release" >&2; exit 1; }
+  d=$(mktemp -d)
+  curl -fsSL "https://github.com/mozilla/sccache/releases/download/$v/sccache-$v-$(uname -m)-unknown-linux-musl.tar.gz" | tar xz -C "$d"
+  mkdir -p "$HOME/.local/bin"
+  install -m 755 "$d"/sccache-*/sccache "$HOME/.local/bin/sccache"
+  rm -rf "$d"
+else
+  cargo install --locked sccache
+fi
+sccache --version
+"#;
+
+/// A Rust toolchain for the build user: rustup's stable (rustup itself first, if it's missing).
+const SETUP_RUST: &str = r#"set -e
+if ! command -v rustup >/dev/null 2>&1; then
+  curl -fsSL https://sh.rustup.rs | sh -s -- -y --no-modify-path --default-toolchain none
+fi
+rustup default stable
+cargo --version
+"#;
+
+/// Makes a key pair for a new build server in AgentFlow's data folder; returns the private key's
+/// path and the public key.
+pub async fn make_key(data_dir: &Path, name: &str) -> anyhow::Result<(String, String)> {
+    let dir = data_dir.join("remote").join("keys");
+    tokio::fs::create_dir_all(&dir).await?;
+    let key = dir.join(name);
+    if !key.exists() {
+        let comment = format!("agentflow@{} for {name}", crate::machine::hostname());
+        let out = tokio::process::Command::new("ssh-keygen")
+            .args(["-q", "-t", "ed25519", "-N", "", "-C", &comment, "-f"])
+            .arg(&key)
+            .output()
+            .await
+            .context("running ssh-keygen")?;
+        if !out.status.success() {
+            bail!("ssh-keygen: {}", String::from_utf8_lossy(&out.stderr).trim());
+        }
+    }
+    let public = tokio::fs::read_to_string(key.with_extension("pub")).await?.trim().to_owned();
+    Ok((key.to_string_lossy().to_string(), public))
+}
+
+/// The public key of a key AgentFlow made.
+pub fn public_key(key_file: &str) -> Option<String> {
+    if key_file.is_empty() {
+        return None;
+    }
+    std::fs::read_to_string(format!("{key_file}.pub")).ok().map(|s| s.trim().to_owned())
 }
 
 #[derive(Default)]
 pub struct Live {
+    /// The build servers, from the database (the Settings page changes them).
+    pub list: Vec<BuildServer>,
     pub servers: HashMap<String, ServerLive>,
     /// Running jobs' ssh processes, to stop them.
     running: HashMap<i64, tokio::sync::oneshot::Sender<()>>,
@@ -426,6 +602,154 @@ pub fn wait_reason(server: &BuildServer, live: &ServerLive, job: &Job, running: 
     None
 }
 
+// ---------------------------------------------------------------------------------------------
+// The registry
+
+/// The build servers now.
+pub fn servers(state: &crate::web::AppState) -> Vec<BuildServer> {
+    state.remote.lock().unwrap_or_else(|e| e.into_inner()).list.clone()
+}
+
+/// Reads the list again after a change.
+pub async fn reload(state: &crate::web::AppState) {
+    match state.db.call(|c| load_servers(c)).await {
+        Ok(list) => {
+            let ssh_program = state.config.build_servers.first().map(|b| b.ssh_program.clone());
+            let list = list
+                .into_iter()
+                .map(|mut b| {
+                    // Tests run a stand-in ssh; it's set in the config.
+                    if let Some(p) = &ssh_program {
+                        b.ssh_program = p.clone();
+                    }
+                    b
+                })
+                .collect();
+            state.remote.lock().unwrap_or_else(|e| e.into_inner()).list = list;
+        }
+        Err(e) => tracing::warn!("build servers: {e:#}"),
+    }
+}
+
+pub fn load_servers(conn: &Connection) -> anyhow::Result<Vec<BuildServer>> {
+    let mut stmt = conn.prepare(
+        "SELECT name, ssh, key_file, root, min_threads, min_memory_gb, reserve_memory_gb, keep_days
+         FROM build_servers ORDER BY created_at, name",
+    )?;
+    let rows = stmt.query_map([], |r| {
+        Ok(BuildServer {
+            name: r.get(0)?,
+            ssh: r.get(1)?,
+            key_file: r.get(2)?,
+            root: r.get(3)?,
+            min_threads: r.get(4)?,
+            min_memory_gb: r.get(5)?,
+            reserve_memory_gb: r.get(6)?,
+            keep_days: r.get(7)?,
+            ..Default::default()
+        })
+    })?;
+    Ok(rows.collect::<Result<_, _>>()?)
+}
+
+/// Copies the servers in config.toml into the database (once; the Settings page manages them).
+pub fn seed(conn: &Connection, from_config: &[BuildServer]) -> anyhow::Result<()> {
+    for b in from_config {
+        conn.execute(
+            "INSERT OR IGNORE INTO build_servers (name, ssh, key_file, root, min_threads, min_memory_gb, reserve_memory_gb, keep_days, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![b.name, b.ssh, b.key_file, b.root, b.min_threads, b.min_memory_gb, b.reserve_memory_gb, b.keep_days, now_ms()],
+        )?;
+    }
+    Ok(())
+}
+
+/// A name, an ssh target and a work folder AgentFlow accepts.
+pub fn check_server(b: &BuildServer) -> anyhow::Result<()> {
+    let simple =
+        |s: &str| !s.is_empty() && s.len() <= 64 && s.bytes().all(|c| c.is_ascii_alphanumeric() || b"-_.".contains(&c));
+    if !simple(&b.name) {
+        bail!("the name is letters, digits, - _ . (e.g. headquarters)");
+    }
+    let target_ok = !b.ssh.is_empty()
+        && b.ssh.len() <= 200
+        && !b.ssh.starts_with('-')
+        && b.ssh.bytes().all(|c| c.is_ascii_alphanumeric() || b"-_.@:[]".contains(&c));
+    if !target_ok {
+        bail!("connect to user@host, or a Host from ~/.ssh/config");
+    }
+    if !b.root.split('/').all(|p| simple(p) && p != "." && p != "..") {
+        bail!("the work folder is a folder in its home, like agentflow");
+    }
+    if !(b.min_threads >= 0.0 && b.min_memory_gb >= 0.0 && b.reserve_memory_gb >= 0.0 && b.keep_days >= 1) {
+        bail!("the limits can't be negative, and folders are kept at least a day");
+    }
+    Ok(())
+}
+
+pub fn add_server(conn: &Connection, b: &BuildServer) -> anyhow::Result<()> {
+    check_server(b)?;
+    let n = conn.execute(
+        "INSERT OR IGNORE INTO build_servers (name, ssh, key_file, root, min_threads, min_memory_gb, reserve_memory_gb, keep_days, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        params![b.name, b.ssh, b.key_file, b.root, b.min_threads, b.min_memory_gb, b.reserve_memory_gb, b.keep_days, now_ms()],
+    )?;
+    if n == 0 {
+        bail!("there's a build server called {} already", b.name);
+    }
+    Ok(())
+}
+
+pub fn set_limits(conn: &Connection, name: &str, b: &BuildServer) -> anyhow::Result<()> {
+    check_server(b)?;
+    conn.execute(
+        "UPDATE build_servers SET min_threads = ?2, min_memory_gb = ?3, reserve_memory_gb = ?4, keep_days = ?5 WHERE name = ?1",
+        params![name, b.min_threads, b.min_memory_gb, b.reserve_memory_gb, b.keep_days],
+    )?;
+    Ok(())
+}
+
+/// Removes a server; refused while jobs wait or run on it. Projects that picked it build locally.
+pub fn remove_server(conn: &Connection, name: &str) -> anyhow::Result<()> {
+    let busy: i64 = conn.query_row(
+        "SELECT count(*) FROM remote_jobs WHERE server = ?1 AND state IN ('queued', 'running', 'paused')",
+        [name],
+        |r| r.get(0),
+    )?;
+    if busy > 0 {
+        bail!("{name} has jobs waiting or running; cancel them first");
+    }
+    conn.execute("DELETE FROM project_build_server WHERE server = ?1", [name])?;
+    conn.execute("DELETE FROM build_servers WHERE name = ?1", [name])?;
+    Ok(())
+}
+
+/// The build server a project picked, if any.
+pub fn project_server(conn: &Connection, project_id: i64) -> anyhow::Result<Option<String>> {
+    Ok(conn
+        .query_row("SELECT server FROM project_build_server WHERE project_id = ?1", [project_id], |r| r.get(0))
+        .optional()?)
+}
+
+/// Picks a project's build server ("" for none).
+pub fn set_project_server(conn: &Connection, project_id: i64, server: &str) -> anyhow::Result<()> {
+    if server.is_empty() {
+        conn.execute("DELETE FROM project_build_server WHERE project_id = ?1", [project_id])?;
+        return Ok(());
+    }
+    let known: bool =
+        conn.query_row("SELECT EXISTS (SELECT 1 FROM build_servers WHERE name = ?1)", [server], |r| r.get(0))?;
+    if !known {
+        bail!("there's no build server called {server}");
+    }
+    conn.execute(
+        "INSERT INTO project_build_server (project_id, server) VALUES (?1, ?2)
+         ON CONFLICT (project_id) DO UPDATE SET server = excluded.server",
+        params![project_id, server],
+    )?;
+    Ok(())
+}
+
 /// The work folder of a project there, relative to its home.
 fn work_dir(server: &BuildServer, slug: &str) -> String {
     format!("{}/{}", server.root.trim_end_matches('/'), slug)
@@ -433,25 +757,27 @@ fn work_dir(server: &BuildServer, slug: &str) -> String {
 
 /// Runs the scheduler: probes the servers, starts what fits, pauses and resumes for memory.
 pub fn spawn(state: crate::web::AppState) {
-    if state.config.build_servers.is_empty() {
-        return;
-    }
     tokio::spawn(async move {
         if let Err(e) = state.db.call(|c| fail_orphans(c)).await {
             tracing::warn!("build servers: {e:#}");
         }
+        let from_config = state.config.build_servers.clone();
+        if let Err(e) = state.db.call(move |c| seed(c, &from_config)).await {
+            tracing::warn!("build servers: {e:#}");
+        }
+        reload(&state).await;
         let mut last_probe: HashMap<String, i64> = HashMap::new();
         let mut last_cleanup = 0;
         loop {
             tokio::time::sleep(Duration::from_secs(3)).await;
-            for server in state.config.build_servers.clone() {
+            for server in servers(&state) {
                 if let Err(e) = round(&state, &server, &mut last_probe).await {
                     tracing::warn!("build server {}: {e:#}", server.name);
                 }
             }
             if now_ms() - last_cleanup > 24 * 3600 * 1000 {
                 last_cleanup = now_ms();
-                for server in state.config.build_servers.clone() {
+                for server in servers(&state) {
                     let st = state.clone();
                     tokio::spawn(async move {
                         if let Err(e) = cleanup(&st, &server).await {
@@ -527,6 +853,22 @@ async fn round(
                     .or_default()
                     .sizes = sizes;
             }
+        });
+    }
+    // What's installed there, once an hour (and right after setup steps).
+    let tools_due = probe.is_ok() && {
+        let mut live = state.remote.lock().unwrap_or_else(|e| e.into_inner());
+        let s = live.servers.entry(server.name.clone()).or_default();
+        let due = now - s.tools_at > 3_600_000 && !s.setup_running;
+        if due {
+            s.tools_at = now;
+        }
+        due
+    };
+    if tools_due {
+        let (st, srv) = (state.clone(), server.clone());
+        tokio::spawn(async move {
+            let _ = refresh_tools(&st, &srv).await;
         });
     }
     // The first probe can't know CPU use yet; decide on the next one.
@@ -608,7 +950,7 @@ pub async fn cancel(state: &crate::web::AppState, id: i64, by: &str) -> anyhow::
     if job.is_finished() {
         return Ok(());
     }
-    let server = state.config.build_servers.iter().find(|s| s.name == job.server).cloned().context("unknown server")?;
+    let server = servers(state).into_iter().find(|s| s.name == job.server).context("unknown server")?;
     let why = format!("cancelled by {by}");
     let w = why.clone();
     state
@@ -927,12 +1269,13 @@ async fn run_job(state: crate::web::AppState, server: BuildServer, job: Job, thr
     let mem_max = (probe.mem_total_gb - server.reserve_memory_gb).max(mem_high + 2.0).floor();
     let command = job.command_line();
     let script = format!(
-        r#"cd "$HOME"/{workdir} || exit 97
-W=""; command -v sccache >/dev/null 2>&1 && W=1
+        r#"export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
+cd "$HOME"/{workdir} || exit 97
+W=$(command -v sccache 2>/dev/null || true)
 exec systemd-run --user --quiet --wait --pipe --collect --unit=af-job-{id} --working-directory="$PWD" \
   -p CPUWeight=10 -p IOWeight=10 -p Nice=10 -p MemoryHigh={mem_high}G -p MemoryMax={mem_max}G \
-  -E CARGO_TARGET_DIR="$HOME"/{base}/target -E CARGO_BUILD_JOBS={threads} -E CARGO_TERM_COLOR=never -E NO_COLOR=1 \
-  ${{W:+-E RUSTC_WRAPPER=sccache -E SCCACHE_DIR="$HOME"/{root}/.sccache -E SCCACHE_CACHE_SIZE=60G}} \
+  -E PATH="$PATH" -E CARGO_TARGET_DIR="$HOME"/{base}/target -E CARGO_BUILD_JOBS={threads} -E CARGO_TERM_COLOR=never -E NO_COLOR=1 \
+  ${{W:+-E RUSTC_WRAPPER="$W" -E SCCACHE_DIR="$HOME"/{root}/.sccache -E SCCACHE_CACHE_SIZE=60G}} \
   -- sh -c {cmd}
 "#,
         workdir = sh_quote(&workdir),
@@ -948,7 +1291,7 @@ exec systemd-run --user --quiet --wait --pipe --collect --unit=af-job-{id} --wor
     flush(&state, &job, &mut out).await;
 
     let mut cmd = tokio::process::Command::new(&server.ssh_program);
-    cmd.args(ssh_base(&data_dir, 10)).arg(&server.ssh).arg("sh -s");
+    cmd.args(ssh_base(&data_dir, &server, 10)).arg(&server.ssh).arg("sh -s");
     cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
     let mut child = match cmd.spawn() {
         Ok(c) => c,
