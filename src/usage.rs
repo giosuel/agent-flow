@@ -16,7 +16,7 @@ use std::io::{BufRead, BufReader, Read as _, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
 use rusqlite::{Connection, OptionalExtension, params};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::util::expand_home;
 
@@ -38,7 +38,7 @@ struct Message {
     usage: Option<Usage>,
 }
 
-#[derive(Deserialize, Default)]
+#[derive(Deserialize, Serialize, Default)]
 struct Usage {
     #[serde(default)]
     input_tokens: i64,
@@ -135,6 +135,7 @@ pub fn transcripts(root: &Path) -> Vec<PathBuf> {
 }
 
 /// One model call, read from a transcript.
+#[derive(Serialize, Deserialize)]
 pub struct Call {
     id: String,
     at: i64,
@@ -146,6 +147,7 @@ pub struct Call {
 
 /// What's new in one transcript since `offset`. Reads files only, so it runs outside the
 /// database's lock.
+#[derive(Serialize, Deserialize)]
 pub struct Read {
     pub path: String,
     folder: String,

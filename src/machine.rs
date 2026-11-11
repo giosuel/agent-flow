@@ -168,11 +168,11 @@ impl Sampler {
         let first = self.last.is_empty();
         // Which group each Claude session belongs to.
         let mut roots: std::collections::HashMap<i32, String> = Default::default();
-        for (pid, p) in &procs {
-            if p.comm != "claude" {
-                continue;
-            }
-            let Ok(cwd) = std::fs::read_link(format!("/proc/{pid}/cwd")) else { continue };
+        // Another user's working folder isn't readable from /proc: ask as the agents' user.
+        let sessions: Vec<i32> = procs.iter().filter(|(_, p)| p.comm == "claude").map(|(pid, _)| *pid).collect();
+        let cwds: Vec<(i32, std::path::PathBuf)> =
+            crate::hands::run(crate::hands::Job::Cwds { pids: sessions }).unwrap_or_default();
+        for (pid, cwd) in &cwds {
             if let Some((_, slug)) =
                 checkouts.iter().filter(|(dir, _)| cwd.starts_with(dir)).max_by_key(|(d, _)| d.as_os_str().len())
             {
