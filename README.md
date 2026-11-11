@@ -29,6 +29,8 @@ data_dir = "~/.local/state/agentflow"
 trusted_proxies = ["127.0.0.1", "::1"]  # may set X-Forwarded-For (a reverse proxy)
 session_idle_days = 14
 session_max_days = 30
+token_dir = "~/.config/agentflow/tokens"   # project tokens for headersHelper
+push_contact = "mailto:you@example.com"     # the sender contact push services ask for
 ```
 
 ## Behind Caddy (passkeys and push)
@@ -89,4 +91,4 @@ Versions come from the git tags (`scripts/version.sh`, `version.rs`), like MinVe
 ## License
 
 AGPL-3.0-or-later. The IBM Plex fonts in `static/fonts/` are under the SIL Open Font License
-(`static/fonts/OFL.txt`); htmx (`static/htmx.min.js`) is under the BSD Zero Clause License.
+(`static/fonts/OFL.txt`).
