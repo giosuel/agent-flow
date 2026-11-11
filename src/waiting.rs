@@ -37,18 +37,22 @@ pub fn load(conn: &Connection) -> anyhow::Result<Waiting> {
         let urgent = q.data.get("urgent").and_then(Value::as_bool).unwrap_or(false);
         (!urgent, !blocking.contains(&q.id), q.created_at)
     });
-    let merges = records::query(
+    // PRs the agent marked ready and GitHub would merge, and releases whose PRs are all merged.
+    let mut merges: Vec<Record> = records::query(
         conn,
-        &Query {
-            kinds: vec![Kind::Pr, Kind::Release],
-            states: vec!["waiting".into()],
-            limit: 100,
-            ..Default::default()
-        },
+        &Query { kinds: vec![Kind::Pr], states: vec!["open".into()], limit: 500, ..Default::default() },
     )?
     .into_iter()
-    .filter(|r| r.data.get("ready").and_then(Value::as_bool).unwrap_or(r.kind == Kind::Release))
+    .filter(|r| crate::prs::merge_ready(r).is_ok())
     .collect();
+    for r in records::query(
+        conn,
+        &Query { kinds: vec![Kind::Release], states: vec!["waiting".into()], limit: 100, ..Default::default() },
+    )? {
+        if crate::poller::release_ready(conn, &r)? {
+            merges.push(r);
+        }
+    }
     let builds = records::query(
         conn,
         &Query { kinds: vec![Kind::Build], states: vec!["published".into()], limit: 100, ..Default::default() },

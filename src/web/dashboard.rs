@@ -141,9 +141,13 @@ async fn dashboard(
                 .map(|r| Item {
                     icon: icon(if r.kind == Kind::Release { "tag" } else { "merge" }),
                     title: r.title.clone(),
-                    sub: format!("{} · {}", name(&r.project), r.str("status_line")),
-                    url: r.url(),
-                    action: "Open",
+                    sub: if r.kind == Kind::Release {
+                        format!("{} · {} · every PR merged", name(&r.project), r.str("tag"))
+                    } else {
+                        format!("{} · PR-{} · ready, CI {}", name(&r.project), r.number, r.str("ci"))
+                    },
+                    url: if r.kind == Kind::Pr { format!("/p/{}?tab=prs", r.project) } else { r.url() },
+                    action: if r.kind == Kind::Release { "Tag" } else { "Merge" },
                 })
                 .collect();
             let merge_count = merges.len();

@@ -2,6 +2,7 @@
 //! already authenticated the request; each tool reads the identity from the request parts, does
 //! its work and writes its own activity-log row.
 
+mod pr_tools;
 mod project_tools;
 mod record_tools;
 
@@ -51,7 +52,10 @@ pub struct FlowMcp {
 
 impl FlowMcp {
     fn new(state: AppState) -> Self {
-        Self { state, tool_router: Self::tool_router() + Self::project_tools() + Self::record_tools() }
+        Self {
+            state,
+            tool_router: Self::tool_router() + Self::project_tools() + Self::record_tools() + Self::pr_tools(),
+        }
     }
 
     async fn log(&self, actor: &Actor, action: Action, summary: String) {
@@ -69,7 +73,16 @@ impl FlowMcp {
     ) -> Result<CallToolResult, ErrorData> {
         if let Actor::Project { project_id, .. } = actor {
             let id = *project_id;
-            let _ = self.state.db.call(move |c| crate::projects::seen(c, id)).await;
+            // A sign of life; the first call of a new agent also starts its read cursor here.
+            let _ = self
+                .state
+                .db
+                .call(move |c| {
+                    crate::projects::seen(c, id)?;
+                    crate::waiting::cursor(c, id)?;
+                    Ok(())
+                })
+                .await;
         }
         match outcome {
             Ok(o) => {

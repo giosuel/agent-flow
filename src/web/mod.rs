@@ -3,6 +3,7 @@
 
 mod api;
 mod assets;
+mod buttons;
 mod dashboard;
 mod icons;
 mod pages;
@@ -25,6 +26,7 @@ use crate::activity::{self, Action, Entry, Via};
 use crate::auth::{self, Actor, SessionLimits};
 use crate::config::Config;
 use crate::db::Db;
+use crate::github::GitHub;
 use crate::passkey::Passkeys;
 use crate::push::{Pusher, Vapid};
 
@@ -36,13 +38,14 @@ pub struct AppState {
     pub config: Arc<Config>,
     pub passkeys: Passkeys,
     pub push: Pusher,
+    pub github: Arc<dyn GitHub>,
 }
 
 impl AppState {
-    pub fn new(db: Db, config: Config, vapid: Vapid) -> Self {
+    pub fn new(db: Db, config: Config, vapid: Vapid, github: Arc<dyn GitHub>) -> Self {
         let passkeys = Passkeys::new(&config);
         let push = Pusher::new(db.clone(), vapid);
-        Self { db, config: Arc::new(config), passkeys, push }
+        Self { db, config: Arc::new(config), passkeys, push, github }
     }
 
     pub fn limits(&self) -> SessionLimits {
@@ -65,6 +68,7 @@ pub fn router(state: AppState) -> Router {
         .merge(settings::routes())
         .merge(projects::routes())
         .merge(api::routes())
+        .merge(buttons::routes())
         .merge(dashboard::routes())
         .merge(pwa::routes())
         .nest_service("/mcp", mcp)
@@ -83,6 +87,7 @@ pub async fn serve(state: AppState) -> anyhow::Result<()> {
         env!("APP_VERSION"),
         state.config.public_url
     );
+    crate::poller::spawn(state.clone());
     let app = router(state).into_make_service_with_connect_info::<SocketAddr>();
     axum::serve(listener, app).with_graceful_shutdown(shutdown_signal()).await?;
     Ok(())

@@ -1,0 +1,16 @@
+<div class="button-box">
+  <div class="row wrap">
+    <form method="post" action="/actions/{{ b.id }}/run">
+      <input type="hidden" name="hash" value="{{ b.hash }}">
+      <input type="hidden" name="next" value="{{ next }}">
+      <button class="btn sm" type="submit"{% if !b.enabled %} disabled{% endif %} data-confirm="Run &quot;{{ b.label }}&quot;? It runs the command below in {{ b.workdir }}.">{{ b.label }}</button>
+    </form>
+    {% if !b.why.is_empty() %}<span class="sub">{{ b.why }}</span>{% endif %}
+    {% if !b.result.is_empty() %}<span class="sub{% if b.state == "failed" %} bad-text{% endif %}">{{ b.result }}</span>{% endif %}
+  </div>
+  <details class="cmd-box"><summary class="sub">Show command</summary>
+    <pre class="cmd mono">{{ b.command }}</pre>
+    <p class="sub">Runs in {{ b.workdir }} · added by {{ b.added_by }}</p>
+  </details>
+  {% if !b.output.is_empty() %}<details class="cmd-box"{% if b.state == "failed" %} open{% endif %}><summary class="sub">Output</summary><pre class="cmd mono">{{ b.output }}</pre></details>{% endif %}
+</div>
