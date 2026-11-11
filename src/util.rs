@@ -49,11 +49,12 @@ pub fn ago(then_ms: i64, now_ms: i64) -> String {
     }
 }
 
-/// UTC timestamp for logs and exports, e.g. `2026-11-11 01:30:05`.
+/// RFC 3339 UTC, "2026-11-11T01:30:05Z": what agents, the API, the CLI and exports get. Pages
+/// show the owner's own time zone instead (see [`crate::tz`]).
 pub fn fmt_utc(ms: i64) -> String {
     let t = time::OffsetDateTime::from_unix_timestamp_nanos(ms as i128 * 1_000_000)
         .unwrap_or(time::OffsetDateTime::UNIX_EPOCH);
-    let f = time::macros::format_description!("[year]-[month]-[day] [hour]:[minute]:[second]");
+    let f = time::macros::format_description!("[year]-[month]-[day]T[hour]:[minute]:[second]Z");
     t.format(&f).unwrap_or_default()
 }
 
@@ -73,14 +74,6 @@ pub fn fmt_count(n: i64) -> String {
 /// "02:04" (UTC).
 pub fn fmt_hm(ms: i64) -> String {
     fmt_utc(ms).get(11..16).unwrap_or("").to_owned()
-}
-
-/// "11 Nov 02:04" (UTC): unambiguous, short, for histories and lists.
-pub fn fmt_short(ms: i64) -> String {
-    let t = time::OffsetDateTime::from_unix_timestamp_nanos(ms as i128 * 1_000_000)
-        .unwrap_or(time::OffsetDateTime::UNIX_EPOCH);
-    let f = time::macros::format_description!("[day padding:none] [month repr:short] [hour]:[minute]");
-    t.format(&f).unwrap_or_default()
 }
 
 /// "2026-11-06" (UTC).
