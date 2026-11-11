@@ -211,15 +211,22 @@ async fn usage_round(state: &AppState) -> anyhow::Result<crate::usage::Stats> {
         let (offset, first_at) = state.db.call(move |c| crate::usage::file_state(c, &p)).await?;
         let r = root.clone();
         let shown = path.display().to_string();
-        let read =
-            match tokio::task::spawn_blocking(move || crate::usage::read_new(&r, &path, offset, first_at)).await? {
-                Ok(read) => read,
-                // Deleted meanwhile (Claude Code cleans up old ones), or unreadable: the rest go on.
-                Err(e) => {
+        let read = match tokio::task::spawn_blocking(move || crate::usage::read_new(&r, &path, offset, first_at))
+            .await?
+        {
+            Ok(read) => read,
+            // Deleted meanwhile (Claude Code cleans up old ones) is expected; anything else is
+            // worth a warning. Either way the rest go on.
+            Err(e) => {
+                let gone = e.downcast_ref::<std::io::Error>().is_some_and(|e| e.kind() == std::io::ErrorKind::NotFound);
+                if gone {
                     tracing::debug!("token usage: {shown}: {e:#}");
-                    continue;
+                } else {
+                    tracing::warn!("token usage: {shown}: {e:#}");
                 }
-            };
+                continue;
+            }
+        };
         if let Some(read) = read {
             let n = state.db.call(move |c| crate::usage::store(c, &read)).await?;
             if n > 0 {
@@ -280,21 +287,21 @@ fn client_ip(config: &Config, peer: Option<IpAddr>, headers: &HeaderMap) -> Stri
     peer.to_string()
 }
 
-/// Works out the identity of every request and refuses anonymous ones.
-/// A token used from two addresses within ten minutes: a warning in the log every time, and an
-/// urgent notification once a day per token.
+/// A token used from two addresses within ten minutes: a warning in the log and an urgent
+/// notification, once a day per token (a token that keeps alternating would otherwise write one
+/// on every request).
 async fn two_places(state: &AppState, actor: &Actor, other: &str, here: &str) {
+    let Some(id) = actor.token_id() else { return };
+    let day = crate::util::now_ms() / 86_400_000;
+    if crate::util::lock(&state.two_places).insert(id, day) == Some(day) {
+        return;
+    }
     let what = format!(
         "{}'s token was used from {other} and {here} within ten minutes; if one of them isn't its agent, rotate it in Settings",
         actor.name()
     );
     let e = Entry::new(actor, Via::Api, Action::System, what.clone()).severity("warn").ip(Some(here.to_owned()));
     activity::write(&state.db, e).await;
-    let Some(id) = actor.token_id() else { return };
-    let day = crate::util::now_ms() / 86_400_000;
-    if crate::util::lock(&state.two_places).insert(id, day) == Some(day) {
-        return;
-    }
     state.push.spawn(
         crate::push::Kind::Urgent,
         crate::push::Notification {
@@ -306,6 +313,7 @@ async fn two_places(state: &AppState, actor: &Actor, other: &str, here: &str) {
     );
 }
 
+/// Works out the identity of every request and refuses anonymous ones.
 async fn authenticate(State(state): State<AppState>, jar: CookieJar, mut req: Request, next: Next) -> Response {
     let peer = req.extensions().get::<ConnectInfo<SocketAddr>>().map(|c| c.0.ip());
     let ip = client_ip(&state.config, peer, req.headers());

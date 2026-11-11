@@ -151,8 +151,11 @@ async fn page(
     let x_labels: Vec<String> = (0..5)
         .map(|i| {
             let t = from + span * i / 4;
-            let s = crate::util::fmt_utc(t);
-            if range == "7d" { s[5..10].to_owned() } else { s[11..16].to_owned() }
+            if range == "7d" {
+                crate::util::fmt_date(t).get(5..).unwrap_or("").to_owned()
+            } else {
+                crate::util::fmt_hm(t)
+            }
         })
         .collect();
 

@@ -608,7 +608,7 @@ fn build_project_page(
                     .map(|(i, n)| {
                         let day = crate::usage::day_start(now) - (6 - i as i64) * crate::usage::DAY;
                         let h = if *n == 0 { 0 } else { ((*n * 100 / max) as u32).max(4) };
-                        (h, format!("{}: {} new tokens", &crate::util::fmt_utc(day)[..10], crate::usage::short(*n)))
+                        (h, format!("{}: {} new tokens", crate::util::fmt_date(day), crate::usage::short(*n)))
                     })
                     .collect()
             },

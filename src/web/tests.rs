@@ -1098,11 +1098,52 @@ async fn a_token_in_two_places_is_reported() {
     let s = TestServer::start().await;
     let token = s.token(TokenKind::Project, Some("vinculum")).await;
     // The test server's peer is a trusted proxy, so it may say who the client is.
-    for from in ["10.0.8.1", "203.0.113.7"] {
+    for from in ["10.0.8.1", "203.0.113.7", "10.0.8.1", "203.0.113.7"] {
         let res =
             s.http.get(s.url("/api/whoami")).bearer_auth(&token).header("x-forwarded-for", from).send().await.unwrap();
         assert_eq!(res.status(), StatusCode::OK);
     }
     let log = s.log_summaries().await;
     assert!(log.iter().any(|l| l.contains("used from 10.0.8.1 and 203.0.113.7")), "{log:?}");
+    assert_eq!(
+        log.iter().filter(|l| l.contains("within ten minutes")).count(),
+        1,
+        "once a day, however often it alternates"
+    );
+}
+
+#[tokio::test]
+async fn only_the_owner_starts_a_project_and_slugs_stay_unique() {
+    let s = TestServer::start().await;
+    let token = s.token(TokenKind::Admin, None).await;
+    let res = s.http.get(s.url("/projects/new")).bearer_auth(&token).send().await.unwrap();
+    assert_eq!(res.status(), StatusCode::FORBIDDEN);
+    s.token(TokenKind::Project, Some("vinculum")).await;
+    let cookie = s.owner_cookie().await;
+    // A taken slug is refused before anything is created; the form keeps what was typed.
+    let html = s
+        .http
+        .post(s.url("/projects/new"))
+        .header(COOKIE, &cookie)
+        .header(ORIGIN, &s.base)
+        .form(&[("name", "Vinculum"), ("folder", "~/x-agentflow-test-never-created"), ("description", "kept")])
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(html.contains("exists already") && html.contains("kept"), "{html}");
+    assert!(!crate::util::home_dir().join("x-agentflow-test-never-created").exists());
+    // And from another site, not at all.
+    let res = s
+        .http
+        .post(s.url("/projects/new"))
+        .header(COOKIE, &cookie)
+        .header(ORIGIN, "https://evil.example")
+        .form(&[("name", "Evil")])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::FORBIDDEN);
 }

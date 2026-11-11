@@ -129,17 +129,26 @@ pub fn spawn(state: crate::web::AppState) {
         loop {
             tick.tick().await;
             let data = state.config.data_dir();
-            let date = fmt_utc(crate::util::now_ms())[..10].to_owned();
+            let date = crate::util::fmt_date(crate::util::now_ms());
             let result = state
                 .db
                 .call(move |c| {
                     let made = backup(c, &data, &date)?;
-                    let exported = if made.is_some() { export(c, &data)? } else { 0 };
+                    // Exported apart from the backup, so a failed export is tried again next hour.
+                    let marker = data.join("export").join(".last");
+                    let exported = if std::fs::read_to_string(&marker).ok().as_deref() != Some(date.as_str()) {
+                        let n = export(c, &data)?;
+                        std::fs::write(&marker, &date)?;
+                        n
+                    } else {
+                        0
+                    };
                     Ok((made, exported))
                 })
                 .await;
             match result {
                 Ok((Some(path), n)) => tracing::info!("backed up to {} and exported {n} projects", path.display()),
+                Ok((None, n)) if n > 0 => tracing::info!("exported {n} projects"),
                 Ok((None, _)) => {}
                 Err(e) => tracing::warn!("backup: {e:#}"),
             }

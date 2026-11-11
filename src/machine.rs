@@ -244,10 +244,15 @@ pub fn store(c: &rusqlite::Connection, at: i64, shares: &[(String, Share)]) -> a
     Ok(())
 }
 
-/// Average cores and memory per (bucket, group) from `from`, buckets of `step` ms.
+/// Average cores and memory per (bucket, group) from `from`, buckets of `step` ms. A group has
+/// rows only in minutes it had processes, so the average is over every sample of the bucket:
+/// an agent busy for one minute of fifteen counts a fifteenth.
 pub fn history(c: &rusqlite::Connection, from: i64, step: i64) -> anyhow::Result<Vec<(i64, String, f64, f64)>> {
     let mut stmt = c.prepare(
-        "SELECT (at - ?1) / ?2, grp, avg(cores), avg(mem_kb) FROM machine_samples WHERE at >= ?1 GROUP BY 1, 2 ORDER BY 1",
+        "WITH s AS (SELECT (at - ?1) / ?2 AS b, at, grp, cores, mem_kb FROM machine_samples WHERE at >= ?1),
+              n AS (SELECT b, count(DISTINCT at) AS k FROM s GROUP BY b)
+         SELECT s.b, s.grp, sum(s.cores) / n.k, sum(s.mem_kb) * 1.0 / n.k FROM s JOIN n USING (b)
+         GROUP BY s.b, s.grp ORDER BY s.b",
     )?;
     let rows = stmt.query_map(rusqlite::params![from, step], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?;
     Ok(rows.collect::<Result<_, _>>()?)
@@ -282,6 +287,23 @@ mod tests {
     fn stat_lines_with_odd_names() {
         let p = super::parse_stat("4242 (tokio (rt) x) S 7 4242 4242 0 -1 4194304 1 0 0 0 150 50 0 0 20 0 9 0 100 123456 2500 18446744073709551615").unwrap();
         assert_eq!((p.ppid, p.comm.as_str(), p.ticks, p.rss_kb), (7, "tokio (rt) x", 200, 10_000));
+    }
+
+    #[test]
+    fn history_averages_over_every_sample() {
+        let db = crate::db::Db::open_memory();
+        db.call_blocking(|c| {
+            let share = |cores: f64| super::Share { cores, mem_kb: 1024, top: String::new() };
+            // Three minutes; the agent only has processes in the first.
+            super::store(c, 0, &[("machine".into(), share(1.0)), ("vinculum".into(), share(3.0))])?;
+            super::store(c, 60_000, &[("machine".into(), share(1.0))])?;
+            super::store(c, 120_000, &[("machine".into(), share(1.0))])?;
+            let h = super::history(c, 0, 180_000)?;
+            let v = h.iter().find(|r| r.1 == "vinculum").unwrap();
+            assert!((v.2 - 1.0).abs() < 1e-9, "3 cores for a third of the bucket: {v:?}");
+            Ok(())
+        })
+        .unwrap();
     }
 
     #[test]

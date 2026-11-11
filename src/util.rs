@@ -11,7 +11,6 @@ pub fn now_ms() -> i64 {
     d.as_millis() as i64
 }
 
-/// A random secret with a readable prefix, e.g. `af_dev_…`. 32 random bytes, so guessing one is hopeless.
 /// Locks a std mutex, also after a panic elsewhere poisoned it: what's kept behind these (caches,
 /// counters, pending ceremonies) is still usable, and one panic shouldn't take every page down.
 pub fn lock<T>(m: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -23,6 +22,7 @@ pub fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
+/// A random secret with a readable prefix, e.g. `af_dev_…`. 32 random bytes, so guessing one is hopeless.
 pub fn new_secret(prefix: &str) -> String {
     let mut bytes = [0u8; 32];
     rand::rng().fill_bytes(&mut bytes);
@@ -55,6 +55,11 @@ pub fn fmt_utc(ms: i64) -> String {
         .unwrap_or(time::OffsetDateTime::UNIX_EPOCH);
     let f = time::macros::format_description!("[year]-[month]-[day] [hour]:[minute]:[second]");
     t.format(&f).unwrap_or_default()
+}
+
+/// "02:04" (UTC).
+pub fn fmt_hm(ms: i64) -> String {
+    fmt_utc(ms).get(11..16).unwrap_or("").to_owned()
 }
 
 /// "11 Nov 02:04" (UTC): unambiguous, short, for histories and lists.

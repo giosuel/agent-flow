@@ -155,7 +155,7 @@ pub struct Read {
     first_at: Option<i64>,
 }
 
-/// Where the last round stopped in this file, and its first call's time.
+/// Where the last round stopped in this file, and (for a subagent) the time of its first own call.
 pub fn file_state(conn: &Connection, path: &Path) -> anyhow::Result<(u64, Option<i64>)> {
     Ok(conn
         .query_row("SELECT offset, first_at FROM usage_files WHERE path = ?1", [path.to_string_lossy()], |r| {
@@ -199,7 +199,6 @@ pub fn read_new(root: &Path, path: &Path, offset: u64, first_at: Option<i64>) ->
         if line.kind != "assistant" {
             continue;
         }
-        out.first_at.get_or_insert(at);
         out.calls.push(Call {
             id,
             at,
@@ -219,10 +218,20 @@ pub fn store(conn: &mut Connection, read: &Read) -> anyhow::Result<usize> {
     let mut touches: HashMap<i64, Vec<(i64, i64)>> = HashMap::new();
     let tx = conn.transaction()?;
     let mut calls = 0;
+    let mut first_at = read.first_at;
     for c in &read.calls {
         let project_id = checkouts.project(&c.cwd, &read.folder);
-        // A subagent works for the task its session was on when it started.
-        let when = if read.subagent { read.first_at.unwrap_or(c.at) } else { c.at };
+        // A subagent works for the task its session was on when it started: when it made its
+        // first call of its own. Its transcript opens with copies of its parent's calls, which
+        // carry the parent's older times.
+        if read.subagent && first_at.is_none() {
+            let repeated: bool =
+                tx.query_row("SELECT EXISTS (SELECT 1 FROM usage WHERE message_id = ?1)", [&c.id], |r| r.get(0))?;
+            if !repeated {
+                first_at = Some(c.at);
+            }
+        }
+        let when = if read.subagent { first_at.unwrap_or(c.at) } else { c.at };
         let task = match project_id {
             Some(p) => {
                 if let std::collections::hash_map::Entry::Vacant(e) = touches.entry(p) {
@@ -256,7 +265,7 @@ pub fn store(conn: &mut Connection, read: &Read) -> anyhow::Result<usize> {
     tx.execute(
         "INSERT INTO usage_files (path, offset, first_at) VALUES (?1, ?2, ?3)
          ON CONFLICT (path) DO UPDATE SET offset = excluded.offset, first_at = coalesce(first_at, excluded.first_at)",
-        params![read.path, read.offset as i64, read.first_at],
+        params![read.path, read.offset as i64, first_at],
     )?;
     tx.commit()?;
     Ok(calls)
@@ -266,7 +275,10 @@ pub fn store(conn: &mut Connection, read: &Read) -> anyhow::Result<usize> {
 /// project the rest of their session works for (one agent per project, so a session is one
 /// project's, even the part spent in a directory of an older name).
 pub fn assign_projects(conn: &Connection) -> anyhow::Result<()> {
-    for (dir, folder, id) in Checkouts::load(conn)?.0 {
+    // Deepest checkouts first, as for new calls, so a nested checkout keeps its own calls.
+    let mut checkouts = Checkouts::load(conn)?.0;
+    checkouts.sort_by_key(|(dir, _, _)| std::cmp::Reverse(dir.as_os_str().len()));
+    for (dir, folder, id) in checkouts {
         let dir = dir.to_string_lossy().to_string();
         conn.execute(
             "UPDATE usage SET project_id = ?1 WHERE project_id IS NULL
@@ -345,7 +357,7 @@ impl Tokens {
         self.input + self.cache_write + self.output
     }
 
-    fn add(&mut self, o: &Tokens) {
+    pub fn add(&mut self, o: &Tokens) {
         self.calls += o.calls;
         self.input += o.input;
         self.cache_write += o.cache_write;
@@ -556,13 +568,16 @@ mod tests {
             };
             assert_eq!(task_of("m1"), Some(t1.id));
             assert_eq!(task_of("m3"), Some(t2.id), "the session moved on to T-2");
-            // The subagent started at 01:00 (its first call), while the session was on T-1.
-            assert_eq!(task_of("m2"), Some(t1.id));
+            // The subagent's transcript opens with a copy of its parent's 01:00 call; its own first
+            // call is at 03:00, when the session was on T-2.
+            assert_eq!(task_of("m2"), Some(t2.id));
 
             let tasks = per_task(c, 0, i64::MAX)?;
             let first = tasks.iter().find(|t| t.task_id == Some(t1.id)).unwrap();
-            assert_eq!((first.main.calls, first.subagents.calls), (1, 1));
-            assert_eq!(first.total().new_tokens(), 5 + 110 + 7 + 110);
+            assert_eq!((first.main.calls, first.subagents.calls), (1, 0));
+            assert_eq!(first.total().new_tokens(), 5 + 110);
+            let second = tasks.iter().find(|t| t.task_id == Some(t2.id)).unwrap();
+            assert_eq!((second.main.calls, second.subagents.calls), (1, 1), "m3, and the subagent's m2");
             let rows = per_project(c, 0, i64::MAX)?;
             assert_eq!(
                 rows,
