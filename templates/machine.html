@@ -1,15 +1,16 @@
 {% extends "base.html" %}
 {% block title %}Machine{% endblock %}
+{% block scripts %}<script src="/static/machine.js?v={{ nav.version }}" defer></script>{% endblock %}
 {% block content %}
 <div class="head">
   <h1>Machine</h1>
-  <p class="status-line">The server AgentFlow runs on, and how the agents use it: {{ host }}. Sampled every minute.</p>
+  <p class="status-line">The server AgentFlow runs on, and how the agents use it: {{ host }}. The figures update every 5 seconds, the charts every minute.</p>
 </div>
-<div class="tiles">
+<div class="tiles" id="tiles" aria-live="off">
   {% for t in tiles %}<div class="card pad tile{% if t.warn %} warn-card{% endif %}"><span class="label">{{ t.label }}</span><strong class="tile-v mono">{{ t.value }}</strong></div>{% endfor %}
 </div>
 
-<section class="card pad stack" aria-labelledby="hist-h">
+<section class="card pad stack" aria-labelledby="hist-h" id="hist">
   <div class="sec wrap"><h2 id="hist-h">By project</h2>
     <span class="ranges" role="group" aria-label="Time range">{% for (k, label, on) in ranges %}<a class="rng{% if *on %} on{% endif %}" href="/machine?range={{ k }}"{% if *on %} aria-current="true"{% endif %}>{{ label }}</a>{% endfor %}</span>
   </div>
