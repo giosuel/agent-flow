@@ -39,6 +39,7 @@ impl Via {
 pub enum Action {
     Read,
     Write,
+    Message,
     Run,
     Login,
     Push,
@@ -52,6 +53,7 @@ impl Action {
         match self {
             Action::Read => "read",
             Action::Write => "write",
+            Action::Message => "message",
             Action::Run => "run",
             Action::Login => "login",
             Action::Push => "push",
