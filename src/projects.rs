@@ -162,6 +162,8 @@ pub fn create(conn: &Connection, slug: &str, name: &str, actor: &str) -> anyhow:
     .with_context(|| format!("project {slug} exists already"))?;
     let id = conn.last_insert_rowid();
     event(conn, Some(id), None, "project.created", &format!("Project {name} added"), actor)?;
+    // The project's agent reads its feed from here on, whatever it uses first (MCP, the API).
+    crate::waiting::cursor(conn, id)?;
     get_by_id(conn, id)
 }
 
