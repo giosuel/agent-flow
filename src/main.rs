@@ -5,6 +5,7 @@
 mod actions;
 mod activity;
 mod auth;
+mod builds;
 mod cli;
 mod config;
 mod db;
