@@ -93,7 +93,9 @@ async fn dashboard(
     State(state): State<AppState>,
     Extension(actor): Extension<Actor>,
     Query(q): Query<DashQuery>,
+    tz: crate::tz::Tz,
 ) -> AppResult<Response> {
+    let today = tz.long(crate::util::now_ms());
     let now = now_ms();
     let answered = q.answered.clone();
     // The guides' open pull requests, from the poller's cache.
@@ -198,7 +200,7 @@ async fn dashboard(
                 .filter(|e| seen.insert((e.summary.clone(), e.actor.clone(), e.at / 1000)))
                 .take(12)
                 .map(|e| Activity {
-                    time: crate::util::fmt_utc(e.at).get(11..16).unwrap_or("").into(),
+                    time: tz.hm(e.at),
                     who: match e.actor.as_str() {
                         "owner" => "you".into(),
                         a => names.get(a).cloned().unwrap_or_else(|| a.to_owned()),
@@ -267,15 +269,13 @@ async fn dashboard(
         })
         .await?;
     let (featured, groups, merge_count, activity, projects, agents, online, warnings, notice) = data;
-    let today = time::OffsetDateTime::now_utc();
-    let f = time::macros::format_description!("[weekday] [day padding:none] [month repr:long] · [hour]:[minute] UTC");
     render(DashboardPage {
         nav: nav(&state, &actor, "/").await,
         online,
         agents,
         machine: machine::snapshot().summary(),
         warnings,
-        today: today.format(&f).unwrap_or_default(),
+        today,
         notice,
         featured,
         groups,

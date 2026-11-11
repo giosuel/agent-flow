@@ -14,7 +14,8 @@ use super::{AppError, AppResult, AppState, ClientIp};
 use crate::activity::{self, Action, Entry, Via};
 use crate::auth::Actor;
 use crate::messages::{self, OWNER};
-use crate::util::{ago, fmt_short, now_ms};
+use crate::tz::Tz;
+use crate::util::{ago, now_ms};
 use crate::{markdown, records};
 
 pub fn routes() -> Router<AppState> {
@@ -85,6 +86,7 @@ async fn page(
     State(state): State<AppState>,
     Extension(actor): Extension<Actor>,
     Query(q): Query<PageQuery>,
+    tz: Tz,
 ) -> AppResult<Response> {
     actor.require_owner()?;
     let now = now_ms();
@@ -130,7 +132,7 @@ async fn page(
             (
                 t.id,
                 t.subject.clone(),
-                format!("{} · started {}", members_line(&names, &t.started_by, &t.members), fmt_short(t.created_at)),
+                format!("{} · started {}", members_line(&names, &t.started_by, &t.members), tz.short(t.created_at)),
             )
         }),
         messages: msgs
@@ -138,7 +140,7 @@ async fn page(
             .map(|m| MessageView {
                 mine: m.sender == OWNER,
                 sender: if m.sender == OWNER { "You".into() } else { display(&names, &m.sender) },
-                at: fmt_short(m.created_at),
+                at: tz.short(m.created_at),
                 kind: m.kind.clone(),
                 body_html: markdown::to_html(&m.body),
             })

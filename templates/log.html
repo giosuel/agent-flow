@@ -32,7 +32,7 @@
       {% for b in bars %}<a href="{{ b.href }}" title="{{ b.label }}" aria-label="{{ b.label }}"><i style="height: {{ b.height }}%"></i></a>{% endfor %}
     </div>
     <div class="axis sub mono">{% for a in axis %}<span>{{ a }}</span>{% endfor %}</div>
-    <p class="sub">Newest first · times in UTC</p>
+    <p class="sub">Newest first · times in {{ tz }}</p>
     <ol class="plain entries" id="entries">
       {% for e in entries %}
       <li><details class="entry sev-{{ e.severity }}">

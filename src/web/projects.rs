@@ -19,7 +19,8 @@ use crate::auth::Actor;
 use crate::markdown;
 use crate::projects::{self, Milestone, Project};
 use crate::records::{self, Kind, Record};
-use crate::util::{ago, fmt_utc, now_ms};
+use crate::tz::Tz;
+use crate::util::{ago, now_ms};
 
 pub fn routes() -> Router<AppState> {
     Router::new()
@@ -297,6 +298,7 @@ async fn project(
     Extension(actor): Extension<Actor>,
     Path(slug): Path<String>,
     Query(q): Query<TabQuery>,
+    tz: Tz,
 ) -> AppResult<Response> {
     let (notice, notice_bad) = press_notice(&q);
     let tab = q.tab.filter(|t| TABS.iter().any(|(k, _)| k == t)).unwrap_or_else(|| "overview".into());
@@ -308,7 +310,7 @@ async fn project(
             let Some(p) = projects::get(c, &slug)? else { return Ok(None) };
             let ms = projects::milestones(c, p.id)?;
             let all = records::query(c, &records::Query { project_id: Some(p.id), limit: 0, ..Default::default() })?;
-            Ok(Some(build_project_page(c, p, ms, all, &t, now)?))
+            Ok(Some(build_project_page(c, p, ms, all, &t, now, &tz)?))
         })
         .await?
         .ok_or(AppError::NotFound)?;
@@ -331,8 +333,10 @@ fn build_project_page(
     all: Vec<Record>,
     tab: &str,
     now: i64,
+    tz: &Tz,
 ) -> anyhow::Result<ProjectPage> {
-    let week = crate::usage::project_days(c, p.id, crate::usage::day_start(now), 7)?;
+    let week_days = tz.days(now, 7);
+    let week = crate::usage::project_days(c, p.id, &week_days)?;
     let online = p.agent.online(now);
     let headline = {
         let mut parts = Vec::new();
@@ -498,7 +502,7 @@ fn build_project_page(
         let sub = match r.kind {
             Kind::Decision => format!(
                 "{} · {}",
-                crate::util::fmt_date(r.data.get("said_at").and_then(Value::as_i64).unwrap_or(r.created_at)),
+                tz.date(r.data.get("said_at").and_then(Value::as_i64).unwrap_or(r.created_at)),
                 r.state
             ),
             Kind::Question if r.state == "answered" => format!("answered {}", ago(r.updated_at, now)),
@@ -641,9 +645,8 @@ fn build_project_page(
                 week.iter()
                     .enumerate()
                     .map(|(i, n)| {
-                        let day = crate::usage::day_start(now) - (6 - i as i64) * crate::usage::DAY;
                         let h = if *n == 0 { 0 } else { ((*n * 100 / max) as u32).max(4) };
-                        (h, format!("{}: {} new tokens", crate::util::fmt_date(day), crate::usage::short(*n)))
+                        (h, format!("{}: {} new tokens", tz.date(week_days[i]), crate::usage::short(*n)))
                     })
                     .collect()
             },
@@ -747,6 +750,7 @@ async fn record(
     Extension(actor): Extension<Actor>,
     Path((slug, id)): Path<(String, String)>,
     Query(q): Query<RecordQuery>,
+    tz: Tz,
 ) -> AppResult<Response> {
     // Only fixed messages come from the address, never text from it.
     let error = q.error.as_deref().map(|code| match code {
@@ -755,7 +759,7 @@ async fn record(
         "empty" => "Pick an option or write an answer.".to_owned(),
         _ => "That didn't work; nothing was saved. Try again.".to_owned(),
     });
-    let mut page = load_record_page(&state, &actor, slug, id, error).await?;
+    let mut page = load_record_page(&state, &actor, slug, id, error, tz).await?;
     if let Some(b) = page.build.as_mut() {
         b.sent = q.sent == Some(1);
     }
@@ -768,6 +772,7 @@ async fn load_record_page(
     slug: String,
     id: String,
     error: Option<String>,
+    tz: Tz,
 ) -> AppResult<RecordPage> {
     let now = now_ms();
     let is_owner = actor.is_owner();
@@ -859,7 +864,7 @@ async fn load_record_page(
     }
 
     let words_line = if r.kind == Kind::Decision {
-        let said = r.data.get("said_at").and_then(Value::as_i64).map(fmt_utc).unwrap_or_default();
+        let said = r.data.get("said_at").and_then(Value::as_i64).map(|t| tz.full(t)).unwrap_or_default();
         let answers = links
             .iter()
             .find(|l| l.relation == "answers" && l.outgoing)
@@ -870,7 +875,7 @@ async fn load_record_page(
         String::new()
     };
     let answer_line = match r.data.get("answered_at").and_then(Value::as_i64) {
-        Some(t) => format!("answered {} ({} UTC)", ago(t, now), fmt_utc(t).get(..16).unwrap_or("")),
+        Some(t) => format!("answered {} ({})", ago(t, now), tz.full(t).get(..16).unwrap_or("")),
         None => String::new(),
     };
 
@@ -897,7 +902,7 @@ async fn load_record_page(
         stale,
         history: history
             .iter()
-            .map(|h| HistoryRow { rev: h.rev, at: crate::util::fmt_short(h.at), text: describe_revision(h, &r) })
+            .map(|h| HistoryRow { rev: h.rev, at: tz.short(h.at), text: describe_revision(h, &r) })
             .collect(),
         error,
         buttons,

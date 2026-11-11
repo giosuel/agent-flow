@@ -80,6 +80,7 @@ async fn page(
     State(state): State<AppState>,
     Extension(actor): Extension<Actor>,
     Query(q): Query<MachineQuery>,
+    tz: crate::tz::Tz,
 ) -> AppResult<Response> {
     actor.require_owner()?;
     let now = now_ms();
@@ -90,7 +91,7 @@ async fn page(
     };
     let n = (span / step) as usize;
     let from = now - span;
-    let today = crate::usage::day_start(now);
+    let today = tz.day_start(now);
     let (projects, history, summary, first) = state
         .db
         .call(move |c| {
@@ -156,11 +157,7 @@ async fn page(
     let x_labels: Vec<String> = (0..5)
         .map(|i| {
             let t = from + span * i / 4;
-            if range == "7d" {
-                crate::util::fmt_date(t).get(5..).unwrap_or("").to_owned()
-            } else {
-                crate::util::fmt_hm(t)
-            }
+            if range == "7d" { tz.date(t).get(5..).unwrap_or("").to_owned() } else { tz.hm(t) }
         })
         .collect();
 
@@ -190,8 +187,8 @@ async fn page(
         sampled: !history.is_empty(),
         collecting: first.filter(|f| *f > from + step).map(|f| {
             format!(
-                "Collecting since {} UTC ({} so far); the chart fills in as it goes.",
-                crate::util::fmt_hm(f),
+                "Collecting since {} ({} so far); the chart fills in as it goes.",
+                tz.hm(f),
                 crate::util::ago(f, now).trim_end_matches(" ago")
             )
         }),
