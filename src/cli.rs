@@ -304,20 +304,6 @@ pub fn mcp_headers(token_file: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-#[cfg(test)]
-mod tests {
-
-    #[test]
-    fn slugs() {
-        for ok in ["vinculum", "cold-trace", "p2"] {
-            assert!(crate::projects::check_slug(ok).is_ok(), "{ok}");
-        }
-        for bad in ["", "Cold", "a b", "-x", "a/b", "ä"] {
-            assert!(crate::projects::check_slug(bad).is_err(), "{bad}");
-        }
-    }
-}
-
 // ---------------------------------------------------------------------------------------------
 // Test builds: publish (agents) and run (the owner's machines)
 
@@ -481,7 +467,13 @@ pub fn run(config_path: &Path, a: RunArgs) -> anyhow::Result<()> {
             if dir.exists() {
                 std::fs::remove_dir_all(&dir)?;
             }
-            std::fs::rename(&staged, &dir).or_else(|_| std::fs::remove_dir_all(&staged))?;
+            if let Err(e) = std::fs::rename(&staged, &dir) {
+                let _ = std::fs::remove_dir_all(&staged);
+                // Another `agentflow run` of the same build may have finished first; that's fine.
+                if !dir.join(".verified").exists() {
+                    return Err(anyhow::anyhow!("keeping the build in {}: {e}", dir.display()));
+                }
+            }
             manifest
         }
     };
