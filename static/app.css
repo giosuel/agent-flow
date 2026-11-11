@@ -367,3 +367,4 @@ button.opt { font: inherit; color: var(--ink); text-align: left; width: 100%; }
 .edetail { padding: 8px 12px 14px; background: var(--inset); border-radius: 6px; margin-bottom: 8px; display: flex; flex-direction: column; gap: 8px; }
 .edetail .kv { font-size: 12px; }
 .edetail dd { white-space: pre-wrap; }
+@media (max-width: 700px) { .split.logs .split-side { order: 1; } }
