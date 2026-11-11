@@ -1270,7 +1270,8 @@ async fn projects_are_archived_and_restored() {
     let list = get("/projects").await;
     assert!(!list.contains("/p/vinculum\"") && list.contains("1 archived"), "{list}");
     assert!(get("/projects?archived=1").await.contains("/p/vinculum\""));
-    assert!(get("/p/vinculum").await.contains("Restore the project"));
+    assert!(get("/p/vinculum").await.contains("Restore it in Settings"));
+    assert!(get("/p/vinculum?tab=settings").await.contains("Restore the project"));
     // Only the owner, and only these two.
     let res = s
         .http
@@ -1300,4 +1301,53 @@ async fn the_demo_project_shows_on_every_tab() {
     assert!(shots.text().await.unwrap().contains("Album sidebar, variant A"));
     let img = s.http.get(s.url("/p/lumen-demo/S-1/image")).header(COOKIE, &cookie).send().await.unwrap();
     assert_eq!(img.headers()["content-type"], "image/png");
+}
+
+#[tokio::test]
+async fn the_owner_edits_a_projects_details() {
+    let s = TestServer::start().await;
+    let token = s.token(TokenKind::Project, Some("vinculum")).await;
+    let cookie = s.owner_cookie().await;
+    let save = |fields: Vec<(&'static str, &'static str)>| {
+        let (http, url, cookie, origin) =
+            (s.http.clone(), s.url("/p/vinculum/settings"), cookie.clone(), s.base.clone());
+        async move {
+            let mut form: Vec<(&str, &str)> = vec![
+                ("name", "Lituus"),
+                ("description", "Settings app"),
+                ("repo", "giosuel/vinculum"),
+                ("checkout", "~/vinculum"),
+                ("machine", "giosuel.ch"),
+                ("stack", "Rust, Slint ,, zbus"),
+                ("platform", "Linux"),
+                ("model", "Claude Opus 5.5"),
+                ("effort", "high"),
+                ("pm_rules", "One rule\n\nAnother"),
+                ("git_rules", "DCO"),
+                ("ports", "21300 demo"),
+                ("build_product", ""),
+            ];
+            for (k, v) in fields {
+                form.retain(|(a, _)| *a != k);
+                form.push((k, v));
+            }
+            let res = http.post(url).header(COOKIE, cookie).header(ORIGIN, origin).form(&form).send().await.unwrap();
+            res.headers()[LOCATION].to_str().unwrap().to_owned()
+        }
+    };
+    assert_eq!(save(vec![]).await, "/p/vinculum?tab=settings&settings=saved");
+    let p = s.state.db.call(|c| crate::projects::require(c, "vinculum")).await.unwrap();
+    assert_eq!((p.name.as_str(), p.repo.as_str()), ("Lituus", "giosuel/vinculum"));
+    assert_eq!(p.stack, ["Rust", "Slint", "zbus"]);
+    assert_eq!(p.pm_rules, ["One rule", "Another"]);
+    assert_eq!(save(vec![("name", " ")]).await, "/p/vinculum?tab=settings&settings=name");
+    assert_eq!(save(vec![("repo", "not a repo")]).await, "/p/vinculum?tab=settings&settings=repo");
+    let page =
+        s.http.get(s.url("/p/vinculum?tab=settings&settings=repo")).header(COOKIE, &cookie).send().await.unwrap();
+    let html = page.text().await.unwrap();
+    assert!(html.contains("owner/name") && html.contains(r#"value="Lituus""#), "{html}");
+    // Only the owner.
+    let res =
+        s.http.post(s.url("/p/vinculum/settings")).bearer_auth(&token).form(&[("name", "x")]).send().await.unwrap();
+    assert!(res.status().is_client_error());
 }

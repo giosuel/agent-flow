@@ -29,6 +29,86 @@ pub fn routes() -> Router<AppState> {
         .route("/p/{slug}/{id}", get(record))
         .route("/p/{slug}/{id}/answer", post(answer))
         .route("/p/{slug}/status", post(set_status))
+        .route("/p/{slug}/settings", post(save_settings))
+}
+
+/// The Settings tab's form: every detail an agent can set with update_project, the owner here (the
+/// owner, 2026-11-11: "a settings tab for projects where the user can archive it or rename it in
+/// agent flow, or add / edit other metadata"). Lists are one per line; the stack is comma-separated.
+#[derive(Deserialize)]
+struct SettingsForm {
+    name: String,
+    description: String,
+    repo: String,
+    checkout: String,
+    machine: String,
+    stack: String,
+    platform: String,
+    model: String,
+    effort: String,
+    pm_rules: String,
+    git_rules: String,
+    ports: String,
+    build_product: String,
+}
+
+async fn save_settings(
+    State(state): State<AppState>,
+    Extension(actor): Extension<Actor>,
+    Extension(ip): Extension<ClientIp>,
+    Path(slug): Path<String>,
+    Form(f): Form<SettingsForm>,
+) -> AppResult<Response> {
+    actor.require_owner()?;
+    let back = |code: &str| -> AppResult<Response> {
+        Ok(Redirect::to(&format!("/p/{slug}?tab=settings&settings={code}")).into_response())
+    };
+    if f.name.trim().is_empty() {
+        return back("name");
+    }
+    if !f.repo.trim().is_empty() && crate::github::check_repo(f.repo.trim()).is_err() {
+        return back("repo");
+    }
+    let lines = |s: &str| s.lines().map(str::to_owned).collect::<Vec<_>>();
+    let patch = projects::ProjectPatch {
+        name: Some(f.name.clone()),
+        description: Some(f.description.clone()),
+        repo: Some(f.repo.clone()),
+        checkout: Some(f.checkout.clone()),
+        machine: Some(f.machine.clone()),
+        stack: Some(f.stack.split(',').map(str::to_owned).collect()),
+        platform: Some(f.platform.clone()),
+        model: Some(f.model.clone()),
+        effort: Some(f.effort.clone()),
+        pm_rules: Some(lines(&f.pm_rules)),
+        git_rules: Some(f.git_rules.clone()),
+        ports: Some(lines(&f.ports)),
+        build_product: Some(f.build_product.clone()),
+        ..Default::default()
+    };
+    let s = slug.clone();
+    let result = state
+        .db
+        .call(move |c| {
+            let p = projects::require(c, &s)?;
+            projects::update(c, p.id, &patch, "owner")
+        })
+        .await;
+    match result {
+        Ok(changed) => {
+            if !changed.is_empty() {
+                let what = format!("project settings changed: {}", changed.join(", "));
+                let e = Entry::new(&actor, Via::Page, Action::Write, what).project(slug.clone()).ip(Some(ip.0));
+                activity::write(&state.db, e).await;
+            }
+            back("saved")
+        }
+        Err(e) if format!("{e:#}").contains("build") || format!("{e:#}").contains("product") => back("product"),
+        Err(e) => {
+            tracing::warn!("saving {slug}'s settings: {e:#}");
+            back("failed")
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -64,7 +144,7 @@ async fn set_status(
         .project(slug.clone())
         .ip(Some(ip.0));
     activity::write(&state.db, e).await;
-    Ok(Redirect::to(&format!("/p/{slug}")).into_response())
+    Ok(Redirect::to(&format!("/p/{slug}?tab=settings")).into_response())
 }
 
 #[derive(Deserialize, Default)]
@@ -285,6 +365,22 @@ struct AgentCard {
     strip: Vec<(u32, String)>,
 }
 
+pub struct EditView {
+    name: String,
+    description: String,
+    repo: String,
+    checkout: String,
+    machine: String,
+    stack: String,
+    platform: String,
+    model: String,
+    effort: String,
+    pm_rules: String,
+    git_rules: String,
+    ports: String,
+    build_product: String,
+}
+
 pub struct ShotCard {
     url: String,
     image: String,
@@ -329,6 +425,8 @@ struct ProjectPage {
     questions: Vec<RecordRow>,
     /// The Builds tab: every build, newest first.
     builds: Vec<RecordRow>,
+    /// The Settings tab's form, filled with the project's details.
+    edit: Option<EditView>,
     /// The Screenshots tab: the shown ones (newest first), all of them, and the category filter.
     shots: Vec<ShotCard>,
     shots_all: usize,
@@ -355,10 +453,30 @@ struct TabQuery {
     upto: Option<i64>,
     /// The Screenshots tab's category filter.
     cat: Option<String>,
+    /// The Settings tab's outcome: saved, or why not.
+    settings: Option<String>,
 }
 
 /// The line shown after pressing a button, from the redirect's query.
 fn press_notice(q: &TabQuery) -> (Option<String>, bool) {
+    // The Settings tab's outcome: only fixed messages come from the address.
+    match q.settings.as_deref() {
+        Some("saved") => {
+            return (Some("Saved. The project's agent sees the change the next time it checks.".into()), false);
+        }
+        Some("name") => return (Some("The name can't be empty. Nothing was saved.".into()), true),
+        Some("repo") => {
+            return (Some("The repository is owner/name, e.g. giosuel/vinculum. Nothing was saved.".into()), true);
+        }
+        Some("product") => {
+            return (
+                Some("That build product isn't free or isn't a valid name (lowercase letters, digits and dashes). Nothing was saved.".into()),
+                true,
+            );
+        }
+        Some(_) => return (Some("That didn't work; nothing was saved. See the log.".into()), true),
+        None => {}
+    }
     match (q.ran, q.ok, q.merged, q.upto) {
         (Some(_), Some(1), _, _) => (Some("Done. The agent has been told.".into()), false),
         (Some(_), Some(_), _, _) => {
@@ -380,6 +498,7 @@ const TABS: &[(&str, &str)] = &[
     ("builds", "Builds"),
     ("decisions", "Decisions"),
     ("screenshots", "Screenshots"),
+    ("settings", "Settings"),
 ];
 
 async fn project(
@@ -684,6 +803,21 @@ fn build_project_page(
     } else {
         HashMap::new()
     };
+    let edit = (tab == "settings").then(|| EditView {
+        name: p.name.clone(),
+        description: p.description.clone(),
+        repo: p.repo.clone(),
+        checkout: p.checkout.clone(),
+        machine: p.machine.clone(),
+        stack: p.stack.join(", "),
+        platform: p.platform.clone(),
+        model: p.model.clone(),
+        effort: p.effort.clone(),
+        pm_rules: p.pm_rules.join("\n"),
+        git_rules: p.git_rules.clone(),
+        ports: p.ports.join("\n"),
+        build_product: p.build_product.clone(),
+    });
     let shots: Vec<ShotCard> = if tab == "screenshots" {
         let mut list: Vec<&Record> =
             all.iter().filter(|r| r.kind == Kind::Screenshot && r.state != "withdrawn").collect();
@@ -800,6 +934,7 @@ fn build_project_page(
         groups,
         questions,
         builds,
+        edit,
         shots_all: shots.len(),
         shots,
         shot_cats: Vec::new(),

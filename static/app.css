@@ -445,9 +445,9 @@ button.opt { font: inherit; color: var(--ink); text-align: left; width: 100%; }
 .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px 20px; }
 .form-grid label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--ink2); }
 .form-grid label.span-all { grid-column: 1 / -1; }
-.form-grid input, .form-grid select { font-size: 15px; }
+.form-grid input, .form-grid select, .form-grid textarea { font-size: 15px; }
 /* Below 16px Safari zooms the page when a field is focused. */
-@media (max-width: 600px) { .form-grid input, .form-grid select { font-size: 16px; } }
+@media (max-width: 600px) { .form-grid input, .form-grid select, .form-grid textarea { font-size: 16px; } }
 /* Review 3 (UX) */
 .only-phone { display: none; }
 .chart .y-zero { position: absolute; left: 0; bottom: 22px; font-size: 11px; transform: translateY(50%); }
