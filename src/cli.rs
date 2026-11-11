@@ -21,11 +21,16 @@ pub enum AdminCommand {
         #[command(subcommand)]
         command: TokenCommand,
     },
-    /// Projects (the New project button comes later).
+    /// Projects (the web page's New project button also makes the folder and token).
     Project {
         #[command(subcommand)]
         command: ProjectCommand,
     },
+    /// Back up the database now and export every project as Markdown (also done once a day).
+    Backup,
+    /// Print the root command that installs Claude Code managed settings keeping agents' file
+    /// tools away from AgentFlow's tokens and data.
+    ManagedSettings,
 }
 
 #[derive(Subcommand)]
@@ -153,6 +158,22 @@ pub fn admin(config_path: &Path, command: AdminCommand) -> anyhow::Result<()> {
             log_cli(&db, Action::Write, format!("project {slug} added"))?;
             eprintln!("Project {slug} added.");
         }
+        AdminCommand::Backup => {
+            let data = config.data_dir();
+            // "2026-11-11-0530": a manual one sorts after that day's nightly one.
+            let stamp = fmt_utc(crate::util::now_ms())[..16].replace([' ', ':'], "-");
+            let stamp = format!("{}{}", &stamp[..13], &stamp[14..]);
+            let (made, n) = db.call_blocking(move |c| {
+                let made = crate::backup::backup(c, &data, &stamp)?;
+                Ok((made, crate::backup::export(c, &data)?))
+            })?;
+            log_cli(&db, Action::Write, "backup and export by hand".into())?;
+            if let Some(p) = made {
+                eprintln!("Backed up to {}", p.display());
+            }
+            eprintln!("Exported {n} projects to {}", config.data_dir().join("export").display());
+        }
+        AdminCommand::ManagedSettings => print!("{}", crate::hardening::managed_settings_command(&config)),
     }
     Ok(())
 }

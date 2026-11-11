@@ -4,6 +4,7 @@
 mod actions;
 mod activity;
 mod auth;
+mod backup;
 mod builds;
 mod cli;
 mod config;
@@ -11,6 +12,7 @@ mod contributions;
 mod db;
 mod github;
 mod guides;
+mod hardening;
 mod logview;
 mod machine;
 mod markdown;
