@@ -91,7 +91,7 @@ async fn save_settings(
         .db
         .call(move |c| {
             let p = projects::require(c, &s)?;
-            Ok(projects::update(c, p.id, &patch, "owner")?)
+            projects::update(c, p.id, &patch, "owner")
         })
         .await;
     match result {
