@@ -46,6 +46,22 @@ pub fn fmt_utc(ms: i64) -> String {
     t.format(&f).unwrap_or_default()
 }
 
+/// "11 Nov 02:04" (UTC): unambiguous, short, for histories and lists.
+pub fn fmt_short(ms: i64) -> String {
+    let t = time::OffsetDateTime::from_unix_timestamp_nanos(ms as i128 * 1_000_000)
+        .unwrap_or(time::OffsetDateTime::UNIX_EPOCH);
+    let f = time::macros::format_description!("[day padding:none] [month repr:short] [hour]:[minute]");
+    t.format(&f).unwrap_or_default()
+}
+
+/// "2026-11-06" (UTC).
+pub fn fmt_date(ms: i64) -> String {
+    let t = time::OffsetDateTime::from_unix_timestamp_nanos(ms as i128 * 1_000_000)
+        .unwrap_or(time::OffsetDateTime::UNIX_EPOCH);
+    let f = time::macros::format_description!("[year]-[month]-[day]");
+    t.format(&f).unwrap_or_default()
+}
+
 /// Expands a leading `~/` to the home directory.
 pub fn expand_home(path: &str) -> std::path::PathBuf {
     match path.strip_prefix("~/") {

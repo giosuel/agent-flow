@@ -30,17 +30,26 @@ pub fn load(conn: &Connection) -> anyhow::Result<Waiting> {
         let urgent = q.data.get("urgent").and_then(Value::as_bool).unwrap_or(false);
         (!urgent, !blocking.contains(&q.id), q.created_at)
     });
-    // PRs the agent marked ready and GitHub would merge, and releases whose PRs are all merged.
-    let mut merges: Vec<Record> = records::query(
-        conn,
-        &Query { kinds: vec![Kind::Pr], states: vec!["open".into()], limit: 0, ..Default::default() },
-    )?
-    .into_iter()
-    .filter(|r| crate::prs::merge_ready(r).is_ok())
-    .collect();
+    // PRs that can be merged now (ready, and not waiting for a PR they're based on), in each
+    // project's merge order; then releases whose PRs are all merged.
+    let mut merges: Vec<Record> = Vec::new();
+    let mut with_prs: Vec<i64> =
+        records::query(conn, &Query { kinds: vec![Kind::Pr], states: vec!["open".into()], ..Default::default() })?
+            .iter()
+            .map(|r| r.project_id)
+            .collect();
+    with_prs.sort_unstable();
+    with_prs.dedup();
+    for project_id in with_prs {
+        for o in crate::prs::merge_order(conn, project_id)? {
+            if o.after.is_none() && crate::prs::merge_ready(&o.record).is_ok() {
+                merges.push(o.record);
+            }
+        }
+    }
     for r in records::query(
         conn,
-        &Query { kinds: vec![Kind::Release], states: vec!["waiting".into()], limit: 0, ..Default::default() },
+        &Query { kinds: vec![Kind::Release], states: vec!["waiting".into()], ..Default::default() },
     )? {
         if crate::prs::release_ready(conn, &r)? {
             merges.push(r);
@@ -74,18 +83,14 @@ fn blocking_ids(conn: &Connection) -> anyhow::Result<Vec<i64>> {
     Ok(rows.collect::<Result<_, _>>()?)
 }
 
-/// What a question blocks, e.g. ["T-14", "PR-56"], for the featured card's chip.
-pub fn blocks(conn: &Connection, q: &Record) -> anyhow::Result<Vec<String>> {
-    let mut stmt = conn.prepare(
-        "SELECT r.kind, r.number, p.slug FROM links l JOIN records r ON r.id = l.to_id JOIN projects p ON p.id = r.project_id
-         WHERE l.from_id = ?1 AND l.relation = 'blocks'",
-    )?;
-    let rows = stmt.query_map([q.id], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?, r.get::<_, String>(2)?)))?;
+/// What a question blocks, by name and page, for "Blocks: Sidebar layout".
+pub fn blocks(conn: &Connection, q: &Record) -> anyhow::Result<Vec<(String, String)>> {
+    let mut stmt = conn.prepare("SELECT to_id FROM links WHERE from_id = ?1 AND relation = 'blocks' ORDER BY id")?;
+    let ids: Vec<i64> = stmt.query_map([q.id], |r| r.get(0))?.collect::<Result<_, _>>()?;
     let mut out = Vec::new();
-    for row in rows {
-        let (kind, n, slug) = row?;
-        let prefix = Kind::parse(&kind).map(|k| k.prefix()).unwrap_or("?");
-        out.push(if slug == q.project { format!("{prefix}-{n}") } else { format!("{slug}/{prefix}-{n}") });
+    for id in ids {
+        let r = records::get(conn, id)?;
+        out.push((r.title.clone(), r.url()));
     }
     Ok(out)
 }
@@ -179,7 +184,7 @@ mod tests {
             let order: Vec<_> = w.questions.iter().map(|q| q.title.as_str()).collect();
             assert_eq!(order, ["urgent", "blocker", "old"]);
             assert_eq!(count(c)?, 3);
-            assert_eq!(blocks(c, &blocker)?, ["T-1"]);
+            assert_eq!(blocks(c, &blocker)?, [("t".to_owned(), "/p/v/T-1".to_owned())]);
             let _ = urgent;
             Ok(())
         })

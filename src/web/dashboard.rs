@@ -29,7 +29,8 @@ struct Featured {
     url: String,
     project: String,
     when: String,
-    blocks: String,
+    /// What it blocks: (title, page).
+    blocks: Vec<(String, String)>,
     title: String,
     body_html: String,
     options: Vec<(usize, String, String, bool)>,
@@ -105,7 +106,7 @@ async fn dashboard(
             let name = |slug: &str| names.get(slug).cloned().unwrap_or_else(|| slug.to_owned());
 
             let featured = match w.questions.first() {
-                Some(q) => Some(featured(q, name(&q.project), waiting::blocks(c, q)?.join(", "), now)),
+                Some(q) => Some(featured(q, name(&q.project), waiting::blocks(c, q)?, now)),
                 None => None,
             };
             let mut groups = Vec::new();
@@ -118,7 +119,7 @@ async fn dashboard(
                     let detail = if blocks.is_empty() {
                         format!("asked {}", ago(q.created_at, now))
                     } else {
-                        format!("blocks {}", blocks.join(", "))
+                        format!("blocks {}", blocks.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>().join(", "))
                     };
                     Item {
                         icon: icon("question"),
@@ -144,9 +145,9 @@ async fn dashboard(
                     sub: if r.kind == Kind::Release {
                         format!("{} · {} · every PR merged", name(&r.project), r.str("tag"))
                     } else {
-                        format!("{} · PR-{} · ready, CI {}", name(&r.project), r.number, r.str("ci"))
+                        format!("{} · #{} · ready, CI {}", name(&r.project), r.number, r.str("ci"))
                     },
-                    url: if r.kind == Kind::Pr { format!("/p/{}?tab=prs", r.project) } else { r.url() },
+                    url: r.url(),
                     action: if r.kind == Kind::Release { "Tag" } else { "Merge" },
                 })
                 .collect();
@@ -169,8 +170,11 @@ async fn dashboard(
                 groups.push(Group { title: "Builds to try", items: builds });
             }
 
-            let activity = records::recent_events(c, None, 12)?
+            let activity = records::recent_events(c, None, 30)?
                 .into_iter()
+                // A button being added is part of the PR's story, not news of its own.
+                .filter(|e| e.kind != "action.added")
+                .take(12)
                 .map(|e| Activity {
                     time: crate::util::fmt_utc(e.at).get(11..16).unwrap_or("").into(),
                     who: match e.actor.as_str() {
@@ -261,7 +265,7 @@ async fn dashboard(
     })
 }
 
-fn featured(q: &Record, project: String, blocks: String, now: i64) -> Featured {
+fn featured(q: &Record, project: String, blocks: Vec<(String, String)>, now: i64) -> Featured {
     let rec = q.data.get("recommended").and_then(Value::as_u64).unwrap_or(0) as usize;
     let options = q
         .data

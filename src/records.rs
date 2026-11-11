@@ -352,7 +352,7 @@ pub fn create(conn: &Connection, project_id: i64, author: &str, new: NewRecord) 
         Some(project_id),
         Some(id),
         &format!("{kind}.created"),
-        &format!("{} {}: {}", kind.label(), record.short_id(), title),
+        &format!("{} {}: {}", kind.label(), display_id(&record), title),
         author,
     )?;
     Ok(record)
@@ -467,7 +467,7 @@ pub fn update(conn: &Connection, record: &Record, author: &str, patch: Patch) ->
         Some(record.project_id),
         Some(record.id),
         &format!("{}.updated", record.kind),
-        &format!("{} {}: {what}", record.kind.label(), record.short_id()),
+        &format!("{} {}: {what}", record.kind.label(), display_id(record)),
         author,
     )?;
     Ok((get(conn, record.id)?, true))
@@ -476,17 +476,26 @@ pub fn update(conn: &Connection, record: &Record, author: &str, patch: Patch) ->
 fn describe_changes(changes: &Map<String, Value>, note: &str) -> String {
     let mut parts: Vec<String> = changes
         .iter()
-        .filter(|(k, _)| !k.ends_with("_at"))
-        .map(|(k, v)| match (k.as_str(), v) {
-            ("state", Value::String(s)) => format!("now {s}"),
-            ("milestone", Value::String(m)) if !m.is_empty() => format!("moved to {m}"),
-            (k, _) => format!("{k} changed"),
+        .filter_map(|(k, v)| {
+            Some(match (k.as_str(), v) {
+                ("state", Value::String(s)) => format!("now {s}"),
+                ("milestone", Value::String(m)) if !m.is_empty() => format!("moved to {m}"),
+                ("ready", Value::Bool(true)) => "marked ready to merge".into(),
+                ("ready", Value::Bool(false)) => "no longer ready".into(),
+                ("title", _) => "renamed".into(),
+                ("body", _) => "details updated".into(),
+                ("tags", _) => "tags changed".into(),
+                ("resurface_when", Value::String(w)) => format!("comes back {w}"),
+                ("estimate", Value::String(e)) => format!("estimate {e}"),
+                // Bookkeeping (timestamps, GitHub's CI and merge state) isn't news.
+                _ => return None,
+            })
         })
         .collect();
     if !note.trim().is_empty() {
         parts.push(note.trim().to_owned());
     }
-    parts.join(", ")
+    if parts.is_empty() { "updated".into() } else { parts.join(", ") }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -527,16 +536,16 @@ pub fn answer_question(
         bail!("{} isn't a question", q.ref_id);
     }
     if q.state != "open" {
-        bail!("{} is already {}", q.ref_id, q.state);
+        bail!("{} is already {}.", q.ref_id, q.state);
     }
     let options = q.data.get("options").and_then(Value::as_array).cloned().unwrap_or_default();
     let chosen = match option {
-        Some(n) if n == 0 || n as usize > options.len() => bail!("there is no option {n}"),
+        Some(n) if n == 0 || n as usize > options.len() => bail!("There's no option {n}."),
         Some(n) => Some((n, options[n as usize - 1].get("title").and_then(Value::as_str).unwrap_or("").to_owned())),
         None => None,
     };
     if chosen.is_none() && words.trim().is_empty() {
-        bail!("pick an option or write an answer");
+        bail!("Pick an option or write an answer.");
     }
     let mut data = Map::new();
     data.insert("answer".into(), words.to_owned().into());

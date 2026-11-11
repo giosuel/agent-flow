@@ -10,3 +10,10 @@ document.addEventListener("click", (e) => {
     e.stopImmediatePropagation();
   }
 }, true);
+
+// Keep the current milestone in view in the (scrolling) milestone strip.
+document.addEventListener("DOMContentLoaded", () => {
+  const now = document.querySelector(".ms-strip .ms.now");
+  const strip = now && now.parentElement;
+  if (strip) strip.scrollLeft = now.offsetLeft - strip.offsetLeft - 24;
+});

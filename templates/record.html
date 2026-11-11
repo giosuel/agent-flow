@@ -28,7 +28,7 @@
     {% if !pr_url.is_empty() %}<p><a href="{{ pr_url }}">Open on GitHub</a> · <a href="{{ pr_url }}/files">View changes on GitHub</a></p>{% endif %}
     {% if !buttons.is_empty() %}
     <section class="card pad stack" aria-labelledby="btn-h">
-      <h2 class="label" id="btn-h">Buttons</h2>
+      <h2 class="label" id="btn-h">{% if kind == "release" %}Push the tag{% else %}Buttons{% endif %}</h2>
       {% for b in buttons %}{% include "button.html" %}{% endfor %}
     </section>
     {% endif %}
@@ -45,13 +45,13 @@
         {% if !options.is_empty() %}
         <fieldset class="opts"><legend class="vh">Options</legend>
         {% for o in options %}
-          <label class="opt{% if o.recommended %} rec{% endif %}"><input type="radio" name="option" value="{{ o.n }}"><span class="mono opt-n">{{ o.n }}</span><span class="opt-t"><strong>{{ o.title }}{% if o.recommended %} <span class="chip accent">Recommended</span>{% endif %}</strong>{% if !o.detail.is_empty() %}<span class="sub">{{ o.detail }}</span>{% endif %}</span></label>
+          <label class="opt"><input type="radio" name="option" value="{{ o.n }}"{% if o.recommended %} checked{% endif %}><span class="mono opt-n">{{ o.n }}</span><span class="opt-t"><strong>{{ o.title }}{% if o.recommended %} <span class="chip accent">Recommended</span>{% endif %}</strong>{% if !o.detail.is_empty() %}<span class="sub">{{ o.detail }}</span>{% endif %}</span></label>
         {% endfor %}
         </fieldset>
         {% endif %}
         <label class="vh" for="words">Answer in your own words</label>
-        <textarea id="words" name="words" rows="3" placeholder="{% if options.is_empty() %}Your answer{% else %}Or answer in your own words (optional with an option){% endif %}"></textarea>
-        <div><button class="btn" type="submit">Send answer</button></div>
+        <textarea id="words" name="words" rows="3"{% if options.is_empty() %} required{% endif %} placeholder="{% if options.is_empty() %}Your answer{% else %}Or answer in your own words (optional with an option){% endif %}"></textarea>
+        <div><button class="btn send" type="submit">Send answer</button></div>
       </form>
       {% else %}
         {% if !options.is_empty() %}

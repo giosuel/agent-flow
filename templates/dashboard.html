@@ -13,19 +13,23 @@
 
     {% if let Some(f) = featured %}
     <article class="card pad stack featured">
-      <div class="row wrap"><span class="sub">{{ f.project }} · {{ f.when }}</span><span class="grow"></span>{% if !f.blocks.is_empty() %}<span class="chip bad">blocks {{ f.blocks }}</span>{% endif %}</div>
+      <div class="row wrap"><span class="sub">{{ f.project }} · {{ f.when }}</span><span class="grow"></span>{% if !f.blocks.is_empty() %}<span class="chip bad">Blocks: {% for (t, u) in f.blocks %}{% if !loop.first %}, {% endif %}<a href="{{ u }}">{{ t }}</a>{% endfor %}</span>{% endif %}</div>
       <h3 class="ftitle"><a href="{{ f.url }}">{{ f.title }}</a></h3>
       {% if !f.body_html.is_empty() %}<div class="prose clamp">{{ f.body_html|safe }}</div>{% endif %}
-      <form method="post" action="/p/{{ f.slug }}/{{ f.short }}/answer" class="stack">
+      {% if !f.options.is_empty() %}
+      <form method="post" action="/p/{{ f.slug }}/{{ f.short }}/answer">
         <input type="hidden" name="next" value="/?answered={{ f.id }}">
-        {% if !f.options.is_empty() %}
         <div class="opts">
           {% for (n, t, d, rec) in f.options %}
-          <button class="opt{% if *rec %} rec{% endif %}" type="submit" name="option" value="{{ n }}"><span class="mono opt-n">{{ n }}</span><span class="opt-t"><strong>{{ t }}{% if *rec %} <span class="chip accent">Recommended</span>{% endif %}</strong>{% if !d.is_empty() %}<span class="sub">{{ d }}</span>{% endif %}</span></button>
+          <button class="opt" type="submit" name="option" value="{{ n }}"><span class="mono opt-n">{{ n }}</span><span class="opt-t"><strong>{{ t }}{% if *rec %} <span class="chip accent">Recommended</span>{% endif %}</strong>{% if !d.is_empty() %}<span class="sub">{{ d }}</span>{% endif %}</span></button>
           {% endfor %}
         </div>
-        {% endif %}
-        <div class="row wrap"><label class="vh" for="words">Answer in your own words</label><input id="words" name="words" placeholder="{% if f.options.is_empty() %}Your answer{% else %}Or answer in your own words{% endif %}"><button class="btn" type="submit">Send answer</button></div>
+      </form>
+      {% endif %}
+      {# Own words go in a form of their own, so pressing Enter there never also picks option 1. #}
+      <form method="post" action="/p/{{ f.slug }}/{{ f.short }}/answer" class="row wrap">
+        <input type="hidden" name="next" value="/?answered={{ f.id }}">
+        <label class="vh" for="words">Answer in your own words</label><input id="words" name="words" required placeholder="{% if f.options.is_empty() %}Your answer{% else %}Or answer in your own words{% endif %}"><button class="btn" type="submit">Send answer</button>
       </form>
     </article>
     {% endif %}

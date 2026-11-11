@@ -101,6 +101,7 @@ pub fn router(state: AppState) -> Router {
         .merge(pwa::routes())
         .nest_service("/mcp", mcp)
         .merge(assets::routes())
+        .fallback(|| async { pages::error_page(StatusCode::NOT_FOUND, "There's no page here.") })
         .layer(middleware::from_fn_with_state(state.clone(), log_requests))
         .layer(middleware::from_fn_with_state(state.clone(), authenticate))
         .layer(middleware::from_fn(security_headers))

@@ -74,6 +74,7 @@ struct TokenView {
     kind: String,
     can: &'static str,
     used: String,
+    added: String,
     from: String,
 }
 
@@ -184,6 +185,7 @@ async fn render_page(
                 _ => "read, CLI and viber-run",
             },
             used: when(t.last_used_at),
+            added: ago(t.created_at, now),
             from: t.last_used_from.clone().unwrap_or_default(),
             kind: t.kind,
         })

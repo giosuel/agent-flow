@@ -88,7 +88,10 @@ impl Actor {
     /// The owner's display line in the header, e.g. "giosuel · passkey".
     pub fn label(&self) -> String {
         match self {
-            Actor::Owner { method, .. } => format!("owner · {method}"),
+            Actor::Owner { method, .. } => match method.as_str() {
+                "passkey" => "signed in with a passkey".into(),
+                _ => "signed in with a one-time link".into(),
+            },
             other => format!("{} · {}", other.name(), other.kind()),
         }
     }
