@@ -19,6 +19,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/006_messages.sql"),
     include_str!("../migrations/007_token_hint.sql"),
     include_str!("../migrations/008_usage.sql"),
+    include_str!("../migrations/009_remote_sessions.sql"),
 ];
 
 const POOL_SIZE: usize = 6;
