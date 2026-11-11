@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block title %}{{ short }} · {{ project_name }}{% endblock %}
+{% block content %}
+<div class="head">
+  <nav class="crumbs" aria-label="Breadcrumb"><a href="/projects">Projects</a> / <a href="/p/{{ project_slug }}">{{ project_name }}</a> / {{ kind_label }}</nav>
+  <p class="row wrap"><span class="mono sub">{{ id }}</span><span class="chip{% if state == "open" %} warn{% endif %}{% if state == "current" || state == "answered" || state == "done" %} ok{% endif %}">{{ state }}</span>{% for t in tags %}<span class="chip">{{ t }}</span>{% endfor %}</p>
+  <h1 class="rec-title">{{ title }}</h1>
+</div>
+{% if let Some(e) = error %}<p class="notice warn" role="alert">{{ e }}</p>{% endif %}
+
+<div class="split">
+  <div class="split-main stack-lg">
+    {% if !owner_words.is_empty() %}
+    <section class="stack-sm" aria-labelledby="words-h">
+      <h2 class="label" id="words-h">The owner's words</h2>
+      <blockquote class="quote">“{{ owner_words }}”</blockquote>
+      <p class="sub">{{ words_line }}</p>
+    </section>
+    {% endif %}
+
+    {% if !body_html.is_empty() %}
+    <section class="stack-sm" aria-labelledby="body-h">
+      <h2 class="label" id="body-h">{% if kind == "decision" %}Why{% else %}Details{% endif %}</h2>
+      <div class="prose">{{ body_html|safe }}</div>
+    </section>
+    {% endif %}
+
+    {% if !extra.is_empty() %}
+    <dl class="kv">{% for (k, v) in extra %}<dt>{{ k }}</dt><dd>{% if v.starts_with("https://") %}<a href="{{ v }}">{{ v }}</a>{% else %}{{ v }}{% endif %}</dd>{% endfor %}</dl>
+    {% endif %}
+
+    {% if kind == "question" %}
+    <section class="card pad stack" aria-labelledby="answer-h">
+      <h2 id="answer-h">{% if can_answer %}Your answer{% else %}Answer{% endif %}</h2>
+      {% if can_answer %}
+      <form method="post" action="/p/{{ project_slug }}/{{ short }}/answer" class="stack">
+        {% if !options.is_empty() %}
+        <fieldset class="opts"><legend class="vh">Options</legend>
+        {% for o in options %}
+          <label class="opt{% if o.recommended %} rec{% endif %}"><input type="radio" name="option" value="{{ o.n }}"><span class="mono opt-n">{{ o.n }}</span><span class="opt-t"><strong>{{ o.title }}{% if o.recommended %} <span class="chip accent">Recommended</span>{% endif %}</strong>{% if !o.detail.is_empty() %}<span class="sub">{{ o.detail }}</span>{% endif %}</span></label>
+        {% endfor %}
+        </fieldset>
+        {% endif %}
+        <label class="vh" for="words">Answer in your own words</label>
+        <textarea id="words" name="words" rows="3" placeholder="{% if options.is_empty() %}Your answer{% else %}Or answer in your own words (optional with an option){% endif %}"></textarea>
+        <div><button class="btn" type="submit">Send answer</button></div>
+      </form>
+      {% else %}
+        {% if !options.is_empty() %}
+        <ol class="plain opts-ro">{% for o in options %}<li class="{% if o.chosen %}chosen{% endif %}"><span class="mono">{{ o.n }}</span> {{ o.title }}{% if o.recommended %} <span class="chip">recommended</span>{% endif %}{% if o.chosen %} <span class="chip ok">chosen</span>{% endif %}</li>{% endfor %}</ol>
+        {% endif %}
+        {% if !answer.is_empty() %}<blockquote class="quote">“{{ answer }}”</blockquote>{% endif %}
+        {% if !answer_line.is_empty() %}<p class="sub">{{ answer_line }}</p>{% else %}<p class="sub">{% if state == "open" %}Waiting for the owner.{% else %}{{ state }}{% endif %}</p>{% endif %}
+      {% endif %}
+    </section>
+    {% endif %}
+
+    <section class="stack-sm" aria-labelledby="hist-h">
+      <h2 class="label" id="hist-h">History</h2>
+      <ol class="plain history">{% for h in history %}<li><span class="mono sub">rev {{ h.rev }} · {{ h.at }}</span> {{ h.text }}</li>{% endfor %}</ol>
+    </section>
+  </div>
+
+  <aside class="split-side stack-lg">
+    <section class="card pad stack" aria-labelledby="links-h">
+      <h2 class="label" id="links-h">Linked records</h2>
+      {% if links.is_empty() %}<p class="sub">Nothing linked yet.</p>{% endif %}
+      {% for g in links %}
+      <div class="stack-sm"><span class="sub">{{ g.label }}</span>
+        <ul class="rows">{% for (r, other) in g.items %}<li class="item-row"><span class="mono sub id-col">{% if *other %}{{ r.id }}{% else %}{{ r.short }}{% endif %}</span><div class="ttl"><a href="{{ r.url }}">{{ r.title }}</a></div><span class="chip">{{ r.state }}</span></li>{% endfor %}</ul>
+      </div>
+      {% endfor %}
+    </section>
+    {% if !stale.is_empty() %}
+    <section class="card pad stack warn-card" aria-labelledby="stale-h">
+      <h2 class="label" id="stale-h">May be stale</h2>
+      <ul class="rows">{% for r in stale %}<li class="item-row"><div class="ttl"><a href="{{ r.url }}">{{ r.short }} {{ r.title }}</a><span class="sub">depends on this, {{ r.sub }}, before this changed</span></div></li>{% endfor %}</ul>
+    </section>
+    {% endif %}
+  </aside>
+</div>
+{% endblock %}

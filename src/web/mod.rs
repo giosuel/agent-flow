@@ -2,7 +2,9 @@
 //! authentication step.
 
 mod assets;
+mod icons;
 mod pages;
+mod projects;
 mod pwa;
 mod settings;
 
@@ -59,6 +61,7 @@ pub fn router(state: AppState) -> Router {
     Router::new()
         .merge(pages::routes())
         .merge(settings::routes())
+        .merge(projects::routes())
         .merge(pwa::routes())
         .nest_service("/mcp", mcp)
         .merge(assets::routes())

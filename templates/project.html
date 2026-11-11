@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+{% block title %}{{ name }}{% endblock %}
+{% block content %}
+<div class="head">
+  <nav class="crumbs" aria-label="Breadcrumb"><a href="/projects">Projects</a></nav>
+  <h1>{{ name }}{% if status != "active" %} <span class="chip">{{ status }}</span>{% endif %}</h1>
+  <p class="status-line"><span class="dot{% if agent.online %} ok{% endif %}" aria-hidden="true"></span>{% if !repo.is_empty() %}<a href="https://github.com/{{ repo }}">github.com/{{ repo }}</a> · {% endif %}<span>{{ headline }}</span></p>
+</div>
+<nav class="tabs" aria-label="Project">
+  <a href="/p/{{ slug }}"{% if tab == "overview" %} class="on" aria-current="page"{% endif %}>Overview</a>
+  <a href="/p/{{ slug }}?tab=tasks"{% if tab == "tasks" %} class="on" aria-current="page"{% endif %}>Tasks</a>
+  <a href="/p/{{ slug }}?tab=decisions"{% if tab == "decisions" %} class="on" aria-current="page"{% endif %}>Decisions</a>
+  <a href="/p/{{ slug }}?tab=questions"{% if tab == "questions" %} class="on" aria-current="page"{% endif %}>Questions{% if !open_questions.is_empty() %} <span class="mono count">{{ open_questions.len() }}</span>{% endif %}</a>
+</nav>
+
+{% if tab == "overview" %}
+<div class="split">
+  <div class="split-main stack-lg">
+    {% if !about.is_empty() %}
+    <section class="card pad meta" aria-label="About">
+      {% for m in about %}
+      <div class="meta-row"><span class="meta-ico">{{ m.icon|safe }}</span><div class="meta-txt"><span class="label">{{ m.label }}</span>{% if !m.value.is_empty() %}<span>{{ m.value }}</span>{% endif %}{% if !m.list.is_empty() %}<ul class="plain">{% for l in m.list %}<li>{{ l }}</li>{% endfor %}</ul>{% endif %}</div></div>
+      {% endfor %}
+    </section>
+    {% endif %}
+
+    <section class="stack" aria-labelledby="ms-h">
+      <div class="sec"><h2 class="label" id="ms-h">Milestones</h2><span class="sub">set by the project agent · every milestone ends with a tag</span></div>
+      {% if milestones.is_empty() %}<p class="sub">The agent hasn't set milestones yet.</p>{% else %}
+      <ol class="ms-strip">
+        {% for m in milestones %}
+        <li class="ms {{ m.class }}"{% if m.class == "up" %} tabindex="0" aria-label="{{ m.name }}: {{ m.title }}, {{ m.note }}"{% endif %}><span class="mono">{{ m.name }}</span><span class="mt">{{ m.title }}</span><span class="tag{% if m.class != "now" %} mono{% endif %}">{{ m.note }}</span></li>
+        {% endfor %}
+      </ol>
+      {% endif %}
+    </section>
+
+    {% if let Some(b) = board %}
+    <section class="stack" aria-labelledby="board-h">
+      <div class="sec"><h2 id="board-h">{{ b.title }}</h2><span class="sub">{{ b.summary }}</span></div>
+      {% if !b.steps.is_empty() %}<ol class="steps">{% for s in b.steps %}<li class="step {{ s.class }}"><span class="mono">{{ s.name }}</span> {{ s.title }}{% if s.class == "done" %} · done{% endif %}{% if s.class == "now" %} · now{% endif %}</li>{% endfor %}</ol>{% endif %}
+      <div class="board">
+        {% for col in b.columns %}
+        <div class="col"><div class="col-h"><span class="label">{{ col.title }}</span><span class="mono sub">{{ col.tasks.len() }}</span></div>
+          {% for t in col.tasks %}
+          <a class="task" href="{{ t.url }}"><span class="sub mono">{% if !t.step.is_empty() %}{{ t.step }} · {% endif %}{{ t.short }}{% for (u, q) in t.blocked_by %} <span class="warn-text">blocked by {{ q }}</span>{% endfor %}</span><span class="task-t">{{ t.title }}</span>{% if !t.sub.is_empty() %}<span class="sub">{{ t.sub }}</span>{% endif %}</a>
+          {% endfor %}
+        </div>
+        {% endfor %}
+      </div>
+    </section>
+    {% endif %}
+  </div>
+
+  <aside class="split-side stack-lg">
+    <section class="card pad stack" aria-labelledby="agent-h">
+      <h2 class="label" id="agent-h">Project agent</h2>
+      <dl class="kv">
+        <dt>Session</dt><dd>{{ agent.session }}</dd>
+        <dt>Machine</dt><dd>{{ agent.machine }}</dd>
+        {% if !agent.model.is_empty() %}<dt>Model</dt><dd>{{ agent.model }}</dd>{% endif %}
+        {% if !agent.working_on.is_empty() %}<dt>Working on</dt><dd>{{ agent.working_on }}</dd>{% endif %}
+        <dt>Last seen</dt><dd><span class="dot{% if agent.online %} ok{% endif %}" aria-hidden="true"></span> {{ agent.seen }}</dd>
+      </dl>
+      <p class="sub">One agent works on each project. It hands focused jobs to subagents, and only it writes here.</p>
+    </section>
+
+    <section class="card pad stack" aria-labelledby="oq-h">
+      <div class="sec"><h2 class="label" id="oq-h">Open questions</h2><a class="sub" href="/p/{{ slug }}?tab=questions">All questions</a></div>
+      {% if open_questions.is_empty() %}<p class="sub">None. Nothing is waiting on you here.</p>{% endif %}
+      <ul class="rows">{% for q in open_questions %}<li class="item-row"><div class="ttl"><a href="{{ q.url }}">{{ q.title }}</a><span class="sub mono">{{ q.short }} · {{ q.sub }}</span></div></li>{% endfor %}</ul>
+    </section>
+
+    <section class="card pad stack" aria-labelledby="dec-h">
+      <div class="sec"><h2 class="label" id="dec-h">Latest decisions</h2><a class="sub" href="/p/{{ slug }}?tab=decisions">All decisions</a></div>
+      {% if decisions.is_empty() %}<p class="sub">No decisions recorded yet.</p>{% endif %}
+      <ul class="rows">{% for d in decisions %}<li class="item-row"><div class="ttl"><span class="sub mono">{{ d.id }} · {{ d.sub }}</span><a href="{{ d.url }}">{{ d.title }}</a></div></li>{% endfor %}</ul>
+    </section>
+  </aside>
+</div>
+{% endif %}
+
+{% if tab == "tasks" %}
+{% if groups.is_empty() %}<section class="card pad empty"><h2>No tasks yet</h2></section>{% endif %}
+{% for g in groups %}
+<section class="card pad stack">
+  <div class="sec"><h2>{% if !g.name.is_empty() %}<span class="mono">{{ g.name }}</span> {% endif %}{{ g.title }}</h2><span class="sub">{{ g.state }} · {{ g.rows.len() }} tasks</span></div>
+  <ul class="rows">{% for t in g.rows %}<li class="item-row"><span class="mono sub id-col">{{ t.short }}</span><div class="ttl"><a href="{{ t.url }}">{{ t.title }}</a></div><span class="chip state-{{ t.state }}">{{ t.sub }}</span></li>{% endfor %}</ul>
+</section>
+{% endfor %}
+{% endif %}
+
+{% if tab == "decisions" %}
+<section class="card pad stack">
+  {% if decisions.is_empty() %}<p class="sub">No decisions recorded yet.</p>{% endif %}
+  <ul class="rows">{% for d in decisions %}<li class="item-row"><span class="mono sub id-col">{{ d.short }}</span><div class="ttl"><a href="{{ d.url }}">{{ d.title }}</a><span class="sub">{{ d.sub }}</span></div></li>{% endfor %}</ul>
+</section>
+{% endif %}
+
+{% if tab == "questions" %}
+<section class="card pad stack">
+  {% if questions.is_empty() %}<p class="sub">No questions yet.</p>{% endif %}
+  <ul class="rows">{% for q in questions %}<li class="item-row"><span class="mono sub id-col">{{ q.short }}</span><div class="ttl"><a href="{{ q.url }}">{{ q.title }}</a><span class="sub">{{ q.sub }}</span></div><span class="chip{% if q.state == "open" %} warn{% endif %}">{{ q.state }}</span></li>{% endfor %}</ul>
+</section>
+{% endif %}
+{% endblock %}

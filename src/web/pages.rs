@@ -45,7 +45,6 @@ const NAV: &[(&str, &str)] = &[
 
 /// Pages that exist in the navigation but are built in a later milestone.
 const COMING: &[(&str, &str, &str)] = &[
-    ("/projects", "Projects", "M2"),
     ("/machine", "Machine", "M9"),
     ("/usage", "Usage", "M9"),
     ("/conversations", "Conversations", "M6"),
