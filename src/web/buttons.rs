@@ -182,7 +182,7 @@ struct RunForm {
 }
 
 fn safe_next(next: Option<String>, fallback: String) -> String {
-    next.filter(|n| n.starts_with('/') && !n.starts_with("//")).unwrap_or(fallback)
+    super::local_path(next.as_deref()).unwrap_or(fallback)
 }
 
 async fn run_one(
@@ -265,6 +265,9 @@ async fn merge_up_to(
     Form(form): Form<UpToForm>,
 ) -> AppResult<Response> {
     actor.require_owner()?;
+    if crate::cli::check_slug(&slug).is_err() {
+        return Err(AppError::NotFound);
+    }
     let mut steps = Vec::new();
     for part in form.actions.split(',').filter(|p| !p.is_empty()) {
         let (id, hash) = part.split_once(':').ok_or_else(|| AppError::BadRequest("malformed button list".into()))?;

@@ -323,6 +323,17 @@ async fn security_headers(req: Request, next: Next) -> Response {
     res
 }
 
+/// A return address from a form, if it's one of our own pages: a path, plain printable ASCII,
+/// not `//…` or `/\…` (both mean another host to a browser). Anything else is ignored.
+pub fn local_path(next: Option<&str>) -> Option<String> {
+    let n = next?.trim();
+    let ok = n.starts_with('/')
+        && !n.starts_with("//")
+        && n.len() <= 300
+        && n.bytes().all(|b| b.is_ascii_graphic() && b != b'\\');
+    ok.then(|| n.to_owned())
+}
+
 /// Errors a handler can return; each becomes a page (or JSON for API calls) with the right status.
 #[derive(Debug)]
 pub enum AppError {
