@@ -456,24 +456,36 @@ pub fn run(config_path: &Path, a: RunArgs) -> anyhow::Result<()> {
         bail!("the server sent an odd build name");
     }
     let dir = cache_root.join(&name);
-    if !dir.join(".verified").exists() {
-        eprintln!("Fetching {product} #{number} ({name})…");
-        let detail = client.get(&format!("/api/builds/{product}/{number}"))?;
-        let manifest = crate::builds::Manifest {
-            files: serde_json::from_value(detail["files"].clone()).context("the build's file list")?,
-            total: 0,
-        };
-        std::fs::create_dir_all(&cache_root)?;
-        let tmp = tempfile::NamedTempFile::new_in(&cache_root)?;
-        client.download(&format!("/api/builds/{product}/{number}/archive"), tmp.path())?;
-        let staging = tempfile::tempdir_in(&cache_root)?;
-        crate::builds::unpack_verified(std::fs::File::open(tmp.path())?, staging.path(), &manifest)?;
-        std::fs::write(staging.path().join(".verified"), b"")?;
-        let staged = staging.keep();
-        std::fs::rename(&staged, &dir).or_else(|_| std::fs::remove_dir_all(&staged))?;
-    }
-    let entry = pick["entry"].as_str().unwrap_or("");
-    let path = dir.join(entry);
+    // ".verified" holds the manifest the build was checked against; an old empty one doesn't count.
+    let cached: Option<crate::builds::Manifest> =
+        std::fs::read(dir.join(".verified")).ok().and_then(|b| serde_json::from_slice(&b).ok());
+    let manifest = match cached {
+        Some(m) => m,
+        None => {
+            eprintln!("Fetching {product} #{number} ({name})…");
+            let detail = client.get(&format!("/api/builds/{product}/{number}"))?;
+            let manifest = crate::builds::Manifest {
+                files: serde_json::from_value(detail["files"].clone()).context("the build's file list")?,
+                total: 0,
+            };
+            for f in &manifest.files {
+                crate::builds::safe_relative(Path::new(&f.path))?;
+            }
+            std::fs::create_dir_all(&cache_root)?;
+            let tmp = tempfile::NamedTempFile::new_in(&cache_root)?;
+            client.download(&format!("/api/builds/{product}/{number}/archive"), tmp.path())?;
+            let staging = tempfile::tempdir_in(&cache_root)?;
+            crate::builds::unpack_verified(std::fs::File::open(tmp.path())?, staging.path(), &manifest)?;
+            std::fs::write(staging.path().join(".verified"), serde_json::to_vec(&manifest)?)?;
+            let staged = staging.keep();
+            if dir.exists() {
+                std::fs::remove_dir_all(&dir)?;
+            }
+            std::fs::rename(&staged, &dir).or_else(|_| std::fs::remove_dir_all(&staged))?;
+            manifest
+        }
+    };
+    let path = crate::builds::entry_path(&dir, &manifest, pick["entry"].as_str().unwrap_or(""))?;
     eprintln!("Starting {product} #{number}: {}", pick["summary"].as_str().unwrap_or(""));
     use std::os::unix::process::CommandExt;
     let err = std::process::Command::new(&path).args(&a.args).current_dir(&dir).exec();
