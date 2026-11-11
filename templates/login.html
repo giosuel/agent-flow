@@ -1,6 +1,7 @@
 {% extends "bare.html" %}
 {% block title %}Sign in · AgentFlow{% endblock %}
-{% block head %}<script src="/static/passkey.js?v={{ version }}" defer></script>{% endblock %}
+{% block head %}<script src="/static/app.js?v={{ version }}" defer></script>
+<script src="/static/passkey.js?v={{ version }}" defer></script>{% endblock %}
 {% block content %}
 {% if let Some(link) = link %}
 <h1>Sign in on this device?</h1>
