@@ -135,6 +135,15 @@ impl Outcome {
     }
 }
 
+/// A record a tool may change: in the caller's own project (any, for the consultant).
+pub fn writable(c: &rusqlite::Connection, actor: &Actor, id: &str) -> anyhow::Result<crate::records::Record> {
+    let r = crate::records::find_str(c, id, actor.project())?;
+    if !actor.can_write_project(r.project_id) {
+        anyhow::bail!("your token can change only your own project's records; {} belongs to {}", r.ref_id, r.project);
+    }
+    Ok(r)
+}
+
 /// The project a tool acts on. A project token acts on its own project and may read others; the
 /// consultant (admin) names the project; the owner's devices only read.
 pub fn target_project(

@@ -5,13 +5,11 @@ use rmcp::handler::server::tool::Extension;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::CallToolResult;
 use rmcp::{ErrorData, schemars, tool, tool_router};
-use rusqlite::Connection;
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
 
-use super::{FlowMcp, Outcome, actor_of, target_project};
+use super::{FlowMcp, Outcome, actor_of, target_project, writable};
 use crate::activity::Action;
-use crate::auth::Actor;
 use crate::projects;
 use crate::push::{self, Notification};
 use crate::records::{self, Kind, NewRecord, Patch, Query, Record};
@@ -175,15 +173,6 @@ pub struct NotifyOwner {
     pub body: String,
     /// A record this is about, e.g. "PR-56".
     pub about: Option<String>,
-}
-
-/// The record a tool may change: in the caller's own project (or any, for the consultant).
-fn writable(c: &Connection, actor: &Actor, id: &str) -> anyhow::Result<Record> {
-    let r = records::find_str(c, id, actor.project())?;
-    if !actor.can_write_project(r.project_id) || matches!(actor, Actor::Owner { .. }) {
-        anyhow::bail!("your token can change only your own project's records; {} belongs to {}", r.ref_id, r.project);
-    }
-    Ok(r)
 }
 
 fn brief(r: &Record) -> Value {

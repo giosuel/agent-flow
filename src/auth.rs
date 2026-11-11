@@ -74,12 +74,14 @@ impl Actor {
         if self.is_owner() { Ok(()) } else { Err(Forbidden("only the owner can do this in the browser")) }
     }
 
-    /// May this identity change records of `project_id`?
+    /// May this identity change records of `project_id` through MCP or the API? The one place
+    /// that decides it. The owner works through the pages (answers, buttons, feedback), which
+    /// check `require_owner` themselves; agents' records are read-only to them there.
     pub fn can_write_project(&self, project_id: i64) -> bool {
         match self {
-            Actor::Owner { .. } | Actor::Admin { .. } | Actor::System(_) => true,
+            Actor::Admin { .. } | Actor::System(_) => true,
             Actor::Project { project_id: own, .. } => *own == project_id,
-            Actor::Device { .. } | Actor::Anonymous => false,
+            Actor::Owner { .. } | Actor::Device { .. } | Actor::Anonymous => false,
         }
     }
 

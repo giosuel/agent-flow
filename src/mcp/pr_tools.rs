@@ -8,7 +8,7 @@ use rmcp::{ErrorData, schemars, tool, tool_router};
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
 
-use super::{FlowMcp, Outcome, actor_of, target_project};
+use super::{FlowMcp, Outcome, actor_of, target_project, writable};
 use crate::activity::Action;
 use crate::records::{self, Kind, NewRecord};
 use crate::{actions, prs};
@@ -257,10 +257,7 @@ impl FlowMcp {
             .db
             .call(move |c| {
                 let tx = c.transaction()?;
-                let r = records::find_str(&tx, &p.record, a.project())?;
-                if !a.can_write_project(r.project_id) || a.is_owner() {
-                    anyhow::bail!("you can add buttons only to your own project's records");
-                }
+                let r = writable(&tx, &a, &p.record)?;
                 let id = actions::add(&tx, &r, &p.label, &p.command, &p.workdir, &p.requires, &a.name())?;
                 tx.commit()?;
                 Ok(Outcome::new(json!({"button": id, "on": r.ref_id}))
@@ -286,9 +283,7 @@ impl FlowMcp {
             .call(move |c| {
                 let b = actions::get(c, p.id)?.ok_or_else(|| anyhow::anyhow!("no button {}", p.id))?;
                 let r = records::get(c, b.record_id)?;
-                if !a.can_write_project(r.project_id) || a.is_owner() {
-                    anyhow::bail!("that button belongs to another project");
-                }
+                writable(c, &a, &r.ref_id)?;
                 actions::withdraw(c, b.id, &a.name())?;
                 Ok(Outcome::new(json!({"withdrawn": b.id}))
                     .summary(format!("button {} withdrawn", b.id))
