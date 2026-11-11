@@ -133,12 +133,12 @@ async fn wait_consultant(state: AppState, q: WaitQuery) -> Response {
     };
     let deadline = Instant::now() + Duration::from_secs(q.timeout.unwrap_or(MAX_WAIT).clamp(1, MAX_WAIT));
     loop {
-        match state.db.call(|c| crate::messages::consultant_inbox(c, true)).await {
+        match state.db.call(|c| crate::messages::consultant_inbox(c)).await {
             Ok(list) if !list.is_empty() => {
                 let events: Vec<_> = list
                     .iter()
                     .map(|m| json!({"at": fmt_utc(m.created_at), "record": null, "kind": "message",
-                        "what": format!("Message from {} (conversation {}): {}", m.sender, m.thread_id, m.body), "by": m.sender}))
+                        "what": format!("Message {} from {} (conversation {}): {}", m.id, m.sender, m.thread_id, m.body), "by": m.sender}))
                     .collect();
                 return Json(json!({"events": events})).into_response();
             }

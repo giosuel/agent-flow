@@ -90,7 +90,7 @@ impl FlowMcp {
                     crate::projects::seen(c, *project_id)?;
                     crate::waiting::unread_count(c, *project_id, slug)
                 }
-                Actor::Admin { .. } => Ok(crate::messages::consultant_inbox(c, false)?.len() as i64),
+                Actor::Admin { .. } => Ok(crate::messages::consultant_inbox(c)?.len() as i64),
                 _ => Ok(0),
             })
             .await

@@ -156,20 +156,23 @@ pub fn members(conn: &Connection, thread_id: i64) -> anyhow::Result<Vec<String>>
     Ok(rows.collect::<Result<_, _>>()?)
 }
 
+const MESSAGE_COLUMNS: &str = "m.id, m.thread_id, m.sender, m.kind, m.body, m.created_at";
+
+fn message_from_row(r: &rusqlite::Row) -> rusqlite::Result<Message> {
+    Ok(Message {
+        id: r.get(0)?,
+        thread_id: r.get(1)?,
+        sender: r.get(2)?,
+        kind: r.get(3)?,
+        body: r.get(4)?,
+        created_at: r.get(5)?,
+    })
+}
+
 pub fn messages(conn: &Connection, thread_id: i64) -> anyhow::Result<Vec<Message>> {
-    let mut stmt = conn.prepare(
-        "SELECT id, thread_id, sender, kind, body, created_at FROM messages WHERE thread_id = ?1 ORDER BY id",
-    )?;
-    let rows = stmt.query_map([thread_id], |r| {
-        Ok(Message {
-            id: r.get(0)?,
-            thread_id: r.get(1)?,
-            sender: r.get(2)?,
-            kind: r.get(3)?,
-            body: r.get(4)?,
-            created_at: r.get(5)?,
-        })
-    })?;
+    let mut stmt =
+        conn.prepare(&format!("SELECT {MESSAGE_COLUMNS} FROM messages m WHERE m.thread_id = ?1 ORDER BY m.id"))?;
+    let rows = stmt.query_map([thread_id], message_from_row)?;
     Ok(rows.collect::<Result<_, _>>()?)
 }
 
@@ -207,37 +210,32 @@ pub fn threads(conn: &Connection, member: Option<&str>, limit: i64, only: Option
     Ok(out)
 }
 
-/// Messages to the consultant (or everyone) it hasn't read, oldest first; marks them read.
-pub fn consultant_inbox(conn: &Connection, mark_read: bool) -> anyhow::Result<Vec<Message>> {
+/// Messages to the consultant (or everyone) it hasn't marked read, oldest first. Reading doesn't
+/// mark them: the consultant marks what it handled with `mark_consultant_read`, so a reply that
+/// never arrived (a dropped connection, a failed tool call) doesn't lose them.
+pub fn consultant_inbox(conn: &Connection) -> anyhow::Result<Vec<Message>> {
     let last: i64 = conn
         .query_row("SELECT last_id FROM consultant_reads WHERE reader = ?1", [CONSULTANT], |r| r.get(0))
         .optional()?
         .unwrap_or(0);
-    let mut stmt = conn.prepare(
-        "SELECT m.id, m.thread_id, m.sender, m.kind, m.body, m.created_at FROM messages m
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {MESSAGE_COLUMNS} FROM messages m
          WHERE m.id > ?1 AND m.sender != ?2
            AND EXISTS (SELECT 1 FROM thread_members tm WHERE tm.thread_id = m.thread_id AND tm.member IN (?2, 'all'))
-         ORDER BY m.id LIMIT 200",
+         ORDER BY m.id LIMIT 200"
+    ))?;
+    let rows = stmt.query_map(params![last, CONSULTANT], message_from_row)?;
+    Ok(rows.collect::<Result<_, _>>()?)
+}
+
+/// Marks the consultant's messages up to and including `up_to` read.
+pub fn mark_consultant_read(conn: &Connection, up_to: i64) -> anyhow::Result<()> {
+    conn.execute(
+        "INSERT INTO consultant_reads (reader, last_id) VALUES (?1, ?2)
+         ON CONFLICT (reader) DO UPDATE SET last_id = max(last_id, excluded.last_id)",
+        params![CONSULTANT, up_to],
     )?;
-    let rows = stmt.query_map(params![last, CONSULTANT], |r| {
-        Ok(Message {
-            id: r.get(0)?,
-            thread_id: r.get(1)?,
-            sender: r.get(2)?,
-            kind: r.get(3)?,
-            body: r.get(4)?,
-            created_at: r.get(5)?,
-        })
-    })?;
-    let list: Vec<Message> = rows.collect::<Result<_, _>>()?;
-    if mark_read && let Some(m) = list.last() {
-        conn.execute(
-            "INSERT INTO consultant_reads (reader, last_id) VALUES (?1, ?2)
-             ON CONFLICT (reader) DO UPDATE SET last_id = max(last_id, excluded.last_id)",
-            params![CONSULTANT, m.id],
-        )?;
-    }
-    Ok(list)
+    Ok(())
 }
 
 #[cfg(test)]
@@ -290,10 +288,12 @@ mod tests {
                 None,
             )?;
             assert!(crate::waiting::unread(c, v, "vinculum")?.iter().any(|e| e.summary.contains("22:00")));
-            let inbox = consultant_inbox(c, true)?;
+            let inbox = consultant_inbox(c)?;
             assert_eq!(inbox.len(), 1);
             assert!(inbox[0].body.contains("[redacted]") && !inbox[0].body.contains("af_prj_"), "tokens never stored");
-            assert!(consultant_inbox(c, true)?.is_empty(), "read");
+            assert_eq!(consultant_inbox(c)?.len(), 1, "still there until it's marked read");
+            mark_consultant_read(c, inbox[0].id)?;
+            assert!(consultant_inbox(c)?.is_empty(), "read");
             assert_eq!(threads(c, Some("vinculum"), 10, None)?.len(), 2, "its own and the one to all");
             Ok(())
         })
