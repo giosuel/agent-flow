@@ -301,9 +301,9 @@ button.opt { font: inherit; color: var(--ink); text-align: left; width: 100%; }
 @media (max-width: 700px) {
   /* The nav scrolls sideways on the phone; fade its right edge so that shows. */
   .nav { -webkit-mask-image: linear-gradient(to right, #000 85%, transparent); mask-image: linear-gradient(to right, #000 85%, transparent); padding-right: 24px; }
-  /* Open questions and the agent before the long overview. */
-  .split { flex-direction: column; }
-  .split-side { order: -1; }
+  .split { flex-direction: column; flex-wrap: nowrap; align-items: stretch; }
+  /* On a project's page: open questions and the agent before the long overview. */
+  .split.proj .split-side { order: -1; }
 }
 @media (max-width: 600px) {
   .btn.sm { min-height: 44px; }

@@ -14,7 +14,7 @@
 {% if let Some(n) = notice %}<p class="notice{% if notice_bad %} warn{% else %} ok{% endif %}" role="status">{{ n }}</p>{% endif %}
 
 {% if tab == "overview" %}
-<div class="split">
+<div class="split proj">
   <div class="split-main stack-lg">
     {% if !about.is_empty() %}
     <section class="card pad meta" aria-label="About">

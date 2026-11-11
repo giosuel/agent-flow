@@ -352,7 +352,7 @@ pub fn create(conn: &Connection, project_id: i64, author: &str, new: NewRecord) 
         Some(project_id),
         Some(id),
         &format!("{kind}.created"),
-        &format!("{} {}: {}", kind.label(), record.short_id(), title),
+        &format!("{} {}: {}", kind.label(), display_id(&record), title),
         author,
     )?;
     Ok(record)
