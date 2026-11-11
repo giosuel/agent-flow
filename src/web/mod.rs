@@ -6,15 +6,18 @@ mod assets;
 mod builds;
 pub use builds::notify_build;
 mod buttons;
+mod charts;
 mod conversations;
 mod dashboard;
 mod guides;
 mod icons;
 mod log;
+mod machine;
 mod pages;
 mod projects;
 mod pwa;
 mod settings;
+mod usage;
 
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
@@ -131,6 +134,8 @@ pub fn router(state: AppState) -> Router {
         .merge(conversations::routes())
         .merge(guides::routes())
         .merge(log::routes())
+        .merge(machine::routes())
+        .merge(usage::routes())
         .merge(dashboard::routes())
         .merge(pwa::routes())
         .nest_service("/mcp", mcp)
@@ -159,10 +164,66 @@ pub async fn serve(state: AppState) -> anyhow::Result<()> {
         tracing::info!("removed {swept} unfinished build upload(s)");
     }
     crate::poller::spawn(state.clone());
+    spawn_usage(state.clone());
+    crate::machine::spawn_sampler(state.clone());
     spawn_archiver(state.clone());
     let app = router(state).into_make_service_with_connect_info::<SocketAddr>();
     axum::serve(listener, app).with_graceful_shutdown(shutdown_signal()).await?;
     Ok(())
+}
+
+/// Reads new token usage from the transcripts: at start, then every five minutes. Files are read
+/// outside the database's lock, one at a time, so a first read of gigabytes doesn't hold up pages.
+fn spawn_usage(state: AppState) {
+    tokio::spawn(async move {
+        let mut tick = tokio::time::interval(std::time::Duration::from_secs(300));
+        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        loop {
+            tick.tick().await;
+            let started = std::time::Instant::now();
+            match usage_round(&state).await {
+                Ok(s) if s.calls > 0 => tracing::info!(
+                    "token usage: {} new calls from {} transcripts in {:.1} s",
+                    s.calls,
+                    s.files,
+                    started.elapsed().as_secs_f64()
+                ),
+                Ok(_) => {}
+                Err(e) => tracing::warn!("token usage: {e:#}"),
+            }
+        }
+    });
+}
+
+async fn usage_round(state: &AppState) -> anyhow::Result<crate::usage::Stats> {
+    let root = crate::usage::root(&state.config);
+    let r = root.clone();
+    let files = tokio::task::spawn_blocking(move || crate::usage::transcripts(&r)).await?;
+    let mut stats = crate::usage::Stats::default();
+    for path in files {
+        let p = path.clone();
+        let (offset, first_at) = state.db.call(move |c| crate::usage::file_state(c, &p)).await?;
+        let r = root.clone();
+        let shown = path.display().to_string();
+        let read =
+            match tokio::task::spawn_blocking(move || crate::usage::read_new(&r, &path, offset, first_at)).await? {
+                Ok(read) => read,
+                // Deleted meanwhile (Claude Code cleans up old ones), or unreadable: the rest go on.
+                Err(e) => {
+                    tracing::debug!("token usage: {shown}: {e:#}");
+                    continue;
+                }
+            };
+        if let Some(read) = read {
+            let n = state.db.call(move |c| crate::usage::store(c, &read)).await?;
+            if n > 0 {
+                stats.files += 1;
+                stats.calls += n;
+            }
+        }
+    }
+    state.db.call(|c| crate::usage::assign_projects(c)).await?;
+    Ok(stats)
 }
 
 /// Moves reads older than 90 days to the monthly archive: at start, then every six hours.

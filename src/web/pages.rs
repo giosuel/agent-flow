@@ -18,22 +18,13 @@ use webauthn_rs::prelude::PublicKeyCredential;
 pub const VERSION: &str = env!("APP_VERSION");
 
 pub fn routes() -> Router<AppState> {
-    let mut r = Router::new()
+    Router::new()
         .route("/login", get(login))
         .route("/login/link/{secret}", get(link_confirm).post(link_use))
         .route("/login/passkey/start", post(passkey_start))
         .route("/login/passkey/finish", post(passkey_finish))
         .route("/logout", post(logout))
-        .route("/api/whoami", get(whoami));
-    for (path, _, milestone) in COMING {
-        r = r.route(
-            path,
-            get(move |State(state): State<AppState>, Extension(actor): Extension<Actor>| {
-                coming(state, actor, path, milestone)
-            }),
-        );
-    }
-    r
+        .route("/api/whoami", get(whoami))
 }
 
 /// The navigation, in the order of the mockups.
@@ -46,9 +37,6 @@ const NAV: &[(&str, &str)] = &[
     ("/guides", "Guides"),
     ("/log", "Log"),
 ];
-
-/// Pages that exist in the navigation but are built in a later milestone.
-const COMING: &[(&str, &str, &str)] = &[("/machine", "Machine", "M9"), ("/usage", "Usage", "M9")];
 
 pub struct NavItem {
     pub href: &'static str,
@@ -87,19 +75,6 @@ impl Nav {
 
 pub fn render(t: impl Template) -> AppResult<Response> {
     Ok(Html(t.render()?).into_response())
-}
-
-#[derive(Template)]
-#[template(path = "coming.html")]
-struct ComingPage {
-    nav: Nav,
-    title: &'static str,
-    milestone: &'static str,
-}
-
-async fn coming(state: AppState, actor: Actor, path: &'static str, milestone: &'static str) -> AppResult<Response> {
-    let title = COMING.iter().find(|c| c.0 == path).map(|c| c.1).unwrap_or("Page");
-    render(ComingPage { nav: nav(&state, &actor, path).await, title, milestone })
 }
 
 #[derive(Template)]

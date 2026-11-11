@@ -221,6 +221,9 @@ struct AgentCard {
     working_on: String,
     seen: String,
     online: bool,
+    /// New tokens over the last 7 days, and a bar per day (height in %, its title), oldest first.
+    tokens_week: String,
+    strip: Vec<(u32, String)>,
 }
 
 #[derive(Template)]
@@ -329,6 +332,7 @@ fn build_project_page(
     tab: &str,
     now: i64,
 ) -> anyhow::Result<ProjectPage> {
+    let week = crate::usage::project_days(c, p.id, crate::usage::day_start(now), 7)?;
     let online = p.agent.online(now);
     let headline = {
         let mut parts = Vec::new();
@@ -596,6 +600,18 @@ fn build_project_page(
             working_on: p.agent.note.clone(),
             seen: p.agent.seen_at.map(|t| ago(t, now)).unwrap_or_else(|| "never".into()),
             online,
+            tokens_week: crate::usage::short(week.iter().sum()),
+            strip: {
+                let max = week.iter().copied().max().unwrap_or(0).max(1);
+                week.iter()
+                    .enumerate()
+                    .map(|(i, n)| {
+                        let day = crate::usage::day_start(now) - (6 - i as i64) * crate::usage::DAY;
+                        let h = if *n == 0 { 0 } else { ((*n * 100 / max) as u32).max(4) };
+                        (h, format!("{}: {} new tokens", &crate::util::fmt_utc(day)[..10], crate::usage::short(*n)))
+                    })
+                    .collect()
+            },
         },
         open_questions,
         decisions,

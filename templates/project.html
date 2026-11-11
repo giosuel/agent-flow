@@ -83,6 +83,9 @@
         {% if !agent.model.is_empty() %}<dt>Model</dt><dd>{{ agent.model }}</dd>{% endif %}
         {% if !agent.working_on.is_empty() %}<dt>Working on</dt><dd>{{ agent.working_on }}</dd>{% endif %}
         <dt>Last seen</dt><dd><span class="dot{% if agent.online %} ok{% endif %}" aria-hidden="true"></span> {{ agent.seen }}</dd>
+        <dt>Tokens this week</dt><dd><span class="mono">{{ agent.tokens_week }}</span> new
+          <span class="strip" role="img" aria-label="new tokens per day, the last 7 days">{% for (h, t) in agent.strip %}<span style="height: {{ h }}%" title="{{ t }}"></span>{% endfor %}</span>
+          <a class="sub" href="/usage">Open in Usage</a></dd>
       </dl>
       <p class="sub">One agent works on each project. It hands focused jobs to subagents, and only it writes here.</p>
     </section>

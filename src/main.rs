@@ -23,6 +23,7 @@ mod prs;
 mod push;
 mod records;
 mod tokens;
+mod usage;
 mod util;
 mod waiting;
 mod web;
