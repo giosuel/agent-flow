@@ -28,7 +28,7 @@
   <div class="form-grid">
     <label>Name<input name="name" required maxlength="60" value="{{ name }}" placeholder="Speculum" autofocus></label>
     <label>Folder<input name="folder" value="{{ folder }}" placeholder="~/speculum (from the name if left empty)"></label>
-    <label class="wide">What it is<input name="description" maxlength="300" value="{{ description }}" placeholder="Screenshot and screen recording tool for Hyprland."></label>
+    <label class="span-all">What it is<input name="description" maxlength="300" value="{{ description }}" placeholder="Screenshot and screen recording tool for Hyprland."></label>
     <label>Tech stack<input name="stack" value="{{ stack }}" placeholder="Rust, Slint"></label>
     <label>Target platform<input name="platform" value="{{ platform }}" placeholder="Linux · Hyprland"></label>
     <label>Model<select name="model">{% for m in ["Claude Opus 5.5", "Claude Sonnet 5.5", "Claude Fable 5.1"] %}<option{% if *m == model %} selected{% endif %}>{{ m }}</option>{% endfor %}</select></label>

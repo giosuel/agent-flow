@@ -57,6 +57,19 @@ pub fn fmt_utc(ms: i64) -> String {
     t.format(&f).unwrap_or_default()
 }
 
+/// "35,948": counts with thousands separators.
+pub fn fmt_count(n: i64) -> String {
+    let digits = n.unsigned_abs().to_string();
+    let mut out = String::new();
+    for (i, d) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i) % 3 == 0 {
+            out.push(',');
+        }
+        out.push(d);
+    }
+    if n < 0 { format!("-{out}") } else { out }
+}
+
 /// "02:04" (UTC).
 pub fn fmt_hm(ms: i64) -> String {
     fmt_utc(ms).get(11..16).unwrap_or("").to_owned()
