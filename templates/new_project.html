@@ -2,7 +2,7 @@
 {% block title %}New project{% endblock %}
 {% block content %}
 <div class="head">
-  <nav class="crumbs" aria-label="Breadcrumb"><a href="/projects">Projects</a> / New project</nav>
+  <nav class="crumbs" aria-label="Back"><a class="crumb-back" href="/projects">{{ crate::web::icons::icon("back")|safe }}<span>All projects</span></a></nav>
   <h1>{% if done.is_some() %}Project ready{% else %}New project{% endif %}</h1>
   <p class="status-line">A new project, or an existing folder to onboard: fill in the same form. Everything is logged.</p>
 </div>
