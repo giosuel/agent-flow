@@ -6,15 +6,18 @@ mod assets;
 mod builds;
 pub use builds::notify_build;
 mod buttons;
+mod charts;
 mod conversations;
 mod dashboard;
 mod guides;
 mod icons;
 mod log;
+mod machine;
 mod pages;
 mod projects;
 mod pwa;
 mod settings;
+mod usage;
 
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
@@ -131,6 +134,8 @@ pub fn router(state: AppState) -> Router {
         .merge(conversations::routes())
         .merge(guides::routes())
         .merge(log::routes())
+        .merge(machine::routes())
+        .merge(usage::routes())
         .merge(dashboard::routes())
         .merge(pwa::routes())
         .nest_service("/mcp", mcp)
