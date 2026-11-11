@@ -104,7 +104,8 @@ impl Kind {
             Kind::Release => &["planned", "waiting", "tagged", "dropped"],
             Kind::Build => &["published", "tried", "withdrawn"],
             Kind::Feedback => &["works", "problem", "skipped", "note"],
-            Kind::Contribution => &["draft", "shown", "approved", "sent", "merged", "closed"],
+            // draft: back with the agent; shown: waiting for the owner's Send; approved: being sent.
+            Kind::Contribution => &["draft", "shown", "approved", "sent", "merged", "closed", "dropped"],
             Kind::Screenshot => &["current", "withdrawn"],
         }
     }
