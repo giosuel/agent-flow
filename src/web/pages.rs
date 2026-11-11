@@ -49,7 +49,7 @@ const NAV: &[(&str, &str)] = &[
 
 /// Pages that exist in the navigation but are built in a later milestone.
 const COMING: &[(&str, &str, &str)] =
-    &[("/machine", "Machine", "M9"), ("/usage", "Usage", "M9"), ("/guides", "Guides", "M7"), ("/log", "Log", "M8")];
+    &[("/machine", "Machine", "M9"), ("/usage", "Usage", "M9"), ("/log", "Log", "M8")];
 
 pub struct NavItem {
     pub href: &'static str,
@@ -69,7 +69,8 @@ pub struct Nav {
 pub async fn nav(state: &AppState, actor: &Actor, active: &str) -> Nav {
     let mut n = Nav::new(actor, active);
     if actor.is_owner() {
-        n.waiting = state.db.call(|c| crate::waiting::count(c)).await.unwrap_or(0) as i64;
+        let guides = state.guide_prs.lock().unwrap().open.len() as i64;
+        n.waiting = state.db.call(|c| crate::waiting::count(c)).await.unwrap_or(0) as i64 + guides;
     }
     n
 }

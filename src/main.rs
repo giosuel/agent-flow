@@ -10,6 +10,7 @@ mod config;
 mod contributions;
 mod db;
 mod github;
+mod guides;
 mod machine;
 mod markdown;
 mod mcp;

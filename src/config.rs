@@ -24,6 +24,14 @@ pub struct Config {
     pub trusted_proxies: Vec<std::net::IpAddr>,
     /// Where project and consultant tokens are written for Claude Code's headersHelper.
     pub token_dir: String,
+    /// The checkout of the guides repository (ai-handbook) that agents read and the owner edits.
+    pub handbook_dir: String,
+    /// That repository on GitHub, for its pull requests and links.
+    pub handbook_repo: String,
+    /// Who the owner's guide edits are committed as.
+    pub git_author: String,
+    /// False on a test instance: the Guides page's Merge button refuses instead of merging on GitHub.
+    pub github_writes: bool,
     /// The contact push services ask senders for (Apple requires one): mailto: or https:.
     pub push_contact: String,
     /// Owner sessions end after this many days without a request…
@@ -40,6 +48,10 @@ impl Default for Config {
             data_dir: "~/.local/state/agentflow".into(),
             token_dir: "~/.config/agentflow/tokens".into(),
             push_contact: "mailto:me@giosuel.ch".into(),
+            handbook_dir: "~/ai-handbook".into(),
+            handbook_repo: "giosuel/ai-handbook".into(),
+            git_author: "giosuel <me@giosuel.ch>".into(),
+            github_writes: true,
             trusted_proxies: vec!["127.0.0.1".parse().unwrap(), "::1".parse().unwrap()],
             session_idle_days: 14,
             session_max_days: 30,
@@ -79,6 +91,10 @@ impl Config {
 
     pub fn token_dir(&self) -> PathBuf {
         expand_home(&self.token_dir)
+    }
+
+    pub fn handbook_dir(&self) -> PathBuf {
+        expand_home(&self.handbook_dir)
     }
 
     pub fn db_path(&self) -> PathBuf {

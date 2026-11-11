@@ -2,6 +2,7 @@
 //! already authenticated the request; each tool reads the identity from the request parts, does
 //! its work and writes its own activity-log row.
 
+mod guide_tools;
 mod message_tools;
 mod pr_tools;
 mod project_tools;
@@ -59,7 +60,8 @@ impl FlowMcp {
                 + Self::project_tools()
                 + Self::record_tools()
                 + Self::pr_tools()
-                + Self::message_tools(),
+                + Self::message_tools()
+                + Self::guide_tools(),
         }
     }
 

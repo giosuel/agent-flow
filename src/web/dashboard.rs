@@ -96,6 +96,22 @@ async fn dashboard(
 ) -> AppResult<Response> {
     let now = now_ms();
     let answered = q.answered.clone();
+    // The guides' open pull requests, from the poller's cache.
+    let repo = state.config.handbook_repo.clone();
+    let guide_prs: Vec<Item> = state
+        .guide_prs
+        .lock()
+        .unwrap()
+        .open
+        .iter()
+        .map(|p| Item {
+            icon: icon("doc"),
+            title: p.title.clone(),
+            sub: format!("{} · {repo}/pull/{}", p.files.join(", "), p.number),
+            url: format!("{}/files", p.url),
+            action: "View on GitHub",
+        })
+        .collect();
     let data = state
         .db
         .call(move |c| {
@@ -168,6 +184,9 @@ async fn dashboard(
                 .collect();
             if !builds.is_empty() {
                 groups.push(Group { title: "Builds to try", items: builds });
+            }
+            if !guide_prs.is_empty() {
+                groups.push(Group { title: "Guides to review", items: guide_prs });
             }
 
             let activity = records::recent_events(c, None, 30)?

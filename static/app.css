@@ -333,3 +333,8 @@ button.opt { font: inherit; color: var(--ink); text-align: left; width: 100%; }
 .conv-row .ttl strong { font-weight: 500; }
 .msgs { padding-left: 0; list-style: none; gap: 16px; }
 .msg { display: flex; flex-direction: column; gap: 6px; padding-bottom: 14px; border-bottom: 1px solid var(--line2); }
+
+/* Guides */
+.split.guides .split-side { flex: 1 1 300px; max-width: 380px; }
+.editor { width: 100%; font-size: 13px; line-height: 1.5; }
+.guide-sec .prose { color: var(--ink2); }

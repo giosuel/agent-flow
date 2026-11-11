@@ -26,6 +26,9 @@ pub fn spawn(state: AppState) {
             if let Err(e) = poll_once(&state).await {
                 tracing::warn!("GitHub poll: {e:#}");
             }
+            if let Err(e) = refresh_guide_prs(&state).await {
+                tracing::warn!("guides' PRs: {e:#}");
+            }
             // Other people's repositories change slowly: every tenth round (30 minutes).
             if round.is_multiple_of(10)
                 && let Err(e) = poll_contributions(&state).await
@@ -200,6 +203,35 @@ pub async fn poll_contributions(state: &AppState) -> anyhow::Result<()> {
                 activity::write(&state.db, e).await;
             }
         }
+    }
+    Ok(())
+}
+
+/// The guides repository's open and recently merged PRs; a new one is something to review.
+pub async fn refresh_guide_prs(state: &AppState) -> anyhow::Result<()> {
+    let repo = state.config.handbook_repo.clone();
+    let open = state.github.repo_prs(&repo, false).await?;
+    let merged = state.github.repo_prs(&repo, true).await?;
+    let new: Vec<crate::github::RepoPr> = {
+        let mut cache = state.guide_prs.lock().unwrap();
+        let new = if cache.fetched {
+            open.iter().filter(|p| !cache.open.iter().any(|o| o.number == p.number)).cloned().collect()
+        } else {
+            Vec::new()
+        };
+        *cache = crate::web::GuidePrs { open, merged, fetched: true };
+        new
+    };
+    for pr in new {
+        state.push.spawn(
+            push::Kind::Review,
+            Notification {
+                title: format!("Guides: #{} to review", pr.number),
+                body: format!("{} ({})", pr.title, pr.files.join(", ")),
+                url: "/guides".into(),
+                tag: Some(format!("guides-{}", pr.number)),
+            },
+        );
     }
     Ok(())
 }
