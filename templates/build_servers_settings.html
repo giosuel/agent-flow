@@ -1,0 +1,48 @@
+{# The Settings page's Build servers card. #}
+<section class="card pad stack" aria-labelledby="s-builds" id="s-builds">
+  <div class="sec"><h2 id="s-builds">Build servers</h2><span class="sub">machines agents build and test on with <span class="mono">agentflow remote</span></span></div>
+  {% if let Some((ok, text)) = notice %}<p class="notice{% if *ok %} ok{% else %} warn{% endif %}" role="status">{{ text }}</p>{% endif %}
+  {% for s in servers %}
+  <div class="bsrv stack-sm">
+    <div class="bs-head"><span class="dot{% if s.online %} ok{% endif %}" aria-hidden="true"></span><h3>{{ s.name }}</h3><span class="sub mono">{{ s.ssh }}</span></div>
+    <p class="sub">{{ s.line }}</p>
+    <ul class="checks">
+      <li><span class="{% if s.cargo.is_empty() %}n{% else %}y{% endif %}" aria-hidden="true">{% if s.cargo.is_empty() %}!{% else %}✓{% endif %}</span><span>{% if !s.checked %}Rust: not checked yet{% else if s.cargo.is_empty() %}Rust: no toolchain for this user{% else %}Rust: {{ s.cargo }}{% endif %}</span></li>
+      <li><span class="{% if s.sccache.is_empty() %}n{% else %}y{% endif %}" aria-hidden="true">{% if s.sccache.is_empty() %}!{% else %}✓{% endif %}</span><span>{% if !s.checked %}sccache: not checked yet{% else if s.sccache.is_empty() %}sccache: not installed (optional: compiled dependencies are then shared by every project there){% else %}{{ s.sccache }}: compiled dependencies are shared by every project there{% endif %}</span></li>
+    </ul>
+    {% if !s.setup.is_empty() %}<p class="sub">{% if s.setup_running %}Running: {% endif %}{{ s.setup }}{% if !s.setup_running %} · <a href="/log?q=target:server-{{ s.name }}&amp;range=7d">in the Log</a>{% endif %}</p>{% endif %}
+    <div class="row wrap">
+      <form method="post" action="/settings/build-servers/{{ s.name }}/check"><button class="btn sm ghost" type="submit">Check</button></form>
+      {% if s.checked && s.cargo.is_empty() %}<form method="post" action="/settings/build-servers/{{ s.name }}/setup/rust"><button class="btn sm ghost" type="submit"{% if s.setup_running %} disabled{% endif %} data-confirm="Set up Rust for {{ s.ssh }}? It installs rustup's stable toolchain in that user's home (about 1.5 GB).">Set up Rust</button></form>{% endif %}
+      {% if s.checked && s.sccache.is_empty() %}<form method="post" action="/settings/build-servers/{{ s.name }}/setup/sccache"><button class="btn sm ghost" type="submit"{% if s.setup_running %} disabled{% endif %}>Install sccache</button></form>{% endif %}
+    </div>
+    {% if let Some(k) = s.key_line %}
+    <details class="stack-sm"{% if !s.online %} open{% endif %}><summary class="sub">Its key: add this line on {{ s.ssh }}</summary>
+      <p class="sub">AgentFlow made a key for it. On that machine, as the build user, run this once. <span class="mono">restrict</span> lets the key run commands and copy files, but not forward ports or open a terminal:</p>
+      <pre class="cmd mono">mkdir -p ~/.ssh && echo '{{ k }}' >> ~/.ssh/authorized_keys</pre>
+    </details>
+    {% endif %}
+    <details><summary class="sub">Limits</summary>
+      <form method="post" action="/settings/build-servers/{{ s.name }}/limits" class="form-grid">
+        <label>Start another job while at least … threads are free<input name="min_threads" type="number" min="0" step="1" value="{{ s.min_threads }}"></label>
+        <label>… and this much memory (GB)<input name="min_memory_gb" type="number" min="0" step="1" value="{{ s.min_memory }}"></label>
+        <label>Pause jobs below this much free memory (GB)<input name="reserve_memory_gb" type="number" min="0" step="1" value="{{ s.reserve_memory }}"></label>
+        <label>Delete a project's folder unused for (days)<input name="keep_days" type="number" min="1" step="1" value="{{ s.keep_days }}"></label>
+        <div><button class="btn sm" type="submit">Save</button></div>
+      </form>
+    </details>
+    <div class="row wrap"><span class="sub">{% if s.projects.is_empty() %}No project uses it yet: pick it in a project's Settings.{% else %}Used by {% for p in s.projects %}{% if !loop.first %}, {% endif %}{{ p }}{% endfor %}.{% endif %}</span><span class="grow"></span>
+      <form method="post" action="/settings/build-servers/{{ s.name }}/remove"><button class="btn sm danger" type="submit" data-confirm="Remove {{ s.name }}? Projects that use it build where their agent is. Its work folders there stay until you delete them.">Remove</button></form></div>
+  </div>
+  {% endfor %}
+  {% if servers.is_empty() %}<p class="sub">None yet. A build server is any Linux machine AgentFlow reaches with ssh, e.g. a workstation over WireGuard.</p>{% endif %}
+  <form method="post" action="/settings/build-servers" class="stack-sm bs-add">
+    <h3 class="label">Add a build server</h3>
+    <div class="form-grid">
+      <label>Name<input name="name" required maxlength="64" placeholder="e.g. headquarters"></label>
+      <label>Connect to<input name="ssh" required maxlength="200" placeholder="builder@10.0.8.2, or a Host from ~/.ssh/config"></label>
+    </div>
+    <label class="row"><input type="checkbox" name="make_key" value="1" checked> Make a new SSH key for it (then add one line on that machine)</label>
+    <div><button class="btn" type="submit">Add</button></div>
+  </form>
+</section>

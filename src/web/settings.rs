@@ -103,11 +103,15 @@ struct SettingsPage {
     device_tokens: Vec<TokenView>,
     agent_tokens: Vec<TokenView>,
     sessions: Vec<SessionView>,
+    /// The Build servers card.
+    build_servers: String,
 }
 
 #[derive(Deserialize)]
 struct PageQuery {
     done: Option<String>,
+    /// What happened on the Build servers card.
+    bs: Option<String>,
 }
 
 /// Messages after a form post; the query names one of these, never free text.
@@ -132,7 +136,7 @@ async fn page(
 ) -> AppResult<Response> {
     actor.require_owner()?;
     let notice = q.done.as_deref().and_then(notice_for);
-    render_page(&state, &actor, notice, None).await
+    render_page(&state, &actor, notice, None, q.bs.as_deref()).await
 }
 
 async fn render_page(
@@ -140,6 +144,7 @@ async fn render_page(
     actor: &Actor,
     notice: Option<&'static str>,
     new_token: Option<(String, String)>,
+    bs: Option<&str>,
 ) -> AppResult<Response> {
     let current = match actor {
         Actor::Owner { session_id, .. } => *session_id,
@@ -198,6 +203,7 @@ async fn render_page(
         nav: nav(state, actor, "/settings").await,
         notice,
         new_token,
+        build_servers: super::remote::servers_card(state, bs).await?,
         passkeys_available: state.passkeys.available(),
         public_url: state.config.public_url.clone(),
         passkeys: passkeys
@@ -420,7 +426,7 @@ async fn device_create(
     let n = name.clone();
     let (id, secret) = state.db.call(move |c| auth::create_token(c, TokenKind::Device, &n, None)).await?;
     log(&state, &actor, &ip, Action::Write, format!("device token {id} created: {name}")).await;
-    render_page(&state, &actor, None, Some((name, secret))).await
+    render_page(&state, &actor, None, Some((name, secret)), None).await
 }
 
 async fn token_revoke(
