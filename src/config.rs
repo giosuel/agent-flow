@@ -79,6 +79,8 @@ pub struct BuildServer {
     pub keep_days: i64,
     /// The ssh program (tests use a stand-in that runs commands locally).
     pub ssh_program: String,
+    /// A private key AgentFlow made for this server; empty: ssh's own config decides.
+    pub key_file: String,
 }
 
 impl Default for BuildServer {
@@ -92,6 +94,7 @@ impl Default for BuildServer {
             reserve_memory_gb: 8.0,
             keep_days: 14,
             ssh_program: "ssh".into(),
+            key_file: String::new(),
         }
     }
 }
