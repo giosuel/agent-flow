@@ -231,7 +231,8 @@ pub fn commands(folder: &Path, token_file: &Path, public_url: &str) -> (String, 
         public_url.trim_end_matches('/'),
         token_file.display()
     );
-    (mcp_add, format!("cd {} && claude", folder.display()))
+    // The session's shell commands (agentflow publish, remote, …) find the token through this.
+    (mcp_add, format!("cd {} && env AGENTFLOW_TOKEN_FILE={} claude", folder.display(), token_file.display()))
 }
 
 /// Checks the form before anything is created.
