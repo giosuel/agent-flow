@@ -237,6 +237,29 @@ details.ask > summary::-webkit-details-marker { display: none; }
 details.ask[open] { flex-basis: 100%; order: 3; }
 .ask-box { margin-top: 10px; }
 pre.wrap { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 40vh; overflow: auto; }
+/* Build servers: the Machine page's section, a job's page, build output in the Log. */
+:root { --bar-you: #6E6E7A; }
+.bs-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; }
+.bs-head h3 { margin: 0; font-size: 17px; }
+.meters { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+.meter { display: flex; flex-direction: column; gap: 6px; }
+.meter .bar3 { display: flex; height: 12px; border-radius: 6px; overflow: hidden; background: var(--chip); gap: 2px; }
+.meter .bar3 i { display: block; height: 100%; }
+.meter .you { background: var(--bar-you); }
+.meter .builds { background: var(--accent); }
+.meter .nums { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; color: var(--muted); }
+.key { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 13px; color: var(--muted); }
+.key span::before { content: ""; display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; background: var(--c); }
+.jobs td, .jobs th { white-space: nowrap; }
+.jobs td.jcmd { white-space: normal; font-family: var(--mono); font-size: 13px; }
+.chip.run { background: var(--chip-accent); color: var(--chip-accent-ink); }
+.joblog, .blog { font-family: var(--mono); font-size: 13px; line-height: 1.55; background: var(--code); border: 1px solid var(--line); border-radius: 8px; padding: 8px 0; overflow: auto; color: var(--ink2); }
+.joblog { height: 60vh; min-height: 320px; }
+.joblog div, .blog div { white-space: pre-wrap; overflow-wrap: anywhere; padding: 0 12px; min-height: 1.55em; }
+.joblog .d, .blog .d { color: var(--muted); }
+.joblog .w, .blog .w { color: var(--warn); background: var(--warn-bg); }
+.joblog .e, .blog .e { color: var(--bad); background: var(--bad-bg); }
+@media (max-width: 700px) { .meters { grid-template-columns: 1fr; } .joblog { height: 70vh; } }
 .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); overflow-x: auto; margin-top: -12px; }
 .tabs a { padding: 10px 14px; color: var(--nav-ink); text-decoration: none; border-bottom: 2px solid transparent; white-space: nowrap; }
 .tabs a.on { color: #fff; border-bottom-color: var(--accent); font-weight: 500; }

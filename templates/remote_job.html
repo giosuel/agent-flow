@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Job #{{ job.id }}{% endblock %}
+{% block scripts %}<script src="/static/remote.js?v={{ nav.version }}" defer></script>{% endblock %}
+{% block content %}
+<div class="head stack-sm">
+  <nav class="crumbs" aria-label="Back"><a class="crumb-back" href="/machine#builds">{{ crate::web::icons::icon("back")|safe }}<span>Machine</span></a><span class="crumb-where">Build job</span></nav>
+  <div class="row wrap"><span class="chip {{ row.chip }}" id="job-state">{{ row.label }}</span><span class="sub mono">job #{{ job.id }} · <span id="job-time">{{ row.time }}</span></span></div>
+  <h1 class="rec-title">{{ job.project }} · <span class="mono">{{ command }}</span></h1>
+  <p class="sub">on {{ job.server }} · {{ started }}</p>
+</div>
+<div class="split">
+  <section class="split-main stack" aria-labelledby="out-h">
+    <div class="sec"><h2 id="out-h">Output</h2><span class="sub">{% if !job.is_finished() %}live · {% endif %}every line is in the Log too: <a href="/log?q=target:job-{{ job.id }}&amp;range=all">target:job-{{ job.id }}</a></span></div>
+    <div class="joblog" id="job-log" role="log" aria-live="polite" data-job="{{ job.id }}" data-next="{{ next }}" data-done="{% if job.is_finished() %}1{% endif %}">{% for (cls, line) in lines %}<div class="{{ cls }}">{{ line }}</div>{% endfor %}</div>
+    {% if is_owner && !job.is_finished() %}
+    <form method="post" action="/machine/jobs/{{ job.id }}/cancel" class="row wrap" id="job-cancel"><button class="btn danger" type="submit" data-confirm="Cancel job #{{ job.id }}? It stops on {{ job.server }}; the agent hears it was cancelled.">Cancel the job</button><span class="sub">Stops it on {{ job.server }}; the agent gets "cancelled by the owner".</span></form>
+    {% endif %}
+  </section>
+  <aside class="split-side stack-lg">
+    <section class="card pad stack-sm" aria-labelledby="f-h"><h2 class="label" id="f-h">This job</h2>
+      <dl class="kv">{% for (k, v) in facts %}<dt>{{ k }}</dt><dd>{{ v }}</dd>{% endfor %}</dl>
+    </section>
+  </aside>
+</div>
+{% endblock %}

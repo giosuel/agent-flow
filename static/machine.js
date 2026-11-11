@@ -32,11 +32,23 @@
     }
   }
 
+  // The Build servers section, when there is one.
+  async function refreshBuilds() {
+    const old = document.getElementById("builds");
+    if (!old) return;
+    const r = await fetch("/machine/builds");
+    if (!r.ok) return;
+    const doc = new DOMParser().parseFromString(await r.text(), "text/html");
+    const fresh = doc.getElementById("builds");
+    if (fresh) old.replaceWith(document.importNode(fresh, true));
+  }
+
   async function tick() {
     if (document.hidden || busy) return;
     busy = true;
     try {
       await refreshTiles();
+      await refreshBuilds();
       if (Date.now() - lastCharts >= 60_000) {
         lastCharts = Date.now();
         await refreshCharts();

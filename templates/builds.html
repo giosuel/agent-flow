@@ -1,0 +1,28 @@
+{# The Machine page's Build servers section; the page fetches it again every 5 seconds. #}
+<section class="card pad stack" aria-labelledby="bs-h" id="builds">
+  <div class="sec wrap"><h2 id="bs-h">Build servers</h2><span class="sub">agents run builds and tests there with <span class="mono">agentflow remote</span></span></div>
+  {% for s in servers %}
+  <div class="bs-head"><span class="dot{% if s.online %} ok{% endif %}" aria-hidden="true"></span><h3>{{ s.name }}</h3><span class="sub mono">{{ s.ssh }}</span><span class="sub">{{ s.line }}</span><span class="grow"></span>
+    {% if is_owner %}<form method="post" action="/machine/servers/{{ s.name }}/{% if s.paused %}resume{% else %}pause{% endif %}"><button class="btn sm ghost" type="submit">{% if s.paused %}Resume builds{% else %}Pause builds{% endif %}</button></form>{% endif %}
+  </div>
+  {% if s.paused %}<p class="notice warn" role="status">Builds are paused: nothing starts, running jobs are frozen until you resume.</p>{% endif %}
+  {% if !s.meters.is_empty() %}
+  <div class="meters">
+    {% for m in s.meters %}
+    <div class="meter"><span class="label">{{ m.label }}</span>
+      <div class="bar3" role="img" aria-label="{{ m.label }}: you {{ m.you_s() }}, builds {{ m.builds_s() }}, free {{ m.free() }} of {{ m.total_s() }} {{ m.unit }}"><i class="you" style="width: {{ m.you_pct() }}%"></i><i class="builds" style="width: {{ m.builds_pct() }}%"></i></div>
+      <div class="nums"><span>you {{ m.you_s() }}</span><span>builds {{ m.builds_s() }}</span><span>free {{ m.free() }} of {{ m.total_s() }} {{ m.unit }}</span></div></div>
+    {% endfor %}
+  </div>
+  <div class="key"><span style="--c: var(--bar-you)">you (everything that isn't a build)</span><span style="--c: var(--accent)">builds</span></div>
+  {% endif %}
+  <p class="sub">Builds get what you aren't using: they run at low priority, and pause if memory runs short, going on by themselves when there's room. Another one starts while at least {{ s.min_threads }} threads and {{ s.min_memory }} GB are free.</p>
+  {% if s.jobs.is_empty() %}<p class="sub">No jobs yet.</p>{% else %}
+  <div class="table-wrap"><table class="table jobs">
+    <thead><tr><th scope="col">Job</th><th scope="col">Project</th><th scope="col">Command</th><th scope="col">State</th><th scope="col" class="hide-phone">Time</th><th scope="col" class="hide-phone">Sent</th></tr></thead>
+    <tbody>{% for j in s.jobs %}<tr><th scope="row"><a href="/machine/jobs/{{ j.id }}">#{{ j.id }}</a></th><td>{{ j.project }}</td><td class="jcmd">{{ j.command }}</td><td><span class="chip {{ j.chip }}">{{ j.label }}</span></td><td class="hide-phone mono">{{ j.time }}</td><td class="hide-phone mono">{{ j.sent }}</td></tr>{% endfor %}</tbody>
+  </table></div>
+  {% endif %}
+  <p class="sub">{% if !s.folders.is_empty() %}Work folders on {{ s.name }}: {{ s.folders }}. {% endif %}A project's folder unused for {{ s.keep_days }} days is deleted.</p>
+  {% endfor %}
+</section>
