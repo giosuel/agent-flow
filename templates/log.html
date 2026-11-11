@@ -46,7 +46,7 @@
     </ol>
     {% if entries.is_empty() %}<p class="sub">Nothing matches in this range.</p>{% endif %}
     {% if let Some(o) = older %}<a class="btn sm ghost" href="{{ o }}">Older entries</a>{% endif %}
-    <p class="sub">Reads older than 90 days are in the archive, one compressed file per month{% if !archive.is_empty() %}: {% for (m, n) in archive %}{% if !loop.first %}, {% endif %}{{ m }} ({{ n }} entries){% endfor %}{% endif %}. Nothing is ever deleted. {% if reaches_archive %}This range reaches the archive, so it's searched too.{% endif %}</p>
+    <p class="sub">Reads older than 90 days are in the archive, one compressed file per month{% if !archive.is_empty() %}: {% for (m, n) in archive %}{% if !loop.first %}, {% endif %}{{ m }} ({{ n }} entr{% if *n == 1 %}y{% else %}ies{% endif %}){% endfor %}{% endif %}. Nothing is ever deleted. {% if reaches_archive %}This range reaches the archive, so it's searched too.{% endif %}</p>
   </section>
 </div>
 {% endblock %}
