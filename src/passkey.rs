@@ -78,7 +78,7 @@ impl Passkeys {
 
     fn remember(pool: &Mutex<HashMap<String, Ceremony>>, client: &str, state: Pending) -> String {
         let now = now_ms();
-        let mut pending = crate::util::lock(&pool);
+        let mut pending = crate::util::lock(pool);
         pending.retain(|_, c| c.expires > now);
         // Per client: drop that client's oldest; overall: drop the oldest of all.
         let oldest = |p: &HashMap<String, Ceremony>, only: Option<&str>| {
@@ -103,7 +103,7 @@ impl Passkeys {
     }
 
     fn take(pool: &Mutex<HashMap<String, Ceremony>>, id: &str) -> Option<Pending> {
-        let c = crate::util::lock(&pool).remove(id)?;
+        let c = crate::util::lock(pool).remove(id)?;
         (c.expires > now_ms()).then_some(c.state)
     }
 

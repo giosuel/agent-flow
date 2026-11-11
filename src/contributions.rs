@@ -112,7 +112,10 @@ pub fn update(conn: &Connection, r: &Record, info: &ItemInfo) -> anyhow::Result<
 
 /// Contributions still worth watching: not merged or closed.
 pub fn watched(conn: &Connection) -> anyhow::Result<Vec<Record>> {
-    records::query(conn, &Query { kinds: vec![Kind::Contribution], states: vec![WATCHING.into()], ..Default::default() })
+    records::query(
+        conn,
+        &Query { kinds: vec![Kind::Contribution], states: vec![WATCHING.into()], ..Default::default() },
+    )
 }
 
 #[cfg(test)]

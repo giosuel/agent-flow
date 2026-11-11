@@ -202,7 +202,6 @@ pub fn sha256_of(mut r: impl Read) -> std::io::Result<(String, u64)> {
     Ok((crate::util::hex(&w.0.finalize()), n))
 }
 
-
 /// `2026-11-11-0215-shortcuts-a1b2c3d`, or just the date and time without a commit.
 pub fn build_name(stamp: time::OffsetDateTime, branch: &str, commit: &str) -> String {
     let f = time::macros::format_description!("[year]-[month]-[day]-[hour][minute]");
