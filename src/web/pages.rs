@@ -9,7 +9,7 @@ use axum::{Extension, Json, Router};
 use axum_extra::extract::CookieJar;
 use axum_extra::extract::cookie::{Cookie, SameSite};
 
-use super::{AppResult, AppState, ClientIp};
+use super::{AppResult, AppState, ClientIp, json_error};
 use crate::activity::{self, Action, Entry, Via};
 use crate::auth::{self, Actor};
 use crate::passkey;
@@ -141,10 +141,6 @@ async fn login(State(state): State<AppState>, Extension(actor): Extension<Actor>
 /// scanners) fetch links with GET, and must not use them up.
 async fn link_confirm(Path(secret): Path<String>) -> AppResult<Response> {
     render(LoginPage::new(Some(secret), None))
-}
-
-fn json_error(status: StatusCode, message: impl Into<String>) -> Response {
-    (status, Json(serde_json::json!({"error": message.into()}))).into_response()
 }
 
 async fn passkey_start(State(state): State<AppState>, Extension(ClientIp(ip)): Extension<ClientIp>) -> Response {

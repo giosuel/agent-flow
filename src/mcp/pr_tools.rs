@@ -8,7 +8,7 @@ use rmcp::{ErrorData, schemars, tool, tool_router};
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
 
-use super::{FlowMcp, Outcome, actor_of, target_project};
+use super::{FlowMcp, Outcome, actor_of, target_project, writable};
 use crate::activity::Action;
 use crate::records::{self, Kind, NewRecord};
 use crate::{actions, prs};
@@ -55,6 +55,9 @@ pub struct AddButton {
     pub record: String,
     /// What the owner sees on the button: "Merge", "Push tag v0.0.5-m4".
     pub label: String,
+    /// "merge" for a PR's merge (unlocks in merge order, and "Merge #a–#b" uses it), "tag" for a
+    /// release's tag (marks the release tagged once it ran), "other" for anything else.
+    pub kind: String,
     /// The exact commands, run with bash when the owner presses it, e.g.
     /// "gh pr merge 58 -R giosuel/vinculum --merge --delete-branch". In a stack, delete the
     /// branch on merge so GitHub moves the next PR onto main. Never run them yourself.
@@ -97,7 +100,7 @@ impl FlowMcp {
             }
             // Fetch it now, so a brand-new PR is there without waiting for the poller.
             let info = self.state.github.pr(&project.repo, p.number).await?;
-            crate::poller::apply(&self.state, &project, info).await?;
+            crate::poller::apply(&self.state, &project, &project.repo, info).await?;
             let (proj, name) = (project.clone(), project.name.clone());
             let (r, newly_ready) = self
                 .state
@@ -172,7 +175,7 @@ impl FlowMcp {
                 let mut releases = Vec::new();
                 for r in records::query(c, &records::Query { project_id: Some(project.id), kinds: vec![Kind::Release], states: vec!["waiting".into(), "planned".into()], ..Default::default() })? {
                     releases.push(json!({"id": r.ref_id, "tag": r.str("tag"), "title": r.title, "waits_for": r.data.get("waits_for"),
-                        "all_merged": crate::poller::release_ready(c, &r)?, "buttons": buttons(c, r.id)?}));
+                        "all_merged": crate::prs::release_ready(c, &r)?, "buttons": buttons(c, r.id)?}));
                 }
                 Ok(Outcome::new(json!({"merge_order": list, "releases": releases})).summary("pull_requests").project(project.slug))
             })
@@ -257,11 +260,16 @@ impl FlowMcp {
             .db
             .call(move |c| {
                 let tx = c.transaction()?;
-                let r = records::find_str(&tx, &p.record, a.project())?;
-                if !a.can_write_project(r.project_id) || a.is_owner() {
-                    anyhow::bail!("you can add buttons only to your own project's records");
-                }
-                let id = actions::add(&tx, &r, &p.label, &p.command, &p.workdir, &p.requires, &a.name())?;
+                let r = writable(&tx, &a, &p.record)?;
+                let kind = actions::ButtonKind::parse(&p.kind)?;
+                let button = actions::NewButton {
+                    label: &p.label,
+                    kind,
+                    command: &p.command,
+                    workdir: &p.workdir,
+                    requires: &p.requires,
+                };
+                let id = actions::add(&tx, &r, &button, &a.name())?;
                 tx.commit()?;
                 Ok(Outcome::new(json!({"button": id, "on": r.ref_id}))
                     .summary(format!("button \"{}\" added to {}", p.label.trim(), r.short_id()))
@@ -286,9 +294,7 @@ impl FlowMcp {
             .call(move |c| {
                 let b = actions::get(c, p.id)?.ok_or_else(|| anyhow::anyhow!("no button {}", p.id))?;
                 let r = records::get(c, b.record_id)?;
-                if !a.can_write_project(r.project_id) || a.is_owner() {
-                    anyhow::bail!("that button belongs to another project");
-                }
+                writable(c, &a, &r.ref_id)?;
                 actions::withdraw(c, b.id, &a.name())?;
                 Ok(Outcome::new(json!({"withdrawn": b.id}))
                     .summary(format!("button {} withdrawn", b.id))

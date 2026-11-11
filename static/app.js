@@ -1,5 +1,5 @@
-// AgentFlow's small helpers. The pages work without JavaScript wherever they can; htmx does the
-// partial updates.
+// AgentFlow's small helpers. The pages are plain forms and links and work without JavaScript
+// wherever they can.
 "use strict";
 
 // Buttons with data-confirm ask before they submit (no inline handlers: the CSP forbids them).

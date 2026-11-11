@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use askama::Template;
 use axum::extract::{Path, Query, State};
-use axum::response::{Redirect, Response};
+use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use axum::{Extension, Form, Router};
 use rusqlite::Connection;
@@ -282,7 +282,7 @@ async fn project(
         .call(move |c| {
             let Some(p) = projects::get(c, &slug)? else { return Ok(None) };
             let ms = projects::milestones(c, p.id)?;
-            let all = records::query(c, &records::Query { project_id: Some(p.id), limit: 500, ..Default::default() })?;
+            let all = records::query(c, &records::Query { project_id: Some(p.id), limit: 0, ..Default::default() })?;
             Ok(Some(build_project_page(c, p, ms, all, &t, now)?))
         })
         .await?
@@ -380,9 +380,10 @@ fn build_project_page(
     {
         let mut stmt = c.prepare(
             "SELECT l.to_id, r.kind, r.number, p.slug FROM links l JOIN records r ON r.id = l.from_id JOIN projects p ON p.id = r.project_id
-             WHERE l.relation = 'blocks' AND r.state IN ('open', 'todo', 'doing', 'blocked')",
+             JOIN records t ON t.id = l.to_id
+             WHERE l.relation = 'blocks' AND r.state IN ('open', 'todo', 'doing', 'blocked') AND t.project_id = ?1",
         )?;
-        let rows = stmt.query_map([], |r| {
+        let rows = stmt.query_map([p.id], |r| {
             Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?, r.get::<_, String>(3)?))
         })?;
         for row in rows {
@@ -422,8 +423,7 @@ fn build_project_page(
     let tasks: Vec<&Record> = all.iter().filter(|r| r.kind == Kind::Task).collect();
 
     let board = current.as_ref().map(|cur| {
-        let ids: Vec<i64> =
-            std::iter::once(cur.id).chain(ms.iter().filter(|s| s.parent_id == Some(cur.id)).map(|s| s.id)).collect();
+        let ids: Vec<i64> = projects::with_steps(&ms, cur.id);
         let mut mine: Vec<&Record> =
             tasks.iter().copied().filter(|t| t.milestone_id.is_some_and(|m| ids.contains(&m))).collect();
         mine.sort_by(|a, b| a.position.partial_cmp(&b.position).unwrap_or(std::cmp::Ordering::Equal));
@@ -495,8 +495,7 @@ fn build_project_page(
     let groups = if tab == "tasks" {
         let mut groups = Vec::new();
         for m in ms.iter().filter(|m| m.parent_id.is_none()) {
-            let ids: Vec<i64> =
-                std::iter::once(m.id).chain(ms.iter().filter(|s| s.parent_id == Some(m.id)).map(|s| s.id)).collect();
+            let ids: Vec<i64> = projects::with_steps(&ms, m.id);
             let mut rows: Vec<&Record> =
                 tasks.iter().copied().filter(|t| t.milestone_id.is_some_and(|x| ids.contains(&x))).collect();
             rows.sort_by(|a, b| a.position.partial_cmp(&b.position).unwrap_or(std::cmp::Ordering::Equal));
@@ -561,8 +560,13 @@ fn build_project_page(
         groups,
         questions,
         prs_total: 0,
-        prs: super::buttons::pr_rows(c, p.id, now)?,
-        releases: super::buttons::release_rows(c, p.id, now)?,
+        // Merge order and releases appear on the overview and the Pull requests tab only.
+        prs: if matches!(tab, "overview" | "prs") { super::buttons::pr_rows(c, p.id, now)? } else { Vec::new() },
+        releases: if matches!(tab, "overview" | "prs") {
+            super::buttons::release_rows(c, p.id, now)?
+        } else {
+            Vec::new()
+        },
         notice: None,
         notice_bad: false,
         next: String::new(),
@@ -642,7 +646,9 @@ async fn load_record_page(
     let page = state
         .db
         .call(move |c| {
-            let Ok(r) = records::find_str(c, &format!("{slug}/{id}"), None) else { return Ok(None) };
+            // A malformed id is a page that doesn't exist; a database failure is an error.
+            let Ok(rref) = records::RecordRef::parse(&format!("{slug}/{id}")) else { return Ok(None) };
+            let Some(r) = records::try_find(c, &rref, None)? else { return Ok(None) };
             let project = projects::get_by_id(c, r.project_id)?;
             let links = records::links_of(c, &r)?;
             let history = records::revisions(c, r.id)?;
@@ -833,5 +839,3 @@ async fn answer(
         }
     }
 }
-
-use axum::response::IntoResponse;

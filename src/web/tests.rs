@@ -553,18 +553,18 @@ async fn prs_merge_in_order_from_the_owners_buttons() {
     for n in [48, 49] {
         let (ok, r) = call("update_pr", json!({"number": n, "ready": true})).await;
         assert!(ok, "{r}");
-        let (ok, r) = call("add_button", json!({"record": format!("PR-{n}"), "label": "Merge", "command": format!("echo merged {n} > merged-{n}"), "workdir": wd})).await;
+        let (ok, r) = call("add_button", json!({"record": format!("PR-{n}"), "label": "Merge", "kind": "merge", "command": format!("echo merged {n} > merged-{n}"), "workdir": wd})).await;
         assert!(ok, "{r}");
     }
     let (ok, r) =
         call("add_release", json!({"tag": "v0.0.5-m4", "title": "M4: Keybinds", "waits_for": ["PR-48", "PR-49"]}))
             .await;
     assert!(ok, "{r}");
-    call("add_button", json!({"record": "R-1", "label": "Push tag v0.0.5-m4", "command": "echo tagged > tagged", "workdir": wd, "requires": ["PR-49"]})).await;
+    call("add_button", json!({"record": "R-1", "label": "Push tag v0.0.5-m4", "kind": "tag", "command": "echo tagged > tagged", "workdir": wd, "requires": ["PR-49"]})).await;
 
     let (_, order) = call("pull_requests", json!({})).await;
     assert_eq!(order["merge_order"][0]["mergeable_now"], true);
-    assert_eq!(order["merge_order"][1]["buttons"][0]["locked_because"], "merge PR-48 first");
+    assert_eq!(order["merge_order"][1]["buttons"][0]["locked_because"], "merge #48 first");
 
     let cookie = s.owner_cookie().await;
     let html =
@@ -621,7 +621,7 @@ async fn prs_merge_in_order_from_the_owners_buttons() {
     assert_eq!(rel["state"], "tagged");
     let (_, news) = call("since_last_check", json!({})).await;
     let what = news.to_string();
-    assert!(what.contains("PR-48 merged") && what.contains("Push tag v0.0.5-m4") && what.contains("done"), "{what}");
+    assert!(what.contains("#48 merged") && what.contains("Push tag v0.0.5-m4") && what.contains("done"), "{what}");
 }
 
 #[test]
@@ -632,4 +632,25 @@ fn return_addresses_stay_on_our_pages() {
     {
         assert_eq!(local_path(Some(bad)), None, "{bad:?}");
     }
+}
+
+#[tokio::test]
+async fn one_broken_pr_doesnt_stop_the_poll() {
+    use crate::github::fake::pr;
+    let s = TestServer::start().await;
+    let token = s.token(TokenKind::Project, Some("vinculum")).await;
+    let sess = mcp_session(&s, &token).await;
+    mcp_tool(&s, &token, &sess, "update_project", json!({"repo": "giosuel/vinculum"})).await;
+    s.github.set("giosuel/vinculum", pr(70, "main", "b70"));
+    s.github.set("giosuel/vinculum", pr(71, "main", "b71"));
+    crate::poller::poll_once(&s.state).await.unwrap();
+    // #70 vanishes from GitHub entirely (the fake can't answer for it); #71 gets merged.
+    s.github.prs.lock().unwrap().remove(&("giosuel/vinculum".to_owned(), 70));
+    let mut merged = pr(71, "main", "b71");
+    merged.state = "merged".into();
+    s.github.set("giosuel/vinculum", merged);
+    crate::poller::poll_once(&s.state).await.unwrap();
+    let (_, r) = mcp_tool(&s, &token, &sess, "get_record", json!({"id": "PR-71"})).await;
+    assert_eq!(r["state"], "merged", "the other PR was still synced");
+    assert!(s.log_summaries().await.iter().any(|l| l.contains("giosuel/vinculum#70 failed")));
 }

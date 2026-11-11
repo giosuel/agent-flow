@@ -196,16 +196,14 @@ async fn dashboard(
                 let current = ms.iter().filter(|m| m.parent_id.is_none()).find(|m| m.state == "active");
                 let percent = match current {
                     Some(m) => {
-                        let ids: Vec<i64> = std::iter::once(m.id)
-                            .chain(ms.iter().filter(|s| s.parent_id == Some(m.id)).map(|s| s.id))
-                            .collect();
+                        let ids: Vec<i64> = projects::with_steps(&ms, m.id);
                         let tasks = records::query(
                             c,
                             &records::Query {
                                 project_id: Some(p.id),
                                 kinds: vec![Kind::Task],
                                 milestone_ids: ids,
-                                limit: 500,
+                                limit: 0,
                                 ..Default::default()
                             },
                         )?;
@@ -233,10 +231,12 @@ async fn dashboard(
                 |r| r.get(0),
             )?;
             let notice = match answered {
-                Some(id) => records::find_str(c, &id, None)
-                    .ok()
-                    .filter(|q| q.state == "answered")
-                    .map(|q| format!("Sent to {}: {}", name(&q.project), q.ref_id)),
+                Some(id) => match records::RecordRef::parse(&id) {
+                    Ok(r) => records::try_find(c, &r, None)?
+                        .filter(|q| q.state == "answered")
+                        .map(|q| format!("Sent to {}: {}", name(&q.project), q.ref_id)),
+                    Err(_) => None,
+                },
                 None => None,
             };
             Ok((featured, groups, merge_count, activity, lines, agents, online, warnings, notice))

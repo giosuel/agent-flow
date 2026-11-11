@@ -314,7 +314,7 @@ struct Target {
 }
 
 impl Pusher {
-    pub fn new(db: Db, vapid: Vapid) -> Self {
+    pub fn new(db: Db, vapid: Vapid, contact: &str) -> Self {
         let http = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(15))
             // Push services answer directly; a redirect would point somewhere else.
@@ -322,7 +322,7 @@ impl Pusher {
             .build()
             .expect("http client");
         // Push services want a contact for the sender; Apple refuses requests without one.
-        Self { db, vapid, subject: "mailto:me@giosuel.ch".into(), http }
+        Self { db, vapid, subject: contact.to_owned(), http }
     }
 
     pub fn public_key(&self) -> String {
@@ -607,7 +607,7 @@ mod tests {
         })
         .unwrap();
 
-        let pusher = Pusher::new(db.clone(), Vapid::random());
+        let pusher = Pusher::new(db.clone(), Vapid::random(), "mailto:test@example.com");
         let n =
             Notification { title: "Vinculum asks".into(), body: "Tabs A or B?".into(), url: "/q/1".into(), tag: None };
         assert_eq!(pusher.send(Kind::Urgent, &n).await.unwrap(), 1);

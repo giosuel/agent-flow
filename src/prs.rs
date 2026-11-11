@@ -10,6 +10,9 @@ use crate::github::PrInfo;
 use crate::projects::Project;
 use crate::records::{self, Kind, NewRecord, Patch, Query, Record};
 
+/// The name GitHub's changes are recorded under, in revisions and events alike.
+pub const GITHUB: &str = "github";
+
 /// What changed when a PR was synced; the poller turns these into events and notifications.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct SyncResult {
@@ -42,13 +45,13 @@ pub fn sync(
     data.insert("mergeable".into(), info.mergeable.clone().into());
     data.insert("ci".into(), info.ci.clone().into());
 
-    let existing = records::find(
+    let existing = records::try_find(
         conn,
         &records::RecordRef { project: Some(project.slug.clone()), kind: Kind::Pr, number: info.number },
         None,
-    )
-    .ok();
+    )?;
     let Some(old) = existing else {
+        // Seen for the first time: nothing to announce yet.
         let r = records::create(
             conn,
             project.id,
@@ -71,8 +74,8 @@ pub fn sync(
         ci_failed: info.ci == "failing" && old.str("ci") != "failing",
         ..Default::default()
     };
-    // Routine sync noise (CI going from pending to passing) doesn't need an event of its own.
-    let quiet = !result.merged && !result.closed && !result.ci_failed && old.title == info.title;
+    // The revision keeps what changed; the events below say what matters (merged, closed, CI).
+    let quiet = true;
     let (r, _) = records::update(
         conn,
         &old,
@@ -80,6 +83,16 @@ pub fn sync(
         Patch { title: Some(info.title.clone()), state: Some(state.into()), data, quiet, ..Default::default() },
     )?;
     result.became_mergeable = !was_ready && merge_ready(&r).is_ok();
+    // The agent hears about what GitHub did to its PR.
+    for (happened, kind, what) in [
+        (result.merged, "pr.merged", format!("#{} merged: {}", r.number, r.title)),
+        (result.closed, "pr.closed", format!("#{} closed without merging", r.number)),
+        (result.ci_failed, "pr.ci_failed", format!("CI failing on #{}", r.number)),
+    ] {
+        if happened {
+            records::event(conn, Some(project.id), Some(r.id), kind, &what, author)?;
+        }
+    }
     Ok((r, result))
 }
 
@@ -126,7 +139,7 @@ pub fn merge_order(conn: &Connection, project_id: i64) -> anyhow::Result<Vec<Ord
             project_id: Some(project_id),
             kinds: vec![Kind::Pr],
             states: vec!["open".into()],
-            limit: 500,
+            limit: 0,
             ..Default::default()
         },
     )?;
@@ -170,6 +183,22 @@ pub fn set_ready(conn: &Connection, pr: &Record, ready: bool, note: &str, author
     data.insert("ready".into(), json!(ready));
     let (r, _) = records::update(conn, pr, author, Patch { data, note: note.into(), ..Default::default() })?;
     Ok(r)
+}
+
+/// Every PR the release waits for is merged.
+pub fn release_ready(c: &Connection, r: &Record) -> anyhow::Result<bool> {
+    let waits: Vec<String> = r
+        .data
+        .get("waits_for")
+        .and_then(Value::as_array)
+        .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_owned)).collect())
+        .unwrap_or_default();
+    for w in waits {
+        if records::find_str(c, &w, None)?.state != "merged" {
+            return Ok(false);
+        }
+    }
+    Ok(true)
 }
 
 #[cfg(test)]

@@ -135,8 +135,25 @@ pub struct ProjectPatch {
     pub build_product: Option<String>,
 }
 
+/// Slugs end up in record ids and URLs: lowercase letters, digits and dashes.
+pub fn check_slug(slug: &str) -> anyhow::Result<()> {
+    let ok = !slug.is_empty()
+        && slug.len() <= 40
+        && slug.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+        && !slug.starts_with('-');
+    if !ok {
+        bail!("{slug:?}: use lowercase letters, digits and dashes, e.g. \"cold-trace\"");
+    }
+    Ok(())
+}
+
+/// A milestone's id and its steps' ids: "tasks of M4" includes those of K1–K4.
+pub fn with_steps(all: &[Milestone], id: i64) -> Vec<i64> {
+    std::iter::once(id).chain(all.iter().filter(|s| s.parent_id == Some(id)).map(|s| s.id)).collect()
+}
+
 pub fn create(conn: &Connection, slug: &str, name: &str, actor: &str) -> anyhow::Result<Project> {
-    crate::cli::check_slug(slug)?;
+    check_slug(slug)?;
     let now = now_ms();
     conn.execute(
         "INSERT INTO projects (slug, name, created_at, updated_at) VALUES (?1, ?2, ?3, ?3)",

@@ -5,13 +5,11 @@ use rmcp::handler::server::tool::Extension;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::CallToolResult;
 use rmcp::{ErrorData, schemars, tool, tool_router};
-use rusqlite::Connection;
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
 
-use super::{FlowMcp, Outcome, actor_of, target_project};
+use super::{FlowMcp, Outcome, actor_of, target_project, writable};
 use crate::activity::Action;
-use crate::auth::Actor;
 use crate::projects;
 use crate::push::{self, Notification};
 use crate::records::{self, Kind, NewRecord, Patch, Query, Record};
@@ -31,7 +29,7 @@ pub struct AddTask {
     pub tags: Vec<String>,
     /// Starting state: todo (default), doing, blocked or parked.
     pub state: Option<String>,
-    /// Your own estimate, e.g. "2 h" or "40 min"; Usage compares it with the tokens spent.
+    /// Your own estimate, e.g. "2 h" or "40 min"; shown with the task.
     pub estimate: Option<String>,
 }
 
@@ -39,7 +37,7 @@ pub struct AddTask {
 pub struct UpdateTask {
     /// The task, e.g. "T-14" or "vinculum/T-14".
     pub id: String,
-    /// todo, doing, review, done, blocked or parked. Setting doing makes it the task your tokens count towards.
+    /// todo, doing, review, done, blocked or parked. Set doing when you start it.
     pub state: Option<String>,
     pub title: Option<String>,
     pub body: Option<String>,
@@ -177,15 +175,6 @@ pub struct NotifyOwner {
     pub about: Option<String>,
 }
 
-/// The record a tool may change: in the caller's own project (or any, for the consultant).
-fn writable(c: &Connection, actor: &Actor, id: &str) -> anyhow::Result<Record> {
-    let r = records::find_str(c, id, actor.project())?;
-    if !actor.can_write_project(r.project_id) || matches!(actor, Actor::Owner { .. }) {
-        anyhow::bail!("your token can change only your own project's records; {} belongs to {}", r.ref_id, r.project);
-    }
-    Ok(r)
-}
-
 fn brief(r: &Record) -> Value {
     let mut v = json!({"id": r.ref_id, "title": r.title, "state": r.state});
     if let Some(m) = &r.milestone {
@@ -283,7 +272,8 @@ impl FlowMcp {
                 if let Some(e) = p.estimate {
                     data.insert("estimate".into(), if e.trim().is_empty() { Value::Null } else { e.trim().into() });
                 }
-                if p.state.as_deref() == Some("doing") {
+                // Started now only if it wasn't already in progress.
+                if p.state.as_deref() == Some("doing") && r.state != "doing" {
                     data.insert("started_at".into(), now_ms().into());
                 }
                 let (r, changed) = records::update(

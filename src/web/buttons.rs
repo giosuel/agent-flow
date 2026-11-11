@@ -142,7 +142,6 @@ pub struct ReleaseRow {
     pub title: String,
     pub url: String,
     pub waits: String,
-    pub all_merged: bool,
     pub buttons: Vec<ButtonView>,
 }
 
@@ -175,7 +174,6 @@ pub fn release_rows(c: &Connection, project_id: i64, now: i64) -> anyhow::Result
                 (n, 0) => format!("all {n} PRs merged"),
                 (n, k) => format!("{k} of {n} PRs still open"),
             },
-            all_merged: open == 0,
             buttons: views(c, r.id, now)?,
         });
     }
@@ -256,7 +254,7 @@ async fn refresh_pr(state: &AppState, record: &Record) {
     let repo = if record.str("repo").is_empty() { project.repo.clone() } else { record.str("repo").to_owned() };
     match state.github.pr(&repo, record.number).await {
         Ok(info) => {
-            if let Err(e) = poller::apply(state, &project, info).await {
+            if let Err(e) = poller::apply(state, &project, &repo, info).await {
                 tracing::warn!("refreshing {} after a press: {e:#}", record.ref_id);
             }
         }
@@ -279,7 +277,7 @@ async fn merge_up_to(
     Form(form): Form<UpToForm>,
 ) -> AppResult<Response> {
     actor.require_owner()?;
-    if crate::cli::check_slug(&slug).is_err() {
+    if crate::projects::check_slug(&slug).is_err() {
         return Err(AppError::NotFound);
     }
     let mut steps = Vec::new();

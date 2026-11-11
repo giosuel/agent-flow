@@ -24,6 +24,8 @@ pub struct Config {
     pub trusted_proxies: Vec<std::net::IpAddr>,
     /// Where project and consultant tokens are written for Claude Code's headersHelper.
     pub token_dir: String,
+    /// The contact push services ask senders for (Apple requires one): mailto: or https:.
+    pub push_contact: String,
     /// Owner sessions end after this many days without a request…
     pub session_idle_days: i64,
     /// …and after this many days in any case.
@@ -37,6 +39,7 @@ impl Default for Config {
             public_url: "http://127.0.0.1:8790".into(),
             data_dir: "~/.local/state/agentflow".into(),
             token_dir: "~/.config/agentflow/tokens".into(),
+            push_contact: "mailto:me@giosuel.ch".into(),
             trusted_proxies: vec!["127.0.0.1".parse().unwrap(), "::1".parse().unwrap()],
             session_idle_days: 14,
             session_max_days: 30,

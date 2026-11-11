@@ -46,7 +46,7 @@ pub struct AppState {
 impl AppState {
     pub fn new(db: Db, config: Config, vapid: Vapid, github: Arc<dyn GitHub>) -> Self {
         let passkeys = Passkeys::new(&config);
-        let push = Pusher::new(db.clone(), vapid);
+        let push = Pusher::new(db.clone(), vapid, &config.push_contact);
         Self { db, config: Arc::new(config), passkeys, push, github, denied: Arc::default(), waits: Arc::default() }
     }
 
@@ -325,6 +325,11 @@ async fn security_headers(req: Request, next: Next) -> Response {
         h.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
     }
     res
+}
+
+/// A JSON error for API calls and the pages' scripts.
+pub fn json_error(status: StatusCode, message: impl Into<String>) -> Response {
+    (status, axum::Json(serde_json::json!({"error": message.into()}))).into_response()
 }
 
 /// A return address from a form, if it's one of our own pages: a path, plain printable ASCII,
