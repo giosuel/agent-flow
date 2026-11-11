@@ -25,10 +25,22 @@ impl TestServer {
         let addr = listener.local_addr().unwrap();
         // Builds and keys go to a folder of the test's own, never the real data directory.
         let data = tempfile::tempdir().unwrap();
+        // A handbook of the test's own: a git repository with one guide.
+        let handbook = data.path().join("handbook");
+        std::fs::create_dir(&handbook).unwrap();
+        std::fs::write(handbook.join("MACHINE.md"), "# MACHINE\n\nThe server.\n\n## Ports\n\nUse 10.0.8.1.\n").unwrap();
+        for args in [
+            &["init", "-q", "-b", "main"][..],
+            &["add", "MACHINE.md"],
+            &["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "init"],
+        ] {
+            assert!(std::process::Command::new("git").arg("-C").arg(&handbook).args(args).status().unwrap().success());
+        }
         let config = Config {
             listen: addr,
             public_url: format!("http://{addr}"),
             data_dir: data.path().display().to_string(),
+            handbook_dir: handbook.display().to_string(),
             ..Config::default()
         };
         let github = std::sync::Arc::new(crate::github::fake::FakeGitHub::default());
@@ -886,4 +898,93 @@ async fn the_owner_writes_into_a_conversation() {
         s.http.get(s.url("/conversations")).bearer_auth(&v).send().await.unwrap().status(),
         StatusCode::FORBIDDEN
     );
+}
+
+#[tokio::test]
+async fn the_owner_edits_a_guide_and_agents_read_it() {
+    let s = TestServer::start().await;
+    let token = s.token(TokenKind::Project, Some("vinculum")).await;
+    let sess = mcp_session(&s, &token).await;
+    let (_, list) = mcp_tool(&s, &token, &sess, "guides", json!({})).await;
+    assert_eq!(list["guides"][0]["sections"], json!(["Introduction", "Ports"]));
+    let (ok, err) = mcp_tool(&s, &token, &sess, "guide", json!({"name": "MACHINE.md", "section": "Nope"})).await;
+    assert!(!ok && err.as_str().unwrap().contains("it has: Introduction, Ports"));
+    let (ok, _) = mcp_tool(&s, &token, &sess, "guide", json!({"name": "../secret.md"})).await;
+    assert!(!ok);
+
+    let cookie = s.owner_cookie().await;
+    let page = s
+        .http
+        .get(s.url("/guides?f=MACHINE.md&edit=1"))
+        .header(COOKIE, &cookie)
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    let start = page.find(r#"name="version" value=""#).unwrap() + r#"name="version" value=""#.len();
+    let version = page[start..].split('"').next().unwrap().to_owned();
+    let res = s
+        .http
+        .post(s.url("/guides/save"))
+        .header(COOKIE, &cookie)
+        .header(ORIGIN, &s.base)
+        .form(&[
+            ("f", "MACHINE.md"),
+            ("version", version.as_str()),
+            ("section", "1"),
+            ("text", "## Ports\n\nUse 10.0.8.1 or 127.0.0.1."),
+        ])
+        .send()
+        .await
+        .unwrap();
+    assert!(
+        res.headers()[LOCATION].to_str().unwrap().starts_with("/guides?f=MACHINE.md&saved="),
+        "{:?}",
+        res.headers()[LOCATION]
+    );
+    let (_, ports) = mcp_tool(&s, &token, &sess, "guide", json!({"name": "MACHINE.md", "section": "ports"})).await;
+    assert!(ports["text"].as_str().unwrap().contains("127.0.0.1"));
+    // The same old version again: refused, nothing written.
+    let res = s
+        .http
+        .post(s.url("/guides/save"))
+        .header(COOKIE, &cookie)
+        .header(ORIGIN, &s.base)
+        .form(&[("f", "MACHINE.md"), ("version", version.as_str()), ("section", "1"), ("text", "## Ports\n\nx")])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.headers()[LOCATION], "/guides?f=MACHINE.md&error=stale");
+
+    // A PR of the guides: shown, counted, merged by the owner.
+    s.github.repo_open.lock().unwrap().push(crate::github::RepoPr {
+        number: 27,
+        title: "MACHINE: gnome-keyring is installed now".into(),
+        url: "https://github.com/giosuel/ai-handbook/pull/27".into(),
+        additions: 1,
+        deletions: 1,
+        files: vec!["MACHINE.md".into()],
+        author: "giosuel".into(),
+        created_at: String::new(),
+    });
+    crate::poller::refresh_guide_prs(&s.state).await.unwrap();
+    let html = s.http.get(s.url("/")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
+    assert!(html.contains("Guides to review · 1"));
+    let res = s
+        .http
+        .post(s.url("/guides/prs/merge"))
+        .header(COOKIE, &cookie)
+        .header(ORIGIN, &s.base)
+        .form(&[("number", "27")])
+        .send()
+        .await
+        .unwrap();
+    // The test's checkout has no remote, so the pull after the merge reports a problem.
+    assert_eq!(res.headers()[LOCATION], "/guides?error=pull");
+    assert_eq!(*s.github.merged.lock().unwrap(), vec![27]);
+    let res =
+        s.http.post(s.url("/guides/prs/merge")).bearer_auth(&token).form(&[("number", "27")]).send().await.unwrap();
+    assert_eq!(res.status(), StatusCode::FORBIDDEN);
 }
