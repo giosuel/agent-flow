@@ -1,0 +1,48 @@
+# Maintainer: giosuel <me@giosuel.ch>
+# AgentFlow for Arch Linux (AUR). After installing:
+#   sudo agentflow setup --public-url https://flow.example --agents-user <user>   (see README)
+pkgname=agentflow
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Project management for Claude agents and their owner"
+arch=('x86_64' 'aarch64')
+url="https://github.com/giosuel/agent-flow"
+license=('AGPL-3.0-or-later')
+depends=('gcc-libs' 'glibc' 'openssl' 'zlib' 'zstd' 'git' 'systemd')
+optdepends=('github-cli: the merge and release buttons, pull request status')
+makedepends=('cargo')
+source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+prepare() {
+  cd "agent-flow-$pkgver"
+  # The version comes from the tag; a release tarball has no .git to work it out from.
+  sed -i "s/^version = \"0.0.0-dev\"/version = \"$pkgver\"/" Cargo.toml
+  sed -i "/^name = \"agentflow\"$/{n;s/^version = \"0.0.0-dev\"/version = \"$pkgver\"/}" Cargo.lock
+  export RUSTUP_TOOLCHAIN=stable
+  cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
+}
+
+build() {
+  cd "agent-flow-$pkgver"
+  export RUSTUP_TOOLCHAIN=stable CARGO_TARGET_DIR=target
+  cargo build --frozen --release
+}
+
+check() {
+  cd "agent-flow-$pkgver"
+  export RUSTUP_TOOLCHAIN=stable CARGO_TARGET_DIR=target
+  cargo test --frozen --release
+}
+
+package() {
+  cd "agent-flow-$pkgver"
+  install -Dm755 target/release/agentflow "$pkgdir/usr/bin/agentflow"
+  sed 's|@BIN@|/usr/bin/agentflow|' packaging/system/agentflow.service |
+    install -Dm644 /dev/stdin "$pkgdir/usr/lib/systemd/system/agentflow.service"
+  sed 's|@BIN@|/usr/bin/agentflow|' packaging/system/agentflow-hands.service |
+    install -Dm644 /dev/stdin "$pkgdir/usr/lib/systemd/user/agentflow-hands.service"
+  # pacman's systemd hook creates the user from this on install.
+  install -Dm644 packaging/system/agentflow.sysusers "$pkgdir/usr/lib/sysusers.d/agentflow.conf"
+  install -Dm644 README.md "$pkgdir/usr/share/doc/agentflow/README.md"
+}

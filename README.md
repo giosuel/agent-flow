@@ -39,6 +39,10 @@ with the agents' login, guide edits, token files, new projects' folders, transcr
 agents' process folders. Admin commands then run as the server's user:
 `sudo -u agentflow agentflow --config /etc/agentflow/config.toml admin login-link`.
 
+**Packages.** `scripts/deb.sh` makes a `.deb` from a release binary, and `packaging/arch/PKGBUILD`
+builds the AUR package from a release tag. Both install the binary, the two services and the user;
+then run `sudo agentflow setup …` as above (no `install` step needed).
+
 **As one user (a personal machine).** `scripts/install.sh` builds a release binary, installs it as
 `~/.local/bin/agentflow` and runs it as a systemd user service (`packaging/agentflow.service`).
 Everything runs as you, so agents running as you can read its files.
