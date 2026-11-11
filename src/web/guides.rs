@@ -57,6 +57,8 @@ struct GuidesPage {
     open: Vec<PrRow>,
     merged: Vec<PrRow>,
     file: Option<String>,
+    /// The pull requests are what's shown (on the phone, instead of the list of files).
+    prs_view: bool,
     version: String,
     sections: Vec<SectionView>,
     editing: Option<Editing>,
@@ -75,6 +77,9 @@ struct PageQuery {
     saved: Option<String>,
     merged: Option<i64>,
     error: Option<String>,
+    /// "prs": the pull requests as their own screen on the phone (the owner, 2026-11-11:
+    /// "clicking on pull requests in guides is broken on mobile").
+    view: Option<String>,
 }
 
 /// The first plain line of a guide, for the file list, with Markdown marks and links' targets removed.
@@ -137,6 +142,8 @@ async fn page(
     }
     let prs = crate::util::lock(&state.guide_prs).clone();
     let file = q.f.clone().filter(|f| guides::check_name(f).is_ok());
+    // After a merge, or a merge that failed, the pull requests are what you were looking at.
+    let prs_view = file.is_none() && (q.view.as_deref() == Some("prs") || q.merged.is_some() || q.error.is_some());
     let (names, guide) = {
         let dir = dir.clone();
         let file = file.clone();
@@ -188,7 +195,8 @@ async fn page(
     });
     let page_nav = nav(&state, &actor, "/guides").await;
     render(GuidesPage {
-        nav: if file.is_some() { page_nav.back_to("/guides", "Guides") } else { page_nav },
+        nav: if file.is_some() || prs_view { page_nav.back_to("/guides", "Guides") } else { page_nav },
+        prs_view,
         repo: state.config.handbook_repo.clone(),
         files: names
             .into_iter()
@@ -332,14 +340,14 @@ async fn merge(
     };
     let _ = crate::poller::refresh_guide_prs(&state).await;
     match pulled {
-        Ok(o) if o.success() => Ok(Redirect::to(&format!("/guides?merged={}", form.number)).into_response()),
+        Ok(o) if o.success() => Ok(Redirect::to(&format!("/guides?view=prs&merged={}", form.number)).into_response()),
         Ok(o) => {
             tracing::warn!("pulling the handbook after #{}: {}", form.number, o.stderr.trim());
-            Ok(Redirect::to("/guides?error=pull").into_response())
+            Ok(Redirect::to("/guides?view=prs&error=pull").into_response())
         }
         Err(e) => {
             tracing::warn!("pulling the handbook after #{}: {e}", form.number);
-            Ok(Redirect::to("/guides?error=pull").into_response())
+            Ok(Redirect::to("/guides?view=prs&error=pull").into_response())
         }
     }
 }

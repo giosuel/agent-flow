@@ -108,7 +108,7 @@ async fn dashboard(
             title: p.title.clone(),
             sub: format!("{} · {repo}/pull/{}", p.files.join(", "), p.number),
             // The Guides page has the diff link and the Merge button together.
-            url: format!("/guides#pr-{}", p.number),
+            url: format!("/guides?view=prs#pr-{}", p.number),
             action: "Review",
         })
         .collect();
