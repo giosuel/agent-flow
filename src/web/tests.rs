@@ -358,3 +358,72 @@ async fn an_agent_runs_its_project_over_mcp() {
     // Refusals are logged as warnings.
     assert!(s.log_summaries().await.iter().any(|l| l.starts_with("update_task refused")));
 }
+
+#[tokio::test]
+async fn the_owner_answers_on_the_page_and_the_agent_reads_it() {
+    let s = TestServer::start().await;
+    let token = s.token(TokenKind::Project, Some("vinculum")).await;
+    let sess = mcp_session(&s, &token).await;
+    mcp_tool(
+        &s,
+        &token,
+        &sess,
+        "ask_question",
+        json!({"title": "A or B?", "options": [{"title": "A"}, {"title": "B"}]}),
+    )
+    .await;
+
+    // Pages render for the owner, and a token can't answer.
+    let cookie = s.owner_cookie().await;
+    for path in [
+        "/projects",
+        "/p/vinculum",
+        "/p/vinculum?tab=tasks",
+        "/p/vinculum?tab=decisions",
+        "/p/vinculum?tab=questions",
+        "/p/vinculum/Q-1",
+    ] {
+        let res = s.http.get(s.url(path)).header(COOKIE, &cookie).send().await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK, "{path}");
+    }
+    assert_eq!(
+        s.http.get(s.url("/p/nope")).header(COOKIE, &cookie).send().await.unwrap().status(),
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        s.http.get(s.url("/p/vinculum/Q-9")).header(COOKIE, &cookie).send().await.unwrap().status(),
+        StatusCode::NOT_FOUND
+    );
+    let res =
+        s.http.post(s.url("/p/vinculum/Q-1/answer")).bearer_auth(&token).form(&[("option", "1")]).send().await.unwrap();
+    assert_eq!(res.status(), StatusCode::FORBIDDEN);
+
+    let res = s
+        .http
+        .post(s.url("/p/vinculum/Q-1/answer"))
+        .header(COOKIE, &cookie)
+        .header(ORIGIN, &s.base)
+        .form(&[("option", "2"), ("words", "B, smaller"), ("next", "//evil.example")])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::SEE_OTHER);
+    assert_eq!(res.headers()[LOCATION], "/p/vinculum/Q-1", "no open redirects");
+
+    let (_, q) = mcp_tool(&s, &token, &sess, "get_record", json!({"id": "Q-1"})).await;
+    assert_eq!(
+        (q["state"].as_str(), q["data"]["answer"].as_str(), q["data"]["answer_option"].as_u64()),
+        (Some("answered"), Some("B, smaller"), Some(2))
+    );
+    // Answering twice shows the reason on the page instead of failing.
+    let res = s
+        .http
+        .post(s.url("/p/vinculum/Q-1/answer"))
+        .header(COOKIE, &cookie)
+        .header(ORIGIN, &s.base)
+        .form(&[("option", "1")])
+        .send()
+        .await
+        .unwrap();
+    assert!(res.text().await.unwrap().contains("already answered"));
+}
