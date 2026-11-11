@@ -1110,6 +1110,8 @@ struct RecordPage {
     answer: String,
     answer_line: String,
     can_answer: bool,
+    /// "2: Icons with labels" when the agent goes ahead with that option until the owner answers.
+    going_ahead: Option<String>,
     extra: Vec<(String, String)>,
     links: Vec<LinkGroup>,
     stale: Vec<RecordRow>,
@@ -1315,6 +1317,18 @@ async fn load_record_page(
         answer: r.str("answer").into(),
         answer_line,
         can_answer: is_owner && r.kind == Kind::Question && r.state == "open",
+        going_ahead: (r.kind == Kind::Question && r.state == "open" && crate::waiting::is_going_ahead(&r)).then(|| {
+            let n = r.data.get("recommended").and_then(Value::as_u64).unwrap_or(0) as usize;
+            let title = r
+                .data
+                .get("options")
+                .and_then(Value::as_array)
+                .and_then(|o| o.get(n.wrapping_sub(1)))
+                .and_then(|o| o.get("title"))
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            format!("{n}: {title}")
+        }),
         options,
         extra,
         links: groups,

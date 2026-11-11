@@ -1885,3 +1885,52 @@ async fn build_servers_are_added_in_settings_and_picked_per_project() {
             .unwrap();
     assert_eq!(pick, None);
 }
+
+#[tokio::test]
+async fn agents_can_go_ahead_with_a_default_while_a_question_waits() {
+    let s = TestServer::start().await;
+    let token = s.token(TokenKind::Project, Some("imaginarium")).await;
+    let cookie = s.owner_cookie().await;
+    let ms = mcp_session(&s, &token).await;
+    let ask = |title: &str, going_ahead: bool, recommended: Option<u32>| {
+        json!({"title": title, "body": "b", "options": [{"title": "Icons only"}, {"title": "Icons with labels"}],
+               "recommended": recommended, "going_ahead": going_ahead})
+    };
+    let (ok, _) = mcp_tool(&s, &token, &ms, "ask_question", ask("No default", true, None)).await;
+    assert!(!ok, "going ahead needs a recommendation");
+    let (ok, r) = mcp_tool(&s, &token, &ms, "ask_question", ask("Sidebar labels?", true, Some(2))).await;
+    assert!(ok, "{r}");
+    let (ok, _) = mcp_tool(&s, &token, &ms, "ask_question", ask("Second one", true, Some(2))).await;
+    assert!(ok);
+    // Not in the badge; in its own group on the Dashboard; the question's page says so.
+    assert_eq!(s.db.call(|c| crate::waiting::count(c)).await.unwrap(), 0);
+    let dash = s.http.get(s.url("/")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
+    assert!(
+        dash.contains("Going ahead unless you say otherwise") && dash.contains("going ahead with 2: Icons with labels")
+    );
+    let page =
+        s.http.get(s.url("/p/imaginarium/Q-1")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
+    assert!(page.contains("is going ahead with <strong>2: Icons with labels</strong>"));
+    // Confirming the default, and changing the other: the agent hears which.
+    for (q, option) in [("Q-1", "2"), ("Q-2", "1")] {
+        let res = s
+            .http
+            .post(s.url(&format!("/p/imaginarium/{q}/answer")))
+            .header(COOKIE, &cookie)
+            .header(ORIGIN, &s.base)
+            .form(&[("option", option)])
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::SEE_OTHER);
+    }
+    let (_, news) = mcp_tool(&s, &token, &ms, "since_last_check", json!({})).await;
+    let news = news.to_string();
+    assert!(news.contains("Owner confirmed Q-1: keep 2: Icons with labels"), "{news}");
+    assert!(
+        news.contains(
+            "Owner changed Q-2: 1: Icons only (not the default you went ahead with, 2: Icons with labels); switch to it"
+        ),
+        "{news}"
+    );
+}
