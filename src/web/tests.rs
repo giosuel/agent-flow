@@ -427,3 +427,55 @@ async fn the_owner_answers_on_the_page_and_the_agent_reads_it() {
         .unwrap();
     assert!(res.text().await.unwrap().contains("already answered"));
 }
+
+#[tokio::test]
+async fn an_agent_waits_for_the_owners_answer() {
+    let s = TestServer::start().await;
+    let token = s.token(TokenKind::Project, Some("vinculum")).await;
+    let sess = mcp_session(&s, &token).await;
+    mcp_tool(
+        &s,
+        &token,
+        &sess,
+        "ask_question",
+        json!({"title": "A or B?", "options": [{"title": "A"}, {"title": "B"}]}),
+    )
+    .await;
+
+    // Nothing yet: the wait times out empty.
+    let r: Value =
+        s.http.get(s.url("/api/wait?timeout=1")).bearer_auth(&token).send().await.unwrap().json().await.unwrap();
+    assert_eq!(r["timed_out"], true);
+
+    let waiter = {
+        let (http, url, token) = (s.http.clone(), s.url("/api/wait?timeout=30&record=Q-1"), token.clone());
+        tokio::spawn(
+            async move { http.get(url).bearer_auth(token).send().await.unwrap().json::<Value>().await.unwrap() },
+        )
+    };
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    let cookie = s.owner_cookie().await;
+    s.http
+        .post(s.url("/p/vinculum/Q-1/answer"))
+        .header(COOKIE, &cookie)
+        .header(ORIGIN, &s.base)
+        .form(&[("option", "2")])
+        .send()
+        .await
+        .unwrap();
+    let r = tokio::time::timeout(std::time::Duration::from_secs(10), waiter).await.unwrap().unwrap();
+    let what = r["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| e["what"].as_str().unwrap().to_owned())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(what.contains("Owner answered Q-1: 2: B"), "{what}");
+
+    // Read now: since_last_check has nothing new, and the owner's token can't wait.
+    let (_, r) = mcp_tool(&s, &token, &sess, "since_last_check", json!({})).await;
+    assert_eq!(r["events"].as_array().unwrap_or_else(|| panic!("{r}")).len(), 0, "{r}");
+    let res = s.http.get(s.url("/api/wait?timeout=1")).header(COOKIE, &cookie).send().await.unwrap();
+    assert_eq!(res.status(), StatusCode::FORBIDDEN);
+}

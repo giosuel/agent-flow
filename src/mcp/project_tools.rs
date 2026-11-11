@@ -177,17 +177,42 @@ impl FlowMcp {
                     },
                 )?;
                 let recent = records::recent_events(c, Some(project.id), 15)?;
+                let unread = crate::waiting::unread(c, project.id, &project.slug)?.len();
                 let reply = json!({
                     "project": project_json(&projects::get_by_id(c, project.id)?, now_ms()),
                     "milestones": milestones_json(&ms, &counts),
                     "open_questions": open.iter().map(|q| json!({"id": q.ref_id, "title": q.title})).collect::<Vec<_>>(),
                     "answered_this_week": answered.iter().map(|q| json!({"id": q.ref_id, "title": q.title, "answer": q.data.get("answer")})).collect::<Vec<_>>(),
+                    "unread_events": unread,
                     "recent_events": recent.iter().map(|e| json!({"at": crate::util::fmt_utc(e.at), "what": e.summary, "by": e.actor})).collect::<Vec<_>>(),
                 });
                 Ok(Outcome::new(reply).summary(format!("hello from {} on {}", p.session, p.machine)).project(project.slug))
             })
             .await;
         self.finish(&actor, "hello", Action::Read, outcome).await
+    }
+
+    #[tool(description = "What happened in your project since you last checked that you didn't do yourself: \
+        the owner's answers, button presses, messages, feedback. Marks them read. Also see `agentflow wait` to block until \
+        something happens.")]
+    async fn since_last_check(&self, Extension(parts): Extension<Parts>) -> Result<CallToolResult, ErrorData> {
+        let actor = actor_of(&parts);
+        let a = actor.clone();
+        let outcome = self
+            .state
+            .db
+            .call(move |c| {
+                let project = target_project(c, &a, None, true)?;
+                let events = crate::waiting::unread(c, project.id, &project.slug)?;
+                crate::waiting::set_cursor(c, project.id, crate::waiting::latest_seq(c)?)?;
+                let list: Vec<Value> = events
+                    .iter()
+                    .map(|e| json!({"at": crate::util::fmt_utc(e.at), "record": e.record, "what": e.summary, "by": e.actor}))
+                    .collect();
+                Ok(Outcome::new(json!({"events": list})).summary(format!("since_last_check: {} events", events.len())).project(project.slug))
+            })
+            .await;
+        self.finish(&actor, "since_last_check", Action::Read, outcome).await
     }
 
     #[tool(
