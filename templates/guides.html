@@ -29,8 +29,8 @@
   <section class="split-main stack">
   {% if let Some(name) = file %}
     <a class="back phone-only" href="/guides">← All guides</a>
-    <div class="sec"><h2 class="mono">{{ name }}</h2>
-      <span class="row wrap"><a class="sub" href="https://github.com/{{ repo }}/commits/main/{{ name }}">History on GitHub</a><a class="sub" href="https://github.com/{{ repo }}/blob/main/{{ name }}">Open on GitHub</a>{% if editing.is_none() %}<a class="btn sm ghost" href="/guides?f={{ name }}&amp;edit=file">Edit file</a>{% endif %}</span></div>
+    <div class="sec guide-head"><h2 class="mono">{{ name }}</h2>
+      <span class="row wrap"><a class="sub" href="https://github.com/{{ repo }}/commits/main/{{ name }}">History on GitHub</a><a class="sub" href="https://github.com/{{ repo }}/blob/main/{{ name }}">Open on GitHub</a>{% if editing.is_none() %}<a class="icon-only" href="/guides?f={{ name }}&amp;edit=file" title="Edit the whole file" aria-label="Edit the whole file">{{ crate::web::icons::icon("pencil")|safe }}</a>{% endif %}</span></div>
     {% if let Some(ed) = editing %}
     <form method="post" action="/guides/save" class="card pad stack">
       <h3>Editing {% if ed.section.is_some() %}“{{ ed.label }}”{% else %}the whole file{% endif %}</h3>
@@ -46,7 +46,7 @@
     {% else %}
     {% for s in sections %}
     <article class="card pad stack guide-sec">
-      <div class="sec"><span class="label">{{ s.title }}</span><a class="btn sm ghost" href="/guides?f={{ name }}&amp;edit={{ s.index }}">Edit section</a></div>
+      <div class="sec"><span class="label">{{ s.title }}</span><a class="icon-only" href="/guides?f={{ name }}&amp;edit={{ s.index }}" title="Edit this section" aria-label="Edit the section {{ s.title }}">{{ crate::web::icons::icon("pencil")|safe }}</a></div>
       <div class="prose">{{ s.html|safe }}</div>
     </article>
     {% endfor %}
