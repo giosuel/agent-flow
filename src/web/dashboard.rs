@@ -98,18 +98,16 @@ async fn dashboard(
     let answered = q.answered.clone();
     // The guides' open pull requests, from the poller's cache.
     let repo = state.config.handbook_repo.clone();
-    let guide_prs: Vec<Item> = state
-        .guide_prs
-        .lock()
-        .unwrap()
+    let guide_prs: Vec<Item> = crate::util::lock(&state.guide_prs)
         .open
         .iter()
         .map(|p| Item {
             icon: icon("doc"),
             title: p.title.clone(),
             sub: format!("{} · {repo}/pull/{}", p.files.join(", "), p.number),
-            url: format!("{}/files", p.url),
-            action: "View on GitHub",
+            // The Guides page has the diff link and the Merge button together.
+            url: format!("/guides#pr-{}", p.number),
+            action: "Review",
         })
         .collect();
     let data = state
@@ -189,10 +187,15 @@ async fn dashboard(
                 groups.push(Group { title: "Guides to review", items: guide_prs });
             }
 
-            let activity = records::recent_events(c, None, 30)?
+            let mut seen = std::collections::HashSet::new();
+            let activity = records::recent_events(c, None, 60)?
                 .into_iter()
-                // A button being added is part of the PR's story, not news of its own.
-                .filter(|e| e.kind != "action.added")
+                // A button being added is part of the PR's story, each piece of feedback part of
+                // "Owner tried build #n", and a PR found on GitHub shows under "Merge and
+                // release"; none is news of its own (an import brings hundreds at once).
+                .filter(|e| !matches!(e.kind.as_str(), "action.added" | "feedback.created" | "pr.created"))
+                // A message lands in every recipient's feed; show it once.
+                .filter(|e| seen.insert((e.summary.clone(), e.actor.clone(), e.at / 1000)))
                 .take(12)
                 .map(|e| Activity {
                     time: crate::util::fmt_utc(e.at).get(11..16).unwrap_or("").into(),
@@ -208,7 +211,7 @@ async fn dashboard(
                         "var(--info)"
                     },
                     url: e.record.as_ref().and_then(|r| r.split_once('/')).map(|(p, id)| format!("/p/{p}/{id}")),
-                    what: lowercase_first(&e.summary),
+                    what: lowercase_first(&plain(e.summary.strip_prefix("Owner ").unwrap_or(&e.summary))),
                 })
                 .collect();
 
@@ -312,6 +315,12 @@ fn featured(q: &Record, project: String, blocks: Vec<(String, String)>, now: i64
         body_html: markdown::to_html(&q.body),
         options,
     }
+}
+
+/// One line without Markdown marks: summaries quote messages and notes as written.
+fn plain(s: &str) -> String {
+    let one_line = s.split_whitespace().collect::<Vec<_>>().join(" ");
+    one_line.replace("**", "").replace('`', "")
 }
 
 fn lowercase_first(s: &str) -> String {

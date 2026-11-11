@@ -40,20 +40,21 @@
     {% if let Some(b) = build %}
     <section class="card pad stack" aria-labelledby="try-h">
       <h2 id="try-h">Try it</h2>
-      <p class="sub">On any of your machines with AgentFlow's CLI:</p>
+      <p class="sub">Run this on any of your machines that has the <span class="mono">agentflow</span> command. It downloads the build once, checks it, and starts it.</p>
       <pre class="cmd mono">{{ b.run }}</pre>
       <dl class="kv">{% for (k, v) in b.facts %}<dt>{{ k }}</dt><dd>{{ v }}</dd>{% endfor %}</dl>
     </section>
     {% if b.sent %}<p class="notice ok" role="status">Feedback sent. The agent gets your words as you wrote them and turns problems into tasks.</p>{% endif %}
     {% if !b.features.is_empty() && b.can_feedback && is_owner %}
-    <form method="post" action="/p/{{ project_slug }}/{{ short }}/feedback" class="stack" aria-labelledby="fb-h">
-      <h2 id="fb-h">How did it go?</h2>
+    <form method="post" action="/p/{{ project_slug }}/{{ short }}/feedback" class="stack fb" aria-labelledby="fb-h">
+      <div class="sec"><h2 id="fb-h">How did it go?</h2><span class="sub" data-fb-count>{{ b.features.len() }} feature{% if b.features.len() != 1 %}s{% endif %} to mark</span></div>
+      <p class="sub">Mark each one; Skip is fine for what you didn't get to. The agent gets it all at once.</p>
       {% for (i, title, what) in b.features %}
       <fieldset class="feat card pad stack">
         <legend class="vh">{{ title }}</legend>
         <div class="stack-sm"><strong>{{ title }}</strong>{% if !what.is_empty() %}<span class="sub">{{ what }}</span>{% endif %}</div>
         <div class="verdicts">
-          <label class="verdict v-works"><input type="radio" name="v{{ i }}" value="works"><span>Works</span></label>
+          <label class="verdict v-works"><input type="radio" name="v{{ i }}" value="works" required><span>Works</span></label>
           <label class="verdict v-problem"><input type="radio" name="v{{ i }}" value="problem"><span>Problem</span></label>
           <label class="verdict v-skip"><input type="radio" name="v{{ i }}" value="skip"><span>Skip</span></label>
         </div>
@@ -95,7 +96,7 @@
         <ol class="plain opts-ro">{% for o in options %}<li class="{% if o.chosen %}chosen{% endif %}"><span class="mono">{{ o.n }}</span> {{ o.title }}{% if o.recommended %} <span class="chip">recommended</span>{% endif %}{% if o.chosen %} <span class="chip ok">chosen</span>{% endif %}</li>{% endfor %}</ol>
         {% endif %}
         {% if !answer.is_empty() %}<blockquote class="quote">“{{ answer }}”</blockquote>{% endif %}
-        {% if !answer_line.is_empty() %}<p class="sub">{{ answer_line }}</p>{% else %}<p class="sub">{% if state == "open" %}Waiting for the owner.{% else %}{{ state }}{% endif %}</p>{% endif %}
+        {% if !answer_line.is_empty() %}<p class="sub">{{ answer_line }}</p>{% if state == "answered" && is_owner %}<p class="sub">Changed your mind? An answer stays as sent, since the agent may have acted on it already. Tell it in a conversation or on the task it belongs to.</p>{% endif %}{% else %}<p class="sub">{% if state == "open" %}Waiting for the owner.{% else %}{{ state }}{% endif %}</p>{% endif %}
       {% endif %}
     </section>
     {% endif %}

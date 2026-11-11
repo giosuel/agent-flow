@@ -476,6 +476,13 @@ async fn feedback(
             let val = |k: String| form2.iter().find(|(a, _)| *a == k).map(|(_, v)| v.clone()).unwrap_or_default();
             let mut counts = (0, 0, 0);
             let mut made = Vec::new();
+            let unmarked = (0..features.len()).filter(|n| val(format!("v{n}")).is_empty()).count();
+            if unmarked > 0 {
+                anyhow::bail!(
+                    "{unmarked} of {} features aren't marked; mark each (Skip is fine) and send again",
+                    features.len()
+                );
+            }
             for (n, f) in features.iter().enumerate() {
                 let state = match val(format!("v{n}")).as_str() {
                     "works" => {

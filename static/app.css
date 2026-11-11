@@ -368,3 +368,21 @@ button.opt { font: inherit; color: var(--ink); text-align: left; width: 100%; }
 .edetail .kv { font-size: 12px; }
 .edetail dd { white-space: pre-wrap; }
 @media (max-width: 700px) { .split.logs .split-side { order: 1; } }
+
+/* Review 2 (UX) */
+.phone-only { display: none; }
+.back { color: var(--ink2); text-decoration: none; font-size: 14px; }
+.msg.mine { border-left: 3px solid var(--accent); padding-left: 12px; }
+.prose code { overflow-wrap: anywhere; }
+.prose pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+@media (max-width: 700px) {
+  .phone-only { display: inline-flex; align-items: center; min-height: 44px; }
+  /* Once something is chosen, the list steps aside; the back link brings it again. */
+  .split.picked > .split-side { display: none; }
+  .split.conv:not(.picked) > .split-main { display: none; }
+}
+/* The current milestone wraps instead of being cut off; the count keeps to its own line end. */
+.pfoot { flex-wrap: wrap; row-gap: 4px; }
+.pfoot .pms { min-width: 0; flex: 1 1 200px; }
+.pfoot .grow { display: none; }
+.chip.quiet { background: transparent; border: 1px solid var(--line); color: var(--muted); }

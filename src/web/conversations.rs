@@ -1,5 +1,7 @@
 //! The Conversations page: what agents and the consultant tell each other, and the owner's replies.
 
+use std::collections::HashMap;
+
 use askama::Template;
 use axum::extract::{Path, Query, State};
 use axum::response::{IntoResponse, Redirect, Response};
@@ -30,6 +32,7 @@ struct ThreadRow {
 }
 
 struct MessageView {
+    mine: bool,
     sender: String,
     at: String,
     kind: String,
@@ -52,6 +55,8 @@ struct ConversationsPage {
     messages: Vec<MessageView>,
     contributions: Vec<ContributionRow>,
     sent: bool,
+    /// A conversation was chosen (not just the newest shown): on the phone, the list steps aside.
+    picked: bool,
 }
 
 #[derive(Deserialize)]
@@ -60,11 +65,20 @@ struct PageQuery {
     sent: Option<u8>,
 }
 
-/// "Vinculum ↔ Antimony", "Cold Trace → everyone"
-fn members_line(started_by: &str, members: &[String]) -> String {
-    let others: Vec<&str> = members.iter().map(String::as_str).filter(|m| *m != started_by).collect();
-    let others = others.iter().map(|m| if *m == messages::ALL { "everyone" } else { m }).collect::<Vec<_>>().join(", ");
-    format!("{started_by} → {others}")
+/// A member as people read it: the project's name, "Consultant", "you" or "everyone".
+fn display(names: &HashMap<String, String>, m: &str) -> String {
+    match m {
+        OWNER => "you".into(),
+        messages::ALL => "everyone".into(),
+        messages::CONSULTANT => "Consultant".into(),
+        slug => names.get(slug).cloned().unwrap_or_else(|| slug.to_owned()),
+    }
+}
+
+/// "Vinculum → Antimony", "Cold Trace → everyone"
+fn members_line(names: &HashMap<String, String>, started_by: &str, members: &[String]) -> String {
+    let others: Vec<String> = members.iter().filter(|m| *m != started_by).map(|m| display(names, m)).collect();
+    format!("{} → {}", display(names, started_by), others.join(", "))
 }
 
 async fn page(
@@ -74,9 +88,12 @@ async fn page(
 ) -> AppResult<Response> {
     actor.require_owner()?;
     let now = now_ms();
-    let (threads, selected, msgs, contributions) = state
+    let picked = q.t.is_some();
+    let (threads, selected, msgs, contributions, names) = state
         .db
         .call(move |c| {
+            let names: HashMap<String, String> =
+                crate::projects::list(c)?.into_iter().map(|p| (p.slug, p.name)).collect();
             let threads = messages::threads(c, None, 100, None)?;
             let pick = q.t.or(threads.first().map(|t| t.id));
             let selected = match pick {
@@ -91,7 +108,7 @@ async fn page(
                 c,
                 &records::Query { kinds: vec![records::Kind::Contribution], limit: 50, ..Default::default() },
             )?;
-            Ok((threads, selected, msgs, contributions))
+            Ok((threads, selected, msgs, contributions, names))
         })
         .await?;
     let sel_id = selected.as_ref().map(|t| t.id);
@@ -102,9 +119,9 @@ async fn page(
             .map(|t| ThreadRow {
                 id: t.id,
                 subject: t.subject.clone(),
-                members: members_line(&t.started_by, &t.members),
+                members: members_line(&names, &t.started_by, &t.members),
                 when: ago(t.last_at, now),
-                kind: t.last_kind.clone(),
+                kind: t.kind.clone(),
                 count: t.count,
                 selected: Some(t.id) == sel_id,
             })
@@ -113,13 +130,14 @@ async fn page(
             (
                 t.id,
                 t.subject.clone(),
-                format!("{} · started {}", members_line(&t.started_by, &t.members), fmt_short(t.created_at)),
+                format!("{} · started {}", members_line(&names, &t.started_by, &t.members), fmt_short(t.created_at)),
             )
         }),
         messages: msgs
             .iter()
             .map(|m| MessageView {
-                sender: if m.sender == OWNER { "You".into() } else { m.sender.clone() },
+                mine: m.sender == OWNER,
+                sender: if m.sender == OWNER { "You".into() } else { display(&names, &m.sender) },
                 at: fmt_short(m.created_at),
                 kind: m.kind.clone(),
                 body_html: markdown::to_html(&m.body),
@@ -135,6 +153,7 @@ async fn page(
             })
             .collect(),
         sent: q.sent == Some(1),
+        picked,
     })
 }
 
