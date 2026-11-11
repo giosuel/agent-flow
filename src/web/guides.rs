@@ -186,8 +186,9 @@ async fn page(
         "pull" => "Merged on GitHub, but updating the checkout failed (does it have unpushed edits? push them first, then pull).".to_owned(),
         _ => "That didn't work; see the log.".to_owned(),
     });
+    let page_nav = nav(&state, &actor, "/guides").await;
     render(GuidesPage {
-        nav: nav(&state, &actor, "/guides").await,
+        nav: if file.is_some() { page_nav.back_to("/guides", "Guides") } else { page_nav },
         repo: state.config.handbook_repo.clone(),
         files: names
             .into_iter()

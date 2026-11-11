@@ -54,7 +54,7 @@ struct NewProjectPage {
 
 fn page(nav: Nav, f: &NewForm, error: Option<String>, done: Option<onboard::Outcome>) -> AppResult<Response> {
     render(NewProjectPage {
-        nav,
+        nav: nav.back_to("/projects", "Projects"),
         host: crate::machine::hostname(),
         error,
         name: f.name.clone(),

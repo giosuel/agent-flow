@@ -72,6 +72,10 @@ pub struct Tab {
 pub struct Nav {
     pub items: Vec<NavItem>,
     pub tabs: Vec<Tab>,
+    /// On the phone a sub-page shows a back bar ("‹ Guides") instead of the logo, like an app's
+    /// navigation (the owner, 2026-11-11: "clicking on something should open a new "window" or
+    /// feel more like navigation").
+    pub back: Option<(String, String)>,
     pub label: String,
     pub version: &'static str,
     pub waiting: i64,
@@ -101,10 +105,19 @@ impl Nav {
                     active: active == "/more" || MORE.iter().any(|m| m.0 == active),
                 }))
                 .collect(),
+            back: MORE.iter().any(|m| m.0 == active).then(|| ("/more".to_owned(), "More".to_owned())),
             label: actor.label(),
             version: VERSION,
             waiting: 0,
         }
+    }
+}
+
+impl Nav {
+    /// A back bar to `href` on the phone.
+    pub fn back_to(mut self, href: impl Into<String>, label: impl Into<String>) -> Self {
+        self.back = Some((href.into(), label.into()));
+        self
     }
 }
 

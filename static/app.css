@@ -519,3 +519,47 @@ body { box-sizing: border-box; min-height: 100vh; min-height: 100dvh; }
   .proj-tabs a.on { background: var(--chip-accent); border-color: var(--accent); color: var(--chip-accent-ink); }
   .guide-head h2 { width: 100%; }
 }
+
+/* App-like navigation on the phone (the owner, 2026-11-11). */
+.back-bar { display: none; }
+/* Page changes: pushed in from the right, popped back to the right, tabs fade (static/nav.js
+   picks which). Only on the phone, and only for those who don't ask for less motion. */
+@view-transition { navigation: auto; }
+@keyframes vt-push-in { from { transform: translateX(100%); } }
+@keyframes vt-push-out { to { transform: translateX(-28%); opacity: .5; } }
+@keyframes vt-pop-in { from { transform: translateX(-28%); opacity: .5; } }
+@keyframes vt-pop-out { to { transform: translateX(100%); } }
+@keyframes vt-fade-in { from { opacity: 0; } }
+::view-transition-old(root), ::view-transition-new(root) { animation: none; }
+@media (max-width: 700px) and (prefers-reduced-motion: no-preference) {
+  .tabbar { view-transition-name: tabbar; }
+  ::view-transition-group(tabbar) { animation: none; z-index: 2; }
+  ::view-transition-old(root) { animation: .34s cubic-bezier(.2, .8, .2, 1) both vt-push-out; }
+  ::view-transition-new(root) { animation: .34s cubic-bezier(.2, .8, .2, 1) both vt-push-in; box-shadow: -12px 0 30px rgba(0, 0, 0, .45); }
+  html:active-view-transition-type(back)::view-transition-old(root) { animation-name: vt-pop-out; z-index: 1; box-shadow: -12px 0 30px rgba(0, 0, 0, .45); }
+  html:active-view-transition-type(back)::view-transition-new(root) { animation-name: vt-pop-in; box-shadow: none; }
+  html:active-view-transition-type(tab)::view-transition-old(root) { animation: none; }
+  html:active-view-transition-type(tab)::view-transition-new(root) { animation: .16s ease-out both vt-fade-in; box-shadow: none; }
+}
+@media (max-width: 700px) {
+  html { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+  /* A sub-page: "‹ Guides" in place of the logo, below the status bar. */
+  .back-bar {
+    display: flex; align-items: center; gap: 2px; width: fit-content; min-height: 44px;
+    padding: calc(8px + env(safe-area-inset-top)) 12px 0 8px; color: var(--accent); font-size: 17px; text-decoration: none;
+  }
+  .back-bar .i { width: 26px; height: 26px; stroke-width: 2.2; }
+  body:has(.back-bar) .top { display: none; }
+  body:has(.back-bar) .crumbs, body:has(.back-bar) a.back.phone-only { display: none; }
+  body:has(.back-bar) .page { padding-top: 6px; }
+  .hide-on-phone { display: none; }
+  /* Rows that open something: an iOS disclosure chevron and feedback while pressed. */
+  .card.list a.item { position: relative; padding-right: 38px; }
+  .card.list a.item::after {
+    content: ""; position: absolute; right: 18px; top: 50%; width: 8px; height: 8px;
+    border-right: 2px solid var(--dim); border-top: 2px solid var(--dim); transform: translateY(-50%) rotate(45deg);
+  }
+  .card.list a.item:active, .more-list a:active, .rows li:active, .tabbar a:active { background: var(--soft); }
+  /* No column grows past the screen, whatever it holds (Safari lets a wide child stretch it). */
+  .split, .split-main, .split-side, .card, .prose { min-width: 0; max-width: 100%; }
+}

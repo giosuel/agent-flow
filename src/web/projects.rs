@@ -341,7 +341,14 @@ async fn project(
         page.prs.truncate(8);
     }
     let next = if tab == "overview" { format!("/p/{}", page.slug) } else { format!("/p/{}?tab={tab}", page.slug) };
-    let page = ProjectPage { nav: nav(&state, &actor, "/projects").await, tab, notice, notice_bad, next, ..page };
+    let page = ProjectPage {
+        nav: nav(&state, &actor, "/projects").await.back_to("/projects", "Projects"),
+        tab,
+        notice,
+        notice_bad,
+        next,
+        ..page
+    };
     render(page)
 }
 
@@ -900,7 +907,7 @@ async fn load_record_page(
     };
 
     Ok(RecordPage {
-        nav: nav(state, actor, "/projects").await,
+        nav: nav(state, actor, "/projects").await.back_to(format!("/p/{}", project.slug), project.name.clone()),
         project_slug: project.slug,
         project_name: project.name,
         kind_label: r.kind.label(),
