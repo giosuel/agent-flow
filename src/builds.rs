@@ -48,6 +48,17 @@ pub fn check_product(product: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// One feature the owner should try, from "Title: what to do" (the part after the colon is
+/// optional); None for an empty line.
+pub fn feature(text: &str) -> Option<serde_json::Value> {
+    let text = text.trim();
+    if text.is_empty() {
+        return None;
+    }
+    let (title, what) = text.split_once(':').map(|(a, b)| (a.trim(), b.trim())).unwrap_or((text, ""));
+    Some(serde_json::json!({"title": title, "what_to_try": what}))
+}
+
 /// A commit as git prints it: 4 to 40 hex digits, or nothing. It becomes part of a file name.
 pub fn check_commit(commit: &str) -> anyhow::Result<()> {
     if !commit.is_empty() && !(4..=40).contains(&commit.len()) || !commit.chars().all(|c| c.is_ascii_hexdigit()) {

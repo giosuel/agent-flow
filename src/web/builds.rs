@@ -72,20 +72,13 @@ struct UploadQuery {
     project: Option<String>,
 }
 
-/// One feature the owner should try, with what to do.
+/// The features, sent as a JSON list of "Title: what to do".
 fn parse_features(s: &str) -> anyhow::Result<Vec<Value>> {
     if s.trim().is_empty() {
         return Ok(Vec::new());
     }
     let list: Vec<String> = serde_json::from_str(s)?;
-    Ok(list
-        .iter()
-        .filter(|f| !f.trim().is_empty())
-        .map(|f| {
-            let (title, what) = f.split_once(':').map(|(a, b)| (a.trim(), b.trim())).unwrap_or((f.trim(), ""));
-            json!({"title": title, "what_to_try": what})
-        })
-        .collect())
+    Ok(list.iter().filter_map(|f| builds::feature(f)).collect())
 }
 
 /// The product belongs to the caller's project: its `build_product`, or its slug.
