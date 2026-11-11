@@ -161,8 +161,8 @@ pub fn admin(config_path: &Path, command: AdminCommand) -> anyhow::Result<()> {
         AdminCommand::Backup => {
             let data = config.data_dir();
             // "2026-11-11-0530": a manual one sorts after that day's nightly one.
-            let stamp = fmt_utc(crate::util::now_ms())[..16].replace([' ', ':'], "-");
-            let stamp = format!("{}{}", &stamp[..13], &stamp[14..]);
+            let now = crate::util::now_ms();
+            let stamp = format!("{}-{}", crate::util::fmt_date(now), crate::util::fmt_hm(now).replace(':', ""));
             let (made, n) = db.call_blocking(move |c| {
                 let made = crate::backup::backup(c, &data, &stamp)?;
                 Ok((made, crate::backup::export(c, &data)?))

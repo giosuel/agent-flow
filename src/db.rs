@@ -92,7 +92,7 @@ impl Db {
         })
         .await
         .context("database task panicked")?;
-        inner.idle.lock().unwrap().push(conn);
+        inner.idle.lock().unwrap_or_else(|e| e.into_inner()).push(conn);
         result
     }
 
@@ -100,12 +100,12 @@ impl Db {
     pub fn call_blocking<T>(&self, f: impl FnOnce(&mut Connection) -> anyhow::Result<T>) -> anyhow::Result<T> {
         let mut conn = self.take()?;
         let r = f(&mut conn);
-        self.inner.idle.lock().unwrap().push(conn);
+        self.inner.idle.lock().unwrap_or_else(|e| e.into_inner()).push(conn);
         r
     }
 
     fn take(&self) -> anyhow::Result<Connection> {
-        let pooled = self.inner.idle.lock().unwrap().pop();
+        let pooled = self.inner.idle.lock().unwrap_or_else(|e| e.into_inner()).pop();
         match pooled {
             Some(c) => Ok(c),
             None => open_connection(&self.inner.path),
