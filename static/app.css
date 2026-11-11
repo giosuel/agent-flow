@@ -338,3 +338,32 @@ button.opt { font: inherit; color: var(--ink); text-align: left; width: 100%; }
 .split.guides .split-side { flex: 1 1 300px; max-width: 380px; }
 .editor { width: 100%; font-size: 13px; line-height: 1.5; }
 .guide-sec .prose { color: var(--ink2); }
+
+/* Log */
+.logq { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.logq input#q { flex: 1 1 420px; font-size: 13px; }
+.ranges { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.rng { padding: 0 12px; min-height: 36px; display: inline-flex; align-items: center; color: var(--ink2); text-decoration: none; font-size: 14px; border-left: 1px solid var(--border); }
+.rng:first-child { border-left: 0; }
+.rng.on { background: var(--chip-accent); color: var(--chip-accent-ink); }
+.split.logs .split-side { flex: 0 1 260px; }
+.facet-list { padding-left: 0; list-style: none; gap: 2px; }
+.facet-list a { display: flex; justify-content: space-between; gap: 8px; padding: 4px 8px; border-radius: 6px; color: var(--ink2); text-decoration: none; font-size: 14px; }
+.facet-list a:hover { background: var(--chip); color: var(--ink); }
+.facet-list a.on { background: var(--chip-accent); color: var(--chip-accent-ink); }
+.hist { display: flex; align-items: flex-end; gap: 2px; height: 90px; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.hist a { flex: 1; height: 100%; display: flex; align-items: flex-end; }
+.hist a i { display: block; width: 100%; background: var(--accent); border-radius: 2px 2px 0 0; opacity: .8; }
+.hist a:hover i { opacity: 1; background: var(--hover); }
+.axis { display: flex; justify-content: space-between; font-size: 12px; }
+.entries { padding-left: 0; list-style: none; gap: 0; }
+.entry { border-top: 1px solid var(--line2); }
+.entry summary { display: flex; gap: 10px; align-items: baseline; padding: 6px 4px; cursor: pointer; font-size: 14px; flex-wrap: wrap; }
+.entry summary:hover { background: #0d0d10; }
+.entry .esum { color: var(--ink2); flex: 1 1 300px; min-width: 0; overflow-wrap: anywhere; }
+.entry.sev-warn summary { box-shadow: inset 3px 0 0 var(--warn); }
+.entry.sev-error summary { box-shadow: inset 3px 0 0 var(--bad); }
+.entry.fresh summary { background: var(--soft); }
+.edetail { padding: 8px 12px 14px; background: var(--inset); border-radius: 6px; margin-bottom: 8px; display: flex; flex-direction: column; gap: 8px; }
+.edetail .kv { font-size: 12px; }
+.edetail dd { white-space: pre-wrap; }

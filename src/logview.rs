@@ -309,7 +309,7 @@ pub fn search_archive(data_dir: &Path, f: &Filter, before: Option<i64>, limit: u
         // Skip months entirely outside the range.
         let starts =
             time::Date::parse(&format!("{month}-01"), time::macros::format_description!("[year]-[month]-[day]"))
-                .map(|d| (d.midnight().assume_utc().unix_timestamp() * 1000) as i64)
+                .map(|d| d.midnight().assume_utc().unix_timestamp() * 1000)
                 .unwrap_or(0);
         if f.to.is_some_and(|to| starts >= to) || f.from.is_some_and(|from| starts + 32 * 86_400_000 < from) {
             continue;

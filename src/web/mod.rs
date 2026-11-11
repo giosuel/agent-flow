@@ -10,6 +10,7 @@ mod conversations;
 mod dashboard;
 mod guides;
 mod icons;
+mod log;
 mod pages;
 mod projects;
 mod pwa;
@@ -123,6 +124,7 @@ pub fn router(state: AppState) -> Router {
         .merge(builds::routes())
         .merge(conversations::routes())
         .merge(guides::routes())
+        .merge(log::routes())
         .merge(dashboard::routes())
         .merge(pwa::routes())
         .nest_service("/mcp", mcp)
@@ -147,9 +149,27 @@ pub async fn serve(state: AppState) -> anyhow::Result<()> {
         tracing::warn!("{recovered} button(s) were running when AgentFlow stopped; marked failed");
     }
     crate::poller::spawn(state.clone());
+    spawn_archiver(state.clone());
     let app = router(state).into_make_service_with_connect_info::<SocketAddr>();
     axum::serve(listener, app).with_graceful_shutdown(shutdown_signal()).await?;
     Ok(())
+}
+
+/// Moves reads older than 90 days to the monthly archive: at start, then every six hours.
+fn spawn_archiver(state: AppState) {
+    tokio::spawn(async move {
+        let mut tick = tokio::time::interval(std::time::Duration::from_secs(6 * 3600));
+        loop {
+            tick.tick().await;
+            let data = state.config.data_dir();
+            let now = crate::util::now_ms();
+            match state.db.call(move |c| crate::logview::archive_old_reads(c, &data, now)).await {
+                Ok(0) => {}
+                Ok(n) => tracing::info!("archived {n} reads older than 90 days"),
+                Err(e) => tracing::warn!("archiving old reads: {e:#}"),
+            }
+        }
+    });
 }
 
 async fn shutdown_signal() {

@@ -48,8 +48,7 @@ const NAV: &[(&str, &str)] = &[
 ];
 
 /// Pages that exist in the navigation but are built in a later milestone.
-const COMING: &[(&str, &str, &str)] =
-    &[("/machine", "Machine", "M9"), ("/usage", "Usage", "M9"), ("/log", "Log", "M8")];
+const COMING: &[(&str, &str, &str)] = &[("/machine", "Machine", "M9"), ("/usage", "Usage", "M9")];
 
 pub struct NavItem {
     pub href: &'static str,
