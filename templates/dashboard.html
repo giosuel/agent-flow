@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+{% block content %}
+<div class="head">
+  <h1>Dashboard</h1>
+  <p class="status-line"><span class="dot ok" aria-hidden="true"></span><span>AgentFlow is running</span><span class="grow"></span><span>{{ today }}</span></p>
+</div>
+<section class="card pad empty">
+  <h2>Nothing is waiting on you</h2>
+  <p class="sub">Questions, merges and builds from the project agents will show up here. Projects arrive with the next milestones; until then this page only proves you're signed in.</p>
+</section>
+{% endblock %}
