@@ -190,9 +190,10 @@ async fn dashboard(
             let mut seen = std::collections::HashSet::new();
             let activity = records::recent_events(c, None, 60)?
                 .into_iter()
-                // A button being added is part of the PR's story, and each piece of feedback part
-                // of "Owner tried build #n"; neither is news of its own.
-                .filter(|e| e.kind != "action.added" && e.kind != "feedback.created")
+                // A button being added is part of the PR's story, each piece of feedback part of
+                // "Owner tried build #n", and a PR found on GitHub shows under "Merge and
+                // release"; none is news of its own (an import brings hundreds at once).
+                .filter(|e| !matches!(e.kind.as_str(), "action.added" | "feedback.created" | "pr.created"))
                 // A message lands in every recipient's feed; show it once.
                 .filter(|e| seen.insert((e.summary.clone(), e.actor.clone(), e.at / 1000)))
                 .take(12)
