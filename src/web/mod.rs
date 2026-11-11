@@ -8,6 +8,7 @@ pub use builds::notify_build;
 mod buttons;
 mod conversations;
 mod dashboard;
+mod guides;
 mod icons;
 mod pages;
 mod projects;
@@ -44,13 +45,32 @@ pub struct AppState {
     denied: Arc<std::sync::Mutex<std::collections::HashMap<String, (i64, u32)>>>,
     /// Running `/api/wait` calls per project.
     pub waits: Arc<std::sync::Mutex<std::collections::HashMap<i64, u32>>>,
+    /// The guides repository's pull requests, refreshed by the poller.
+    pub guide_prs: Arc<std::sync::Mutex<GuidePrs>>,
+}
+
+#[derive(Default, Clone)]
+pub struct GuidePrs {
+    pub open: Vec<crate::github::RepoPr>,
+    pub merged: Vec<crate::github::RepoPr>,
+    /// Fetched at least once since start (the first fetch doesn't notify).
+    pub fetched: bool,
 }
 
 impl AppState {
     pub fn new(db: Db, config: Config, vapid: Vapid, github: Arc<dyn GitHub>) -> Self {
         let passkeys = Passkeys::new(&config);
         let push = Pusher::new(db.clone(), vapid, &config.push_contact);
-        Self { db, config: Arc::new(config), passkeys, push, github, denied: Arc::default(), waits: Arc::default() }
+        Self {
+            db,
+            config: Arc::new(config),
+            passkeys,
+            push,
+            github,
+            denied: Arc::default(),
+            waits: Arc::default(),
+            guide_prs: Arc::default(),
+        }
     }
 
     /// The owner's session cookie. On https it's a `__Host-` cookie: never shared with another
@@ -102,6 +122,7 @@ pub fn router(state: AppState) -> Router {
         .merge(buttons::routes())
         .merge(builds::routes())
         .merge(conversations::routes())
+        .merge(guides::routes())
         .merge(dashboard::routes())
         .merge(pwa::routes())
         .nest_service("/mcp", mcp)

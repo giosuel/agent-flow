@@ -34,12 +34,46 @@ pub struct ItemInfo {
     pub comments: i64,
 }
 
+/// A pull request as a list shows it (the guides' PRs).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RepoPr {
+    pub number: i64,
+    pub title: String,
+    pub url: String,
+    #[serde(default)]
+    pub additions: i64,
+    #[serde(default)]
+    pub deletions: i64,
+    #[serde(default, deserialize_with = "file_paths")]
+    pub files: Vec<String>,
+    #[serde(default, deserialize_with = "login")]
+    pub author: String,
+    /// When it was opened, or merged for a merged one (RFC 3339).
+    #[serde(default, alias = "mergedAt")]
+    pub created_at: String,
+}
+
+fn file_paths<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<String>, D::Error> {
+    let v: Vec<serde_json::Value> = Deserialize::deserialize(d)?;
+    Ok(v.iter().filter_map(|f| f.get("path").and_then(|p| p.as_str()).map(str::to_owned)).collect())
+}
+
+fn login<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::Error> {
+    let v: serde_json::Value = Deserialize::deserialize(d)?;
+    Ok(v.get("login").and_then(|l| l.as_str()).unwrap_or("").to_owned())
+}
+
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
 pub trait GitHub: Send + Sync {
     fn pr<'a>(&'a self, repo: &'a str, number: i64) -> BoxFuture<'a, anyhow::Result<PrInfo>>;
     fn open_prs<'a>(&'a self, repo: &'a str) -> BoxFuture<'a, anyhow::Result<Vec<PrInfo>>>;
     fn item<'a>(&'a self, repo: &'a str, number: i64) -> BoxFuture<'a, anyhow::Result<ItemInfo>>;
+    /// Open PRs, or the most recently merged ones.
+    fn repo_prs<'a>(&'a self, repo: &'a str, merged: bool) -> BoxFuture<'a, anyhow::Result<Vec<RepoPr>>>;
+    /// Merges a PR (the owner's button on the Guides page) and deletes its branch.
+    fn merge<'a>(&'a self, repo: &'a str, number: i64) -> BoxFuture<'a, anyhow::Result<String>>;
 }
 
 const FIELDS: &str = "number,title,url,state,isDraft,baseRefName,headRefName,mergeable,statusCheckRollup";
@@ -137,6 +171,29 @@ struct GhIssue {
 }
 
 impl GitHub for GhCli {
+    fn repo_prs<'a>(&'a self, repo: &'a str, merged: bool) -> BoxFuture<'a, anyhow::Result<Vec<RepoPr>>> {
+        Box::pin(async move {
+            check_repo(repo)?;
+            let (state, fields, limit) = if merged {
+                ("merged", "number,title,url,additions,deletions,files,author,mergedAt", "5")
+            } else {
+                ("open", "number,title,url,additions,deletions,files,author,createdAt", "50")
+            };
+            let out =
+                Self::run(&["pr", "list", "-R", repo, "--state", state, "--limit", limit, "--json", fields]).await?;
+            Ok(serde_json::from_slice(&out).context("reading gh's answer")?)
+        })
+    }
+
+    fn merge<'a>(&'a self, repo: &'a str, number: i64) -> BoxFuture<'a, anyhow::Result<String>> {
+        Box::pin(async move {
+            check_repo(repo)?;
+            let n = number.to_string();
+            let out = Self::run(&["pr", "merge", &n, "-R", repo, "--merge", "--delete-branch"]).await?;
+            Ok(String::from_utf8_lossy(&out).trim().to_owned())
+        })
+    }
+
     fn item<'a>(&'a self, repo: &'a str, number: i64) -> BoxFuture<'a, anyhow::Result<ItemInfo>> {
         Box::pin(async move {
             check_repo(repo)?;
@@ -186,6 +243,8 @@ pub mod fake {
     #[derive(Default)]
     pub struct FakeGitHub {
         pub items: Mutex<HashMap<(String, i64), ItemInfo>>,
+        pub repo_open: Mutex<Vec<RepoPr>>,
+        pub merged: Mutex<Vec<i64>>,
         pub prs: Mutex<HashMap<(String, i64), PrInfo>>,
         /// PRs reported merged the next time they're fetched one by one (as after a merge button).
         pub merge_on_fetch: Mutex<std::collections::HashSet<i64>>,
@@ -208,6 +267,18 @@ pub mod fake {
                     p
                 });
             Box::pin(async move { r })
+        }
+
+        fn repo_prs<'a>(&'a self, _repo: &'a str, merged: bool) -> BoxFuture<'a, anyhow::Result<Vec<RepoPr>>> {
+            let done = self.merged.lock().unwrap().clone();
+            let list: Vec<RepoPr> =
+                self.repo_open.lock().unwrap().iter().filter(|p| done.contains(&p.number) == merged).cloned().collect();
+            Box::pin(async move { Ok(list) })
+        }
+
+        fn merge<'a>(&'a self, _repo: &'a str, number: i64) -> BoxFuture<'a, anyhow::Result<String>> {
+            self.merged.lock().unwrap().push(number);
+            Box::pin(async move { Ok(format!("merged #{number}")) })
         }
 
         fn item<'a>(&'a self, repo: &'a str, number: i64) -> BoxFuture<'a, anyhow::Result<ItemInfo>> {
