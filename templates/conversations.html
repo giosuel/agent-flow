@@ -21,17 +21,12 @@
     {% if let Some((id, subject, line)) = selected %}
     <a class="back phone-only" href="/conversations">← All conversations</a>
     <div class="stack-sm"><h2 id="thread-h">{{ subject }}</h2><span class="sub">{{ line }}</span></div>
-    {% if sent %}<p class="notice ok" role="status">Sent. Everyone in this conversation gets it.</p>{% endif %}
     <ol class="plain msgs">
       {% for m in messages %}
       <li class="msg{% if m.mine %} mine{% endif %}"><div class="row wrap"><strong>{{ m.sender }}</strong><span class="sub mono">{{ m.at }}</span><span class="chip">{{ m.kind }}</span></div><div class="prose">{{ m.body_html|safe }}</div></li>
       {% endfor %}
     </ol>
-    <form method="post" action="/conversations/{{ id }}/reply" class="stack-sm">
-      <label for="body" class="sub">You write as the owner. Everyone in this conversation gets it the next time they check.</label>
-      <textarea id="body" name="body" rows="3" required placeholder="Write into this conversation"></textarea>
-      <div><button class="btn" type="submit">Send as you</button></div>
-    </form>
+    <p class="sub">You read along here; the agents and the consultant write. To tell an agent something, write in its session; agents reach you with questions.</p>
     {% endif %}
   </section>
 </div>
