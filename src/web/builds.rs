@@ -1,0 +1,475 @@
+//! Builds over HTTP: agents upload them (`agentflow publish`), the owner's machines download them
+//! (`agentflow run`), and the owner gives feedback on a build's page.
+
+use std::path::PathBuf;
+
+use axum::body::Body;
+use axum::extract::{Path, Query, State};
+use axum::http::{HeaderValue, StatusCode, header};
+use axum::response::{IntoResponse, Redirect, Response};
+use axum::routing::{get, post};
+use axum::{Extension, Form, Json, Router};
+use futures::StreamExt;
+use rusqlite::Connection;
+use serde::Deserialize;
+use serde_json::{Map, Value, json};
+use tokio::io::AsyncWriteExt;
+
+use super::{AppError, AppResult, AppState, ClientIp, json_error};
+use crate::activity::{self, Action, Entry, Via};
+use crate::auth::Actor;
+use crate::builds::{self, Manifest};
+use crate::push::{self, Notification};
+use crate::records::{self, Kind, NewRecord, Query as RQuery, Record};
+use crate::util::new_secret;
+use crate::{mcp, projects};
+
+pub fn routes() -> Router<AppState> {
+    Router::new()
+        .route("/api/builds", get(products).post(upload))
+        .route("/api/builds/{product}", get(list))
+        .route("/api/builds/{product}/{number}", get(one))
+        .route("/api/builds/{product}/{number}/archive", get(archive))
+        .route("/p/{slug}/{id}/feedback", post(feedback))
+}
+
+fn builds_dir(state: &AppState) -> PathBuf {
+    state.config.data_dir().join("builds")
+}
+
+#[derive(Deserialize)]
+struct UploadQuery {
+    product: String,
+    summary: String,
+    #[serde(default)]
+    commit: String,
+    #[serde(default)]
+    branch: String,
+    /// The file that starts it; required for a folder, the file's own name for a single binary.
+    #[serde(default)]
+    entry: String,
+    #[serde(default)]
+    tag: String,
+    /// "Title: what to try", repeatable via `feature=`; JSON list here.
+    #[serde(default)]
+    features: String,
+    /// The consultant names the project; agents publish to their own.
+    project: Option<String>,
+}
+
+/// One feature the owner should try, with what to do.
+fn parse_features(s: &str) -> anyhow::Result<Vec<Value>> {
+    if s.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+    let list: Vec<String> = serde_json::from_str(s)?;
+    Ok(list
+        .iter()
+        .filter(|f| !f.trim().is_empty())
+        .map(|f| {
+            let (title, what) = f.split_once(':').map(|(a, b)| (a.trim(), b.trim())).unwrap_or((f.trim(), ""));
+            json!({"title": title, "what_to_try": what})
+        })
+        .collect())
+}
+
+/// The product belongs to the caller's project: its `build_product`, or its slug.
+fn product_project(
+    c: &Connection,
+    actor: &Actor,
+    product: &str,
+    project: Option<&str>,
+) -> anyhow::Result<projects::Project> {
+    let p = mcp::target_project(c, actor, project, true)?;
+    let own = if p.build_product.is_empty() { p.slug.clone() } else { p.build_product.clone() };
+    if own != product {
+        anyhow::bail!(
+            "{} publishes builds as {own:?}, not {product:?} (set build_product with update_project)",
+            p.slug
+        );
+    }
+    Ok(p)
+}
+
+async fn upload(
+    State(state): State<AppState>,
+    Extension(actor): Extension<Actor>,
+    Query(q): Query<UploadQuery>,
+    body: Body,
+) -> Response {
+    if let Err(e) = builds::check_product(&q.product) {
+        return json_error(StatusCode::BAD_REQUEST, format!("{e:#}"));
+    }
+    if q.summary.trim().is_empty() {
+        return json_error(StatusCode::BAD_REQUEST, "summary: one line on what's in it");
+    }
+    let features = match parse_features(&q.features) {
+        Ok(f) => f,
+        Err(e) => return json_error(StatusCode::BAD_REQUEST, format!("features: {e:#}")),
+    };
+    let (a, product, project_arg) = (actor.clone(), q.product.clone(), q.project.clone());
+    let project = match state.db.call(move |c| product_project(c, &a, &product, project_arg.as_deref())).await {
+        Ok(p) => p,
+        Err(e) => return json_error(StatusCode::FORBIDDEN, format!("{e:#}")),
+    };
+
+    // Stream the archive to a file first: builds are large, and nothing is kept unless it checks out.
+    let incoming = builds_dir(&state).join(".incoming");
+    if let Err(e) = tokio::fs::create_dir_all(&incoming).await {
+        return json_error(StatusCode::INTERNAL_SERVER_ERROR, format!("{e}"));
+    }
+    let tmp = incoming.join(format!("{}.tar", new_secret("")));
+    let result = async {
+        let mut file = tokio::fs::File::create(&tmp).await?;
+        let mut stream = body.into_data_stream();
+        let mut size = 0u64;
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.map_err(|e| anyhow::anyhow!("upload broke off: {e}"))?;
+            size += chunk.len() as u64;
+            if size > builds::MAX_BYTES {
+                anyhow::bail!("the build is larger than 2 GB");
+            }
+            file.write_all(&chunk).await?;
+        }
+        file.flush().await?;
+        let path = tmp.clone();
+        let manifest = tokio::task::spawn_blocking(move || builds::inspect(std::fs::File::open(&path)?)).await??;
+        anyhow::Ok(manifest)
+    }
+    .await;
+    let manifest = match result {
+        Ok(m) => m,
+        Err(e) => {
+            let _ = tokio::fs::remove_file(&tmp).await;
+            return json_error(StatusCode::BAD_REQUEST, format!("{e:#}"));
+        }
+    };
+    let entry = match pick_entry(&manifest, q.entry.trim()) {
+        Ok(e) => e,
+        Err(e) => {
+            let _ = tokio::fs::remove_file(&tmp).await;
+            return json_error(StatusCode::BAD_REQUEST, format!("{e:#}"));
+        }
+    };
+
+    let dir = builds_dir(&state).join(&q.product);
+    let mut name = builds::build_name(time::OffsetDateTime::now_utc(), q.branch.trim(), q.commit.trim());
+    if let Err(e) = tokio::fs::create_dir_all(&dir).await {
+        return json_error(StatusCode::INTERNAL_SERVER_ERROR, format!("{e}"));
+    }
+    // Two builds in the same minute from the same commit get a suffix; a build never changes.
+    let mut n = 2;
+    while dir.join(format!("{name}.tar")).exists() {
+        name = format!("{}-{n}", name.trim_end_matches(&format!("-{}", n - 1)));
+        n += 1;
+    }
+    if let Err(e) = tokio::fs::rename(&tmp, builds::archive_path(&builds_dir(&state), &q.product, &name)).await {
+        let _ = tokio::fs::remove_file(&tmp).await;
+        return json_error(StatusCode::INTERNAL_SERVER_ERROR, format!("{e}"));
+    }
+
+    let ready = !features.is_empty();
+    let (a, p, nm, ent) = (actor.clone(), project.clone(), name.clone(), entry.clone());
+    let created = state
+        .db
+        .call(move |c| {
+            let mut data = Map::new();
+            data.insert("product".into(), q.product.clone().into());
+            data.insert("name".into(), nm.clone().into());
+            data.insert("commit".into(), q.commit.trim().into());
+            data.insert("branch".into(), q.branch.trim().into());
+            data.insert("entry".into(), ent.into());
+            data.insert("size".into(), manifest.total.into());
+            data.insert("files".into(), serde_json::to_value(&manifest.files)?);
+            data.insert("features".into(), features.into());
+            data.insert("ready_for_feedback".into(), ready.into());
+            if !q.tag.trim().is_empty() {
+                data.insert("tag".into(), q.tag.trim().into());
+            }
+            let r = records::create(
+                c,
+                p.id,
+                &a.name(),
+                NewRecord {
+                    kind: Some(Kind::Build),
+                    title: q.summary.trim().into(),
+                    state: Some("published".into()),
+                    data,
+                    ..Default::default()
+                },
+            )?;
+            Ok(r)
+        })
+        .await;
+    let r = match created {
+        Ok(r) => r,
+        Err(e) => return json_error(StatusCode::INTERNAL_SERVER_ERROR, format!("{e:#}")),
+    };
+    let e = Entry::new(&actor, Via::Api, Action::Write, format!("build {} published: {}", r.short_id(), name))
+        .project(r.project.clone())
+        .target(r.ref_id.clone());
+    activity::write(&state.db, e).await;
+    if ready {
+        notify_build(&state, &project.name, &r);
+    }
+    Json(json!({"id": r.ref_id, "number": r.number, "name": name, "run": format!("agentflow run {} {}", r.str("product"), r.number)})).into_response()
+}
+
+pub fn notify_build(state: &AppState, project_name: &str, r: &Record) {
+    state.push.spawn(
+        push::Kind::Build,
+        Notification {
+            title: format!("{project_name}: build #{} to try", r.number),
+            body: r.title.clone(),
+            url: r.url(),
+            tag: Some(r.ref_id.clone()),
+        },
+    );
+}
+
+/// The file that starts the build: given, or the only file when it's a single binary.
+fn pick_entry(m: &Manifest, entry: &str) -> anyhow::Result<String> {
+    if entry.is_empty() {
+        return match m.files.as_slice() {
+            [only] if only.executable => Ok(only.path.clone()),
+            [_] => anyhow::bail!("the file isn't executable"),
+            _ => anyhow::bail!("a folder needs --entry, the executable that starts it"),
+        };
+    }
+    let e = entry.trim_start_matches("./");
+    match m.files.iter().find(|f| f.path == e) {
+        Some(f) if f.executable => Ok(f.path.clone()),
+        Some(_) => anyhow::bail!("{e} isn't executable"),
+        None => anyhow::bail!("{e} isn't in the build"),
+    }
+}
+
+fn builds_of(c: &Connection, product: &str) -> anyhow::Result<Vec<Record>> {
+    let mut list: Vec<Record> =
+        records::query(c, &RQuery { kinds: vec![Kind::Build], limit: 0, ..Default::default() })?
+            .into_iter()
+            .filter(|r| r.str("product") == product && r.state != "withdrawn")
+            .collect();
+    list.sort_by_key(|r| std::cmp::Reverse(r.created_at));
+    Ok(list)
+}
+
+fn summary(r: &Record) -> Value {
+    json!({
+        "number": r.number, "name": r.str("name"), "summary": r.title, "commit": r.str("commit"), "branch": r.str("branch"),
+        "entry": r.str("entry"), "size": r.data.get("size"), "tag": r.data.get("tag"), "published": crate::util::fmt_utc(r.created_at),
+        "project": r.project, "page": r.url(),
+    })
+}
+
+async fn products(State(state): State<AppState>) -> Response {
+    let res = state
+        .db
+        .call(|c| {
+            let all = records::query(c, &RQuery { kinds: vec![Kind::Build], limit: 0, ..Default::default() })?;
+            let mut by: std::collections::BTreeMap<String, (usize, Option<Record>)> = Default::default();
+            for r in all.into_iter().filter(|r| r.state != "withdrawn") {
+                let e = by.entry(r.str("product").to_owned()).or_default();
+                e.0 += 1;
+                if e.1.as_ref().is_none_or(|l| l.created_at < r.created_at) {
+                    e.1 = Some(r);
+                }
+            }
+            Ok(by
+                .into_iter()
+                .map(|(p, (n, l))| json!({"product": p, "builds": n, "latest": l.as_ref().map(summary)}))
+                .collect::<Vec<_>>())
+        })
+        .await;
+    match res {
+        Ok(list) => Json(json!({ "products": list })).into_response(),
+        Err(e) => json_error(StatusCode::INTERNAL_SERVER_ERROR, format!("{e:#}")),
+    }
+}
+
+async fn list(State(state): State<AppState>, Path(product): Path<String>) -> Response {
+    match state.db.call(move |c| builds_of(c, &product)).await {
+        Ok(list) => Json(json!({"builds": list.iter().map(summary).collect::<Vec<_>>()})).into_response(),
+        Err(e) => json_error(StatusCode::INTERNAL_SERVER_ERROR, format!("{e:#}")),
+    }
+}
+
+/// The build, or the error response to send instead (boxed: a Response is large).
+async fn find_build(state: &AppState, product: String, number: i64) -> Result<Record, Box<Response>> {
+    match state.db.call(move |c| Ok(builds_of(c, &product)?.into_iter().find(|r| r.number == number))).await {
+        Ok(Some(r)) => Ok(r),
+        Ok(None) => Err(Box::new(json_error(StatusCode::NOT_FOUND, "no such build"))),
+        Err(e) => Err(Box::new(json_error(StatusCode::INTERNAL_SERVER_ERROR, format!("{e:#}")))),
+    }
+}
+
+async fn one(State(state): State<AppState>, Path((product, number)): Path<(String, i64)>) -> Response {
+    match find_build(&state, product, number).await {
+        Ok(r) => {
+            let mut v = summary(&r);
+            v["files"] = r.data.get("files").cloned().unwrap_or(Value::Null);
+            Json(v).into_response()
+        }
+        Err(res) => *res,
+    }
+}
+
+async fn archive(
+    State(state): State<AppState>,
+    Extension(actor): Extension<Actor>,
+    Path((product, number)): Path<(String, i64)>,
+) -> Response {
+    if builds::check_product(&product).is_err() {
+        return json_error(StatusCode::BAD_REQUEST, "bad product");
+    }
+    let r = match find_build(&state, product.clone(), number).await {
+        Ok(r) => r,
+        Err(res) => return *res,
+    };
+    let path = builds::archive_path(&builds_dir(&state), &product, r.str("name"));
+    let file = match tokio::fs::File::open(&path).await {
+        Ok(f) => f,
+        Err(e) => return json_error(StatusCode::GONE, format!("the build's archive is missing: {e}")),
+    };
+    let len = file.metadata().await.map(|m| m.len()).unwrap_or(0);
+    let e = Entry::new(&actor, Via::Api, Action::Read, format!("build {} downloaded", r.short_id()))
+        .project(r.project.clone())
+        .target(r.ref_id.clone());
+    activity::write(&state.db, e).await;
+    let mut res = Body::from_stream(tokio_util::io::ReaderStream::new(file)).into_response();
+    let h = res.headers_mut();
+    h.insert(header::CONTENT_TYPE, HeaderValue::from_static("application/x-tar"));
+    if let Ok(v) = HeaderValue::from_str(&len.to_string()) {
+        h.insert(header::CONTENT_LENGTH, v);
+    }
+    res
+}
+
+// ---------------------------------------------------------------------------------------------
+// Feedback
+
+/// The owner's form: per feature `v{i}` = works | problem | skip and `n{i}` = their words, plus
+/// a general note.
+async fn feedback(
+    State(state): State<AppState>,
+    Extension(actor): Extension<Actor>,
+    Extension(ip): Extension<ClientIp>,
+    Path((slug, id)): Path<(String, String)>,
+    Form(form): Form<Vec<(String, String)>>,
+) -> AppResult<Response> {
+    actor.require_owner()?;
+    let get = |k: &str| form.iter().find(|(a, _)| a == k).map(|(_, v)| v.clone()).unwrap_or_default();
+    let note = get("note");
+    let (s, i) = (slug.clone(), id.clone());
+    let form2 = form.clone();
+    let result = state
+        .db
+        .call(move |c| {
+            let tx = c.transaction()?;
+            let build = records::find_str(&tx, &format!("{s}/{i}"), None)?;
+            if build.kind != Kind::Build {
+                anyhow::bail!("{} isn't a build", build.ref_id);
+            }
+            let features = build.data.get("features").and_then(Value::as_array).cloned().unwrap_or_default();
+            let val = |k: String| form2.iter().find(|(a, _)| *a == k).map(|(_, v)| v.clone()).unwrap_or_default();
+            let mut counts = (0, 0, 0);
+            let mut made = Vec::new();
+            for (n, f) in features.iter().enumerate() {
+                let verdict = val(format!("v{n}"));
+                let words = val(format!("n{n}"));
+                let state = match verdict.as_str() {
+                    "works" => {
+                        counts.0 += 1;
+                        "works"
+                    }
+                    "problem" => {
+                        counts.1 += 1;
+                        "problem"
+                    }
+                    "skip" => {
+                        counts.2 += 1;
+                        "skipped"
+                    }
+                    _ => continue,
+                };
+                let title = f.get("title").and_then(Value::as_str).unwrap_or("Feature").to_owned();
+                let mut data = Map::new();
+                data.insert("owner_words".into(), words.clone().into());
+                data.insert("build".into(), build.ref_id.clone().into());
+                let fb = records::create(
+                    &tx,
+                    build.project_id,
+                    "owner",
+                    NewRecord {
+                        kind: Some(Kind::Feedback),
+                        title,
+                        state: Some(state.into()),
+                        data,
+                        ..Default::default()
+                    },
+                )?;
+                records::link(&tx, &fb, &build, "feedback_on", "owner")?;
+                made.push(fb);
+            }
+            if !note.trim().is_empty() {
+                let mut data = Map::new();
+                data.insert("owner_words".into(), note.clone().into());
+                data.insert("build".into(), build.ref_id.clone().into());
+                let fb = records::create(
+                    &tx,
+                    build.project_id,
+                    "owner",
+                    NewRecord {
+                        kind: Some(Kind::Feedback),
+                        title: "General note".into(),
+                        state: Some("problem".into()),
+                        data,
+                        ..Default::default()
+                    },
+                )?;
+                records::link(&tx, &fb, &build, "feedback_on", "owner")?;
+                made.push(fb);
+            }
+            if made.is_empty() {
+                anyhow::bail!("mark at least one feature, or write a note");
+            }
+            let mut data = Map::new();
+            data.insert("ready_for_feedback".into(), false.into());
+            records::update(
+                &tx,
+                &build,
+                "owner",
+                records::Patch { state: Some("tried".into()), data, quiet: true, ..Default::default() },
+            )?;
+            records::event(
+                &tx,
+                Some(build.project_id),
+                Some(build.id),
+                "build.feedback",
+                &format!(
+                    "Owner tried build #{}: {} works, {} problem{}, {} skipped{}",
+                    build.number,
+                    counts.0,
+                    counts.1,
+                    if counts.1 == 1 { "" } else { "s" },
+                    counts.2,
+                    if note.trim().is_empty() { String::new() } else { format!(". \"{}\"", note.trim()) }
+                ),
+                "owner",
+            )?;
+            tx.commit()?;
+            Ok(build)
+        })
+        .await;
+    match result {
+        Ok(b) => {
+            let e = Entry::new(&actor, Via::Page, Action::Write, format!("feedback on {}", b.ref_id))
+                .project(b.project.clone())
+                .target(b.ref_id.clone())
+                .ip(Some(ip.0));
+            activity::write(&state.db, e).await;
+            Ok(Redirect::to(&format!("{}?sent=1", b.url())).into_response())
+        }
+        Err(e) => Err(AppError::BadRequest(format!("{e:#}"))),
+    }
+}

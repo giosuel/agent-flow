@@ -37,6 +37,43 @@
     <dl class="kv">{% for (k, v) in extra %}<dt>{{ k }}</dt><dd>{% if v.starts_with("https://") %}<a href="{{ v }}">{{ v }}</a>{% else %}{{ v }}{% endif %}</dd>{% endfor %}</dl>
     {% endif %}
 
+    {% if let Some(b) = build %}
+    <section class="card pad stack" aria-labelledby="try-h">
+      <h2 id="try-h">Try it</h2>
+      <p class="sub">On any of your machines with AgentFlow's CLI:</p>
+      <pre class="cmd mono">{{ b.run }}</pre>
+      <dl class="kv">{% for (k, v) in b.facts %}<dt>{{ k }}</dt><dd>{{ v }}</dd>{% endfor %}</dl>
+    </section>
+    {% if b.sent %}<p class="notice ok" role="status">Feedback sent. The agent gets your words as you wrote them and turns problems into tasks.</p>{% endif %}
+    {% if !b.features.is_empty() && b.can_feedback && is_owner %}
+    <form method="post" action="/p/{{ project_slug }}/{{ short }}/feedback" class="stack" aria-labelledby="fb-h">
+      <h2 id="fb-h">How did it go?</h2>
+      {% for (i, title, what) in b.features %}
+      <fieldset class="feat card pad stack">
+        <legend class="vh">{{ title }}</legend>
+        <div class="stack-sm"><strong>{{ title }}</strong>{% if !what.is_empty() %}<span class="sub">{{ what }}</span>{% endif %}</div>
+        <div class="verdicts">
+          <label class="verdict v-works"><input type="radio" name="v{{ i }}" value="works"><span>Works</span></label>
+          <label class="verdict v-problem"><input type="radio" name="v{{ i }}" value="problem"><span>Problem</span></label>
+          <label class="verdict v-skip"><input type="radio" name="v{{ i }}" value="skip"><span>Skip</span></label>
+        </div>
+        <label class="vh" for="n{{ i }}">What went wrong?</label>
+        <textarea id="n{{ i }}" name="n{{ i }}" rows="2" class="problem-note" placeholder="What went wrong?"></textarea>
+      </fieldset>
+      {% endfor %}
+      <label class="vh" for="note">Anything else</label>
+      <textarea id="note" name="note" rows="2" placeholder="Anything else about this build (optional)"></textarea>
+      <div><button class="btn send" type="submit">Send feedback</button></div>
+    </form>
+    {% endif %}
+    {% if !b.given.is_empty() %}
+    <section class="stack-sm" aria-labelledby="given-h">
+      <h2 class="label" id="given-h">Your feedback</h2>
+      <ul class="rows">{% for (t, v, w) in b.given %}<li class="item-row"><div class="ttl"><strong>{{ t }}</strong>{% if !w.is_empty() %}<span class="sub">“{{ w }}”</span>{% endif %}</div><span class="chip{% if v == "works" %} ok{% endif %}{% if v == "problem" %} warn{% endif %}">{{ v }}</span></li>{% endfor %}</ul>
+    </section>
+    {% endif %}
+    {% endif %}
+
     {% if kind == "question" %}
     <section class="card pad stack" aria-labelledby="answer-h">
       <h2 id="answer-h">{% if can_answer %}Your answer{% else %}Answer{% endif %}</h2>

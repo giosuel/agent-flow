@@ -631,11 +631,27 @@ struct RecordPage {
     buttons: Vec<super::buttons::ButtonView>,
     pr_url: String,
     next: String,
+    build: Option<BuildView>,
+    is_owner: bool,
+}
+
+/// A build's page: how to start it and what to try.
+struct BuildView {
+    run: String,
+    facts: Vec<(String, String)>,
+    /// (index, title, what to try)
+    features: Vec<(usize, String, String)>,
+    /// Feedback already given: (feature, verdict, the owner's words)
+    given: Vec<(String, String, String)>,
+    can_feedback: bool,
+    sent: bool,
 }
 
 #[derive(Deserialize)]
 struct RecordQuery {
     error: Option<String>,
+    /// Set after feedback on a build was sent.
+    sent: Option<u8>,
 }
 
 async fn record(
@@ -651,7 +667,10 @@ async fn record(
         "empty" => "Pick an option or write an answer.".to_owned(),
         _ => "That didn't work; nothing was saved. Try again.".to_owned(),
     });
-    let page = load_record_page(&state, &actor, slug, id, error).await?;
+    let mut page = load_record_page(&state, &actor, slug, id, error).await?;
+    if let Some(b) = page.build.as_mut() {
+        b.sent = q.sent == Some(1);
+    }
     render(page)
 }
 
@@ -791,8 +810,54 @@ async fn load_record_page(
         error,
         buttons,
         pr_url: if r.kind == Kind::Pr { r.str("url").to_owned() } else { String::new() },
+        build: (r.kind == Kind::Build).then(|| build_view(&r, &links, false)),
+        is_owner,
         next: r.url(),
     })
+}
+
+fn build_view(r: &Record, links: &[records::LinkView], sent: bool) -> BuildView {
+    let size = r.data.get("size").and_then(Value::as_u64).unwrap_or(0);
+    let mut facts = vec![("Build".to_owned(), format!("#{} · {}", r.number, r.str("name")))];
+    if !r.str("commit").is_empty() {
+        facts.push(("Commit".into(), format!("{} on {}", r.str("commit"), r.str("branch"))));
+    }
+    let size = if size >= 1_048_576 {
+        format!("{:.1} MB", size as f64 / 1_048_576.0)
+    } else {
+        format!("{} KB", size.div_ceil(1024))
+    };
+    facts.push(("Size".into(), format!("{size}, starts with {}", r.str("entry"))));
+    if !r.str("tag").is_empty() {
+        facts.push(("Tag".into(), r.str("tag").into()));
+    }
+    let features = r
+        .data
+        .get("features")
+        .and_then(Value::as_array)
+        .map(|fs| {
+            fs.iter()
+                .enumerate()
+                .map(|(i, f)| {
+                    let s = |k: &str| f.get(k).and_then(Value::as_str).unwrap_or("").to_owned();
+                    (i, s("title"), s("what_to_try"))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let given = links
+        .iter()
+        .filter(|l| l.relation == "feedback_on" && !l.outgoing)
+        .map(|l| (l.other.title.clone(), l.other.state.clone(), l.other.str("owner_words").to_owned()))
+        .collect();
+    BuildView {
+        run: format!("agentflow run {} {}", r.str("product"), r.number),
+        facts,
+        features,
+        given,
+        can_feedback: r.state == "published",
+        sent,
+    }
 }
 
 fn describe_revision(h: &records::Revision, r: &Record) -> String {

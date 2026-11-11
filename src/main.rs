@@ -4,6 +4,7 @@
 mod actions;
 mod activity;
 mod auth;
+mod builds;
 mod cli;
 mod config;
 mod db;
@@ -47,6 +48,11 @@ enum Command {
     },
     /// Ask the server who your token belongs to.
     Whoami(cli::ClientArgs),
+    /// Publish a test build for the owner (agents; like viber-run's publish.sh).
+    Publish(cli::PublishArgs),
+    /// Fetch and start a test build (the owner's machines; like viber-run). Without a product,
+    /// lists the products; `run <product> list` lists its builds.
+    Run(cli::RunArgs),
     /// Wait until something happens in your project (the owner answers, presses a button…), print
     /// it and exit. Agents run this in the background, so the session is woken when it ends.
     Wait {
@@ -86,6 +92,8 @@ fn main() -> anyhow::Result<()> {
         }
         Command::Admin { command } => cli::admin(&config_path, command),
         Command::Whoami(client) => cli::whoami(&config_path, client),
+        Command::Publish(args) => cli::publish(&config_path, args),
+        Command::Run(args) => cli::run(&config_path, args),
         Command::Wait { client, record, minutes } => cli::wait(&config_path, client, record, minutes),
         Command::McpHeaders { token_file } => cli::mcp_headers(&token_file),
     }

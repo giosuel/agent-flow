@@ -15,6 +15,7 @@ pub struct TestServer {
     pub http: reqwest::Client,
     pub github: std::sync::Arc<crate::github::fake::FakeGitHub>,
     pub state: AppState,
+    _data: tempfile::TempDir,
 }
 
 impl TestServer {
@@ -22,13 +23,20 @@ impl TestServer {
         let db = Db::open_memory();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        let config = Config { listen: addr, public_url: format!("http://{addr}"), ..Config::default() };
+        // Builds and keys go to a folder of the test's own, never the real data directory.
+        let data = tempfile::tempdir().unwrap();
+        let config = Config {
+            listen: addr,
+            public_url: format!("http://{addr}"),
+            data_dir: data.path().display().to_string(),
+            ..Config::default()
+        };
         let github = std::sync::Arc::new(crate::github::fake::FakeGitHub::default());
         let state = AppState::new(db.clone(), config, crate::push::Vapid::random(), github.clone());
         let app = router(state.clone()).into_make_service_with_connect_info::<SocketAddr>();
         tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
         let http = reqwest::Client::builder().redirect(reqwest::redirect::Policy::none()).build().unwrap();
-        Self { base: format!("http://{addr}"), db, http, github, state }
+        Self { base: format!("http://{addr}"), db, http, github, state, _data: data }
     }
 
     pub fn url(&self, path: &str) -> String {
@@ -39,8 +47,10 @@ impl TestServer {
         let project = project.map(str::to_owned);
         self.db
             .call(move |c| {
-                if let Some(p) = &project {
-                    c.execute("INSERT OR IGNORE INTO projects (slug, name, created_at) VALUES (?1, ?1, 0)", [p])?;
+                if let Some(p) = &project
+                    && crate::projects::get(c, p)?.is_none()
+                {
+                    crate::projects::create(c, p, p, "test")?;
                 }
                 Ok(auth::create_token(c, kind, "test", project.as_deref())?.1)
             })
@@ -660,4 +670,96 @@ async fn one_broken_pr_doesnt_stop_the_poll() {
     let (_, r) = mcp_tool(&s, &token, &sess, "get_record", json!({"id": "PR-71"})).await;
     assert_eq!(r["state"], "merged", "the other PR was still synced");
     assert!(s.log_summaries().await.iter().any(|l| l.contains("giosuel/vinculum#70 failed")));
+}
+
+#[tokio::test]
+async fn a_build_goes_from_agent_to_owner_and_feedback_comes_back() {
+    let s = TestServer::start().await;
+    let token = s.token(TokenKind::Project, Some("imaginarium")).await;
+    let other = s.token(TokenKind::Project, Some("vinculum")).await;
+    let device = s.token(TokenKind::Device, None).await;
+
+    // A folder with an app and a data file, packed like `agentflow publish` does.
+    let src = tempfile::tempdir().unwrap();
+    std::fs::write(src.path().join("run.sh"), b"#!/bin/sh\necho hi\n").unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(src.path().join("run.sh"), std::fs::Permissions::from_mode(0o755)).unwrap();
+    std::fs::write(src.path().join("data.txt"), b"data").unwrap();
+    let mut tar = Vec::new();
+    crate::builds::pack(src.path(), &mut tar).unwrap();
+    let features = serde_json::to_string(&["Tables: print a document with a table", "Pictures"]).unwrap();
+    let url = |q: &str| {
+        s.url(&format!("/api/builds?product=imaginarium&summary=Tables%20in%20print&commit=a1b2c3d&branch=m8&{q}"))
+    };
+
+    // Another project can't publish this product; a folder needs its entry.
+    let res = s.http.post(url("entry=run.sh")).bearer_auth(&other).body(tar.clone()).send().await.unwrap();
+    assert_eq!(res.status(), StatusCode::FORBIDDEN);
+    let res = s.http.post(url("")).bearer_auth(&token).body(tar.clone()).send().await.unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+
+    let res: Value = s
+        .http
+        .post(url(&format!(
+            "entry=run.sh&features={}",
+            features
+                .replace(' ', "%20")
+                .replace('"', "%22")
+                .replace('[', "%5B")
+                .replace(']', "%5D")
+                .replace(',', "%2C")
+                .replace(':', "%3A")
+        )))
+        .bearer_auth(&token)
+        .body(tar.clone())
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(res["number"], 1, "{res}");
+    assert_eq!(res["run"], "agentflow run imaginarium 1");
+
+    // The owner's machine lists it and gets the same bytes back.
+    let list: Value =
+        s.http.get(s.url("/api/builds/imaginarium")).bearer_auth(&device).send().await.unwrap().json().await.unwrap();
+    assert_eq!(list["builds"][0]["entry"], "run.sh");
+    let back = s
+        .http
+        .get(s.url("/api/builds/imaginarium/1/archive"))
+        .bearer_auth(&device)
+        .send()
+        .await
+        .unwrap()
+        .bytes()
+        .await
+        .unwrap();
+    assert_eq!(back.as_ref(), tar.as_slice());
+
+    // It waits for the owner, who gives feedback on its page.
+    let cookie = s.owner_cookie().await;
+    let page = s.http.get(s.url("/")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
+    assert!(page.contains("Builds to try · 1"));
+    let page =
+        s.http.get(s.url("/p/imaginarium/B-1")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
+    assert!(page.contains("How did it go?") && page.contains("agentflow run imaginarium 1"));
+    let res = s
+        .http
+        .post(s.url("/p/imaginarium/B-1/feedback"))
+        .header(COOKIE, &cookie)
+        .header(ORIGIN, &s.base)
+        .form(&[("v0", "works"), ("v1", "problem"), ("n1", "the border is cut off"), ("note", "")])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.headers()[LOCATION], "/p/imaginarium/B-1?sent=1");
+
+    let sess = mcp_session(&s, &token).await;
+    let (_, builds) = mcp_tool(&s, &token, &sess, "builds", json!({})).await;
+    assert_eq!(builds["builds"][0]["state"], "tried");
+    let fb = builds["builds"][0]["feedback"].as_array().unwrap();
+    assert!(fb.iter().any(|f| f["verdict"] == "problem" && f["owner_words"] == "the border is cut off"), "{builds}");
+    let (_, news) = mcp_tool(&s, &token, &sess, "since_last_check", json!({})).await;
+    assert!(news.to_string().contains("1 works, 1 problem"), "{news}");
 }

@@ -310,3 +310,17 @@ button.opt { font: inherit; color: var(--ink); text-align: left; width: 100%; }
   .cmd-box summary, .pr-actions > a.sub, .foot .link-btn { display: inline-flex; align-items: center; min-height: 44px; }
   .pr-row .row > a.mono { min-height: 44px; display: inline-flex; align-items: center; }
 }
+
+/* Build feedback */
+.feat { gap: 10px; }
+.verdicts { display: flex; gap: 6px; }
+.verdict { flex: 1; position: relative; }
+.verdict input { position: absolute; opacity: 0; }
+.verdict span { display: flex; align-items: center; justify-content: center; min-height: 44px; border-radius: 22px; border: 1px solid var(--border); background: var(--inset); color: var(--ink2); cursor: pointer; font-size: 14px; }
+.verdict input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
+.verdict.v-works input:checked + span { border-color: var(--accent); background: var(--chip-accent); color: var(--chip-accent-ink); font-weight: 600; }
+.verdict.v-problem input:checked + span { border-color: var(--warn); background: var(--warn-bg); color: var(--warn-ink); font-weight: 600; }
+.verdict.v-skip input:checked + span { border-color: var(--muted); background: var(--chip); color: var(--ink); font-weight: 600; }
+/* The note box appears once "Problem" is chosen. */
+.feat .problem-note { display: none; }
+.feat:has(.verdict.v-problem input:checked) .problem-note { display: block; }
