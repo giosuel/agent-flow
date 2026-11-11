@@ -115,6 +115,10 @@ pub async fn serve(state: AppState) -> anyhow::Result<()> {
         env!("APP_VERSION"),
         state.config.public_url
     );
+    let recovered = state.db.call(|c| crate::actions::recover_interrupted(c)).await?;
+    if recovered > 0 {
+        tracing::warn!("{recovered} button(s) were running when AgentFlow stopped; marked failed");
+    }
     crate::poller::spawn(state.clone());
     let app = router(state).into_make_service_with_connect_info::<SocketAddr>();
     axum::serve(listener, app).with_graceful_shutdown(shutdown_signal()).await?;

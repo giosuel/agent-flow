@@ -129,6 +129,17 @@ pub fn add(
     Ok(id)
 }
 
+/// After a restart, buttons that were running can't still be: mark them failed, so they can be
+/// looked at, pressed again or withdrawn.
+pub fn recover_interrupted(conn: &Connection) -> anyhow::Result<usize> {
+    Ok(conn.execute(
+        "UPDATE actions SET state = 'failed', finished_at = ?1,
+            output = output || 'AgentFlow restarted while this ran. Check the result on GitHub before pressing it again.'
+         WHERE state = 'running'",
+        [now_ms()],
+    )?)
+}
+
 pub fn withdraw(conn: &Connection, id: i64, by: &str) -> anyhow::Result<()> {
     let n =
         conn.execute("UPDATE actions SET state = 'withdrawn' WHERE id = ?1 AND state IN ('waiting', 'failed')", [id])?;

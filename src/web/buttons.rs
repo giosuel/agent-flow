@@ -214,32 +214,39 @@ async fn press(state: &AppState, actor: &Actor, ip: &ClientIp, id: i64, hash: &s
         .call(move |c| actions::claim(c, id, &hash))
         .await
         .map_err(|e| AppError::BadRequest(format!("{e:#}")))?;
-    let started = std::time::Instant::now();
-    let result = actions::execute(&claimed).await;
-    let ok = result.ok;
-    let a = claimed.clone();
-    let summary = format!(
-        "pressed \"{}\": {}",
-        a.label,
-        if ok { "done".to_owned() } else { format!("failed, exit {:?}", result.exit_code) }
-    );
-    let record = state
-        .db
-        .call(move |c| {
-            actions::finish(c, &a, &result)?;
-            records::get(c, a.record_id)
-        })
-        .await?;
-    let e = Entry::new(actor, Via::Button, Action::Run, summary)
-        .project(record.project.clone())
-        .target(record.ref_id.clone())
-        .duration_ms(started.elapsed().as_millis() as i64)
-        .ip(Some(ip.0.clone()))
-        .severity(if ok { "info" } else { "warn" });
-    activity::write(&state.db, e).await;
-    if ok && record.kind == Kind::Pr {
-        refresh_pr(state, &record).await;
-    }
+    // The run lives in its own task: if the phone drops the connection, the merge still finishes
+    // and is recorded. The request waits for it as long as it stays open.
+    let (state2, actor2, ip2) = (state.clone(), actor.clone(), ip.clone());
+    let run = tokio::spawn(async move {
+        let started = std::time::Instant::now();
+        let result = actions::execute(&claimed).await;
+        let ok = result.ok;
+        let a = claimed.clone();
+        let summary = format!(
+            "pressed \"{}\": {}",
+            a.label,
+            if ok { "done".to_owned() } else { format!("failed, exit {:?}", result.exit_code) }
+        );
+        let record = state2
+            .db
+            .call(move |c| {
+                actions::finish(c, &a, &result)?;
+                records::get(c, a.record_id)
+            })
+            .await?;
+        let e = Entry::new(&actor2, Via::Button, Action::Run, summary)
+            .project(record.project.clone())
+            .target(record.ref_id.clone())
+            .duration_ms(started.elapsed().as_millis() as i64)
+            .ip(Some(ip2.0.clone()))
+            .severity(if ok { "info" } else { "warn" });
+        activity::write(&state2.db, e).await;
+        if ok && record.kind == Kind::Pr {
+            refresh_pr(&state2, &record).await;
+        }
+        anyhow::Ok((record, ok))
+    });
+    let (record, ok) = run.await.map_err(|e| AppError::Internal(e.into()))??;
     Ok((record, ok))
 }
 
