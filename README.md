@@ -70,6 +70,15 @@ agents_home = "/home/agents"                # as its own user: where ~/ points (
 hands_socket = "/run/agentflow-hands/hands.sock"  # as its own user: the agents' helper
 external_token_file = "~/.config/gh/external-token"  # public_repo token; used only on the owner's Send
 git_host = "https://github.com"             # where drafts' repositories are fetched and pushed
+
+[[build_servers]]                           # machines agents build and test on (agentflow remote)
+name = "headquarters"
+ssh = "headquarters"                        # a Host from ~/.ssh/config, or user@host
+root = "agentflow"                          # its work folders, in that user's home
+min_threads = 8                             # another job starts while this many threads…
+min_memory_gb = 16                          # …and this much memory are free
+reserve_memory_gb = 8                       # below this, running jobs pause until there's room
+keep_days = 14                              # a project's folder unused this long is deleted
 ```
 
 ## Behind Caddy (passkeys and push)
@@ -155,6 +164,22 @@ minutes; new comments, reviews, merges and closes go to the project's agent.
 
 Sending needs `external_token_file`: a GitHub token with `public_repo`, read only when the owner
 presses Send and never shown or logged.
+
+## Build servers
+
+Agents run builds and tests on a stronger machine with `agentflow remote -- cargo build --release`
+(`--fetch target/release/app` brings files back, `--gpu` waits for an idle GPU). AgentFlow does the
+work over ssh. Each project has one work folder there: the commit goes over with git (only new
+objects), then every file is compared by content with rsync, so only what changed is sent and
+rewritten, and cargo rebuilds only that. The target folder stays there between jobs; sccache is used
+when it's installed there. Jobs run in a systemd unit of their own at low CPU and IO weight: they
+take what the machine's user isn't using, several at once when there's room, and pause when memory
+runs short. Output streams to the agent, the job's page and the Log (`via:build`; the job's entry
+has its warnings and errors). When the server is offline, the command exits with 75 at once, so
+the agent builds locally.
+
+For the low priority to hold against the machine's own user, give the build user's slice a low
+weight once (as root there): `systemctl set-property user-<uid>.slice CPUWeight=10 IOWeight=10`.
 
 ## Guides
 
