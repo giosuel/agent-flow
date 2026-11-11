@@ -381,3 +381,7 @@ button.opt { font: inherit; color: var(--ink); text-align: left; width: 100%; }
   .split.picked > .split-side { display: none; }
   .split.conv:not(.picked) > .split-main { display: none; }
 }
+/* The current milestone wraps instead of being cut off; the count keeps to its own line end. */
+.pfoot { flex-wrap: wrap; row-gap: 4px; }
+.pfoot .pms { min-width: 0; flex: 1 1 200px; }
+.pfoot .grow { display: none; }
