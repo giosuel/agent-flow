@@ -2,16 +2,19 @@
 //! client commands agents and the owner run against the server.
 #![allow(dead_code, reason = "log kinds and helpers that M3–M8 start using; removed once they all do")]
 
+mod actions;
 mod activity;
 mod auth;
 mod cli;
 mod config;
 mod db;
+mod github;
 mod machine;
 mod markdown;
 mod mcp;
 mod passkey;
 mod projects;
+mod prs;
 mod push;
 mod records;
 mod tokens;
