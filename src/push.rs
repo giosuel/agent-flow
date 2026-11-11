@@ -225,11 +225,26 @@ pub struct DeviceRow {
     pub last_error: Option<String>,
 }
 
-pub fn save_subscription(conn: &Connection, sub: &Subscription, device: &str) -> anyhow::Result<()> {
-    origin_of(&sub.endpoint)?;
-    if !sub.endpoint.starts_with("https://") {
-        bail!("push endpoints must use https");
+/// The browsers' push services. Endpoints anywhere else are refused, so a subscription can't
+/// make the server send requests into the local network.
+const PUSH_HOSTS: &[&str] =
+    &[".push.apple.com", "fcm.googleapis.com", ".push.services.mozilla.com", ".notify.windows.com"];
+
+fn check_push_host(endpoint: &str) -> anyhow::Result<()> {
+    let origin = origin_of(endpoint)?;
+    let Some(host) = origin.strip_prefix("https://") else { bail!("push endpoints must use https") };
+    let host = host.split(':').next().unwrap_or(host).to_ascii_lowercase();
+    let known = PUSH_HOSTS
+        .iter()
+        .any(|h| if let Some(suffix) = h.strip_prefix('.') { host.ends_with(h) || host == suffix } else { host == *h });
+    if !known {
+        bail!("{host} isn't a browser push service AgentFlow knows");
     }
+    Ok(())
+}
+
+pub fn save_subscription(conn: &Connection, sub: &Subscription, device: &str) -> anyhow::Result<()> {
+    check_push_host(&sub.endpoint)?;
     // Validate the keys now rather than at the first push.
     let p256dh = B64.decode(sub.keys.p256dh.trim_end_matches('=')).context("p256dh isn't base64url")?;
     PublicKey::from_sec1_bytes(&p256dh).context("p256dh isn't a P-256 key")?;
@@ -300,7 +315,12 @@ struct Target {
 
 impl Pusher {
     pub fn new(db: Db, vapid: Vapid) -> Self {
-        let http = reqwest::Client::builder().timeout(std::time::Duration::from_secs(15)).build().expect("http client");
+        let http = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(15))
+            // Push services answer directly; a redirect would point somewhere else.
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .expect("http client");
         // Push services want a contact for the sender; Apple refuses requests without one.
         Self { db, vapid, subject: "mailto:me@giosuel.ch".into(), http }
     }
@@ -335,6 +355,14 @@ impl Pusher {
                 Ok(rows.collect::<Result<Vec<_>, _>>()?)
             })
             .await?;
+        // One aes128gcm record holds at most 4096 bytes; notifications are short anyway.
+        let n = Notification {
+            title: crate::activity::clip(&n.title, 120),
+            body: crate::activity::clip(&n.body, 600),
+            url: n.url.clone(),
+            tag: n.tag.clone(),
+        };
+        let n = &n;
         let payload = serde_json::to_vec(n)?;
         let mut delivered = 0;
         for t in targets {
@@ -489,11 +517,21 @@ mod tests {
             keys: SubscriptionKeys { p256dh: p256dh.into(), auth: auth.into() },
         };
         db.call_blocking(|c| {
-            assert!(save_subscription(c, &sub("http://x/1", ua, "BTBZMqHH6r4Tts7J_aSIgg"), "d").is_err());
-            assert!(save_subscription(c, &sub("https://x/1", "AAAA", "BTBZMqHH6r4Tts7J_aSIgg"), "d").is_err());
-            assert!(save_subscription(c, &sub("https://x/1", ua, "AAAA"), "d").is_err());
-            save_subscription(c, &sub("https://x/1", ua, "BTBZMqHH6r4Tts7J_aSIgg"), "iPhone")?;
-            save_subscription(c, &sub("https://x/1", ua, "BTBZMqHH6r4Tts7J_aSIgg"), "iPhone again")?;
+            assert!(
+                save_subscription(c, &sub("http://web.push.apple.com/1", ua, "BTBZMqHH6r4Tts7J_aSIgg"), "d").is_err()
+            );
+            assert!(save_subscription(c, &sub("https://127.0.0.1/1", ua, "BTBZMqHH6r4Tts7J_aSIgg"), "d").is_err());
+            assert!(
+                save_subscription(c, &sub("https://evil.push.apple.com.example/1", ua, "BTBZMqHH6r4Tts7J_aSIgg"), "d")
+                    .is_err()
+            );
+            assert!(
+                save_subscription(c, &sub("https://web.push.apple.com/1", "AAAA", "BTBZMqHH6r4Tts7J_aSIgg"), "d")
+                    .is_err()
+            );
+            assert!(save_subscription(c, &sub("https://web.push.apple.com/1", ua, "AAAA"), "d").is_err());
+            save_subscription(c, &sub("https://web.push.apple.com/1", ua, "BTBZMqHH6r4Tts7J_aSIgg"), "iPhone")?;
+            save_subscription(c, &sub("https://web.push.apple.com/1", ua, "BTBZMqHH6r4Tts7J_aSIgg"), "iPhone again")?;
             assert_eq!(devices(c)?.len(), 1);
             assert!(is_enabled(c, Kind::Question)?);
             set_enabled(c, Kind::Question, false)?;
