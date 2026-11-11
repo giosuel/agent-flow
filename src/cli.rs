@@ -206,6 +206,35 @@ impl Client {
         self
     }
 
+    /// Uploads a file as the request body (a build archive) and returns the JSON answer.
+    pub fn post_file(&self, path: &str, file: std::fs::File) -> anyhow::Result<serde_json::Value> {
+        let len = file.metadata()?.len();
+        let res = self
+            .http
+            .post(format!("{}{path}", self.base))
+            .bearer_auth(&self.token)
+            .header("Content-Type", "application/x-tar")
+            .body(reqwest::blocking::Body::sized(file, len))
+            .send()?;
+        let status = res.status();
+        let body: serde_json::Value = res.json().unwrap_or(serde_json::Value::Null);
+        if !status.is_success() {
+            bail!("{status}: {}", body.get("error").and_then(|e| e.as_str()).unwrap_or("upload failed"));
+        }
+        Ok(body)
+    }
+
+    /// Streams a response body into a file.
+    pub fn download(&self, path: &str, to: &Path) -> anyhow::Result<()> {
+        let mut res = self.http.get(format!("{}{path}", self.base)).bearer_auth(&self.token).send()?;
+        if !res.status().is_success() {
+            bail!("{}: download failed", res.status());
+        }
+        let mut f = std::fs::File::create(to)?;
+        res.copy_to(&mut f)?;
+        Ok(())
+    }
+
     pub fn get(&self, path: &str) -> anyhow::Result<serde_json::Value> {
         let res = self.http.get(format!("{}{path}", self.base)).bearer_auth(&self.token).send()?;
         let status = res.status();
@@ -287,4 +316,166 @@ mod tests {
             assert!(crate::projects::check_slug(bad).is_err(), "{bad}");
         }
     }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Test builds: publish (agents) and run (the owner's machines)
+
+#[derive(Args)]
+pub struct PublishArgs {
+    #[command(flatten)]
+    pub client: ClientArgs,
+    /// A binary, or a folder with the app and its files.
+    pub path: PathBuf,
+    /// The product, e.g. "imaginarium" (your project's build_product, or its slug).
+    #[arg(long)]
+    pub product: String,
+    /// One line: what's in it.
+    #[arg(long)]
+    pub summary: String,
+    /// The git checkout it was built from: its commit and branch name the build.
+    #[arg(long)]
+    pub checkout: Option<PathBuf>,
+    /// For a folder: the executable inside it that starts the app.
+    #[arg(long)]
+    pub entry: Option<String>,
+    /// Something for the owner to try, "Title: what to do". Repeat for each. With at least one,
+    /// the owner is notified and gets a feedback form.
+    #[arg(long = "feature")]
+    pub features: Vec<String>,
+    /// A tag this build is, e.g. v0.0.5-m4.
+    #[arg(long)]
+    pub tag: Option<String>,
+}
+
+fn git_out(dir: &Path, args: &[&str]) -> Option<String> {
+    let out = std::process::Command::new("git").arg("-C").arg(dir).args(args).output().ok()?;
+    out.status.success().then(|| String::from_utf8_lossy(&out.stdout).trim().to_owned())
+}
+
+fn query_pairs(pairs: &[(&str, String)]) -> String {
+    pairs
+        .iter()
+        .filter(|(_, v)| !v.is_empty())
+        .map(|(k, v)| format!("{k}={}", url_encode(v)))
+        .collect::<Vec<_>>()
+        .join("&")
+}
+
+pub fn publish(config_path: &Path, a: PublishArgs) -> anyhow::Result<()> {
+    let client = Client::new(config_path, &a.client)?.with_timeout(std::time::Duration::from_secs(30 * 60));
+    if !a.path.exists() {
+        bail!("{} doesn't exist", a.path.display());
+    }
+    let (commit, branch) = match &a.checkout {
+        Some(dir) => (
+            git_out(dir, &["rev-parse", "--short=7", "HEAD"]).context("the checkout isn't a git repository")?,
+            git_out(dir, &["rev-parse", "--abbrev-ref", "HEAD"]).unwrap_or_default(),
+        ),
+        None => (String::new(), String::new()),
+    };
+    // Pack next to the user's cache, not in /tmp: builds are big and /tmp is small here.
+    let cache = expand_home("~/.cache/agentflow");
+    std::fs::create_dir_all(&cache)?;
+    let mut tmp = tempfile::NamedTempFile::new_in(&cache)?;
+    crate::builds::pack(&a.path, tmp.as_file_mut())?;
+    let file = tmp.reopen()?;
+    let query = query_pairs(&[
+        ("product", a.product.clone()),
+        ("summary", a.summary.clone()),
+        ("commit", commit),
+        ("branch", branch),
+        ("entry", a.entry.clone().unwrap_or_default()),
+        ("tag", a.tag.clone().unwrap_or_default()),
+        ("features", if a.features.is_empty() { String::new() } else { serde_json::to_string(&a.features)? }),
+    ]);
+    let res = client.post_file(&format!("/api/builds?{query}"), file)?;
+    println!(
+        "Published {} as #{} ({}). The owner runs it with: {}",
+        a.product,
+        res["number"],
+        res["name"].as_str().unwrap_or(""),
+        res["run"].as_str().unwrap_or("")
+    );
+    Ok(())
+}
+
+#[derive(Args)]
+pub struct RunArgs {
+    #[command(flatten)]
+    pub client: ClientArgs,
+    /// The product; leave out to list them.
+    pub product: Option<String>,
+    /// A build's number or part of its name, or "list". The newest if left out.
+    pub build: Option<String>,
+    /// Arguments for the app (after --).
+    #[arg(last = true)]
+    pub args: Vec<String>,
+}
+
+pub fn run(config_path: &Path, a: RunArgs) -> anyhow::Result<()> {
+    let client = Client::new(config_path, &a.client)?.with_timeout(std::time::Duration::from_secs(30 * 60));
+    let Some(product) = a.product else {
+        let list = client.get("/api/builds")?;
+        for p in list["products"].as_array().cloned().unwrap_or_default() {
+            println!(
+                "{:<16} {:>3} builds   newest #{} {}",
+                p["product"].as_str().unwrap_or(""),
+                p["builds"],
+                p["latest"]["number"],
+                p["latest"]["summary"].as_str().unwrap_or("")
+            );
+        }
+        return Ok(());
+    };
+    crate::builds::check_product(&product)?;
+    let builds = client.get(&format!("/api/builds/{product}"))?["builds"].as_array().cloned().unwrap_or_default();
+    if builds.is_empty() {
+        bail!("{product} has no builds");
+    }
+    let cache_root = expand_home("~/.local/share/agentflow/builds").join(&product);
+    if a.build.as_deref() == Some("list") {
+        for b in &builds {
+            let name = b["name"].as_str().unwrap_or("");
+            let here = if cache_root.join(name).join(".verified").exists() { "✓" } else { " " };
+            println!("{here} #{:<4} {}  {}", b["number"], name, b["summary"].as_str().unwrap_or(""));
+        }
+        return Ok(());
+    }
+    let pick = match a.build.as_deref() {
+        None => builds.first(),
+        Some(want) => builds
+            .iter()
+            .find(|b| want.trim_start_matches('#').parse::<i64>().ok() == b["number"].as_i64())
+            .or_else(|| builds.iter().find(|b| b["name"].as_str().is_some_and(|n| n.contains(want)))),
+    }
+    .with_context(|| format!("no build of {product} matches {:?}", a.build.as_deref().unwrap_or("")))?;
+    let number = pick["number"].as_i64().unwrap_or(0);
+    let name = pick["name"].as_str().unwrap_or("").to_owned();
+    if name.is_empty() || name.contains('/') || name.starts_with('.') {
+        bail!("the server sent an odd build name");
+    }
+    let dir = cache_root.join(&name);
+    if !dir.join(".verified").exists() {
+        eprintln!("Fetching {product} #{number} ({name})…");
+        let detail = client.get(&format!("/api/builds/{product}/{number}"))?;
+        let manifest = crate::builds::Manifest {
+            files: serde_json::from_value(detail["files"].clone()).context("the build's file list")?,
+            total: 0,
+        };
+        std::fs::create_dir_all(&cache_root)?;
+        let tmp = tempfile::NamedTempFile::new_in(&cache_root)?;
+        client.download(&format!("/api/builds/{product}/{number}/archive"), tmp.path())?;
+        let staging = tempfile::tempdir_in(&cache_root)?;
+        crate::builds::unpack_verified(std::fs::File::open(tmp.path())?, staging.path(), &manifest)?;
+        std::fs::write(staging.path().join(".verified"), b"")?;
+        let staged = staging.keep();
+        std::fs::rename(&staged, &dir).or_else(|_| std::fs::remove_dir_all(&staged))?;
+    }
+    let entry = pick["entry"].as_str().unwrap_or("");
+    let path = dir.join(entry);
+    eprintln!("Starting {product} #{number}: {}", pick["summary"].as_str().unwrap_or(""));
+    use std::os::unix::process::CommandExt;
+    let err = std::process::Command::new(&path).args(&a.args).current_dir(&dir).exec();
+    Err(anyhow::anyhow!("starting {}: {err}", path.display()))
 }
