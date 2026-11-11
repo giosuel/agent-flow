@@ -194,6 +194,18 @@ pre code { background: none; padding: 0; }
 .crumb-back:hover { border-color: var(--accent); background: var(--soft); color: var(--hover); }
 .crumb-back .i { width: 18px; height: 18px; stroke-width: 2.2; }
 .crumb-where { font-size: 13px; color: var(--muted); }
+/* The project agent's Claude Code session, one tap away on every page of a project (the owner,
+   2026-11-11: "so on the project page and all its subpages i can get to the agent discussion
+   quickly"). */
+.crumb-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.session-link {
+  margin-left: auto; display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 0 12px;
+  border: 1px solid var(--accent); border-radius: 18px; background: var(--soft);
+  color: var(--chip-accent-ink); font-size: 14px; font-weight: 500; text-decoration: none;
+}
+.session-link:hover { background: var(--chip-accent); color: var(--ink); }
+.session-link .i { width: 18px; height: 18px; }
+.session-link .i:last-child { width: 14px; height: 14px; color: var(--accent); }
 .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); overflow-x: auto; margin-top: -12px; }
 .tabs a { padding: 10px 14px; color: var(--nav-ink); text-decoration: none; border-bottom: 2px solid transparent; white-space: nowrap; }
 .tabs a.on { color: #fff; border-bottom-color: var(--accent); font-weight: 500; }

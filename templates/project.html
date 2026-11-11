@@ -2,7 +2,7 @@
 {% block title %}{{ name }}{% endblock %}
 {% block content %}
 <div class="head">
-  <nav class="crumbs" aria-label="Back"><a class="crumb-back" href="/projects">{{ crate::web::icons::icon("back")|safe }}<span>All projects</span></a></nav>
+  <div class="crumb-row"><nav class="crumbs" aria-label="Back"><a class="crumb-back" href="/projects">{{ crate::web::icons::icon("back")|safe }}<span>All projects</span></a></nav>{% if let Some(u) = session_url %}<a class="session-link" href="{{ u }}" target="_blank" rel="noopener" title="The project agent's Claude Code session on claude.ai">{{ crate::web::icons::icon("session")|safe }}<span class="hide-phone">Open the agent's session</span><span class="only-phone">Agent session</span>{{ crate::web::icons::icon("out")|safe }}</a>{% endif %}</div>
   <h1>{{ name }}{% if status != "active" %} <span class="chip">{{ status }}</span>{% endif %}</h1>
   <p class="status-line"><span class="dot{% if agent.online %} ok{% endif %}" aria-hidden="true"></span>{% if !repo.is_empty() %}<a href="https://github.com/{{ repo }}">github.com/{{ repo }}</a> · {% endif %}<span>{{ headline }}</span></p>
 </div>
@@ -88,6 +88,7 @@
           <a class="sub" href="/usage">Open in Usage</a></dd>
       </dl>
       <p class="sub">One agent works on each project. It hands focused jobs to subagents, and only it writes here.</p>
+      {% if session_url.is_none() %}<p class="sub">The button to its Claude Code session shows up once the agent runs with <span class="mono">/remote-control</span>.</p>{% endif %}
       {% if let Some(c) = connect %}
       <details class="connect">
         <summary class="sub">Connect the agent</summary>
