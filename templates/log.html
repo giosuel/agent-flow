@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}Log{% endblock %}
+{% block scripts %}<script src="/static/log.js?v={{ nav.version }}" defer></script>{% endblock %}
+{% block content %}
+<div class="head"><h1>Log</h1></div>
+<form method="get" action="/log" class="logq">
+  <label class="vh" for="q">Query</label>
+  <input id="q" name="q" value="{{ q }}" class="mono" placeholder="severity:warn project:vinculum -action:read merge" autocomplete="off">
+  <input type="hidden" name="range" value="{{ range }}">
+  <div class="ranges" role="group" aria-label="Time range">
+    {% for (k, label, on) in ranges %}<a class="rng{% if *on %} on{% endif %}" href="/log?q={{ q|urlencode }}&amp;range={{ k }}"{% if *on %} aria-current="true"{% endif %}>{{ label }}</a>{% endfor %}
+  </div>
+  <button class="btn sm" type="submit">Run query</button>
+  <button class="btn sm ghost" type="button" id="stream" data-q="{{ q }}" data-after="{{ latest }}" aria-pressed="false">Stream</button>
+</form>
+<p class="sub">Fields: severity, project, actor, kind, action, via, target, ip. Put - before a field to leave it out; other words search the text. Click a value below to filter by it.</p>
+
+<div class="split logs">
+  <aside class="split-side stack" aria-label="Log fields">
+    {% for f in facets %}
+    <section class="facet"><h2 class="label">{{ f.title }}</h2>
+      {% if f.values.is_empty() %}<p class="sub">–</p>{% endif %}
+      <ul class="plain facet-list">{% for (v, n, link, on) in f.values %}<li><a href="{{ link }}"{% if *on %} class="on"{% endif %}><span>{{ v }}</span><span class="mono sub">{{ n }}</span></a></li>{% endfor %}</ul>
+    </section>
+    {% endfor %}
+    {% if !q.is_empty() %}<a class="sub" href="/log?range={{ range }}">Reset the query</a>{% endif %}
+  </aside>
+
+  <section class="split-main stack" aria-labelledby="entries-h">
+    <div class="sec"><h2 id="entries-h">{{ total }} entr{% if total == 1 %}y{% else %}ies{% endif %} · {{ span }}</h2><span class="sub">click a bar to zoom in</span></div>
+    <div class="hist" role="img" aria-label="Entries over time">
+      {% for b in bars %}<a href="{{ b.href }}" title="{{ b.label }}" aria-label="{{ b.label }}"><i style="height: {{ b.height }}%"></i></a>{% endfor %}
+    </div>
+    <div class="axis sub mono">{% for a in axis %}<span>{{ a }}</span>{% endfor %}</div>
+    <p class="sub">Newest first · times in UTC</p>
+    <ol class="plain entries" id="entries">
+      {% for e in entries %}
+      <li><details class="entry sev-{{ e.severity }}">
+        <summary><span class="mono sub">{{ e.time }}</span><strong>{{ e.actor }}</strong><span class="chip">{{ e.action }}</span><span class="esum">{{ e.summary }}</span>{% if e.archived %}<span class="chip">archived</span>{% endif %}</summary>
+        <div class="edetail">
+          <div class="row wrap">{% if let Some(u) = e.record_url %}<a class="sub" href="{{ u }}">Open the record</a>{% endif %}<a class="sub" href="{{ e.around }}">Entries around this</a></div>
+          <dl class="kv mono">{% for (k, v, link) in e.fields %}<dt>{{ k }}</dt><dd>{% if let Some(l) = link %}<a href="{{ l }}">{{ v }}</a>{% else %}{{ v }}{% endif %}</dd>{% endfor %}</dl>
+        </div>
+      </details></li>
+      {% endfor %}
+    </ol>
+    {% if entries.is_empty() %}<p class="sub">Nothing matches in this range.</p>{% endif %}
+    {% if let Some(o) = older %}<a class="btn sm ghost" href="{{ o }}">Older entries</a>{% endif %}
+    <p class="sub">Reads older than 90 days are in the archive, one compressed file per month{% if !archive.is_empty() %}: {% for (m, n) in archive %}{% if !loop.first %}, {% endif %}{{ m }} ({{ n }} entries){% endfor %}{% endif %}. Nothing is ever deleted. {% if reaches_archive %}This range reaches the archive, so it's searched too.{% endif %}</p>
+  </section>
+</div>
+{% endblock %}
