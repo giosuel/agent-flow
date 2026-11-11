@@ -1395,7 +1395,7 @@ fn build_view(r: &Record, links: &[records::LinkView], sent: bool) -> BuildView 
         .map(|l| (l.other.title.clone(), l.other.state.clone(), l.other.str("owner_words").to_owned()))
         .collect();
     BuildView {
-        run: format!("agentflow run {} {}", r.str("product"), r.number),
+        run: format!("flow-run {} {}", r.str("product"), r.number),
         facts,
         features,
         given,

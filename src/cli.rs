@@ -43,7 +43,7 @@ pub enum TokenCommand {
         /// device, project or admin
         #[arg(long)]
         kind: TokenKind,
-        /// What it's for, e.g. "HEADQUARTERS viber-run" or "Vinculum agent".
+        /// What it's for, e.g. "HEADQUARTERS flow-run" or "Vinculum agent".
         #[arg(long)]
         name: String,
         /// The project, for a project token.
@@ -763,7 +763,7 @@ pub fn run(config_path: &Path, a: RunArgs) -> anyhow::Result<()> {
             }
             if let Err(e) = std::fs::rename(&staged, &dir) {
                 let _ = std::fs::remove_dir_all(&staged);
-                // Another `agentflow run` of the same build may have finished first; that's fine.
+                // Another `flow-run` of the same build may have finished first; that's fine.
                 if !dir.join(".verified").exists() {
                     return Err(anyhow::anyhow!("keeping the build in {}: {e}", dir.display()));
                 }
