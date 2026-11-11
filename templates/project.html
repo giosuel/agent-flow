@@ -103,6 +103,20 @@
       {% endif %}
     </section>
 
+    {% if !external.is_empty() || !external_done.is_empty() %}
+    <section class="card pad stack" aria-labelledby="ext-h">
+      <h2 class="label" id="ext-h">External PRs / issues</h2>
+      <ul class="rows">{% for e in external %}<li class="item-row ext-row"><span class="ext-ico ext-{{ e.icon }}">{{ crate::web::icons::icon(e.icon)|safe }}</span><div class="ttl"><a href="{{ e.url }}">{{ e.title }}</a><span class="sub">{{ e.sub }}</span></div>{% if let Some((cls, text)) = e.chip %}<span class="chip {{ cls }}">{{ text }}</span>{% endif %}{% if e.review %}<a class="btn sm ghost" href="{{ e.url }}">Review</a>{% endif %}</li>{% endfor %}</ul>
+      {% if external.is_empty() %}<p class="sub">Nothing open.</p>{% endif %}
+      <p class="sub">Watched every 30 minutes. Nothing is posted or pushed until you press Send on a draft.</p>
+      {% if !external_done.is_empty() %}
+      <details class="ext-done"><summary class="sub">{{ external_done.len() }} merged, closed or dropped</summary>
+        <ul class="rows">{% for e in external_done %}<li class="item-row ext-row"><span class="ext-ico ext-{{ e.icon }}">{{ crate::web::icons::icon(e.icon)|safe }}</span><div class="ttl"><a href="{{ e.url }}">{{ e.title }}</a><span class="sub">{{ e.sub }}</span></div>{% if let Some((cls, text)) = e.chip %}<span class="chip {{ cls }}">{{ text }}</span>{% endif %}</li>{% endfor %}</ul>
+      </details>
+      {% endif %}
+    </section>
+    {% endif %}
+
     <section class="card pad stack" aria-labelledby="oq-h">
       <div class="sec"><h2 class="label" id="oq-h">Open questions</h2><a class="sub" href="/p/{{ slug }}?tab=questions">All questions</a></div>
       {% if open_questions.is_empty() %}<p class="sub">None. Nothing is waiting on you here.</p>{% endif %}
