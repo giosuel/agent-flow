@@ -331,3 +331,21 @@ document.addEventListener("DOMContentLoaded", () => {
     update();
   }
 });
+
+// To test: count what's ticked; Send needs at least one.
+document.addEventListener("DOMContentLoaded", () => {
+  for (const form of document.querySelectorAll("form[data-tt]")) {
+    const boxes = [...form.querySelectorAll("input[type=checkbox]")];
+    const count = form.querySelector("[data-tt-count]");
+    const send = form.querySelector("[data-tt-send]");
+    if (!count || !send) continue;
+    const update = () => {
+      const n = boxes.filter((b) => b.checked).length;
+      count.textContent = `${n} ticked`;
+      send.disabled = n === 0;
+      form.classList.toggle("tt-active", n > 0);
+    };
+    for (const b of boxes) b.addEventListener("change", update);
+    update();
+  }
+});

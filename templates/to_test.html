@@ -1,0 +1,30 @@
+{# The To test checklist (tab, release, build). The owner ticks what they tried and works, then sends. #}
+<section class="card pad stack" aria-labelledby="tt-h" id="to-test">
+  <div class="sec"><h2 id="tt-h">{{ tt.heading }}</h2><span class="sub">{{ tt.sub }}</span></div>
+  {% if !tt.note.is_empty() %}<p class="notice">{{ tt.note }}</p>{% endif %}
+  {% if tt.groups.is_empty() %}<p class="sub">Nothing to test right now. The agent adds things here as it builds them.</p>{% else %}
+  <form method="post" action="/p/{{ tt.slug }}/to-test" class="stack" data-tt>
+    <input type="hidden" name="back" value="{{ tt.back }}">
+    {% for g in tt.groups %}
+    <div class="tt-cat"><h3>{{ g.category }}</h3><span class="sub">{{ g.items.len() }}</span></div>
+    <ul class="tt-list">
+      {% for i in g.items %}
+      <li class="tt-item">{% if tt.is_owner %}<input type="checkbox" name="t{{ i.id }}" value="1" id="tt{{ i.id }}" aria-label="Tested and works: {{ i.title }}">{% endif %}
+        <div class="tt-body"><label class="t" for="tt{{ i.id }}">{{ i.title }}</label>{% if !i.how.is_empty() %}<span class="sub">{{ i.how }}</span>{% endif %}
+          {% for p in i.problems %}<span class="tt-problem">{{ p }}</span>{% endfor %}
+          <div class="tt-meta"><span class="chip {{ i.chip.0 }}">{{ i.chip.1 }}</span><a class="sub mono" href="{{ i.url }}">{{ i.short }}</a></div></div></li>
+      {% endfor %}
+    </ul>
+    {% endfor %}
+    {% if tt.is_owner %}
+    <div class="tt-send"><strong data-tt-count>0 ticked</strong><label class="vh" for="tt-note">Anything to tell the agent?</label><input id="tt-note" name="note" placeholder="Anything to tell the agent? (optional)" maxlength="2000"><button class="btn" type="submit" data-tt-send disabled>Send: tested, works</button></div>
+    <p class="sub">Tick what you've tried and works, then Send; the agent hears which. Something wrong? Tell the agent in its session; it notes the problem on the item and keeps it open.</p>
+    {% endif %}
+  </form>
+  {% endif %}
+  {% if tt.done_total > 0 %}
+  <details class="tt-done"><summary class="sub">{{ tt.done_total }} tested or dropped earlier</summary>
+    <ul class="rows">{% for (t, s) in tt.done %}<li class="item-row"><div class="ttl"><span>{{ t }}</span><span class="sub">{{ s }}</span></div></li>{% endfor %}</ul>
+  </details>
+  {% endif %}
+</section>

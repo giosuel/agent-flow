@@ -8,7 +8,7 @@
 </div>
 <nav class="tabs proj-tabs" aria-label="Project">
   {% for (key, name) in tabs %}
-  <a href="/p/{{ slug }}{% if *key != "overview" %}?tab={{ key }}{% endif %}"{% if tab == *key %} class="on" aria-current="page"{% endif %}>{% if *key == "prs" %}<span class="hide-phone">{{ name }}</span><span class="only-phone">PRs</span>{% else if *key == "screenshots" %}<span class="hide-phone">{{ name }}</span><span class="only-phone">Shots</span>{% else %}{{ name }}{% endif %}{% if *key == "questions" && !open_questions.is_empty() %} <span class="mono count">{{ open_questions.len() }}</span>{% endif %}{% if *key == "prs" && prs_total > 0 %} <span class="mono sub">{{ prs_total }}</span>{% endif %}</a>
+  <a href="/p/{{ slug }}{% if *key != "overview" %}?tab={{ key }}{% endif %}"{% if tab == *key %} class="on" aria-current="page"{% endif %}>{% if *key == "prs" %}<span class="hide-phone">{{ name }}</span><span class="only-phone">PRs</span>{% else if *key == "screenshots" %}<span class="hide-phone">{{ name }}</span><span class="only-phone">Shots</span>{% else if *key == "to-test" %}<span class="hide-phone">{{ name }}</span><span class="only-phone">Test</span>{% else %}{{ name }}{% endif %}{% if *key == "questions" && !open_questions.is_empty() %} <span class="mono count">{{ open_questions.len() }}</span>{% endif %}{% if *key == "prs" && prs_total > 0 %} <span class="mono sub">{{ prs_total }}</span>{% endif %}{% if *key == "to-test" && to_test_open > 0 %} <span class="mono count">{{ to_test_open }}</span>{% endif %}</a>
   {% endfor %}
 </nav>
 {% if let Some(n) = notice %}<p class="notice{% if notice_bad %} warn{% else %} ok{% endif %}" role="status">{{ n }}</p>{% endif %}
@@ -183,6 +183,8 @@
   {% endif %}
 </section>
 {% endif %}
+
+{% if let Some(tt) = to_test %}{% include "to_test.html" %}{% endif %}
 
 {% if tab == "screenshots" %}
 <section class="stack" aria-label="Screenshots">

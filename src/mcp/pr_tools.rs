@@ -233,8 +233,10 @@ impl FlowMcp {
                         ..Default::default()
                     },
                 )?;
+                // Everything still to test comes along (the owner, 2026-11-11).
+                let to_test = crate::totest::attach_to_release(&tx, &r, &a.name())?;
                 tx.commit()?;
-                Ok(Outcome::new(json!({"id": r.ref_id, "tag": tag}))
+                Ok(Outcome::new(json!({"id": r.ref_id, "tag": tag, "to_test": to_test}))
                     .summary(format!("release {} planned: {tag}", r.short_id()))
                     .project(project.slug)
                     .target(r.ref_id))

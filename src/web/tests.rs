@@ -789,31 +789,91 @@ async fn a_build_goes_from_agent_to_owner_and_feedback_comes_back() {
         .unwrap();
     assert_eq!(res.status(), StatusCode::BAD_REQUEST);
 
-    // It waits for the owner, who gives feedback on its page.
+    // What the agent wants tried is on the To test list, and on the build's page below Try it; no
+    // feedback form any more.
     let cookie = s.owner_cookie().await;
     let page = s.http.get(s.url("/")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
-    assert!(page.contains("Builds to try · 1"));
+    assert!(page.contains("imaginarium: 2 to test"), "the Dashboard's To test group");
     let page =
         s.http.get(s.url("/p/imaginarium/B-1")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
-    assert!(page.contains("How did it go?") && page.contains("flow-run imaginarium 1"));
+    assert!(!page.contains("How did it go?") && page.contains("flow-run imaginarium 1"));
+    let try_it = page.find("aria-labelledby=\"try-h\"").unwrap();
+    let list = page.find("To test in this build").unwrap();
+    assert!(try_it < list, "Try it comes first");
+    assert!(page.contains("print a document with a table") && page.contains(">Pictures<"));
+
+    // The owner ticks one and sends; the agent hears it, with the note.
+    let (tables, pictures) =
+        s.db.call(|c| {
+            let id = |n: i64| -> anyhow::Result<i64> {
+                Ok(crate::records::try_find(
+                    c,
+                    &crate::records::RecordRef::parse(&format!("imaginarium/TT-{n}"))?,
+                    None,
+                )?
+                .unwrap()
+                .id)
+            };
+            Ok((id(1)?, id(2)?))
+        })
+        .await
+        .unwrap();
     let res = s
         .http
-        .post(s.url("/p/imaginarium/B-1/feedback"))
+        .post(s.url("/p/imaginarium/to-test"))
         .header(COOKIE, &cookie)
         .header(ORIGIN, &s.base)
-        .form(&[("v0", "works"), ("v1", "problem"), ("n1", "the border is cut off"), ("note", "")])
+        .form(&[
+            (format!("t{tables}"), "1".to_owned()),
+            ("note".into(), "crisp".into()),
+            ("back".into(), "/p/imaginarium/B-1".into()),
+        ])
         .send()
         .await
         .unwrap();
-    assert_eq!(res.headers()[LOCATION], "/p/imaginarium/B-1?sent=1");
-
+    assert_eq!(res.headers()[LOCATION], "/p/imaginarium/B-1?tested=1");
     let sess = mcp_session(&s, &token).await;
-    let (_, builds) = mcp_tool(&s, &token, &sess, "builds", json!({})).await;
-    assert_eq!(builds["builds"][0]["state"], "tried");
-    let fb = builds["builds"][0]["feedback"].as_array().unwrap();
-    assert!(fb.iter().any(|f| f["verdict"] == "problem" && f["owner_words"] == "the border is cut off"), "{builds}");
     let (_, news) = mcp_tool(&s, &token, &sess, "since_last_check", json!({})).await;
-    assert!(news.to_string().contains("1 works, 1 problem"), "{news}");
+    assert!(news.to_string().contains("Owner tested, works: TT-1 Tables. Note: \\\"crisp\\\""), "{news}");
+
+    // The owner told the agent about a problem: it stays open, with the problem.
+    let (ok, r) = mcp_tool(
+        &s,
+        &token,
+        &sess,
+        "resolve_tests",
+        json!({"ids": ["TT-2"], "result": "problem", "note": "the border is cut off"}),
+    )
+    .await;
+    assert!(ok, "{r}");
+    let (ok, _) = mcp_tool(
+        &s,
+        &token,
+        &sess,
+        "add_to_test",
+        json!({"title": "Undo a table edit", "how": "Ctrl+Z", "category": "Tables"}),
+    )
+    .await;
+    assert!(ok);
+    // A new release takes what's open along.
+    let (ok, r) = mcp_tool(&s, &token, &sess, "add_release", json!({"tag": "v0.9.0", "title": "M9"})).await;
+    assert!(ok, "{r}");
+    assert_eq!(r["to_test"], 2);
+    let page = s
+        .http
+        .get(s.url("/p/imaginarium?tab=to-test"))
+        .header(COOKIE, &cookie)
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(
+        page.contains("the border is cut off") && page.contains("new in v0.9.0") && !page.contains(">Tables</label>"),
+        "{page}"
+    );
+    let _ = pictures;
 }
 
 #[tokio::test]
