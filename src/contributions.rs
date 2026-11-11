@@ -8,6 +8,28 @@ use serde_json::{Map, Value};
 use crate::github::ItemInfo;
 use crate::records::{self, Kind, NewRecord, Patch, Query, Record};
 
+/// Most contributions a project can have watched at once: each costs GitHub calls every round.
+pub const MAX_WATCHED: usize = 50;
+
+/// Refuses a new one when the project watches MAX_WATCHED already.
+pub fn check_room(conn: &Connection, project_id: i64) -> anyhow::Result<()> {
+    let open = records::query(
+        conn,
+        &Query {
+            project_id: Some(project_id),
+            kinds: vec![Kind::Contribution],
+            states: vec!["sent".into()],
+            limit: 0,
+            ..Default::default()
+        },
+    )?
+    .len();
+    if open >= MAX_WATCHED {
+        anyhow::bail!("this project watches {open} contributions already; that's the most at once");
+    }
+    Ok(())
+}
+
 /// Starts watching `repo#number` for a project. Idempotent.
 pub fn track(
     conn: &Connection,
@@ -26,6 +48,7 @@ pub fn track(
     if let Some(r) = existing {
         return Ok(r);
     }
+    check_room(conn, project_id)?;
     let mut data = Map::new();
     data.insert("repo".into(), repo.into());
     data.insert("number".into(), number.into());
@@ -122,6 +145,11 @@ mod tests {
             assert!(watched(c)?.is_empty());
             let events = crate::waiting::unread(c, p.id, "imaginarium")?;
             assert_eq!(events.iter().filter(|e| e.kind == "contribution.updated").count(), 2);
+            // Only so many are watched at once; closed ones don't count.
+            for n in 0..MAX_WATCHED as i64 {
+                track(c, p.id, "loro-dev/loro", 2000 + n, &item("open", 0), "consultant")?;
+            }
+            assert!(track(c, p.id, "loro-dev/loro", 9999, &item("open", 0), "consultant").is_err());
             Ok(())
         })
         .unwrap();
