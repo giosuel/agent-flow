@@ -124,8 +124,8 @@ pub fn stacked_areas(label: &str, points: usize, series: &[Series], limit: Optio
     for s in series {
         let top: Vec<f64> = (0..n).map(|i| base[i] + s.values.get(i).copied().unwrap_or(0.0)).collect();
         let mut d = String::new();
-        for i in 0..n {
-            let _ = write!(d, "{}{:.1},{:.2} ", if i == 0 { "M" } else { "L" }, x(i), y(top[i]));
+        for (i, t) in top.iter().enumerate() {
+            let _ = write!(d, "{}{:.1},{:.2} ", if i == 0 { "M" } else { "L" }, x(i), y(*t));
         }
         for i in (0..n).rev() {
             let _ = write!(d, "L{:.1},{:.2} ", x(i), y(base[i]));
@@ -174,13 +174,13 @@ pub fn lines(label: &str, points: usize, series: &[Series]) -> (String, f64) {
     (out, max)
 }
 
-/// A round number at or above `v` for the top of the scale: 1, 2 or 5 × a power of ten.
+/// A round number at or above `v` for the top of the scale: 1, 2, 2.5 or 5 × a power of ten.
 pub fn nice_max(v: f64) -> f64 {
     if v <= 0.0 {
         return 0.0;
     }
     let p = 10f64.powf(v.log10().floor());
-    [1.0, 2.0, 5.0, 10.0].iter().map(|m| m * p).find(|x| *x >= v).unwrap_or(10.0 * p)
+    [1.0, 2.0, 2.5, 5.0, 10.0].iter().map(|m| m * p).find(|x| *x >= v).unwrap_or(10.0 * p)
 }
 
 #[cfg(test)]
@@ -192,6 +192,7 @@ mod tests {
         let c = colors(&["vinculum".into(), "giosuelio".into(), "imaginarium".into()]);
         assert_eq!(c, vec!["#d95926", "#199e70", "#3987e5"], "a new project takes a free colour");
         assert_eq!(nice_max(7.3), 10.0);
+        assert_eq!(nice_max(23.0), 25.0);
         assert_eq!(nice_max(1_300_000.0), 2_000_000.0);
     }
 

@@ -248,8 +248,11 @@ pub fn history(c: &rusqlite::Connection, from: i64, step: i64) -> anyhow::Result
     Ok(rows.collect::<Result<_, _>>()?)
 }
 
-/// Per group since `from`: CPU-hours, peak memory (KB), and the newest sample (cores, top).
-pub fn group_summary(c: &rusqlite::Connection, from: i64) -> anyhow::Result<Vec<(String, f64, i64, f64, String)>> {
+/// A group's day: (group, CPU-hours, peak memory in KB, cores in the newest sample, its busiest command).
+pub type GroupDay = (String, f64, i64, f64, String);
+
+/// Per group since `from`.
+pub fn group_summary(c: &rusqlite::Connection, from: i64) -> anyhow::Result<Vec<GroupDay>> {
     let mut stmt = c.prepare(
         "SELECT grp, sum(cores) / 60.0, max(mem_kb),
                 (SELECT cores FROM machine_samples s2 WHERE s2.grp = s.grp ORDER BY at DESC LIMIT 1),

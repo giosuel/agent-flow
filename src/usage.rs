@@ -225,8 +225,8 @@ pub fn store(conn: &mut Connection, read: &Read) -> anyhow::Result<usize> {
         let when = if read.subagent { read.first_at.unwrap_or(c.at) } else { c.at };
         let task = match project_id {
             Some(p) => {
-                if !touches.contains_key(&p) {
-                    touches.insert(p, task_touches(&tx, p)?);
+                if let std::collections::hash_map::Entry::Vacant(e) = touches.entry(p) {
+                    e.insert(task_touches(&tx, p)?);
                 }
                 task_at(&touches[&p], when)
             }
@@ -393,7 +393,8 @@ pub fn per_task(conn: &Connection, from: i64, to: i64) -> anyhow::Result<Vec<Tas
         "SELECT task_id, project_id, subagent, min(at), max(at), {SUMS} FROM usage
          WHERE at >= ?1 AND at < ?2 AND project_id IS NOT NULL GROUP BY 1, 2, 3"
     ))?;
-    let rows: Vec<(Option<i64>, Option<i64>, bool, i64, i64, Tokens)> = stmt
+    type Row = (Option<i64>, Option<i64>, bool, i64, i64, Tokens);
+    let rows: Vec<Row> = stmt
         .query_map(params![from, to], |r| {
             Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, tokens_row(r, 5)?))
         })?
