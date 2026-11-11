@@ -40,6 +40,8 @@ pub struct Config {
     pub session_max_days: i64,
     /// GB a build upload must leave free on the data disk, which other projects share.
     pub build_free_gb: u64,
+    /// Claude Code's transcripts, read for token usage.
+    pub transcripts_dir: String,
 }
 
 impl Default for Config {
@@ -58,6 +60,7 @@ impl Default for Config {
             session_idle_days: 14,
             session_max_days: 30,
             build_free_gb: 10,
+            transcripts_dir: "~/.claude/projects".into(),
         }
     }
 }
