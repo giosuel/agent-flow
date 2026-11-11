@@ -4,6 +4,7 @@
 mod api;
 mod assets;
 mod builds;
+mod screenshots;
 pub use builds::notify_build;
 mod buttons;
 mod charts;
@@ -135,6 +136,7 @@ pub fn router(state: AppState) -> Router {
         .merge(api::routes())
         .merge(buttons::routes())
         .merge(builds::routes())
+        .merge(screenshots::routes())
         .merge(conversations::routes())
         .merge(guides::routes())
         .merge(log::routes())

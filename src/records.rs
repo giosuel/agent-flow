@@ -22,10 +22,13 @@ pub enum Kind {
     Build,
     Feedback,
     Contribution,
+    /// A screenshot an agent uploaded (the owner, 2026-11-11): its name is the title, its
+    /// description the body, its category and file in the data.
+    Screenshot,
 }
 
 impl Kind {
-    pub const ALL: [Kind; 9] = [
+    pub const ALL: [Kind; 10] = [
         Kind::Question,
         Kind::Decision,
         Kind::Task,
@@ -35,6 +38,7 @@ impl Kind {
         Kind::Build,
         Kind::Feedback,
         Kind::Contribution,
+        Kind::Screenshot,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -48,6 +52,7 @@ impl Kind {
             Kind::Build => "build",
             Kind::Feedback => "feedback",
             Kind::Contribution => "contribution",
+            Kind::Screenshot => "screenshot",
         }
     }
 
@@ -63,6 +68,7 @@ impl Kind {
             Kind::Build => "B",
             Kind::Feedback => "F",
             Kind::Contribution => "C",
+            Kind::Screenshot => "S",
         }
     }
 
@@ -77,6 +83,7 @@ impl Kind {
             Kind::Build => "Build",
             Kind::Feedback => "Feedback",
             Kind::Contribution => "External contribution",
+            Kind::Screenshot => "Screenshot",
         }
     }
 
@@ -98,6 +105,7 @@ impl Kind {
             Kind::Build => &["published", "tried", "withdrawn"],
             Kind::Feedback => &["works", "problem", "skipped", "note"],
             Kind::Contribution => &["draft", "shown", "approved", "sent", "merged", "closed"],
+            Kind::Screenshot => &["current", "withdrawn"],
         }
     }
 
@@ -128,7 +136,7 @@ pub fn finished_word(kind: Kind) -> &'static str {
         Kind::Question => "answered",
         Kind::Build => "tried",
         Kind::Contribution => "merged",
-        Kind::Decision | Kind::Adr => "current",
+        Kind::Decision | Kind::Adr | Kind::Screenshot => "current",
         Kind::Feedback => "works",
         Kind::Task => "done",
     }
@@ -606,6 +614,7 @@ pub const RELATIONS: &[(&str, &str, &str)] = &[
     ("depends_on", "Depends on", "Needed by"),
     ("feedback_on", "Feedback on", "Feedback"),
     ("relates", "Related", "Related"),
+    ("shows", "Shows", "Screenshots"),
 ];
 
 pub fn check_relation(relation: &str) -> anyhow::Result<()> {

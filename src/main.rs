@@ -26,6 +26,7 @@ mod projects;
 mod prs;
 mod push;
 mod records;
+mod screenshots;
 mod setup;
 mod tokens;
 mod tz;
@@ -61,6 +62,9 @@ enum Command {
     Whoami(cli::ClientArgs),
     /// Publish a test build for the owner (agents; like viber-run's publish.sh).
     Publish(cli::PublishArgs),
+    /// Upload a screenshot to your project's Screenshots (agents): a test build, a mockup, a
+    /// spike test, a bug. Name and category required; a description and a record optional.
+    Screenshot(cli::ScreenshotArgs),
     /// Fetch and start a test build (the owner's machines; like viber-run). Without a product,
     /// lists the products; `run <product> list` lists its builds.
     Run(cli::RunArgs),
@@ -118,6 +122,7 @@ fn main() -> anyhow::Result<()> {
         Command::Admin { command } => cli::admin(&config_path, command),
         Command::Whoami(client) => cli::whoami(&config_path, client),
         Command::Publish(args) => cli::publish(&config_path, args),
+        Command::Screenshot(args) => cli::screenshot(&config_path, args),
         Command::Run(args) => cli::run(&config_path, args),
         Command::Wait { client, record, minutes } => cli::wait(&config_path, client, record, minutes),
         Command::McpHeaders { token_file } => cli::mcp_headers(&token_file),
