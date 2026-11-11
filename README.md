@@ -129,6 +129,10 @@ claude mcp add-json agentflow '{"type": "http", "url": "https://flow.example/mcp
   "headersHelper": "agentflow mcp-headers --token-file ~/.config/agentflow/tokens/<project>.token"}'
 ```
 
+Start the agent in that folder with `env AGENTFLOW_TOKEN_FILE=~/.config/agentflow/tokens/<project>.token
+claude` (the page shows this command too), so the `agentflow` commands it runs (publish, screenshot,
+contribute, remote, wait) use the same token. `hello` tells the agent where the file is as well.
+
 `agentflow admin managed-settings` prints Claude Code managed settings that keep every session's
 Read and Edit tools away from AgentFlow's tokens, data and config, and the root command to
 install them. Shell commands run as the same user can still read those files; running AgentFlow
