@@ -142,6 +142,8 @@ pub struct ReleaseRow {
     pub title: String,
     pub url: String,
     pub waits: String,
+    /// The PRs it still waits for: "#58" and its page.
+    pub open_prs: Vec<(String, String)>,
     pub buttons: Vec<ButtonView>,
 }
 
@@ -163,17 +165,22 @@ pub fn release_rows(c: &Connection, project_id: i64, now: i64) -> anyhow::Result
             .and_then(|v| v.as_array())
             .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_owned)).collect())
             .unwrap_or_default();
-        let open =
-            waits.iter().filter(|w| records::find_str(c, w, None).map(|x| x.state != "merged").unwrap_or(true)).count();
+        let open_prs: Vec<(String, String)> = waits
+            .iter()
+            .filter_map(|w| records::find_str(c, w, None).ok())
+            .filter(|x| x.state != "merged")
+            .map(|x| (format!("#{}", x.number), x.url()))
+            .collect();
         out.push(ReleaseRow {
             tag: r.str("tag").to_owned(),
             title: r.title.clone(),
             url: r.url(),
-            waits: match (waits.len(), open) {
-                (0, _) => "waits for nothing".into(),
-                (n, 0) => format!("all {n} PRs merged"),
-                (n, k) => format!("{k} of {n} PRs still open"),
+            waits: match (waits.len(), open_prs.len()) {
+                (0, _) => "Ready to tag: it waits for no PRs.".into(),
+                (n, 0) => format!("Ready to tag: all {n} of its PRs are merged."),
+                (n, k) => format!("Waiting for {k} of its {n} PRs:"),
             },
+            open_prs,
             buttons: views(c, r.id, now)?,
         });
     }

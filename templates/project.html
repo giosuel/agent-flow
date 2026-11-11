@@ -50,7 +50,7 @@
       <section class="card pad stack" aria-label="Release {{ rel.tag }}">
         <div class="sec"><h2 class="label">Release</h2><a class="sub" href="{{ rel.url }}">details</a></div>
         <p><span class="mono">{{ rel.tag }}</span> · {{ rel.title }}</p>
-        <p class="sub">{{ rel.waits }}</p>
+        <p class="sub">{{ rel.waits }}{% for (n, u) in rel.open_prs %} <a class="mono" href="{{ u }}">{{ n }}</a>{% endfor %}</p>
         {% for b in rel.buttons %}{% include "button.html" %}{% endfor %}
         {% if rel.buttons.is_empty() %}<p class="sub">The agent hasn't added the tag button yet.</p>{% endif %}
       </section>
@@ -119,7 +119,7 @@
 </section>
 {% for rel in releases %}
 <section class="card pad stack" aria-label="Release {{ rel.tag }}">
-  <div class="sec"><h2><span class="mono">{{ rel.tag }}</span> · {{ rel.title }}</h2><span class="sub">{{ rel.waits }}</span></div>
+  <div class="sec"><h2><span class="mono">{{ rel.tag }}</span> · {{ rel.title }}</h2><span class="sub">{{ rel.waits }}{% for (n, u) in rel.open_prs %} <a class="mono" href="{{ u }}">{{ n }}</a>{% endfor %}</span></div>
   {% for b in rel.buttons %}{% include "button.html" %}{% endfor %}
 </section>
 {% endfor %}
