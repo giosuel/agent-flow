@@ -18,6 +18,8 @@ pub enum Via {
     Button,
     Poller,
     System,
+    /// A build or test on a build server, and its output.
+    Build,
 }
 
 impl Via {
@@ -30,6 +32,7 @@ impl Via {
             Via::Button => "button",
             Via::Poller => "poller",
             Via::System => "system",
+            Via::Build => "build",
         }
     }
 }
@@ -46,6 +49,8 @@ pub enum Action {
     /// A refused request: bad token, missing session, not allowed.
     Denied,
     System,
+    /// A line of a build's or test's output.
+    Output,
 }
 
 impl Action {
@@ -59,6 +64,7 @@ impl Action {
             Action::Push => "push",
             Action::Denied => "denied",
             Action::System => "system",
+            Action::Output => "output",
         }
     }
 }
