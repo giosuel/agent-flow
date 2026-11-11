@@ -741,6 +741,23 @@ pub fn events(conn: &Connection, project_id: Option<i64>, after_seq: i64, limit:
     Ok(rows.collect::<Result<_, _>>()?)
 }
 
+/// Events in one project after `after_seq` that `actor` didn't cause, oldest first.
+pub fn events_by_others(
+    conn: &Connection,
+    project_id: i64,
+    actor: &str,
+    after_seq: i64,
+    limit: i64,
+) -> anyhow::Result<Vec<Event>> {
+    let mut stmt = conn.prepare(
+        "SELECT e.seq, e.at, p.slug, r.kind, r.number, e.kind, e.summary, e.actor
+         FROM events e LEFT JOIN projects p ON p.id = e.project_id LEFT JOIN records r ON r.id = e.record_id
+         WHERE e.project_id = ?1 AND e.seq > ?2 AND e.actor != ?3 ORDER BY e.seq LIMIT ?4",
+    )?;
+    let rows = stmt.query_map(params![project_id, after_seq, actor, limit], event_from_row)?;
+    Ok(rows.collect::<Result<_, _>>()?)
+}
+
 /// The newest events, newest first (the dashboard's activity, a project's history).
 pub fn recent_events(conn: &Connection, project_id: Option<i64>, limit: i64) -> anyhow::Result<Vec<Event>> {
     let mut stmt = conn.prepare(
@@ -862,7 +879,9 @@ mod tests {
         db.call_blocking(|c| {
             let a = setup(c);
             let b = crate::projects::create(c, "other", "Other", "test")?.id;
-            let dec = |p: i64| create(c, p, "x", NewRecord { kind: Some(Kind::Decision), title: "d".into(), ..Default::default() });
+            let dec = |p: i64| {
+                create(c, p, "x", NewRecord { kind: Some(Kind::Decision), title: "d".into(), ..Default::default() })
+            };
             let (mine, theirs) = (dec(a)?, dec(b)?);
             for relation in ["supersedes", "blocks", "implements", "answers", "records", "feedback_on"] {
                 assert!(link(c, &mine, &theirs, relation, "vinculum").is_err(), "{relation}");

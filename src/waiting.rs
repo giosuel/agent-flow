@@ -102,9 +102,22 @@ pub fn blocks(conn: &Connection, q: &Record) -> anyhow::Result<Vec<String>> {
 
 /// Events in the project that someone else caused (the owner answering, another agent, the
 /// consultant, AgentFlow itself), after the agent's cursor.
+/// Returns at most `UNREAD_PAGE`; the caller moves the cursor to the last one it handed out.
 pub fn unread(conn: &Connection, project_id: i64, slug: &str) -> anyhow::Result<Vec<Event>> {
     let after = cursor(conn, project_id)?;
-    Ok(records::events(conn, Some(project_id), after, 200)?.into_iter().filter(|e| e.actor != slug).collect())
+    records::events_by_others(conn, project_id, slug, after, UNREAD_PAGE)
+}
+
+pub const UNREAD_PAGE: i64 = 200;
+
+/// How many unread events there are, without a cap.
+pub fn unread_count(conn: &Connection, project_id: i64, slug: &str) -> anyhow::Result<i64> {
+    let after = cursor(conn, project_id)?;
+    Ok(conn.query_row(
+        "SELECT count(*) FROM events WHERE project_id = ?1 AND seq > ?2 AND actor != ?3",
+        params![project_id, after, slug],
+        |r| r.get(0),
+    )?)
 }
 
 pub fn cursor(conn: &Connection, project_id: i64) -> anyhow::Result<i64> {
@@ -114,7 +127,7 @@ pub fn cursor(conn: &Connection, project_id: i64) -> anyhow::Result<i64> {
         Some(c) => Ok(c),
         // A new agent starts from now, not from the project's whole history.
         None => {
-            let latest: i64 = conn.query_row("SELECT coalesce(max(seq), 0) FROM events", [], |r| r.get(0))?;
+            let latest = latest_seq(conn)?;
             set_cursor(conn, project_id, latest)?;
             Ok(latest)
         }
@@ -130,7 +143,7 @@ pub fn set_cursor(conn: &Connection, project_id: i64, seq: i64) -> anyhow::Resul
     Ok(())
 }
 
-/// The newest event seq overall; a reader that has seen everything moves its cursor here.
+/// The newest event seq overall; where a new agent starts reading.
 pub fn latest_seq(conn: &Connection) -> anyhow::Result<i64> {
     Ok(conn.query_row("SELECT coalesce(max(seq), 0) FROM events", [], |r| r.get(0))?)
 }
@@ -195,6 +208,31 @@ mod tests {
             assert!(unread(c, p, "v")?.is_empty());
             set_cursor(c, p, 1)?;
             assert_eq!(cursor(c, p)?, seq, "cursors never move back");
+            Ok(())
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn many_own_events_dont_hide_the_owners() {
+        let db = Db::open_memory();
+        db.call_blocking(|c| {
+            let p = crate::projects::create(c, "v", "V", "admin")?.id;
+            cursor(c, p)?;
+            for i in 0..250 {
+                records::event(c, Some(p), None, "task.created", &format!("own {i}"), "v")?;
+            }
+            records::event(c, Some(p), None, "question.answered", "Owner answered Q-1", "owner")?;
+            let u = unread(c, p, "v")?;
+            assert_eq!(u.len(), 1);
+            assert_eq!(unread_count(c, p, "v")?, 1);
+            for i in 0..(UNREAD_PAGE + 5) {
+                records::event(c, Some(p), None, "x", &format!("theirs {i}"), "owner")?;
+            }
+            let page = unread(c, p, "v")?;
+            assert_eq!(page.len() as i64, UNREAD_PAGE);
+            set_cursor(c, p, page.last().unwrap().seq)?;
+            assert_eq!(unread(c, p, "v")?.len(), 6, "the rest stays unread, nothing is skipped");
             Ok(())
         })
         .unwrap();

@@ -177,7 +177,7 @@ impl FlowMcp {
                     },
                 )?;
                 let recent = records::recent_events(c, Some(project.id), 15)?;
-                let unread = crate::waiting::unread(c, project.id, &project.slug)?.len();
+                let unread = crate::waiting::unread_count(c, project.id, &project.slug)?;
                 let reply = json!({
                     "project": project_json(&projects::get_by_id(c, project.id)?, now_ms()),
                     "milestones": milestones_json(&ms, &counts),
@@ -204,12 +204,15 @@ impl FlowMcp {
             .call(move |c| {
                 let project = target_project(c, &a, None, true)?;
                 let events = crate::waiting::unread(c, project.id, &project.slug)?;
-                crate::waiting::set_cursor(c, project.id, crate::waiting::latest_seq(c)?)?;
+                if let Some(last) = events.last() {
+                    crate::waiting::set_cursor(c, project.id, last.seq)?;
+                }
+                let more = events.len() as i64 == crate::waiting::UNREAD_PAGE;
                 let list: Vec<Value> = events
                     .iter()
                     .map(|e| json!({"at": crate::util::fmt_utc(e.at), "record": e.record, "what": e.summary, "by": e.actor}))
                     .collect();
-                Ok(Outcome::new(json!({"events": list})).summary(format!("since_last_check: {} events", events.len())).project(project.slug))
+                Ok(Outcome::new(json!({"events": list, "more": more})).summary(format!("since_last_check: {} events", events.len())).project(project.slug))
             })
             .await;
         self.finish(&actor, "since_last_check", Action::Read, outcome).await
