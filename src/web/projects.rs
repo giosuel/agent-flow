@@ -213,18 +213,6 @@ fn waiting_counts(c: &Connection) -> anyhow::Result<HashMap<i64, (i64, i64)>> {
     Ok(rows.collect::<Result<_, _>>()?)
 }
 
-/// "2 questions · 1 build to try", or "nothing waiting on you".
-fn waiting_line((questions, builds): (i64, i64)) -> String {
-    let mut parts = Vec::new();
-    if questions > 0 {
-        parts.push(plural(questions, "question", "questions"));
-    }
-    if builds > 0 {
-        parts.push(plural(builds, "build to try", "builds to try"));
-    }
-    if parts.is_empty() { "nothing waiting on you".into() } else { parts.join(" · ") }
-}
-
 fn plural(n: i64, one: &str, many: &str) -> String {
     format!("{n} {}", if n == 1 { one } else { many })
 }
@@ -232,15 +220,30 @@ fn plural(n: i64, one: &str, many: &str) -> String {
 // ---------------------------------------------------------------------------------------------
 // Projects list
 
+/// One project on the Projects page: a full-width row (the owner, 2026-11-11, chose this over
+/// cards: "lets go with projects: A").
 struct ProjectCard {
     slug: String,
     name: String,
     description: String,
     online: bool,
     agent_state: &'static str,
-    facts: Vec<String>,
+    /// Its agent has never connected: listed small, under Not started.
+    not_started: bool,
+    facts: String,
+    /// Top-level milestones around the current one: (name, "d" done, "n" now, "" planned).
+    ms_chips: Vec<(String, &'static str)>,
     milestone: Option<(String, String)>,
-    waiting: String,
+    /// "step S2 · 2 of 8 tasks done", and the share done.
+    progress: String,
+    percent: u32,
+    /// What waits on the owner: (chip class, text).
+    waits: Vec<(&'static str, String)>,
+    /// The project's latest event: "asked Q-1 · 13 h ago".
+    last: String,
+    /// New tokens per day for 7 days: (bar height %, tip), and the week's total.
+    tokens: Vec<(u32, String)>,
+    tokens_week: String,
     status: String,
 }
 
@@ -252,15 +255,21 @@ struct ProjectsPage {
     /// Showing the archived projects instead of the others.
     archived: bool,
     archived_count: usize,
+    /// Some project's agent never connected (they're listed small, under Not started).
+    any_not_started: bool,
 }
 
 async fn list(
     State(state): State<AppState>,
     Extension(actor): Extension<Actor>,
     Query(q): Query<ListQuery>,
+    tz: Tz,
 ) -> AppResult<Response> {
     let now = now_ms();
     let archived = q.archived == Some(1);
+    let week_days = tz.days(now, 7);
+    let day_names: Vec<String> =
+        week_days.iter().take(7).map(|&t| tz.full(t).get(..10).unwrap_or("").to_owned()).collect();
     let cards: Vec<ProjectCard> = state
         .db
         .call(move |c| {
@@ -273,23 +282,110 @@ async fn list(
                 if !p.stack.is_empty() {
                     facts.push(p.stack.join(" · "));
                 }
-                for f in [&p.platform, &model_line(&p), &p.machine] {
-                    if !f.is_empty() {
-                        facts.push(f.clone());
-                    }
+                if !p.platform.is_empty() {
+                    facts.push(p.platform.clone());
                 }
+                // The milestones around the current one, and how far it is.
+                let top: Vec<&Milestone> = ms.iter().filter(|m| m.parent_id.is_none()).collect();
+                let cur = current_milestone(&ms);
+                let cur_i = cur.and_then(|m| top.iter().position(|t| t.id == m.id)).unwrap_or(top.len());
+                let from = cur_i.saturating_sub(3);
+                let ms_chips = top
+                    .iter()
+                    .enumerate()
+                    .skip(from)
+                    .take(6)
+                    .map(|(i, m)| {
+                        (
+                            m.name.clone(),
+                            if i < cur_i || m.state == "closed" {
+                                "d"
+                            } else if i == cur_i {
+                                "n"
+                            } else {
+                                ""
+                            },
+                        )
+                    })
+                    .collect();
+                let (progress, percent) = match cur {
+                    Some(m) => {
+                        let ids: Vec<i64> = std::iter::once(m.id)
+                            .chain(ms.iter().filter(|s| s.parent_id == Some(m.id)).map(|s| s.id))
+                            .collect();
+                        let tasks = records::query(
+                            c,
+                            &records::Query {
+                                project_id: Some(p.id),
+                                kinds: vec![Kind::Task],
+                                milestone_ids: ids,
+                                limit: 0,
+                                ..Default::default()
+                            },
+                        )?;
+                        let done = tasks.iter().filter(|t| t.state == "done").count();
+                        let step = ms.iter().find(|s| s.parent_id == Some(m.id) && s.state == "active");
+                        let line = match (step, tasks.len()) {
+                            (_, 0) => "no tasks yet".to_owned(),
+                            (Some(s), n) => format!("step {} · {done} of {n} tasks done", s.name),
+                            (None, n) => format!("{done} of {n} tasks done"),
+                        };
+                        (line, if tasks.is_empty() { 0 } else { (done * 100 / tasks.len()) as u32 })
+                    }
+                    None => (String::new(), 0),
+                };
+                let (questions, _) = counts.get(&p.id).copied().unwrap_or((0, 0));
+                let mut waits = Vec::new();
+                if questions > 0 {
+                    waits.push(("bad", plural(questions, "question", "questions")));
+                }
+                let merges = crate::prs::merge_order(c, p.id)?
+                    .iter()
+                    .filter(|o| o.after.is_none() && crate::prs::merge_ready(&o.record).is_ok())
+                    .count() as i64;
+                if merges > 0 {
+                    waits.push(("accent", format!("{merges} to merge")));
+                }
+                let to_test = crate::totest::open_count(c, p.id)?;
+                if to_test > 0 {
+                    waits.push(("warn", format!("{to_test} to test")));
+                }
+                let last = records::recent_events(c, Some(p.id), 1)?
+                    .first()
+                    .map(|e| format!("{} · {}", e.summary, crate::util::ago(e.at, now)))
+                    .unwrap_or_default();
+                let week = crate::usage::project_days(c, p.id, &week_days)?;
+                let max = week.iter().copied().max().unwrap_or(0).max(1);
+                let tokens = week
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &n)| {
+                        (
+                            ((n * 100) / max) as u32,
+                            format!("{}: {}", day_names.get(i).cloned().unwrap_or_default(), crate::usage::short(n)),
+                        )
+                    })
+                    .collect();
+                let tokens_week = crate::usage::short(week.iter().sum());
                 cards.push(ProjectCard {
                     online,
                     agent_state: if online {
-                        "agent online"
+                        "online"
                     } else if p.agent.seen_at.is_some() {
-                        "agent idle"
+                        "idle"
                     } else {
                         "no agent yet"
                     },
-                    milestone: current_milestone(&ms).map(|m| (m.name.clone(), m.title.clone())),
-                    waiting: waiting_line(counts.get(&p.id).copied().unwrap_or((0, 0))),
-                    facts,
+                    not_started: p.agent.seen_at.is_none(),
+                    ms_chips,
+                    milestone: cur.map(|m| (m.name.clone(), m.title.clone())),
+                    progress,
+                    percent,
+                    waits,
+                    last,
+                    tokens,
+                    tokens_week,
+                    facts: facts.join(" · "),
                     status: p.status.clone(),
                     slug: p.slug,
                     name: p.name,
@@ -300,13 +396,15 @@ async fn list(
         })
         .await?;
     let archived_count = cards.iter().filter(|c| c.status == "archived").count();
-    let cards = cards.into_iter().filter(|c| (c.status == "archived") == archived).collect();
+    let cards: Vec<ProjectCard> = cards.into_iter().filter(|c| (c.status == "archived") == archived).collect();
+    let any_not_started = cards.iter().any(|c| c.not_started);
     let page_nav = nav(&state, &actor, "/projects").await;
     render(ProjectsPage {
         nav: if archived { page_nav.back_to("/projects", "Projects") } else { page_nav },
         cards,
         archived,
         archived_count,
+        any_not_started,
     })
 }
 

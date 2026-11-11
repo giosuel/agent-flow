@@ -1,0 +1,21 @@
+{# One project on the Projects page. #}
+<a class="card prow2{% if c.status != "active" %} dimmed{% endif %}" href="/p/{{ c.slug }}">
+  <div class="prow2-who">
+    <div class="nm">{{ c.name }} <span class="chip{% if c.online %} ok{% endif %}"><span class="dot{% if c.online %} ok{% endif %}" aria-hidden="true"></span>{{ c.agent_state }}</span></div>
+    {% if !c.description.is_empty() %}<div class="ds">{{ c.description }}</div>{% endif %}
+    {% if !c.facts.is_empty() %}<div class="fx">{{ c.facts }}</div>{% endif %}
+  </div>
+  <div class="prow2-ms">
+    {% if let Some((n, t)) = c.milestone %}
+    <div class="mss" aria-hidden="true">{% for (m, cls) in c.ms_chips %}<span class="{{ cls }}">{{ m }}</span>{% endfor %}</div>
+    <strong><span class="mono">{{ n }}</span> · {{ t }}</strong>
+    <div class="pbar" role="img" aria-label="{{ c.percent }}% of the milestone's tasks done"><i style="width: {{ c.percent }}%"></i></div>
+    <span class="sub">{{ c.progress }}</span>
+    {% else %}<span class="sub">no milestones yet</span>{% endif %}
+  </div>
+  <div class="prow2-wait stack-sm">
+    <div class="waits">{% for (cls, t) in c.waits %}<span class="chip {{ cls }}">{{ t }}</span>{% endfor %}{% if c.waits.is_empty() %}<span class="sub">nothing waiting on you</span>{% endif %}</div>
+    {% if !c.last.is_empty() %}<span class="sub prow2-last">last: {{ c.last }}</span>{% endif %}
+  </div>
+  <div class="tok"><span class="sub">tokens, 7 days</span><span class="bars" aria-hidden="true">{% for (h, tip) in c.tokens %}<i style="height: {{ h }}%" data-tip="{{ tip }}"></i>{% endfor %}</span><b>{{ c.tokens_week }}</b></div>
+</a>
