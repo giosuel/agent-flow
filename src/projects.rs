@@ -144,7 +144,26 @@ pub fn check_slug(slug: &str) -> anyhow::Result<()> {
     if !ok {
         bail!("{slug:?}: use lowercase letters, digits and dashes, e.g. \"cold-trace\"");
     }
+    // Messages are addressed by slug, so these names mean someone else.
+    if RESERVED_SLUGS.contains(&slug) {
+        bail!("{slug:?} is reserved; pick another slug");
+    }
     Ok(())
+}
+
+pub const RESERVED_SLUGS: &[&str] = &["all", "owner", "consultant"];
+
+/// The project that publishes builds as `product`: the one whose build_product it is, or the one
+/// with that slug if it hasn't set a build_product of its own. Products are unique, so at most one.
+pub fn by_build_product(conn: &Connection, product: &str) -> anyhow::Result<Option<Project>> {
+    let id: Option<i64> = conn
+        .query_row(
+            "SELECT id FROM projects WHERE build_product = ?1 OR (build_product = '' AND slug = ?1) ORDER BY id LIMIT 1",
+            [product],
+            |r| r.get(0),
+        )
+        .optional()?;
+    id.map(|id| get_by_id(conn, id)).transpose()
 }
 
 /// A milestone's id and its steps' ids: "tasks of M4" includes those of K1–K4.
@@ -154,6 +173,9 @@ pub fn with_steps(all: &[Milestone], id: i64) -> Vec<i64> {
 
 pub fn create(conn: &Connection, slug: &str, name: &str, actor: &str) -> anyhow::Result<Project> {
     check_slug(slug)?;
+    if by_build_product(conn, slug)?.is_some() {
+        bail!("another project publishes builds as {slug:?}; pick another slug");
+    }
     let now = now_ms();
     conn.execute(
         "INSERT INTO projects (slug, name, created_at, updated_at) VALUES (?1, ?2, ?3, ?3)",
@@ -189,6 +211,21 @@ pub fn update(
         && !["active", "paused", "archived"].contains(&v.as_str())
     {
         bail!("status must be active, paused or archived");
+    }
+    if let Some(v) = patch.build_product.as_deref().map(str::trim) {
+        // Empty means "builds under the slug", which must be free too.
+        let product = if v.is_empty() { get_by_id(conn, project_id)?.slug } else { v.to_owned() };
+        crate::builds::check_product(&product)?;
+        let taken: Option<i64> = conn
+            .query_row(
+                "SELECT id FROM projects WHERE id != ?2 AND (build_product = ?1 OR (build_product = '' AND slug = ?1))",
+                params![product, project_id],
+                |r| r.get(0),
+            )
+            .optional()?;
+        if taken.is_some() {
+            bail!("another project publishes builds as {product:?} already");
+        }
     }
     if let Some(v) = &patch.name {
         if v.trim().is_empty() {
@@ -500,6 +537,19 @@ mod tests {
         db.call_blocking(|c| {
             let p = create(c, "vinculum", "Vinculum", "admin")?;
             assert!(create(c, "vinculum", "again", "admin").is_err());
+            for reserved in RESERVED_SLUGS {
+                assert!(create(c, reserved, "x", "admin").is_err(), "{reserved}");
+            }
+            // A product is one project's: nobody publishes as another's slug or product.
+            let i = create(c, "imaginarium", "Imaginarium", "admin")?;
+            let product = |v: &str| ProjectPatch { build_product: Some(v.into()), ..Default::default() };
+            assert!(update(c, p.id, &product("imaginarium"), "admin").is_err());
+            assert!(update(c, p.id, &product("Bad Name"), "admin").is_err());
+            update(c, i.id, &product("imag"), "admin")?;
+            assert!(update(c, p.id, &product("imag"), "admin").is_err());
+            assert!(create(c, "imag", "x", "admin").is_err());
+            assert_eq!(by_build_product(c, "imag")?.map(|x| x.id), Some(i.id));
+            assert!(by_build_product(c, "imaginarium")?.is_none(), "it publishes as imag now");
             let changed = update(
                 c,
                 p.id,
