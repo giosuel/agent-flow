@@ -1169,3 +1169,57 @@ async fn only_the_owner_starts_a_project_and_slugs_stay_unique() {
         .unwrap();
     assert_eq!(res.status(), StatusCode::FORBIDDEN);
 }
+
+#[tokio::test]
+async fn screenshots_are_uploaded_shown_and_linked() {
+    let s = TestServer::start().await;
+    let token = s.token(TokenKind::Project, Some("vinculum")).await;
+    let sess = mcp_session(&s, &token).await;
+    assert!(mcp_tool(&s, &token, &sess, "add_milestone", json!({"name": "M4", "title": "Keybinds"})).await.0);
+    let (ok, t) = mcp_tool(&s, &token, &sess, "add_task", json!({"title": "Sidebar", "milestone": "M4"})).await;
+    assert!(ok, "{t}");
+    let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
+    png.extend_from_slice(&1280u32.to_be_bytes());
+    png.extend_from_slice(&800u32.to_be_bytes());
+    png.extend_from_slice(&[0; 64]);
+    let up = |query: &'static str, body: Vec<u8>| {
+        let (http, url, token) = (s.http.clone(), s.url(&format!("/api/screenshots?{query}")), token.clone());
+        async move { http.post(url).bearer_auth(token).body(body).send().await.unwrap() }
+    };
+    let res =
+        up("name=Sidebar%2C%20variant%20A&category=Mockup&description=Tabs%20on%20the%20left&record=T-1", png.clone())
+            .await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let j: Value = res.json().await.unwrap();
+    assert_eq!(j["id"], "vinculum/S-1");
+    assert!(up("name=x&category=bug", png.clone()).await.status().is_success());
+    // Not an image (an SVG could run script from our origin), no category, a record of nothing.
+    let svg = b"<svg xmlns='http://www.w3.org/2000/svg'><script>alert(1)</script></svg>".to_vec();
+    assert_eq!(up("name=x&category=bug", svg).await.status(), StatusCode::UNSUPPORTED_MEDIA_TYPE);
+    assert_eq!(up("name=x&category=%20", png.clone()).await.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(up("name=x&category=bug&record=T-99", png.clone()).await.status(), StatusCode::BAD_REQUEST);
+
+    let cookie = s.owner_cookie().await;
+    let get = |path: String| {
+        let (http, url, cookie) = (s.http.clone(), s.url(&path), cookie.clone());
+        async move { http.get(url).header(COOKIE, cookie).send().await.unwrap() }
+    };
+    let tab = get("/p/vinculum?tab=screenshots".into()).await.text().await.unwrap();
+    assert!(
+        tab.contains("Sidebar, variant A") && tab.contains("/p/vinculum/S-1/image") && tab.contains("mockup"),
+        "{tab}"
+    );
+    let only = get("/p/vinculum?tab=screenshots&cat=bug".into()).await.text().await.unwrap();
+    assert!(!only.contains("Sidebar, variant A") && only.contains("/p/vinculum/S-2/image"), "{only}");
+    let page = get("/p/vinculum/S-1".into()).await.text().await.unwrap();
+    assert!(page.contains("1280 × 800") && page.contains("Tabs on the left"), "{page}");
+    let task = get("/p/vinculum/T-1".into()).await.text().await.unwrap();
+    assert!(task.contains("Screenshots") && task.contains("S-1"), "the task links to it: {task}");
+    let img = get("/p/vinculum/S-1/image".into()).await;
+    assert_eq!(img.headers()["content-type"], "image/png");
+    assert_eq!(img.headers()["x-content-type-options"], "nosniff");
+    assert_eq!(img.bytes().await.unwrap().as_ref(), png.as_slice());
+    // Signed out: nothing.
+    let res = s.http.get(s.url("/p/vinculum/S-1/image")).send().await.unwrap();
+    assert!(res.status().is_client_error() || res.status().is_redirection(), "{}", res.status());
+}

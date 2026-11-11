@@ -8,7 +8,7 @@
 </div>
 <nav class="tabs proj-tabs" aria-label="Project">
   {% for (key, name) in tabs %}
-  <a href="/p/{{ slug }}{% if *key != "overview" %}?tab={{ key }}{% endif %}"{% if tab == *key %} class="on" aria-current="page"{% endif %}>{% if *key == "prs" %}<span class="hide-phone">{{ name }}</span><span class="only-phone">PRs</span>{% else %}{{ name }}{% endif %}{% if *key == "questions" && !open_questions.is_empty() %} <span class="mono count">{{ open_questions.len() }}</span>{% endif %}{% if *key == "prs" && prs_total > 0 %} <span class="mono sub">{{ prs_total }}</span>{% endif %}</a>
+  <a href="/p/{{ slug }}{% if *key != "overview" %}?tab={{ key }}{% endif %}"{% if tab == *key %} class="on" aria-current="page"{% endif %}>{% if *key == "prs" %}<span class="hide-phone">{{ name }}</span><span class="only-phone">PRs</span>{% else if *key == "screenshots" %}<span class="hide-phone">{{ name }}</span><span class="only-phone">Shots</span>{% else %}{{ name }}{% endif %}{% if *key == "questions" && !open_questions.is_empty() %} <span class="mono count">{{ open_questions.len() }}</span>{% endif %}{% if *key == "prs" && prs_total > 0 %} <span class="mono sub">{{ prs_total }}</span>{% endif %}</a>
   {% endfor %}
 </nav>
 {% if let Some(n) = notice %}<p class="notice{% if notice_bad %} warn{% else %} ok{% endif %}" role="status">{{ n }}</p>{% endif %}
@@ -125,6 +125,17 @@
   <ul class="rows">{% for t in g.rows %}<li class="item-row"><span class="mono sub id-col">{{ t.short }}</span><div class="ttl"><a href="{{ t.url }}">{{ t.title }}</a></div><span class="chip state-{{ t.state }}">{{ t.sub }}</span></li>{% endfor %}</ul>
 </section>
 {% endfor %}
+{% endif %}
+
+{% if tab == "screenshots" %}
+<section class="stack" aria-label="Screenshots">
+  {% if shots_all == 0 %}
+  <p class="card pad sub">No screenshots yet. The agent uploads them with <span class="mono">agentflow screenshot</span>: test builds, mockups, spike tests, bugs.</p>
+  {% else %}
+  <nav class="pills" aria-label="Categories">{% for (label, href, n, on) in shot_cats %}<a href="{{ href }}"{% if *on %} class="on" aria-current="true"{% endif %}>{{ label }} <span class="mono">{{ n }}</span></a>{% endfor %}</nav>
+  <ul class="shots">{% for s in shots %}<li><a class="shot" href="{{ s.url }}"><img src="{{ s.image }}" alt="" loading="lazy" decoding="async"><span class="shot-meta"><strong>{{ s.title }}</strong><span class="sub"><span class="chip">{{ s.category }}</span> {{ s.when }}</span></span></a></li>{% endfor %}</ul>
+  {% endif %}
+</section>
 {% endif %}
 
 {% if tab == "prs" %}
