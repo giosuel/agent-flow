@@ -88,19 +88,21 @@ pub fn merge_ready(pr: &Record) -> Result<(), String> {
     if pr.state != "open" {
         return Err(format!("already {}", pr.state));
     }
-    if !pr.data.get("ready").and_then(Value::as_bool).unwrap_or(false) {
-        return Err("the agent hasn't marked it ready".into());
-    }
+    // Problems on GitHub first: they say more than "not marked ready".
     if pr.data.get("draft").and_then(Value::as_bool).unwrap_or(false) {
         return Err("still a draft".into());
     }
-    match pr.str("ci") {
-        "failing" => return Err("CI failing".into()),
-        "pending" => return Err("CI still running".into()),
-        _ => {}
+    if pr.str("ci") == "failing" {
+        return Err("CI failing".into());
     }
     if pr.str("mergeable") == "conflicting" {
         return Err("has conflicts".into());
+    }
+    if !pr.data.get("ready").and_then(Value::as_bool).unwrap_or(false) {
+        return Err("the agent hasn't marked it ready".into());
+    }
+    if pr.str("ci") == "pending" {
+        return Err("CI still running".into());
     }
     Ok(())
 }
