@@ -479,3 +479,52 @@ async fn an_agent_waits_for_the_owners_answer() {
     let res = s.http.get(s.url("/api/wait?timeout=1")).header(COOKIE, &cookie).send().await.unwrap();
     assert_eq!(res.status(), StatusCode::FORBIDDEN);
 }
+
+#[tokio::test]
+async fn the_dashboard_features_a_question_and_answers_in_one_tap() {
+    let s = TestServer::start().await;
+    let cookie = s.owner_cookie().await;
+    let html = s.http.get(s.url("/")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
+    assert!(html.contains("Nothing is waiting on you"));
+
+    let token = s.token(TokenKind::Project, Some("vinculum")).await;
+    let sess = mcp_session(&s, &token).await;
+    mcp_tool(&s, &token, &sess, "ask_question", json!({"title": "Old question"})).await;
+    mcp_tool(
+        &s,
+        &token,
+        &sess,
+        "ask_question",
+        json!({"title": "Tabs A or B?", "options": [{"title": "A"}, {"title": "B"}], "urgent": true}),
+    )
+    .await;
+    let html = s.http.get(s.url("/")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
+    // The urgent one is featured, the other is listed, and the badge counts both.
+    let featured = html.find("Tabs A or B?").unwrap();
+    assert!(featured < html.find("Old question").unwrap());
+    assert!(html.contains("More questions · 1"));
+    assert!(html.contains(r#"<span class="mono count">2</span>"#));
+
+    let res = s
+        .http
+        .post(s.url("/p/vinculum/Q-2/answer"))
+        .header(COOKIE, &cookie)
+        .header(ORIGIN, &s.base)
+        .form(&[("option", "1"), ("next", "/?answered=vinculum/Q-2")])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.headers()[LOCATION], "/?answered=vinculum/Q-2");
+    let html = s
+        .http
+        .get(s.url("/?answered=vinculum/Q-2"))
+        .header(COOKIE, &cookie)
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(html.contains("Sent to vinculum: vinculum/Q-2"), "notice");
+    assert!(html.contains(r#"<span class="mono count">1</span>"#));
+}
