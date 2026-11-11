@@ -2,6 +2,31 @@
 // wherever they can.
 "use strict";
 
+// Pages show times in this browser's time zone: the server reads it from the af_tz cookie. When
+// the cookie was missing (the first visit) or the zone changed (travel, another device), set it
+// and reload once, so this page uses it too. Zone names ("Europe/Zurich") are valid cookie values.
+(() => {
+  let zone;
+  try {
+    zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  } catch {
+    return;
+  }
+  if (!zone || !/^[A-Za-z0-9/_+-]{1,64}$/.test(zone)) return;
+  const want = `af_tz=${zone}`;
+  if (document.cookie.split("; ").includes(want)) return;
+  const secure = location.protocol === "https:" ? "; Secure" : "";
+  document.cookie = `${want}; Path=/; Max-Age=31536000; SameSite=Lax${secure}`;
+  // Once per zone and tab, and only if the cookie stuck: never a reload loop.
+  try {
+    if (sessionStorage.getItem("af_tz_reloaded") === zone) return;
+    sessionStorage.setItem("af_tz_reloaded", zone);
+  } catch {
+    return;
+  }
+  if (document.cookie.split("; ").includes(want)) location.reload();
+})();
+
 // Buttons with data-confirm ask before they submit (no inline handlers: the CSP forbids them).
 document.addEventListener("click", (e) => {
   const el = e.target.closest("[data-confirm]");
