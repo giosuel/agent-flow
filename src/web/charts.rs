@@ -149,7 +149,8 @@ pub fn stacked_areas(label: &str, points: usize, series: &[Series], limit: Optio
     (out, max)
 }
 
-/// One line per series (2px, never filled).
+/// One line per series (2px, never filled), a point in the middle of each slot, so they sit
+/// under the same labels as bars.
 pub fn lines(label: &str, points: usize, series: &[Series]) -> (String, f64) {
     let n = points.max(2);
     let max = nice_max(series.iter().flat_map(|s| s.values.iter().copied()).fold(0.0, f64::max));
@@ -160,7 +161,7 @@ pub fn lines(label: &str, points: usize, series: &[Series]) -> (String, f64) {
         for i in 0..n {
             let v = s.values.get(i).copied().unwrap_or(0.0);
             let yy = if max > 0.0 { H - v / max * H } else { H };
-            let _ = write!(d, "{}{:.1},{:.2} ", if i == 0 { "M" } else { "L" }, i as f64 / (n - 1) as f64 * W, yy);
+            let _ = write!(d, "{}{:.1},{:.2} ", if i == 0 { "M" } else { "L" }, (i as f64 + 0.5) / n as f64 * W, yy);
         }
         let _ = write!(
             out,

@@ -414,3 +414,5 @@ button.opt { font: inherit; color: var(--ink); text-align: left; width: 100%; }
 .sec.wrap { flex-wrap: wrap; gap: 10px; }
 .strip { display: inline-flex; align-items: flex-end; gap: 2px; height: 18px; width: 70px; vertical-align: middle; margin: 0 8px; }
 .strip span { flex: 1; background: var(--accent); border-radius: 2px 2px 0 0; min-height: 1px; opacity: .85; }
+.x-labels.edges span { flex: none; }
+.table.nums thead th:not(:first-child) { text-align: right; }

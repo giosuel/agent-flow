@@ -17,9 +17,9 @@
   <ul class="legend plain" aria-label="Projects">{% for l in legend %}<li><span class="swatch" style="--c: {{ l.color }}"></span>{{ l.name }}</li>{% endfor %}<li><span class="swatch limit"></span>machine limit</li></ul>
   <div class="duo-charts">
     <div class="stack-sm"><span class="label">CPU · cores</span>
-      <div class="chart"><span class="y-max mono sub">{{ cpu_max }}</span>{{ cpu|safe }}<div class="x-labels mono sub" aria-hidden="true">{% for l in x_labels %}<span>{{ l }}</span>{% endfor %}</div></div></div>
+      <div class="chart"><span class="y-max mono sub">{{ cpu_max }}</span>{{ cpu|safe }}<div class="x-labels edges mono sub" aria-hidden="true">{% for l in x_labels %}<span>{{ l }}</span>{% endfor %}</div></div></div>
     <div class="stack-sm"><span class="label">Memory · GB</span>
-      <div class="chart"><span class="y-max mono sub">{{ mem_max }}</span>{{ mem|safe }}<div class="x-labels mono sub" aria-hidden="true">{% for l in x_labels %}<span>{{ l }}</span>{% endfor %}</div></div></div>
+      <div class="chart"><span class="y-max mono sub">{{ mem_max }}</span>{{ mem|safe }}<div class="x-labels edges mono sub" aria-hidden="true">{% for l in x_labels %}<span>{{ l }}</span>{% endfor %}</div></div></div>
   </div>
   {% endif %}
   <div class="table-wrap"><table class="table nums">
