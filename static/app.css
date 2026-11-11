@@ -563,3 +563,26 @@ body { box-sizing: border-box; min-height: 100vh; min-height: 100dvh; }
   /* No column grows past the screen, whatever it holds (Safari lets a wide child stretch it). */
   .split, .split-main, .split-side, .card, .prose { min-width: 0; max-width: 100%; }
 }
+
+/* Screenshots (the owner, 2026-11-11): a grid of thumbnails with category pills; one opens on its
+   own page at full width. */
+.pills { display: flex; flex-wrap: wrap; gap: 8px; }
+.pills a { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 0 14px; border-radius: 18px; border: 1px solid var(--line); background: var(--panel); color: var(--ink2); text-decoration: none; font-size: 14px; }
+.pills a .mono { color: var(--muted); font-size: 12px; }
+.pills a.on { background: var(--chip-accent); border-color: var(--accent); color: var(--chip-accent-ink); }
+.shots { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; }
+.shot { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--panel); color: var(--ink); text-decoration: none; height: 100%; }
+.shot:hover { border-color: var(--accent); }
+.shot img { display: block; width: 100%; aspect-ratio: 16 / 10; object-fit: cover; object-position: top; background: var(--inset); border-bottom: 1px solid var(--line); }
+.shot-meta { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px 12px; min-width: 0; }
+.shot-meta strong { font-weight: 500; overflow-wrap: break-word; }
+.shot-full { margin: 0; display: flex; flex-direction: column; gap: 8px; }
+.shot-full img { display: block; max-width: 100%; height: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--inset); }
+@media (max-width: 700px) {
+  .shots { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .shot-meta { padding: 8px 10px 10px; font-size: 14px; }
+  .shot:active { background: var(--soft); }
+  /* Seven project tabs: four to a row. */
+  .proj-tabs { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .proj-tabs a { padding: 0 4px; font-size: 13px; }
+}

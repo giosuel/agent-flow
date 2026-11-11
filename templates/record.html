@@ -10,6 +10,13 @@
 
 <div class="split">
   <div class="split-main stack-lg">
+    {% if let Some(sv) = shot %}
+    <figure class="shot-full">
+      <a href="{{ sv.image }}" target="_blank" rel="noopener" title="Open the full image"><img src="{{ sv.image }}" alt="{{ title }}"></a>
+      <figcaption class="sub"><span class="chip">{{ sv.category }}</span> {{ sv.line }}</figcaption>
+    </figure>
+    {% endif %}
+
     {% if !owner_words.is_empty() %}
     <section class="stack-sm" aria-labelledby="words-h">
       <h2 class="label" id="words-h">The owner's words</h2>

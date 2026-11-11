@@ -358,6 +358,41 @@ pub struct PublishArgs {
     pub tag: Option<String>,
 }
 
+#[derive(Args)]
+pub struct ScreenshotArgs {
+    #[command(flatten)]
+    pub client: ClientArgs,
+    /// The image: PNG, JPEG or WebP, up to 10 MB.
+    pub file: PathBuf,
+    /// What it shows, in a few words, e.g. "Settings sidebar, variant A".
+    #[arg(long)]
+    pub name: String,
+    /// What kind of screenshot: test build, mockup, spike test, bug, … (a few words, your choice).
+    #[arg(long)]
+    pub category: String,
+    /// More about it (Markdown), if the name doesn't say enough.
+    #[arg(long, default_value = "")]
+    pub description: String,
+    /// The record it belongs to, e.g. T-12, B-3 or Q-4: it's linked and shows there.
+    #[arg(long)]
+    pub record: Option<String>,
+}
+
+/// Uploads a screenshot to the project's Screenshots.
+pub fn screenshot(config_path: &Path, a: ScreenshotArgs) -> anyhow::Result<()> {
+    let client = Client::new(config_path, &a.client)?.with_timeout(std::time::Duration::from_secs(120));
+    let file = std::fs::File::open(&a.file).with_context(|| format!("opening {}", a.file.display()))?;
+    let query = query_pairs(&[
+        ("name", a.name.clone()),
+        ("category", a.category.clone()),
+        ("description", a.description.clone()),
+        ("record", a.record.clone().unwrap_or_default()),
+    ]);
+    let res = client.post_file(&format!("/api/screenshots?{query}"), file)?;
+    println!("Uploaded as {}: {}", res["id"].as_str().unwrap_or(""), res["url"].as_str().unwrap_or(""));
+    Ok(())
+}
+
 fn git_out(dir: &Path, args: &[&str]) -> Option<String> {
     let out = std::process::Command::new("git").arg("-C").arg(dir).args(args).output().ok()?;
     out.status.success().then(|| String::from_utf8_lossy(&out.stdout).trim().to_owned())

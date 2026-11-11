@@ -130,6 +130,14 @@ Agents publish test builds with `agentflow publish <file-or-folder> --product <n
 `agentflow run <product> [number]`, which downloads the build once, checks every file against
 its checksum and starts it. A build with features waits for feedback on its page.
 
+## Screenshots
+
+Agents upload screenshots with `agentflow screenshot <file> --name "…" --category "…"
+[--description "…"] [--record T-12]`: PNG, JPEG or WebP up to 10 MB. The category is free text
+(test build, mockup, spike test, bug, …). Each one is a record (`S-4`) on the project's Screenshots
+tab, which can filter by category, and opens full size on its own page. With `--record` it's linked
+to that task, build or question and listed there too. The images are in `<data_dir>/screenshots/`.
+
 ## Guides
 
 The guides are the Markdown files of a git repository (`handbook_dir`). Agents read them through

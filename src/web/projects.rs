@@ -227,6 +227,20 @@ struct AgentCard {
     strip: Vec<(u32, String)>,
 }
 
+pub struct ShotCard {
+    url: String,
+    image: String,
+    title: String,
+    category: String,
+    when: String,
+}
+
+pub struct ShotView {
+    image: String,
+    category: String,
+    line: String,
+}
+
 pub struct Connect {
     mcp_add: String,
     start: String,
@@ -257,6 +271,10 @@ struct ProjectPage {
     questions: Vec<RecordRow>,
     /// The Builds tab: every build, newest first.
     builds: Vec<RecordRow>,
+    /// The Screenshots tab: the shown ones (newest first), all of them, and the category filter.
+    shots: Vec<ShotCard>,
+    shots_all: usize,
+    shot_cats: Vec<(String, String, usize, bool)>,
     prs: Vec<super::buttons::PrRow>,
     prs_total: usize,
     has_stack_button: bool,
@@ -277,6 +295,8 @@ struct TabQuery {
     /// After "Merge up to here": how many merged, and up to which PR.
     merged: Option<usize>,
     upto: Option<i64>,
+    /// The Screenshots tab's category filter.
+    cat: Option<String>,
 }
 
 /// The line shown after pressing a button, from the redirect's query.
@@ -301,6 +321,7 @@ const TABS: &[(&str, &str)] = &[
     ("prs", "Pull requests"),
     ("builds", "Builds"),
     ("decisions", "Decisions"),
+    ("screenshots", "Screenshots"),
 ];
 
 async fn project(
@@ -326,6 +347,28 @@ async fn project(
         .await?
         .ok_or(AppError::NotFound)?;
     let (mut page, checkout) = page;
+    if tab == "screenshots" {
+        let mut cats: Vec<(String, usize)> = Vec::new();
+        for s in &page.shots {
+            match cats.iter_mut().find(|c| c.0 == s.category) {
+                Some(c) => c.1 += 1,
+                None => cats.push((s.category.clone(), 1)),
+            }
+        }
+        cats.sort();
+        let pick = q.cat.clone().filter(|c| cats.iter().any(|x| &x.0 == c));
+        let base = format!("/p/{}?tab=screenshots", page.slug);
+        let mut pills = vec![("All".to_owned(), base.clone(), page.shots.len(), pick.is_none())];
+        for (c, n) in cats {
+            let href = format!("{base}&cat={}", super::log::enc(&c));
+            let on = pick.as_deref() == Some(c.as_str());
+            pills.push((c, href, n, on));
+        }
+        if let Some(c) = &pick {
+            page.shots.retain(|s| &s.category == c);
+        }
+        page.shot_cats = pills;
+    }
     if tab == "overview" && actor.is_owner() && !checkout.is_empty() {
         let folder = crate::util::expand_home(&checkout);
         let token_file = crate::tokens::token_path(&state.config.token_dir(), Some(&page.slug), &page.name);
@@ -583,6 +626,22 @@ fn build_project_page(
     } else {
         HashMap::new()
     };
+    let shots: Vec<ShotCard> = if tab == "screenshots" {
+        let mut list: Vec<&Record> =
+            all.iter().filter(|r| r.kind == Kind::Screenshot && r.state != "withdrawn").collect();
+        list.sort_by_key(|r| std::cmp::Reverse(r.number));
+        list.iter()
+            .map(|r| ShotCard {
+                url: r.url(),
+                image: format!("{}/image", r.url()),
+                title: r.title.clone(),
+                category: r.str("category").to_owned(),
+                when: format!("{} · {}", r.short_id(), ago(r.created_at, now)),
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
     let builds = if tab == "builds" {
         let mut list: Vec<&Record> = all.iter().filter(|r| r.kind == Kind::Build).collect();
         list.sort_by_key(|r| std::cmp::Reverse(r.number));
@@ -683,6 +742,9 @@ fn build_project_page(
         groups,
         questions,
         builds,
+        shots_all: shots.len(),
+        shots,
+        shot_cats: Vec::new(),
         prs_total: 0,
         has_stack_button: false,
         tabs: TABS,
@@ -750,6 +812,8 @@ struct RecordPage {
     pr_url: String,
     next: String,
     build: Option<BuildView>,
+    /// A screenshot's image and its details.
+    shot: Option<ShotView>,
     is_owner: bool,
 }
 
@@ -907,7 +971,15 @@ async fn load_record_page(
     };
 
     Ok(RecordPage {
-        nav: nav(state, actor, "/projects").await.back_to(format!("/p/{}", project.slug), project.name.clone()),
+        nav: nav(state, actor, "/projects").await.back_to(
+            // A screenshot goes back to the Screenshots it was opened from.
+            if r.kind == Kind::Screenshot {
+                format!("/p/{}?tab=screenshots", project.slug)
+            } else {
+                format!("/p/{}", project.slug)
+            },
+            project.name.clone(),
+        ),
         project_slug: project.slug,
         project_name: project.name,
         kind_label: r.kind.label(),
@@ -935,6 +1007,19 @@ async fn load_record_page(
         buttons,
         pr_url: if r.kind == Kind::Pr { r.str("url").to_owned() } else { String::new() },
         build: (r.kind == Kind::Build).then(|| build_view(&r, &links, false)),
+        shot: (r.kind == Kind::Screenshot).then(|| ShotView {
+            image: format!("{}/image", r.url()),
+            category: r.str("category").to_owned(),
+            line: {
+                let size = r.data.get("size").and_then(Value::as_i64).unwrap_or(0);
+                let dims =
+                    match (r.data.get("width").and_then(Value::as_i64), r.data.get("height").and_then(Value::as_i64)) {
+                        (Some(w), Some(h)) => format!("{w} × {h} · "),
+                        _ => String::new(),
+                    };
+                format!("{dims}{} KB · uploaded by {} {}", (size + 1023) / 1024, r.author, ago(r.created_at, now))
+            },
+        }),
         is_owner,
         next: r.url(),
     })

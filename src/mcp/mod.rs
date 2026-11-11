@@ -30,8 +30,11 @@ const INSTRUCTIONS: &str = "AgentFlow is the owner's project-management server. 
 owner, PRs and builds here instead of in Markdown files, and only it writes here (subagents report back \
 to it). Start every session with `hello`. Ask the owner with `ask_question`, one question per call, with \
 numbered options and your recommendation; the answer comes back verbatim. Record what the owner decided \
-with `record_decision`, quoting their words. Your token can change only your own project and read all \
-others. Every call is logged.";
+with `record_decision`, quoting their words. Show the owner what you see with screenshots: upload each \
+with the `agentflow screenshot <file> --name \"…\" --category \"…\"` command (a category of your choice, \
+e.g. test build, mockup, spike test, bug; `--description` and `--record T-12` optional); they appear on \
+your project's Screenshots tab, and on that record. Your token can change only your own project and read \
+all others. Every call is logged.";
 
 pub fn service(state: AppState) -> StreamableHttpService<FlowMcp, LocalSessionManager> {
     let host = state.config.public_host().to_owned();
