@@ -42,6 +42,7 @@ impl TestServer {
             data_dir: data.path().display().to_string(),
             handbook_dir: handbook.display().to_string(),
             build_free_gb: 0,
+            transcripts_dir: data.path().join("transcripts").display().to_string(),
             ..Config::default()
         };
         let github = std::sync::Arc::new(crate::github::fake::FakeGitHub::default());
@@ -1054,4 +1055,40 @@ async fn the_log_page_filters_and_streams() {
     );
     let res = s.http.get(s.url("/log/stream?after=0")).header(COOKIE, &cookie).send().await.unwrap();
     assert_eq!(res.headers()["content-type"], "text/event-stream");
+}
+
+#[tokio::test]
+async fn usage_and_machine_pages_show_the_counts() {
+    let s = TestServer::start().await;
+    let token = s.token(TokenKind::Project, Some("imaginarium")).await;
+    let sess = mcp_session(&s, &token).await;
+    mcp_tool(&s, &token, &sess, "update_project", json!({"checkout": "/home/viber/office"})).await;
+    let dir = std::path::PathBuf::from(&s.state.config.transcripts_dir).join("-home-viber-office");
+    std::fs::create_dir_all(&dir).unwrap();
+    let now = time::OffsetDateTime::now_utc().format(&time::format_description::well_known::Rfc3339).unwrap();
+    std::fs::write(
+        dir.join("s1.jsonl"),
+        format!(
+            "{{\"type\":\"assistant\",\"timestamp\":\"{now}\",\"sessionId\":\"s1\",\"message\":{{\"id\":\"m1\",\"model\":\"claude-opus-5-5\",\"usage\":{{\"input_tokens\":1200000,\"output_tokens\":5,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":9}}}}}}\n"
+        ),
+    )
+    .unwrap();
+    let stats = super::usage_round(&s.state).await.unwrap();
+    assert_eq!(stats.calls, 1);
+    let cookie = s.owner_cookie().await;
+    let get = |path: &'static str| {
+        let (http, url, cookie) = (s.http.clone(), s.url(path), cookie.clone());
+        async move { http.get(url).header(COOKIE, cookie).send().await.unwrap() }
+    };
+    let html = get("/usage").await.text().await.unwrap();
+    assert!(html.contains("imaginarium") && html.contains("1.2 M"), "{html}");
+    assert!(get("/usage?tab=tasks").await.text().await.unwrap().contains("Not in a task"));
+    let res = get("/machine?range=6h").await;
+    assert_eq!(res.status(), StatusCode::OK);
+    assert!(res.text().await.unwrap().contains("Disk free"));
+    let html = get("/p/imaginarium").await.text().await.unwrap();
+    assert!(html.contains("Tokens this week") && html.contains("1.2 M"));
+    // Agents don't see it.
+    let res = s.http.get(s.url("/usage")).bearer_auth(&token).send().await.unwrap();
+    assert_eq!(res.status(), StatusCode::FORBIDDEN);
 }
