@@ -225,6 +225,8 @@ struct ProjectPage {
     decisions: Vec<RecordRow>,
     groups: Vec<TaskGroup>,
     questions: Vec<RecordRow>,
+    /// The Builds tab: every build, newest first.
+    builds: Vec<RecordRow>,
     prs: Vec<super::buttons::PrRow>,
     prs_total: usize,
     has_stack_button: bool,
@@ -267,6 +269,7 @@ const TABS: &[(&str, &str)] = &[
     ("questions", "Questions"),
     ("tasks", "Tasks"),
     ("prs", "Pull requests"),
+    ("builds", "Builds"),
     ("decisions", "Decisions"),
 ];
 
@@ -498,6 +501,23 @@ fn build_project_page(
     let open_questions = questions_all.iter().filter(|r| r.state == "open").map(|r| row(r)).collect();
     let questions = if tab == "questions" { questions_all.iter().map(|r| row(r)).collect() } else { Vec::new() };
 
+    let builds = if tab == "builds" {
+        let mut list: Vec<&Record> = all.iter().filter(|r| r.kind == Kind::Build).collect();
+        list.sort_by_key(|r| std::cmp::Reverse(r.number));
+        list.iter()
+            .map(|r| {
+                let waiting = r.data.get("ready_for_feedback").and_then(Value::as_bool).unwrap_or(false);
+                let mut sub = format!("{} · {}", r.str("name"), ago(r.created_at, now));
+                if waiting {
+                    sub.push_str(" · waiting for your feedback");
+                }
+                RecordRow::new(r, sub)
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+
     let groups = if tab == "tasks" {
         let mut groups = Vec::new();
         for m in ms.iter().filter(|m| m.parent_id.is_none()) {
@@ -565,6 +585,7 @@ fn build_project_page(
         decisions,
         groups,
         questions,
+        builds,
         prs_total: 0,
         has_stack_button: false,
         tabs: TABS,

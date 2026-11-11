@@ -125,6 +125,13 @@
 {% endfor %}
 {% endif %}
 
+{% if tab == "builds" %}
+<section class="card pad stack">
+  {% if builds.is_empty() %}<p class="sub">No builds yet. The agent publishes them with <span class="mono">agentflow publish</span>.</p>{% endif %}
+  <ul class="rows">{% for b in builds %}<li class="item-row"><span class="mono sub id-col">{{ b.short }}</span><div class="ttl"><a href="{{ b.url }}">{{ b.title }}</a><span class="sub">{{ b.sub }}</span></div><span class="chip{% if b.state == "tried" %} ok{% endif %}">{{ b.state }}</span></li>{% endfor %}</ul>
+</section>
+{% endif %}
+
 {% if tab == "decisions" %}
 <section class="card pad stack">
   {% if decisions.is_empty() %}<p class="sub">No decisions recorded yet.</p>{% endif %}
