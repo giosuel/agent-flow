@@ -26,7 +26,10 @@
     const doc = new DOMParser().parseFromString(await r.text(), "text/html");
     const fresh = doc.getElementById("hist");
     const old = document.getElementById("hist");
-    if (fresh && old) old.replaceWith(document.importNode(fresh, true));
+    if (fresh && old) {
+      old.replaceWith(document.importNode(fresh, true));
+      document.dispatchEvent(new Event("af:charts"));
+    }
   }
 
   async function tick() {

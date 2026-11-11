@@ -165,8 +165,19 @@ async fn page(
     };
     let cpu_series = series_of(&|cores, _| cores);
     let mem_series = series_of(&|_, mem_kb| mem_kb / 1024.0 / 1024.0);
-    let (cpu, cpu_max) = charts::stacked_areas("CPU by project, cores", n, &cpu_series, Some(snap.cores as f64));
-    let (mem, mem_max) = charts::stacked_areas("Memory by project, GB", n, &mem_series, Some(snap.mem_total_gb()));
+    // Each point's time, for the hover layer: "14:05", or "Tue 10 14:00" over a week.
+    let point_labels: Vec<String> = (0..n as i64)
+        .map(|i| {
+            let t = from + i * step;
+            if range == "7d" { format!("{} {}", tz.day_label(t), tz.hm(t)) } else { tz.hm(t) }
+        })
+        .collect();
+    let cores_fmt = |v: f64| format!("{v:.1} cores");
+    let gb_fmt = |v: f64| format!("{v:.1} GB");
+    let (cpu, cpu_max) =
+        charts::stacked_areas("CPU by project, cores", &point_labels, &cpu_series, Some(snap.cores as f64), &cores_fmt);
+    let (mem, mem_max) =
+        charts::stacked_areas("Memory by project, GB", &point_labels, &mem_series, Some(snap.mem_total_gb()), &gb_fmt);
     let legend = cpu_series.iter().map(|s| Legend { name: s.name.clone(), color: s.color }).collect();
     let x_labels: Vec<String> = (0..5)
         .map(|i| {

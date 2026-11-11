@@ -29,7 +29,7 @@
   <section class="split-main stack" aria-labelledby="entries-h">
     <div class="sec"><h2 id="entries-h">{{ total }} entr{% if total == 1 %}y{% else %}ies{% endif %} · {{ span }}</h2><span class="sub">click a bar to zoom in</span></div>
     <div class="hist" role="img" aria-label="Entries over time">
-      {% for b in bars %}<a href="{{ b.href }}" title="{{ b.label }}" aria-label="{{ b.label }}"><i style="height: {{ b.height }}%"></i></a>{% endfor %}
+      {% for b in bars %}<a href="{{ b.href }}" data-tip="{{ b.label }}" aria-label="{{ b.label }}"><i style="height: {{ b.height }}%"></i></a>{% endfor %}
     </div>
     <div class="axis sub mono">{% for a in axis %}<span>{{ a }}</span>{% endfor %}</div>
     <p class="sub">Newest first · times in {{ tz }}</p>
