@@ -159,7 +159,7 @@ fn model_line(p: &Project) -> String {
         ("", "") => String::new(),
         (m, "") => m.into(),
         ("", e) => format!("effort {e}"),
-        (m, e) => format!("{m} · {e}"),
+        (m, e) => format!("{m} · effort {e}"),
     }
 }
 
@@ -521,6 +521,38 @@ fn build_project_page(
     let open_questions = questions_all.iter().filter(|r| r.state == "open").map(|r| row(r)).collect();
     let questions = if tab == "questions" { questions_all.iter().map(|r| row(r)).collect() } else { Vec::new() };
 
+    // "1 works · 1 problem · 1 skipped" per build, from its feedback records.
+    let verdicts: HashMap<i64, String> = if tab == "builds" {
+        let mut by: HashMap<i64, (usize, usize, usize)> = HashMap::new();
+        for f in all.iter().filter(|f| f.kind == Kind::Feedback) {
+            let Some(b) = all.iter().find(|b| b.kind == Kind::Build && b.ref_id == f.str("build")) else { continue };
+            let e = by.entry(b.id).or_default();
+            match f.state.as_str() {
+                "works" => e.0 += 1,
+                "problem" => e.1 += 1,
+                "skipped" => e.2 += 1,
+                _ => {}
+            }
+        }
+        by.into_iter()
+            .map(|(id, (w, p, s))| {
+                let mut parts = Vec::new();
+                if w > 0 {
+                    parts.push(format!("{w} works"));
+                }
+                if p > 0 {
+                    parts.push(plural(p as i64, "problem", "problems"));
+                }
+                if s > 0 {
+                    parts.push(format!("{s} skipped"));
+                }
+                (id, parts.join(" · "))
+            })
+            .filter(|(_, s)| !s.is_empty())
+            .collect()
+    } else {
+        HashMap::new()
+    };
     let builds = if tab == "builds" {
         let mut list: Vec<&Record> = all.iter().filter(|r| r.kind == Kind::Build).collect();
         list.sort_by_key(|r| std::cmp::Reverse(r.number));
@@ -530,6 +562,9 @@ fn build_project_page(
                 let mut sub = format!("{} · {}", r.str("name"), ago(r.created_at, now));
                 if waiting {
                     sub.push_str(" · waiting for your feedback");
+                }
+                if let Some(v) = verdicts.get(&r.id) {
+                    sub.push_str(&format!(" · {v}"));
                 }
                 RecordRow::new(r, sub)
             })
@@ -755,6 +790,10 @@ async fn load_record_page(
     let mut groups: Vec<LinkGroup> = Vec::new();
     let mut stale = Vec::new();
     for l in &links {
+        // A build's feedback is listed on the page already ("Your feedback").
+        if r.kind == Kind::Build && l.other.kind == Kind::Feedback {
+            continue;
+        }
         if l.stale {
             stale.push(RecordRow::new(&l.other, format!("last changed {}", ago(l.other.updated_at, now))));
         }
@@ -880,7 +919,8 @@ fn build_view(r: &Record, links: &[records::LinkView], sent: bool) -> BuildView 
     } else {
         format!("{} KB", size.div_ceil(1024))
     };
-    facts.push(("Size".into(), format!("{size}, starts with {}", r.str("entry"))));
+    facts.push(("Size".into(), size));
+    facts.push(("Starts".into(), r.str("entry").into()));
     if !r.str("tag").is_empty() {
         facts.push(("Tag".into(), r.str("tag").into()));
     }
@@ -941,6 +981,8 @@ fn describe_revision(h: &records::Revision, r: &Record) -> String {
                 | ("answer_option", _)
                 | ("answer_option_title", _) => continue,
                 ("started_at", _) => continue,
+                // Set by the feedback itself, which the next line of the history says.
+                ("ready_for_feedback", _) => continue,
                 (k, _) => format!("changed the {}", k.replace('_', " ")),
             });
         }
