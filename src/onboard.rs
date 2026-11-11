@@ -63,10 +63,61 @@ fn check_folder(folder: &str) -> anyhow::Result<PathBuf> {
     if !path.to_string_lossy().chars().all(|c| c.is_ascii_alphanumeric() || "/._-".contains(c)) {
         bail!("use letters, digits, dots, dashes and underscores in the folder's name");
     }
-    if path.exists() && !path.is_dir() {
-        bail!("{} exists and isn't a folder", path.display());
+    // No link anywhere on the way: the project would work in wherever it points.
+    let mut walk = home.clone();
+    for part in path.strip_prefix(&home).unwrap_or(&path).components() {
+        walk.push(part);
+        match std::fs::symlink_metadata(&walk) {
+            Ok(m) if m.file_type().is_symlink() => bail!("{} is a link; give the real folder", walk.display()),
+            Ok(m) if !m.is_dir() => bail!("{} exists and isn't a folder", walk.display()),
+            Ok(_) => {}
+            Err(_) => break, // the rest doesn't exist yet
+        }
     }
     Ok(path)
+}
+
+/// Folders a new project may not use: other projects' checkouts and AgentFlow's and Claude
+/// Code's own, with everything inside them (and their parents, which would contain them).
+pub struct Taken {
+    pub dirs: Vec<(PathBuf, String)>,
+    pub token_dir: PathBuf,
+}
+
+impl Taken {
+    pub fn load(conn: &Connection, config: &crate::config::Config) -> anyhow::Result<Self> {
+        let mut dirs: Vec<(PathBuf, String)> = projects::list(conn)?
+            .into_iter()
+            .filter(|p| !p.checkout.trim().is_empty())
+            .map(|p| (expand_home(p.checkout.trim()), format!("{}'s checkout", p.name)))
+            .collect();
+        for (dir, what) in [
+            (config.token_dir(), "AgentFlow's tokens"),
+            (config.data_dir(), "AgentFlow's data"),
+            (config.handbook_dir(), "the guides"),
+            (crate::util::home_dir().join(".claude"), "Claude Code's own folder"),
+            (crate::util::home_dir().join(".config"), "your settings"),
+        ] {
+            dirs.push((dir, what.into()));
+        }
+        Ok(Self { dirs, token_dir: config.token_dir() })
+    }
+
+    fn check(&self, folder: &Path, slug: &str, name: &str) -> anyhow::Result<()> {
+        for (dir, what) in &self.dirs {
+            if folder.starts_with(dir) || dir.starts_with(folder) {
+                bail!("{} overlaps {what} ({}); pick another folder", folder.display(), dir.display());
+            }
+        }
+        let token = crate::tokens::token_path(&self.token_dir, Some(slug), name);
+        if token.exists() {
+            bail!(
+                "{} exists already (another project's or the consultant's token); pick another name",
+                token.display()
+            );
+        }
+        Ok(())
+    }
 }
 
 /// The database part: project, details, M0, token. Returns the token's secret.
@@ -132,11 +183,19 @@ pub fn create_files(
 
     // The agent's memory lives with Claude Code, not in the repository (the owner, 2026-10-20).
     let memory = claude_projects.join(crate::usage::folder_for(&folder.display().to_string())).join("memory");
+    if memory.exists() {
+        steps.push(format!(
+            "The agent's memory folder ({}) existed already; look through it before you start the agent, since it reads it.",
+            memory.display()
+        ));
+    }
     std::fs::create_dir_all(&memory)?;
     let note = memory.join("agentflow.md");
-    if !note.exists() {
-        std::fs::write(
-            &note,
+    // create_new: a note somebody left there first is never taken as ours.
+    let created = std::fs::OpenOptions::new().write(true).create_new(true).open(&note);
+    if let Ok(mut f) = created {
+        use std::io::Write;
+        f.write_all(
             format!(
                 "---\nname: agentflow\ndescription: this project ({name}) is run through AgentFlow; start every session with its hello tool\nmetadata:\n  type: project\n---\n\n\
                  {name} is managed in AgentFlow ({public_url}), through the `agentflow` MCP server. At the start of every \
@@ -144,7 +203,8 @@ pub fn create_files(
                  in the repository. The owner's rules are in the guides (`guides`, `guide`). Ask the owner with \
                  `ask_question`; write to other agents and the consultant with `send_message`.\n",
                 name = p.name.trim()
-            ),
+            )
+            .as_bytes(),
         )?;
         let index = memory.join("MEMORY.md");
         let mut text = std::fs::read_to_string(&index).unwrap_or_default();
@@ -166,7 +226,7 @@ pub fn create_files(
 }
 
 /// Checks the form before anything is created.
-pub fn check(p: &mut NewProject) -> anyhow::Result<PathBuf> {
+pub fn check(p: &mut NewProject, taken: &Taken) -> anyhow::Result<PathBuf> {
     if p.name.trim().is_empty() || p.name.chars().count() > 60 {
         bail!("give the project a name (up to 60 characters)");
     }
@@ -177,7 +237,9 @@ pub fn check(p: &mut NewProject) -> anyhow::Result<PathBuf> {
     if p.folder.trim().is_empty() {
         p.folder = format!("~/{}", p.slug);
     }
-    check_folder(&p.folder)
+    let folder = check_folder(&p.folder)?;
+    taken.check(&folder, &p.slug, &p.name)?;
+    Ok(folder)
 }
 
 #[cfg(test)]
@@ -227,13 +289,38 @@ mod tests {
 
     #[test]
     fn folders_stay_in_home() {
+        let tokens = tempfile::tempdir().unwrap();
+        let none = Taken { dirs: Vec::new(), token_dir: tokens.path().to_owned() };
         for bad in ["/etc/x", "~", "~/../x", "~/my app", "~/it's"] {
             let mut p = NewProject { name: "X".into(), folder: bad.into(), ..Default::default() };
-            assert!(check(&mut p).is_err(), "{bad}");
+            assert!(check(&mut p, &none).is_err(), "{bad}");
         }
         let mut p = NewProject { name: "Cold Trace".into(), ..Default::default() };
-        let path = check(&mut p).unwrap();
+        let path = check(&mut p, &none).unwrap();
         assert_eq!(p.slug, "cold-trace");
         assert!(path.ends_with("cold-trace"));
+        // Another project's checkout, or a folder holding one, is taken; so is a token file.
+        let home = crate::util::home_dir();
+        let taken = Taken {
+            dirs: vec![(home.join("vinculum"), "Vinculum's checkout".into())],
+            token_dir: tokens.path().to_owned(),
+        };
+        for folder in ["~/vinculum", "~/vinculum/sub"] {
+            let mut p = NewProject { name: "X".into(), folder: folder.into(), ..Default::default() };
+            assert!(check(&mut p, &taken).unwrap_err().to_string().contains("overlaps"), "{folder}");
+        }
+        std::fs::write(tokens.path().join("viber-consultant.token"), "x").unwrap();
+        let mut p = NewProject { name: "Viber Consultant".into(), folder: "~/vc-x".into(), ..Default::default() };
+        assert!(check(&mut p, &taken).unwrap_err().to_string().contains("token"));
+    }
+
+    #[test]
+    fn links_are_refused() {
+        let home = crate::util::home_dir();
+        let link = home.join(format!(".agentflow-test-link-{}", std::process::id()));
+        std::os::unix::fs::symlink("/tmp", &link).unwrap();
+        let r = check_folder(&format!("~/{}/x", link.file_name().unwrap().to_string_lossy()));
+        std::fs::remove_file(&link).unwrap();
+        assert!(r.unwrap_err().to_string().contains("is a link"));
     }
 }
