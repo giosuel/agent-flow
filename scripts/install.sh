@@ -10,6 +10,8 @@ install -d "$HOME/.local/bin" "$HOME/.config/systemd/user"
 # Copy next to the old binary, then rename: a running server keeps its file until it restarts.
 install -m 755 "$CARGO_TARGET_DIR/release/agentflow" "$HOME/.local/bin/.agentflow.new"
 mv "$HOME/.local/bin/.agentflow.new" "$HOME/.local/bin/agentflow"
+# The owner's command for test builds is the same program by another name.
+ln -sfn agentflow "$HOME/.local/bin/flow-run"
 install -m 644 packaging/agentflow.service "$HOME/.config/systemd/user/agentflow.service"
 systemctl --user daemon-reload
 systemctl --user enable agentflow.service >/dev/null
