@@ -898,7 +898,7 @@ async fn the_owner_writes_into_a_conversation() {
     let thread = r["conversation"].as_i64().unwrap();
     let cookie = s.owner_cookie().await;
     let page = s.http.get(s.url("/conversations")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
-    assert!(page.contains("Tags?") && page.contains("vinculum → consultant"));
+    assert!(page.contains("Tags?") && page.contains("vinculum → Consultant"), "names, not slugs");
     let res = s
         .http
         .post(s.url(&format!("/conversations/{thread}/reply")))
