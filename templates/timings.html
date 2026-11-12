@@ -1,0 +1,6 @@
+<section class="stack-sm" aria-labelledby="timings-h">
+  <h2 class="label" id="timings-h">Timings</h2>
+  <div class="table-wrap"><table class="timing"><thead><tr><th>What</th><th>On</th><th>Where</th><th>Wall</th><th>CPU</th><th>Peak memory</th><th>When</th></tr></thead><tbody>
+  {% for t in timings %}<tr{% if t.failed %} class="failed"{% endif %}><td><span class="mono">{{ t.what }}</span>{% if t.failed %} <span class="chip warn">failed</span>{% endif %}</td><td class="mono sub">{{ t.on }}</td><td>{{ t.place }}</td><td class="m">{{ t.wall }}</td><td class="m">{{ t.cpu }}</td><td class="m">{{ t.peak }}</td><td class="sub">{{ t.when }}</td></tr>{% endfor %}
+  </tbody></table></div>
+</section>
