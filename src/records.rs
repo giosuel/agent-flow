@@ -641,6 +641,38 @@ pub fn answer_question(
     Ok(q)
 }
 
+/// The decision an answer makes (Imaginarium's agent, 2026-11-12: "when the owner answers in
+/// AgentFlow, AgentFlow creates the decision itself, with their answer as the owner's words"):
+/// the owner's words are their answer, the title says what was chosen (or `title` when given).
+pub fn decision_from_answer(conn: &Connection, q: &Record, title: Option<&str>, source: &str, author: &str) -> anyhow::Result<Record> {
+    let option = q.str("answer_option_title").to_owned();
+    let words = q.str("answer").trim().to_owned();
+    let owner_words = match (option.is_empty(), words.is_empty()) {
+        (false, true) => option.clone(),
+        (false, false) => format!("{option}. {words}"),
+        _ => words.clone(),
+    };
+    let title = match title.map(str::trim).filter(|t| !t.is_empty()) {
+        Some(t) => t.to_owned(),
+        None => {
+            let what = if option.is_empty() { words.chars().take(120).collect::<String>() } else { option };
+            format!("{}: {what}", q.title.trim().trim_end_matches('?'))
+        }
+    };
+    let mut data = Map::new();
+    data.insert("owner_words".into(), owner_words.into());
+    data.insert("said_at".into(), q.data.get("answered_at").cloned().unwrap_or_else(|| now_ms().into()));
+    data.insert("source".into(), source.into());
+    let d = create(
+        conn,
+        q.project_id,
+        author,
+        NewRecord { kind: Some(Kind::Decision), title, body: format!("The answer to {}.", q.short_id()), data, ..Default::default() },
+    )?;
+    link(conn, &d, q, "answers", author)?;
+    Ok(d)
+}
+
 // ---------------------------------------------------------------------------------------------
 // Links
 

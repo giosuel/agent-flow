@@ -1908,6 +1908,7 @@ async fn answer(
             let tx = c.transaction()?;
             let q = records::find_str(&tx, &format!("{s}/{i}"), None)?;
             let q = records::answer_question(&tx, &q, option, &words, "owner")?;
+            records::decision_from_answer(&tx, &q, None, &format!("owner, answering {} in AgentFlow", q.short_id()), "owner")?;
             tx.commit()?;
             Ok(q)
         })
