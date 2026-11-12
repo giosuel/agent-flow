@@ -74,6 +74,8 @@ struct StepPage {
     follow_ups: Vec<Link>,
     with_owner: Vec<Link>,
     review: Option<ReviewView>,
+    /// Notes that belong to the step (reports, logs).
+    notes: Vec<Link>,
 }
 
 async fn step(
@@ -174,11 +176,16 @@ async fn step(
                     ),
                 })
             };
-            Ok(Some((p, m, parent, tasks, (times, timings, decisions, follow_ups, with_owner, review))))
+            let notes: Vec<Link> = all
+                .iter()
+                .filter(|r| r.kind == crate::records::Kind::Note && r.milestone_id == Some(m.id))
+                .map(|r| Link { short: r.short_id(), url: r.url(), title: r.title.clone(), sub: r.str("category").to_owned() })
+                .collect();
+            Ok(Some((p, m, parent, tasks, (times, timings, decisions, follow_ups, with_owner, review, notes))))
         })
         .await?
         .ok_or(AppError::NotFound)?;
-    let (p, m, parent, mut tasks, (times, timings, decisions, follow_ups, with_owner, review)) = page;
+    let (p, m, parent, mut tasks, (times, timings, decisions, follow_ups, with_owner, review, notes)) = page;
     // A review's findings by importance (high first), then in the agent's order.
     if review.is_some() {
         let rank = |t: &Record| match t.str("importance") {
@@ -259,5 +266,6 @@ async fn step(
         follow_ups,
         with_owner,
         review,
+        notes,
     })
 }

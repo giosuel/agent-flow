@@ -237,6 +237,20 @@ pub fn enabled(conn: &Connection, a: &ActionRow) -> anyhow::Result<Result<(), St
         "done" => return Ok(Err("done".into())),
         s => return Ok(Err(s.into())),
     }
+    // An open question that blocks the PR or release holds its buttons (Imaginarium's agent,
+    // 2026-11-12: a Push tag button was live while the tag's name was still a question).
+    let waiting: Option<i64> = conn
+        .query_row(
+            "SELECT q.number FROM links l JOIN records q ON q.id = l.from_id
+             WHERE l.to_id = ?1 AND l.relation = 'blocks' AND q.kind = 'question' AND q.state = 'open'
+             ORDER BY q.number LIMIT 1",
+            [a.record_id],
+            |r| r.get(0),
+        )
+        .optional()?;
+    if let Some(n) = waiting {
+        return Ok(Err(format!("waits for the answer to Q-{n}")));
+    }
     for req in &a.requires {
         let r = records::find_str(conn, req, None)?;
         if !records::is_finished(&r) {

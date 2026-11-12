@@ -450,7 +450,7 @@ pub struct NoteArgs {
     /// More about it (Markdown).
     #[arg(long, default_value = "")]
     pub description: String,
-    /// A record it belongs to, e.g. T-12.
+    /// What it belongs to: a record (T-12) or a step (P9.R).
     #[arg(long)]
     pub record: Option<String>,
     /// When it should come back to you in hello: a date (2026-11-25) or a condition.
