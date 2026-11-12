@@ -17,6 +17,55 @@ use crate::util::now_ms;
 /// something. "review" (its PR is open) doesn't: open PRs never hold a step.
 pub const OPEN: &[&str] = &["todo", "doing", "blocked"];
 
+/// "2 h", "40 min", "1 h 30 min", "1.5h", "90m" → minutes. Estimates are the agent's own words,
+/// but they have to be readable as a duration so actual times can be set against them.
+pub fn parse_minutes(s: &str) -> Option<i64> {
+    let s = s.trim().to_lowercase().replace(',', ".");
+    if s.is_empty() {
+        return None;
+    }
+    let mut total = 0.0;
+    let mut num = String::new();
+    let mut unit = String::new();
+    let mut found = false;
+    let mut flush = |num: &mut String, unit: &mut String| -> Option<()> {
+        if num.is_empty() {
+            return if unit.is_empty() { Some(()) } else { None };
+        }
+        let n: f64 = num.parse().ok()?;
+        let factor = match unit.as_str() {
+            "h" | "hr" | "hrs" | "hour" | "hours" => 60.0,
+            "m" | "min" | "mins" | "minute" | "minutes" => 1.0,
+            "d" | "day" | "days" => 8.0 * 60.0,
+            _ => return None,
+        };
+        total += n * factor;
+        found = true;
+        num.clear();
+        unit.clear();
+        Some(())
+    };
+    for ch in s.chars() {
+        if ch.is_ascii_digit() || ch == '.' {
+            if !unit.is_empty() {
+                flush(&mut num, &mut unit)?;
+            }
+            num.push(ch);
+        } else if ch.is_alphabetic() {
+            unit.push(ch);
+        } else if ch.is_whitespace() {
+            continue;
+        } else {
+            return None;
+        }
+    }
+    flush(&mut num, &mut unit)?;
+    (found && total > 0.0 && total < 60.0 * 24.0 * 30.0).then(|| total.round() as i64)
+}
+
+/// Where a task came from: planned with its step, or added while the step was under way.
+pub const SOURCES: &[&str] = &["planned", "owner_feedback", "found", "review", "bug"];
+
 /// A task went to doing: its step (and the step's milestone) start if they hadn't.
 pub fn task_started(conn: &Connection, task: &Record, actor: &str) -> anyhow::Result<Vec<String>> {
     let mut started = Vec::new();
@@ -263,6 +312,19 @@ pub fn where_json(conn: &Connection, project_id: i64) -> anyhow::Result<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn estimates() {
+        assert_eq!(parse_minutes("2 h"), Some(120));
+        assert_eq!(parse_minutes("40 min"), Some(40));
+        assert_eq!(parse_minutes("1 h 30 min"), Some(90));
+        assert_eq!(parse_minutes("1.5h"), Some(90));
+        assert_eq!(parse_minutes("90m"), Some(90));
+        assert_eq!(parse_minutes("1h30"), None);
+        assert_eq!(parse_minutes("soon"), None);
+        assert_eq!(parse_minutes(""), None);
+        assert_eq!(parse_minutes("0 h"), None);
+    }
     use crate::db::Db;
     use crate::records::NewRecord;
 
