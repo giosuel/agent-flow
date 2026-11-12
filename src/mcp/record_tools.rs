@@ -117,7 +117,7 @@ pub struct AddNote {
     pub category: String,
     /// The note itself, Markdown.
     pub text: String,
-    /// A record it belongs to, e.g. "T-31".
+    /// What it belongs to: a record ("T-31") or a step or milestone ("P9.R").
     pub record: Option<String>,
     /// When it should come back to you in hello: a date ("2026-11-25") or a condition ("when Loro
     /// updates", listed in every hello until you resolve it).
@@ -227,7 +227,8 @@ pub struct AskQuestion {
     /// The option you recommend, counting from 1.
     pub recommended: Option<u32>,
     /// What this question blocks, e.g. ["T-18", "T-19"]: those tasks are set blocked and come back
-    /// to todo by themselves when the owner answers.
+    /// to todo by themselves when the owner answers. A PR or release (e.g. "R-1", whose tag name is
+    /// the question) keeps its buttons locked until then.
     #[serde(default)]
     pub blocks: Vec<String>,
     #[serde(default)]
@@ -570,6 +571,101 @@ fn update_one(tx: &rusqlite::Connection, a: &crate::auth::Actor, id: &str, p: &U
     Ok((r, changed, started))
 }
 
+/// Records one decision (record_decision, and each of record_decisions). `earlier` maps "#n" to
+/// the decisions made before it in the same batch, so a batch can replace its own entries.
+fn decide(tx: &rusqlite::Connection, a: &crate::auth::Actor, project: &projects::Project, p: &RecordDecision, earlier: &[Record]) -> anyhow::Result<Record> {
+    if p.owner_words.trim().is_empty() {
+        anyhow::bail!("owner_words: quote what the owner said");
+    }
+    if p.source.trim().is_empty() {
+        anyhow::bail!("source: \"owner\" or \"relayed by <session>\"");
+    }
+    let said_at = match &p.said_at {
+        Some(s) => parse_date(s)?,
+        None => now_ms(),
+    };
+    let find = |id: &str| -> anyhow::Result<Record> {
+        if let Some(n) = id.trim().strip_prefix('#').and_then(|n| n.parse::<usize>().ok()) {
+            return earlier.get(n.wrapping_sub(1)).cloned().ok_or_else(|| anyhow::anyhow!("#{n} isn't an earlier decision of this batch"));
+        }
+        records::find_str(tx, id, Some(&project.slug))
+    };
+    let mut data = Map::new();
+    data.insert("owner_words".into(), p.owner_words.trim().into());
+    data.insert("said_at".into(), said_at.into());
+    data.insert("source".into(), p.source.trim().into());
+    let d = records::create(
+        tx,
+        project.id,
+        &a.name(),
+        NewRecord {
+            kind: Some(Kind::Decision),
+            title: p.title.clone(),
+            body: p.body.clone(),
+            tags: p.tags.clone(),
+            data,
+            ..Default::default()
+        },
+    )?;
+    if let Some(q) = &p.answers {
+        let q = find(q)?;
+        // An answer given in chat closes the question too (the owner, 2026-11-12).
+        if q.kind == Kind::Question && q.state == "open" {
+            records::answer_question(tx, &q, None, p.owner_words.trim(), &a.name())?;
+        }
+        records::link(tx, &d, &q, "answers", &a.name())?;
+    }
+    if let Some(old) = &p.supersedes {
+        let old = find(old)?;
+        if old.kind != Kind::Decision {
+            anyhow::bail!("{} isn't a decision", old.ref_id);
+        }
+        records::link(tx, &d, &old, "supersedes", &a.name())?;
+    }
+    Ok(d)
+}
+
+fn adr(tx: &rusqlite::Connection, a: &crate::auth::Actor, project: &projects::Project, p: &AddAdr) -> anyhow::Result<Record> {
+    let mut data = Map::new();
+    data.insert("repo".into(), p.repo.trim().into());
+    data.insert("path".into(), p.path.trim().trim_start_matches('/').into());
+    if let Some(n) = p.number {
+        data.insert("adr_number".into(), n.into());
+    }
+    let r = records::create(
+        tx,
+        project.id,
+        &a.name(),
+        NewRecord { kind: Some(Kind::Adr), title: p.title.clone(), tags: p.tags.clone(), data, ..Default::default() },
+    )?;
+    if let Some(d) = &p.records {
+        let d = records::find_str(tx, d, Some(&project.slug))?;
+        records::link(tx, &r, &d, "records", &a.name())?;
+    }
+    Ok(r)
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct RecordDecisions {
+    /// Only for the consultant: which project.
+    pub project: Option<String>,
+    /// The decisions, oldest first. In supersedes or answers, "#3" means the 3rd decision of this
+    /// list. All are recorded or none (with each problem listed).
+    pub decisions: Vec<RecordDecision>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct AddAdrs {
+    /// Only for the consultant: which project.
+    pub project: Option<String>,
+    pub adrs: Vec<AddAdr>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct AddToTests {
+    pub items: Vec<AddToTest>,
+}
+
 #[tool_router(router = record_tools, vis = "pub(super)")]
 impl FlowMcp {
     #[tool(description = "Add a task to a step (or milestone) of your project, with your estimate. For a step's \
@@ -793,15 +889,15 @@ impl FlowMcp {
                     data.insert("resurface".into(), text.into());
                     data.insert("resurface_at".into(), at.map(Value::from).unwrap_or(Value::Null));
                 }
+                let (target, step) = crate::notes::target(&tx, &project, p.record.as_deref().unwrap_or("").trim())?;
                 let n = records::create(
                     &tx,
                     project.id,
                     &a.name(),
-                    NewRecord { kind: Some(Kind::Note), title: p.name, body: p.text, data, ..Default::default() },
+                    NewRecord { kind: Some(Kind::Note), title: p.name, body: p.text, milestone_id: step, data, ..Default::default() },
                 )?;
-                if let Some(r) = p.record.as_deref().map(str::trim).filter(|r| !r.is_empty()) {
-                    let target = records::find_str(&tx, r, Some(&project.slug))?;
-                    records::link(&tx, &n, &target, "relates", &a.name())?;
+                if let Some(target) = &target {
+                    records::link(&tx, &n, target, "relates", &a.name())?;
                 }
                 tx.commit()?;
                 Ok(Outcome::new(json!({"id": n.ref_id})).summary(format!("note {} added", n.short_id())).project(project.slug).target(n.ref_id))
@@ -1266,48 +1362,7 @@ impl FlowMcp {
             .call(move |c| {
                 let tx = c.transaction()?;
                 let project = target_project(&tx, &a, p.project.as_deref(), true)?;
-                if p.owner_words.trim().is_empty() {
-                    anyhow::bail!("owner_words: quote what the owner said");
-                }
-                if p.source.trim().is_empty() {
-                    anyhow::bail!("source: \"owner\" or \"relayed by <session>\"");
-                }
-                let said_at = match &p.said_at {
-                    Some(s) => parse_date(s)?,
-                    None => now_ms(),
-                };
-                let mut data = Map::new();
-                data.insert("owner_words".into(), p.owner_words.trim().into());
-                data.insert("said_at".into(), said_at.into());
-                data.insert("source".into(), p.source.trim().into());
-                let d = records::create(
-                    &tx,
-                    project.id,
-                    &a.name(),
-                    NewRecord {
-                        kind: Some(Kind::Decision),
-                        title: p.title,
-                        body: p.body,
-                        tags: p.tags,
-                        data,
-                        ..Default::default()
-                    },
-                )?;
-                if let Some(q) = &p.answers {
-                    let q = records::find_str(&tx, q, Some(&project.slug))?;
-                    // An answer given in chat closes the question too (the owner, 2026-11-12).
-                    if q.kind == Kind::Question && q.state == "open" {
-                        records::answer_question(&tx, &q, None, p.owner_words.trim(), &a.name())?;
-                    }
-                    records::link(&tx, &d, &q, "answers", &a.name())?;
-                }
-                if let Some(old) = &p.supersedes {
-                    let old = records::find_str(&tx, old, Some(&project.slug))?;
-                    if old.kind != Kind::Decision {
-                        anyhow::bail!("{} isn't a decision", old.ref_id);
-                    }
-                    records::link(&tx, &d, &old, "supersedes", &a.name())?;
-                }
+                let d = decide(&tx, &a, &project, &p, &[])?;
                 tx.commit()?;
                 Ok(Outcome::new(json!({"id": d.ref_id}))
                     .summary(format!("decision {} recorded", d.short_id()))
@@ -1332,22 +1387,7 @@ impl FlowMcp {
             .call(move |c| {
                 let tx = c.transaction()?;
                 let project = target_project(&tx, &a, p.project.as_deref(), true)?;
-                let mut data = Map::new();
-                data.insert("repo".into(), p.repo.trim().into());
-                data.insert("path".into(), p.path.trim().trim_start_matches('/').into());
-                if let Some(n) = p.number {
-                    data.insert("adr_number".into(), n.into());
-                }
-                let r = records::create(
-                    &tx,
-                    project.id,
-                    &a.name(),
-                    NewRecord { kind: Some(Kind::Adr), title: p.title, tags: p.tags, data, ..Default::default() },
-                )?;
-                if let Some(d) = &p.records {
-                    let d = records::find_str(&tx, d, Some(&project.slug))?;
-                    records::link(&tx, &r, &d, "records", &a.name())?;
-                }
+                let r = adr(&tx, &a, &project, &p)?;
                 tx.commit()?;
                 Ok(Outcome::new(json!({"id": r.ref_id}))
                     .summary(format!("ADR {} added", r.short_id()))
@@ -1356,6 +1396,100 @@ impl FlowMcp {
             })
             .await;
         self.finish(&actor, "add_adr", Action::Write, outcome).await
+    }
+
+    #[tool(description = "Record several of the owner's decisions in one call, oldest first, each with their words \
+        verbatim (for an import or a long chat). In supersedes or answers, \"#3\" means the 3rd of this list. All are \
+        recorded or none.")]
+    async fn record_decisions(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(p): Parameters<RecordDecisions>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let actor = actor_of(&parts);
+        let a = actor.clone();
+        let outcome = self
+            .state
+            .db
+            .call(move |c| {
+                if p.decisions.is_empty() || p.decisions.len() > 100 {
+                    anyhow::bail!("give 1 to 100 decisions");
+                }
+                let tx = c.transaction()?;
+                let project = target_project(&tx, &a, p.project.as_deref(), true)?;
+                let mut made: Vec<Record> = Vec::new();
+                for (i, d) in p.decisions.iter().enumerate() {
+                    let r = decide(&tx, &a, &project, d, &made).map_err(|e| anyhow::anyhow!("nothing recorded; #{}: {e:#}", i + 1))?;
+                    made.push(r);
+                }
+                tx.commit()?;
+                let ids: Vec<String> = made.iter().map(|r| r.short_id()).collect();
+                Ok(Outcome::new(json!({"ids": ids})).summary(format!("{} decisions recorded", ids.len())).project(project.slug))
+            })
+            .await;
+        self.finish(&actor, "record_decisions", Action::Write, outcome).await
+    }
+
+    #[tool(description = "Point to several ADR files in one call (AgentFlow keeps links; the ADRs stay in the repo). \
+        All are added or none.")]
+    async fn add_adrs(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(p): Parameters<AddAdrs>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let actor = actor_of(&parts);
+        let a = actor.clone();
+        let outcome = self
+            .state
+            .db
+            .call(move |c| {
+                if p.adrs.is_empty() || p.adrs.len() > 100 {
+                    anyhow::bail!("give 1 to 100 ADRs");
+                }
+                let tx = c.transaction()?;
+                let project = target_project(&tx, &a, p.project.as_deref(), true)?;
+                let mut ids = Vec::new();
+                for (i, x) in p.adrs.iter().enumerate() {
+                    let r = adr(&tx, &a, &project, x).map_err(|e| anyhow::anyhow!("nothing added; #{}: {e:#}", i + 1))?;
+                    ids.push(r.short_id());
+                }
+                tx.commit()?;
+                Ok(Outcome::new(json!({"ids": ids})).summary(format!("{} ADRs added", ids.len())).project(project.slug))
+            })
+            .await;
+        self.finish(&actor, "add_adrs", Action::Write, outcome).await
+    }
+
+    #[tool(description = "Add several things for the owner to test in one call (each with a category of your \
+        choosing). All are added or none.")]
+    async fn add_to_tests(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(p): Parameters<AddToTests>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let actor = actor_of(&parts);
+        let a = actor.clone();
+        let outcome = self
+            .state
+            .db
+            .call(move |c| {
+                if p.items.is_empty() || p.items.len() > 100 {
+                    anyhow::bail!("give 1 to 100 items");
+                }
+                let tx = c.transaction()?;
+                let project = target_project(&tx, &a, None, true)?;
+                let mut ids = Vec::new();
+                for (i, t) in p.items.iter().enumerate() {
+                    let r = crate::totest::add(&tx, project.id, &a.name(), &t.title, &t.how, &t.category)
+                        .map_err(|e| anyhow::anyhow!("nothing added; #{}: {e:#}", i + 1))?;
+                    ids.push(r.short_id());
+                }
+                let open = crate::totest::open_count(&tx, project.id)?;
+                tx.commit()?;
+                Ok(Outcome::new(json!({"ids": ids, "open": open})).summary(format!("{} to-test items added", ids.len())).project(project.slug))
+            })
+            .await;
+        self.finish(&actor, "add_to_tests", Action::Write, outcome).await
     }
 
     #[tool(
