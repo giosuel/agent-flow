@@ -60,6 +60,23 @@ pub struct AddMilestone {
     pub step_of: Option<String>,
     /// Insert it before this milestone (name); at the end if left out.
     pub before: Option<String>,
+    /// Makes it a review step (the owner, 2026-11-12: a review is a step of its own). Add its
+    /// findings with add_tasks, ranked, with importance; skipped ones with a reason.
+    pub review: Option<ReviewInfo>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct ReviewInfo {
+    /// Who reviews, e.g. ["correctness", "UX", "performance"] (fresh agents, no context of the work).
+    pub reviewers: Vec<String>,
+    /// The commit reviewed, e.g. "9f3c2e1" (on main, or say the branch).
+    pub commit: String,
+    /// The owner's words for the review, verbatim, if they gave any.
+    #[serde(default)]
+    pub owner_words: String,
+    /// The reports, as notes or links, e.g. ["N-6"].
+    #[serde(default)]
+    pub reports: Vec<String>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -368,6 +385,19 @@ impl FlowMcp {
                     &NewMilestone { name: &p.name, title: &p.title, description: &p.description, parent, before },
                     &a.name(),
                 )?;
+                if let Some(r) = &p.review {
+                    if parent.is_none() {
+                        anyhow::bail!("a review is a step: give step_of, the milestone it reviews");
+                    }
+                    if r.reviewers.is_empty() || r.commit.trim().is_empty() {
+                        anyhow::bail!("a review step names its reviewers and the commit they review");
+                    }
+                    projects::set_review(
+                        &tx,
+                        &m,
+                        &json!({"reviewers": r.reviewers, "commit": r.commit.trim(), "owner_words": r.owner_words.trim(), "reports": r.reports}),
+                    )?;
+                }
                 tx.commit()?;
                 Ok(Outcome::new(json!({"added": m.name, "title": m.title, "state": m.state}))
                     .summary(format!("milestone {} added", m.name))

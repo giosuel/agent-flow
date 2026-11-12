@@ -478,6 +478,7 @@ struct TaskGroup {
 struct StepBox {
     name: String,
     title: String,
+    review: bool,
     /// concluded, active, blocked (every open task is) or planned.
     state: &'static str,
     sub: String,
@@ -1209,9 +1210,18 @@ fn build_project_page(
                     _ => format!("{open} open of {n} · {est_txt} · spent {} so far", crate::times::fmt_ms(times.total_ms)),
                 };
                 let sub = sub.trim_start_matches(" · ").trim_end_matches(" · ").replace(" ·  · ", " · ");
+                let review = !st.review.is_empty();
+                let sub = if review {
+                    let r: Value = serde_json::from_str(&st.review).unwrap_or_default();
+                    let n = r["reviewers"].as_array().map(Vec::len).unwrap_or(0);
+                    format!("{n} reviewer{} · commit {} · {sub}", if n == 1 { "" } else { "s" }, r["commit"].as_str().unwrap_or(""))
+                } else {
+                    sub
+                };
                 boxes.push(StepBox {
                     name: st.name.clone(),
                     title: st.title.clone(),
+                    review,
                     state,
                     sub,
                     url: format!("/p/{}/steps/{}", p.slug, st.id),
