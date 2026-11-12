@@ -871,3 +871,4 @@ a.blk.q:hover { text-decoration: underline; }
 .imp.high { background: #3A1414; color: #FFC9C9; } .imp.medium { background: var(--warn-bg); color: var(--warn-ink); } .imp.low { background: var(--chip); color: var(--ink2); }
 .who { display: inline-flex; flex-wrap: wrap; gap: 6px; margin-right: 8px; }
 .skip-why { display: block; margin-top: 2px; }
+.pdoc .guide-sec.old { opacity: .8; border-style: dashed; }

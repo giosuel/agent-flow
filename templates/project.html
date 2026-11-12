@@ -151,6 +151,8 @@
 {% endfor %}
 {% endif %}
 
+{% if tab == "notes" %}{% if let Some(d) = doc %}{% include "project_doc.html" %}{% endif %}{% endif %}
+
 {% if tab == "settings" %}
 {% if let Some(e) = edit %}
 <form method="post" action="/p/{{ slug }}/settings" class="card pad stack" aria-labelledby="set-h">
@@ -162,8 +164,6 @@
     <label class="span-all">What it is<input name="description" maxlength="300" value="{{ e.description }}"></label>
     <label>Folder<input name="checkout" value="{{ e.checkout }}" placeholder="e.g. ~/vinculum"></label>
     <label>Machine<input name="machine" value="{{ e.machine }}" placeholder="e.g. giosuel.ch"></label>
-    <label>Tech stack<input name="stack" value="{{ e.stack }}" placeholder="Rust, Slint, zbus"><span class="sub">Separated by commas.</span></label>
-    <label>Target platform<input name="platform" value="{{ e.platform }}" placeholder="e.g. Linux · Hyprland"></label>
     <label>Model<input name="model" value="{{ e.model }}" placeholder="e.g. Claude Opus 5.5" list="models"></label>
     <label>Effort<input name="effort" value="{{ e.effort }}" placeholder="e.g. high" list="efforts"></label>
     <label>Build product<input name="build_product" value="{{ e.build_product }}" placeholder="{{ slug }}"><span class="sub">The name test builds go under; empty means the id.</span></label>
@@ -171,8 +171,7 @@
       <option value=""{% if e.build_server.is_empty() %} selected{% endif %}>None: builds where the agent is</option>
       {% for b in e.servers %}<option value="{{ b }}"{% if *b == e.build_server %} selected{% endif %}>{{ b }}</option>{% endfor %}
     </select><span class="sub">Where <span class="mono">agentflow remote</span> runs its builds and tests. Add machines in <a href="/settings#s-builds">Settings</a>.</span></label>
-    <label>Git rules<input name="git_rules" value="{{ e.git_rules }}" placeholder="e.g. Conventional Commits, DCO sign-off"></label>
-    <label class="span-all">Rules for this project<textarea name="pm_rules" rows="3" placeholder="One per line">{{ e.pm_rules }}</textarea><span class="sub">Project-management rules that override the usual ones, one per line.</span></label>
+    <p class="sub span-all">Tech stack, platform, git and project rules are in the <a href="/p/{{ slug }}?tab=notes">project document</a> now.</p>
     <label class="span-all">Ports<textarea name="ports" rows="2" placeholder="One per line, e.g. 5173 vite">{{ e.ports }}</textarea></label>
   </div>
   <datalist id="models"><option value="Claude Opus 5.5"><option value="Claude Sonnet 5.5"><option value="Claude Fable 5.1"></datalist>
