@@ -107,7 +107,7 @@ impl FlowMcp {
         outcome: anyhow::Result<Outcome>,
     ) -> Result<CallToolResult, ErrorData> {
         // Every reply says when something is waiting to be read, so a busy session notices a
-        // message without having to ask. (since_last_check and inbox are the reading itself.)
+        // message without having to ask. (since_last_check is the reading itself.)
         let a = actor.clone();
         // A write call's reply carries the news itself (marked read), so a busy agent hears the
         // owner's answers at its next call without asking; other replies say how much is waiting.
@@ -147,7 +147,7 @@ impl FlowMcp {
                     obj.insert("news".into(), serde_json::Value::Array(news));
                 }
                 if unread > 0
-                    && !matches!(tool, "since_last_check" | "inbox" | "hello")
+                    && !matches!(tool, "since_last_check" | "hello")
                     && let Some(obj) = reply.as_object_mut()
                 {
                     obj.insert("unread".into(), serde_json::json!(format!("{unread} new for you; call since_last_check")));
