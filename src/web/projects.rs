@@ -614,12 +614,19 @@ pub struct ShotCard {
     title: String,
     category: String,
     when: String,
+    /// A mockup's state, and whether it links to its design.
+    mstate: String,
+    design: bool,
 }
 
 pub struct ShotView {
     image: String,
     category: String,
     line: String,
+    mstate: String,
+    design_url: String,
+    /// Where the owner's state buttons post.
+    state_action: String,
 }
 
 pub struct Connect {
@@ -1128,6 +1135,8 @@ fn build_project_page(
                 title: r.title.clone(),
                 category: r.str("category").to_owned(),
                 when: format!("{} · {}", r.short_id(), ago(r.created_at, now)),
+                mstate: r.str("mockup_state").to_owned(),
+                design: !r.str("design_url").is_empty(),
             })
             .collect()
     } else {
@@ -1763,6 +1772,9 @@ async fn load_record_page(
                     };
                 format!("{dims}{} KB · uploaded by {} {}", (size + 1023) / 1024, r.author, ago(r.created_at, now))
             },
+            mstate: r.str("mockup_state").to_owned(),
+            design_url: r.str("design_url").to_owned(),
+            state_action: format!("{}/mockup-state", r.url()),
         }),
         is_owner,
         next: r.url(),
