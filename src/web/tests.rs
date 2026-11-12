@@ -1316,6 +1316,9 @@ async fn steps_run_on_batches_blocks_and_conclusions() {
     let (ok, u) = call("update_task", json!({"ids": ["T-1", "T-2"], "state": "doing"})).await;
     assert!(ok, "{u}");
     assert_eq!(u["started"], json!(["K1", "M4"]));
+    // "Working on" comes from the tasks in doing until the agent says more.
+    let ov = s.http.get(s.url("/p/vinculum")).header(COOKIE, s.owner_cookie().await).send().await.unwrap().text().await.unwrap();
+    assert!(ov.contains("doing T-2 Store (+1)"), "{ov}");
     // Added once the step is under way: found, unless said.
     let (ok, t) = call("add_task", json!({"milestone": "K1", "title": "Wider drop zone", "estimate": "30 min", "source": "owner_feedback", "source_ref": "B-3"})).await;
     assert!(ok, "{t}");
