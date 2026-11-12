@@ -3,30 +3,39 @@
 {% block content %}
 <div class="head">
   <h1>Conversations</h1>
-  <p class="status-line">What agents and the consultant tell each other. Every message is kept in the log.</p>
+  <p class="status-line">What sessions tell each other, and what their subagents were told and reported, read from the Claude Code transcripts on this machine. You read along here.</p>
+  <form method="post" action="/transcripts/read" class="row wrap reload-form"><input type="hidden" name="next" value="{{ here }}">
+    <button class="btn ghost sm" type="submit"{% if reading %} disabled{% endif %}>{% if reading %}Reading the transcripts…{% else %}Reload{% endif %}</button>
+    <span class="sub">Read every five minutes; Reload reads them now.</span></form>
 </div>
-{% if threads.is_empty() %}
-<section class="card pad empty"><h2>No conversations yet</h2><p class="sub">When agents write to each other or to the consultant, it shows up here.</p></section>
+{% if sessions.is_empty() && subagents.is_empty() %}
+<section class="card pad empty"><h2>No conversations yet</h2><p class="sub">When sessions message each other or start subagents, it shows up here after the next read of the transcripts.</p></section>
 {% else %}
 <div class="split conv{% if picked %} picked{% endif %}">
   <nav class="split-side card list" aria-label="Conversations">
-    {% for t in threads %}
-    <a class="item conv-row{% if t.selected %} on{% endif %}" href="/conversations?t={{ t.id }}"{% if t.selected %} aria-current="true"{% endif %}>
-      <div class="ttl"><span class="sub">{{ t.members }} · {{ t.count }} message{% if t.count != 1 %}s{% endif %} · {{ t.when }}</span><strong>{{ t.subject }}</strong></div>
-      <span class="chip">{{ t.kind }}</span>
+    {% if !sessions.is_empty() %}<p class="label conv-group">Between sessions</p>{% endif %}
+    {% for t in sessions %}
+    <a class="item conv-row{% if t.selected %} on{% endif %}" href="/conversations?t={{ t.key|urlencode }}"{% if t.selected %} aria-current="true"{% endif %}>
+      <div class="ttl"><strong>{{ t.title }}</strong><span class="sub">{% if !t.sub.is_empty() %}{{ t.sub }} · {% endif %}{{ t.count }} message{% if t.count != 1 %}s{% endif %} · {{ t.when }}</span></div>
     </a>
     {% endfor %}
+    {% if !subagents.is_empty() %}<p class="label conv-group">Subagents</p>{% endif %}
+    {% for t in subagents %}
+    <a class="item conv-row{% if t.selected %} on{% endif %}" href="/conversations?t={{ t.key|urlencode }}"{% if t.selected %} aria-current="true"{% endif %}>
+      <div class="ttl"><strong>{{ t.title }}</strong><span class="sub">{{ t.sub }} · {{ t.when }}</span></div>
+    </a>
+    {% endfor %}
+    {% if !all && subagents.len() >= 40 %}<a class="item sub" href="/conversations?all=1">All subagents</a>{% endif %}
   </nav>
   <section class="split-main card pad stack" aria-labelledby="thread-h">
-    {% if let Some((id, subject, line)) = selected %}
+    {% if let Some((title, line)) = selected %}
     <a class="back phone-only" href="/conversations">← All conversations</a>
-    <div class="stack-sm"><h2 id="thread-h">{{ subject }}</h2><span class="sub">{{ line }}</span></div>
+    <div class="stack-sm"><h2 id="thread-h">{{ title }}</h2><span class="sub">{{ line }}</span></div>
     <ol class="plain msgs">
       {% for m in messages %}
-      <li class="msg{% if m.mine %} mine{% endif %}"><div class="row wrap"><strong>{{ m.sender }}</strong><span class="sub mono">{{ m.at }}</span><span class="chip">{{ m.kind }}</span></div><div class="prose">{{ m.body_html|safe }}</div></li>
+      <li class="msg"><div class="row wrap"><strong>{{ m.from }}</strong><span class="sub">→ {{ m.to }}</span><span class="sub mono">{{ m.at }}</span></div>{% if let Some(pv) = m.preview %}<details class="msg-fold"><summary><span class="msg-preview">{{ pv }}</span> <span class="sub">Show all</span></summary><div class="prose">{{ m.body_html|safe }}</div></details>{% else %}<div class="prose">{{ m.body_html|safe }}</div>{% endif %}</li>
       {% endfor %}
     </ol>
-    <p class="sub">You read along here; the agents and the consultant write. To tell an agent something, write in its session; agents reach you with questions.</p>
     {% endif %}
   </section>
 </div>

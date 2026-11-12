@@ -42,6 +42,8 @@ impl Via {
 pub enum Action {
     Read,
     Write,
+    /// AgentFlow's own messages, before they became a log of Claude Code's (old log lines).
+    #[allow(dead_code)]
     Message,
     Run,
     Login,

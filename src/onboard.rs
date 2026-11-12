@@ -211,7 +211,7 @@ pub fn create_files(
                  {name} is managed in AgentFlow ({public_url}), through the `agentflow` MCP server. At the start of every \
                  session call `hello`, then `since_last_check`; record tasks, decisions and questions there, not in files \
                  in the repository. The owner's rules are in the guides (`guides`, `guide`). Ask the owner with \
-                 `ask_question`; write to other agents and the consultant with `send_message`.\n",
+                 `ask_question`; write to other agents and the consultant with Claude Code's SendMessage (AgentFlow logs it).\n",
                 name = p.name.trim()
             )
             .as_bytes(),
