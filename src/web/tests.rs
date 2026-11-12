@@ -1571,7 +1571,12 @@ async fn answers_make_scoped_decisions_and_releases_bring_their_tag_button() {
 
     // A note on a step; a step made a review later; where for a milestone whose steps are done.
     assert!(call("add_milestone", json!({"name": "R9", "title": "Review", "step_of": "M4"})).await.0);
+    assert!(!call("update_milestone", json!({"milestone": "R9", "review": {"reports": ["N-1"]}})).await.0, "not a review yet");
     assert!(call("update_milestone", json!({"milestone": "R9", "review": {"reviewers": ["UX"], "commit": "abc1234"}})).await.0);
+    // Only the reports: the reviewers and commit stay.
+    assert!(call("update_milestone", json!({"milestone": "R9", "review": {"reports": ["N-26"]}})).await.0);
+    let (_, m) = call("get_milestone", json!({"milestone": "R9"})).await;
+    assert!(m["review"]["reports"] == json!(["N-26"]) && m["review"]["reviewers"] == json!(["UX"]) && m["review"]["commit"] == "abc1234", "{m}");
     let (ok, n) = call("add_note", json!({"name": "Review report R1", "category": "review report", "text": "Findings…", "record": "R9"})).await;
     assert!(ok, "{n}");
     assert!(!call("add_note", json!({"name": "x", "category": "x", "text": "x", "record": "NOPE"})).await.0);
@@ -2620,4 +2625,22 @@ async fn hello_over_the_api_for_a_session_start_hook() {
     // Not for the owner.
     let res = s.http.post(s.url("/api/hello")).header(COOKIE, &cookie).header(ORIGIN, &s.base).json(&json!({})).send().await.unwrap();
     assert!(!res.status().is_success());
+}
+
+/// Every tool's schema is written out in full: no $ref for a client to follow (Imaginarium's
+/// didn't see update_milestone's review).
+#[tokio::test]
+async fn tool_schemas_have_no_refs() {
+    let s = TestServer::start().await;
+    let token = s.token(TokenKind::Project, Some("vinculum")).await;
+    let sess = mcp_session(&s, &token).await;
+    let (_, r) = mcp_call(&s, &token, Some(&sess), json!({"jsonrpc": "2.0", "id": 9, "method": "tools/list", "params": {}})).await;
+    let tools = r.unwrap()["result"]["tools"].as_array().unwrap().clone();
+    assert!(tools.len() > 20);
+    for t in &tools {
+        let schema = t["inputSchema"].to_string();
+        assert!(!schema.contains("$ref"), "{}: {schema}", t["name"]);
+    }
+    let um = tools.iter().find(|t| t["name"] == "update_milestone").unwrap();
+    assert!(um["inputSchema"]["properties"]["review"]["properties"]["reports"].is_object(), "{um}");
 }

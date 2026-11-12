@@ -85,15 +85,36 @@ pub struct AddMilestone {
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct ReviewInfo {
     /// Who reviews, e.g. ["correctness", "UX", "performance"] (fresh agents, no context of the work).
+    #[serde(default)]
     pub reviewers: Vec<String>,
     /// The commit reviewed, e.g. "9f3c2e1" (on main, or say the branch).
+    #[serde(default)]
     pub commit: String,
     /// The owner's words for the review, verbatim, if they gave any.
-    #[serde(default)]
-    pub owner_words: String,
+    pub owner_words: Option<String>,
     /// The reports, as notes or links, e.g. ["N-6"].
-    #[serde(default)]
-    pub reports: Vec<String>,
+    pub reports: Option<Vec<String>>,
+}
+
+impl ReviewInfo {
+    /// This review over an earlier one: what's left out stays as it was.
+    fn over(&self, old: &str) -> Value {
+        let old: Value = serde_json::from_str(old).unwrap_or(Value::Null);
+        let reviewers = if self.reviewers.is_empty() { old.get("reviewers").cloned().unwrap_or_else(|| json!([])) } else { json!(self.reviewers) };
+        let commit = match self.commit.trim() {
+            "" => old.get("commit").and_then(Value::as_str).unwrap_or("").to_owned(),
+            c => c.to_owned(),
+        };
+        let owner_words = match &self.owner_words {
+            Some(w) => w.trim().to_owned(),
+            None => old.get("owner_words").and_then(Value::as_str).unwrap_or("").to_owned(),
+        };
+        let reports = match &self.reports {
+            Some(r) => json!(r),
+            None => old.get("reports").cloned().unwrap_or_else(|| json!([])),
+        };
+        json!({"reviewers": reviewers, "commit": commit, "owner_words": owner_words, "reports": reports})
+    }
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -105,7 +126,8 @@ pub struct UpdateMilestone {
     #[serde(flatten)]
     pub patch: MilestonePatch,
     /// Makes it a review step, or changes its review details (reviewers, commit, the owner's
-    /// words, reports such as ["N-26"]).
+    /// words, reports such as ["N-26"]). What you leave out stays as it was, so
+    /// {"reports": ["N-26"]} only sets the reports.
     pub review: Option<ReviewInfo>,
 }
 
@@ -536,7 +558,7 @@ impl FlowMcp {
                     projects::set_review(
                         &tx,
                         &m,
-                        &json!({"reviewers": r.reviewers, "commit": r.commit.trim(), "owner_words": r.owner_words.trim(), "reports": r.reports}),
+                        &json!({"reviewers": r.reviewers, "commit": r.commit.trim(), "owner_words": r.owner_words.as_deref().unwrap_or("").trim(), "reports": r.reports.clone().unwrap_or_default()}),
                     )?;
                 }
                 tx.commit()?;
@@ -573,14 +595,11 @@ impl FlowMcp {
                     if m.parent_id.is_none() {
                         anyhow::bail!("a review is a step; {} is a milestone", m.name);
                     }
-                    if r.reviewers.is_empty() || r.commit.trim().is_empty() {
+                    let review = r.over(&m.review);
+                    if review["reviewers"].as_array().is_none_or(|a| a.is_empty()) || review["commit"].as_str().is_none_or(|c| c.is_empty()) {
                         anyhow::bail!("a review step names its reviewers and the commit they review");
                     }
-                    projects::set_review(
-                        &tx,
-                        &m,
-                        &json!({"reviewers": r.reviewers, "commit": r.commit.trim(), "owner_words": r.owner_words.trim(), "reports": r.reports}),
-                    )?;
+                    projects::set_review(&tx, &m, &review)?;
                 }
                 tx.commit()?;
                 Ok(Outcome::new(json!({"milestone": m.name, "title": m.title, "state": m.state, "tag": m.tag, "summary": m.summary,
