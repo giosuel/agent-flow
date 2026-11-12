@@ -28,7 +28,11 @@ use crate::web::AppState;
 const INSTRUCTIONS: &str = "AgentFlow is the owner's project-management server. Each project has one agent \
 (you, for your project); it records the project's milestones, tasks, decisions, ADRs, questions for the \
 owner, PRs and builds here instead of in Markdown files, and only it writes here (subagents report back \
-to it). Start every session with `hello`. Ask the owner with `ask_question`, one question per call, with \
+to it). Start every session with `hello`; its `where` says which steps are under way. Work in steps: \
+when you start one, set its first task to doing (that starts the step), each task to done when it is, and \
+`conclude_step` once its tasks are done; your open PRs never hold a step, stack them and move on. A task \
+that waits on the owner is blocked by a question (`blocked_by: \"Q-12\"`, or `blocks` on `ask_question`), \
+and the answer unblocks it. Ask the owner with `ask_question`, one question per call, with \
 numbered options and your recommendation; the answer comes back verbatim. Record what the owner decided \
 with `record_decision`, quoting their words. Show the owner what you see with screenshots: upload each \
 with the `agentflow screenshot <file> --name \"…\" --category \"…\"` command (a category of your choice, \
