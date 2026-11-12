@@ -635,8 +635,9 @@ struct ProjectPage {
     /// The To test checklist (its tab), and how many are open (the tab's count).
     to_test: Option<super::totest::View>,
     to_test_open: i64,
-    /// The Notes tab: the project document.
+    /// The Notes tab: the project document, and the notes.
     doc: Option<super::projectdoc::DocView>,
+    notes: Option<super::notes::NotesView>,
     /// External PRs and issues: open ones and drafts, and the finished ones.
     external: Vec<ExtRow>,
     external_done: Vec<ExtRow>,
@@ -702,6 +703,8 @@ struct TabQuery {
     history: Option<u8>,
     rev: Option<i64>,
     doc: Option<String>,
+    /// The Notes tab's category filter.
+    ncat: Option<String>,
 }
 
 /// The line shown after pressing a button, from the redirect's query.
@@ -825,6 +828,16 @@ async fn project(
                         outcome: outcome.as_deref(),
                     };
                     super::projectdoc::view(c, p.id, &ask, &tz2, now)
+                })
+                .await?,
+        );
+        let (slug, pick) = (page.slug.clone(), q.ncat.clone());
+        page.notes = Some(
+            state
+                .db
+                .call(move |c| {
+                    let p = projects::require(c, &slug)?;
+                    super::notes::view(c, &slug, p.id, pick.as_deref(), now)
                 })
                 .await?,
         );
@@ -1289,6 +1302,7 @@ fn build_project_page(
     Ok(ProjectPage {
         to_test_open: crate::totest::open_count(c, p.id)?,
         doc: None,
+        notes: None,
         to_test,
         external,
         external_done,
@@ -1432,6 +1446,8 @@ struct RecordPage {
     time: Option<TimeView>,
     /// Builds and tests timed on this task or PR.
     timings: Vec<crate::times::TimingRow>,
+    /// A note: its text and its file.
+    note: Option<super::notes::NotePage>,
     /// A screenshot's image and its details.
     shot: Option<ShotView>,
     is_owner: bool,
@@ -1686,7 +1702,8 @@ async fn load_record_page(
             project.name.clone(),
         ),
         session_url,
-        body_html: if draft.is_some() { String::new() } else { markdown::to_html(&r.body) },
+        // A text note's body is its text, shown in its own section.
+        body_html: if draft.is_some() || (r.kind == Kind::Note && r.str("ext").is_empty()) { String::new() } else { markdown::to_html(&r.body) },
         draft,
         draft_notice,
         to_test,
@@ -1725,6 +1742,7 @@ async fn load_record_page(
         stale,
         time,
         timings,
+        note: if r.kind == Kind::Note { Some(super::notes::page(&state.config.data_dir(), &r)) } else { None },
         history: history
             .iter()
             .map(|h| HistoryRow { rev: h.rev, at: tz.short(h.at), text: describe_revision(h, &r) })

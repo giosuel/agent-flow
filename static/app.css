@@ -872,3 +872,18 @@ a.blk.q:hover { text-decoration: underline; }
 .who { display: inline-flex; flex-wrap: wrap; gap: 6px; margin-right: 8px; }
 .skip-why { display: block; margin-top: 2px; }
 .pdoc .guide-sec.old { opacity: .8; border-style: dashed; }
+
+/* Notes (the owner, 2026-11-12): any file or text an agent hands in. */
+.notes { list-style: none; margin: 0; padding: 0; }
+.notes li { display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; gap: 14px; align-items: center; padding: 12px 0; border-top: 1px solid var(--line2); }
+.notes li:first-child { border-top: 0; }
+.ficon { width: 40px; height: 46px; border-radius: 6px; border: 1px solid var(--border); background: var(--inset); display: grid; place-items: end center; padding-bottom: 6px; font-family: var(--mono); font-size: 10px; color: var(--ink2); overflow: hidden; }
+.ficon.md { color: var(--chip-accent-ink); } .ficon.ki { color: var(--warn-ink); border-color: #6b5a1f; font-size: 14px; font-weight: 700; }
+.notes .t { min-width: 0; }
+.notes .t > a { color: var(--ink); text-decoration: none; font-weight: 500; }
+.notes .t > a:hover { text-decoration: underline; }
+.notes .meta { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 4px; font-size: 13px; color: var(--muted); }
+.resurf { font-size: 12px; color: var(--warn-ink); background: var(--warn-bg); border-radius: 6px; padding: 2px 8px; }
+.md-doc { background: var(--ground); border: 1px solid var(--line); border-radius: 10px; padding: 16px 20px; font-size: 14px; line-height: 1.6; }
+.note-plain { white-space: pre-wrap; overflow-x: auto; max-height: 70vh; }
+@media (max-width: 760px) { .notes li { grid-template-columns: 34px minmax(0, 1fr); } .notes li > .btn, .notes li > span:last-child { display: none; } }
