@@ -145,6 +145,13 @@ pub fn add(conn: &Connection, record: &Record, b: &NewButton, added_by: &str) ->
             bail!("{what} contains an invisible character (U+{:04X}); write it in plain text", c as u32);
         }
     }
+    // The agent's own Merge button replaces the one AgentFlow put there by itself.
+    if kind == ButtonKind::Merge {
+        conn.execute(
+            "UPDATE actions SET state = 'withdrawn' WHERE record_id = ?1 AND kind = 'merge' AND added_by = 'agentflow' AND state = 'waiting'",
+            [record.id],
+        )?;
+    }
     // Check the required records exist now, so a typo doesn't leave a button that never unlocks.
     let mut resolved = Vec::new();
     for r in requires {
@@ -332,7 +339,8 @@ pub fn finish(conn: &Connection, a: &ActionRow, r: &RunResult) -> anyhow::Result
         )
     };
     records::event(conn, Some(record.project_id), Some(record.id), kind, &what, "owner")?;
-    // A release whose tag command ran is tagged.
+    // A release whose tag command ran is tagged, and the milestone it closes is closed with that
+    // tag (Imaginarium's agent, 2026-11-12).
     if r.ok && record.kind == Kind::Release && a.kind == ButtonKind::Tag {
         records::update(
             conn,
@@ -340,6 +348,17 @@ pub fn finish(conn: &Connection, a: &ActionRow, r: &RunResult) -> anyhow::Result
             "owner",
             records::Patch { state: Some("tagged".into()), quiet: true, ..Default::default() },
         )?;
+        if let Some(mid) = record.milestone_id {
+            let m = crate::projects::get_milestone(conn, mid)?;
+            if m.state != "closed" {
+                let patch = crate::projects::MilestonePatch {
+                    state: Some("closed".into()),
+                    tag: Some(record.str("tag").to_owned()),
+                    ..Default::default()
+                };
+                crate::projects::update_milestone(conn, &m, &patch, "owner")?;
+            }
+        }
     }
     Ok(())
 }
@@ -349,6 +368,27 @@ mod tests {
     use super::*;
     use crate::db::Db;
     use crate::github::fake::pr;
+
+    #[test]
+    fn a_pushed_tag_closes_its_milestone() {
+        let db = Db::open_memory();
+        db.call_blocking(|c| {
+            let p = crate::projects::create(c, "v", "V", "t")?;
+            let m = crate::projects::add_milestone(c, p.id, &crate::projects::NewMilestone { name: "M4", title: "Keybinds", description: "", parent: None, before: None }, "v")?;
+            let mut data = serde_json::Map::new();
+            data.insert("tag".into(), "v0.0.5-m4".into());
+            let rel = records::create(c, p.id, "v", records::NewRecord { kind: Some(Kind::Release), title: "M4".into(), state: Some("waiting".into()), milestone_id: Some(m.id), data, ..Default::default() })?;
+            let b = NewButton { label: "Push tag v0.0.5-m4", kind: ButtonKind::Tag, command: "git push origin v0.0.5-m4", workdir: "", requires: &[] };
+            let id = add(c, &rel, &b, "v")?;
+            let row = get(c, id)?.unwrap();
+            finish(c, &row, &RunResult { ok: true, exit_code: Some(0), output: String::new() })?;
+            let m = crate::projects::get_milestone(c, m.id)?;
+            assert_eq!((m.state.as_str(), m.tag.as_str()), ("closed", "v0.0.5-m4"));
+            assert_eq!(records::get(c, rel.id)?.state, "tagged");
+            Ok(())
+        })
+        .unwrap();
+    }
 
     #[test]
     fn commands_fit_their_confirmation() {

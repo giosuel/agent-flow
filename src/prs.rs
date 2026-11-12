@@ -66,6 +66,7 @@ pub fn sync(
             },
         )?;
         link_by_branch(conn, project.id, &r, &info.head, author)?;
+        ensure_merge_button(conn, project, repo, &r)?;
         return Ok((r, SyncResult { created: true, merged: state == "merged", ..Default::default() }));
     };
     let was_ready = merge_ready(&old).is_ok();
@@ -85,6 +86,7 @@ pub fn sync(
     )?;
     result.became_mergeable = !was_ready && merge_ready(&r).is_ok();
     link_by_branch(conn, project.id, &r, &info.head, author)?;
+    ensure_merge_button(conn, project, repo, &r)?;
     // The agent hears about what GitHub did to its PR.
     for (happened, kind, what) in [
         (result.merged, "pr.merged", format!("#{} merged: {}", r.number, r.title)),
@@ -96,6 +98,43 @@ pub fn sync(
         }
     }
     Ok((r, result))
+}
+
+/// The command a PR's Merge button runs: the project's merge method, deleting the branch so
+/// GitHub moves the next PR of a stack onto main.
+pub fn merge_command(repo: &str, number: i64, method: &str) -> String {
+    let method = if ["merge", "squash", "rebase"].contains(&method) { method } else { "merge" };
+    format!("gh pr merge {number} -R {repo} --{method} --delete-branch")
+}
+
+/// Every open PR of the project's own repository has its Merge button (Imaginarium's agent,
+/// 2026-11-12: "a 6-PR stack still means 6 add_button calls"). It unlocks when the PR is ready and
+/// in merge order; pressing it is the owner's approval. One the agent added itself counts too.
+fn ensure_merge_button(conn: &Connection, project: &Project, repo: &str, pr: &Record) -> anyhow::Result<()> {
+    if pr.state != "open" || repo.is_empty() || !repo.eq_ignore_ascii_case(project.repo.trim()) {
+        return Ok(());
+    }
+    let has: i64 = conn.query_row(
+        "SELECT count(*) FROM actions WHERE record_id = ?1 AND kind = 'merge' AND state != 'withdrawn'",
+        [pr.id],
+        |r| r.get(0),
+    )?;
+    if has > 0 {
+        return Ok(());
+    }
+    crate::actions::add(
+        conn,
+        pr,
+        &crate::actions::NewButton {
+            label: "Merge",
+            kind: crate::actions::ButtonKind::parse("merge")?,
+            command: &merge_command(repo, pr.number, &project.merge_method),
+            workdir: "",
+            requires: &[],
+        },
+        "agentflow",
+    )?;
+    Ok(())
 }
 
 /// A PR carries out the tasks whose branch is its head branch (Imaginarium's agent, 2026-11-12:
@@ -228,6 +267,40 @@ mod tests {
     use super::*;
     use crate::db::Db;
     use crate::github::fake::pr;
+
+    #[test]
+    fn every_pr_of_the_repo_gets_its_merge_button() {
+        let db = Db::open_memory();
+        db.call_blocking(|c| {
+            let p = crate::projects::create(c, "v", "V", "t")?;
+            let patch = crate::projects::ProjectPatch { repo: Some("o/r".into()), merge_method: Some("squash".into()), ..Default::default() };
+            crate::projects::update(c, p.id, &patch, "owner")?;
+            assert!(crate::projects::update(c, p.id, &crate::projects::ProjectPatch { merge_method: Some("yolo".into()), ..Default::default() }, "o").is_err());
+            let p = crate::projects::get_by_id(c, p.id)?;
+            let (r, _) = sync(c, &p, "o/r", &pr(48, "main", "b48"), "poller")?;
+            sync(c, &p, "o/r", &pr(48, "main", "b48"), "poller")?;
+            let buttons = crate::actions::for_record(c, r.id)?;
+            assert_eq!(buttons.len(), 1, "once, however often it syncs");
+            assert_eq!(buttons[0].command, "gh pr merge 48 -R o/r --squash --delete-branch");
+            assert!(buttons[0].is_merge());
+            // Another repository's PR gets none; the agent's own button replaces AgentFlow's.
+            let (other, _) = sync(c, &p, "x/y", &pr(7, "main", "b7"), "poller")?;
+            assert!(crate::actions::for_record(c, other.id)?.is_empty());
+            let mine = crate::actions::NewButton {
+                label: "Merge",
+                kind: crate::actions::ButtonKind::parse("merge")?,
+                command: "gh pr merge 48 -R o/r --merge",
+                workdir: "",
+                requires: &[],
+            };
+            crate::actions::add(c, &r, &mine, "v")?;
+            let live: Vec<_> = crate::actions::for_record(c, r.id)?.into_iter().filter(|b| b.state != "withdrawn").collect();
+            assert_eq!(live.len(), 1);
+            assert_eq!(live[0].command, "gh pr merge 48 -R o/r --merge");
+            Ok(())
+        })
+        .unwrap();
+    }
 
     #[test]
     fn sync_and_merge_order() {

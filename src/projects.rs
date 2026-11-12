@@ -25,6 +25,8 @@ pub struct Project {
     pub git_rules: String,
     pub ports: Vec<String>,
     pub build_product: String,
+    /// merge, squash or rebase: how its PRs' Merge buttons merge.
+    pub merge_method: String,
     pub agent: Agent,
 }
 
@@ -47,7 +49,8 @@ impl Agent {
 }
 
 const PROJECT_COLUMNS: &str = "id, slug, name, description, status, repo, checkout, machine, stack, platform, model, effort, \
-     pm_rules, git_rules, ports, build_product, agent_session, agent_machine, agent_model, agent_effort, agent_note, agent_seen_at";
+     pm_rules, git_rules, ports, build_product, agent_session, agent_machine, agent_model, agent_effort, agent_note, agent_seen_at, \
+     merge_method";
 
 fn json_list(s: String) -> Vec<String> {
     serde_json::from_str(&s).unwrap_or_default()
@@ -79,6 +82,7 @@ fn project_from_row(r: &Row) -> rusqlite::Result<Project> {
             note: r.get(20)?,
             seen_at: r.get(21)?,
         },
+        merge_method: r.get(22)?,
     })
 }
 
@@ -141,6 +145,9 @@ pub struct ProjectPatch {
     pub ports: Option<Vec<String>>,
     /// The viber-run product name for test builds.
     pub build_product: Option<String>,
+    /// How its PRs merge: merge (a merge commit, the default), squash or rebase. Every PR of the
+    /// project's repository gets a Merge button that merges this way and deletes the branch.
+    pub merge_method: Option<String>,
 }
 
 /// Slugs end up in record ids and URLs: lowercase letters, digits and dashes.
@@ -237,6 +244,12 @@ pub fn update(
         if taken.is_some() {
             bail!("another project publishes builds as {product:?} already");
         }
+    }
+    if let Some(v) = &patch.merge_method {
+        if !["merge", "squash", "rebase"].contains(&v.trim()) {
+            bail!("merge_method is merge, squash or rebase");
+        }
+        set("merge_method", v.trim().into())?;
     }
     if let Some(v) = &patch.name {
         if v.trim().is_empty() {
