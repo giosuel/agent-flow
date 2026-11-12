@@ -7,6 +7,7 @@ mod guide_tools;
 mod message_tools;
 mod pr_tools;
 mod project_tools;
+pub(crate) use project_tools::{Hello, hello_reply};
 mod record_tools;
 
 use std::sync::Arc;
