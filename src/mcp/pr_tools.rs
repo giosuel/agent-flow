@@ -191,7 +191,8 @@ impl FlowMcp {
     #[tool(
         description = "Plan a tag (a milestone's closing tag or a release) that waits for PRs to be merged. Its \
         \"Push tag …\" button comes by itself (an annotated tag on origin/main); the owner presses it once every PR is \
-        merged. Your PRs' Merge buttons come by themselves too, once a PR isn't a draft."
+        merged, and the milestone it closes is closed with it. Your PRs' Merge buttons come by themselves too (the \
+        project's merge method; update_project merge_method)."
     )]
     async fn add_release(
         &self,
@@ -279,7 +280,8 @@ impl FlowMcp {
     }
 
     #[tool(
-        description = "Put a button on one of your PRs or releases: the exact git/gh commands the owner runs by pressing it \
+        description = "Only for something unusual (PRs get their Merge button and releases their Push tag button by \
+        themselves): put a button on one of your PRs or releases: the exact git/gh commands the owner runs by pressing it \
         (merge, push a tag). The owner sees the command first; pressing it is their approval. Never merge or tag yourself. \
         At most 40 lines and 2000 characters, since the owner reads all of it. \
         Buttons can't be edited; withdraw one and add a new one instead."

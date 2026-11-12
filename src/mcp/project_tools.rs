@@ -24,6 +24,10 @@ pub struct Hello {
     pub model: String,
     /// Your effort level, e.g. "high".
     pub effort: String,
+    /// After your context was reset or summarized in the same session: only where you are, news
+    /// and notes coming back, without the project document and milestones.
+    #[serde(default)]
+    pub brief: bool,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -200,7 +204,9 @@ fn task_counts(c: &rusqlite::Connection, project_id: i64) -> anyhow::Result<Vec<
 #[tool_router(router = project_tools, vis = "pub(super)")]
 impl FlowMcp {
     #[tool(description = "Start every session with this: says which session, machine, model and effort work on your \
-        project, and returns your project, its milestones, open questions and what changed since your last session.")]
+        project, and returns your project, its document, milestones, where you are (steps under way), open questions, \
+        notes coming back and what changed since your last session. Call it again with brief: true after your context \
+        was reset or summarized, to get where you are, news and notes without the document.")]
     async fn hello(
         &self,
         Extension(parts): Extension<Parts>,
@@ -255,7 +261,16 @@ impl FlowMcp {
                         "how": "Run agentflow commands with AGENTFLOW_TOKEN_FILE set to token_file (sessions started with AgentFlow's start command have it), or add --token-file token_file."
                     },
                 });
-                Ok(Outcome::new(reply).summary(format!("hello from {} on {}", p.session, p.machine)).project(project.slug))
+                let mut reply = reply;
+                if p.brief
+                    && let Some(o) = reply.as_object_mut()
+                {
+                    for k in ["doc", "milestones", "cli", "project"] {
+                        o.remove(k);
+                    }
+                }
+                let what = if p.brief { "hello (brief)" } else { "hello" };
+                Ok(Outcome::new(reply).summary(format!("{what} from {} on {}", p.session, p.machine)).project(project.slug))
             })
             .await;
         self.finish(&actor, "hello", Action::Read, outcome).await

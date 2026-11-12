@@ -54,6 +54,8 @@ struct SettingsForm {
     effort: String,
     ports: String,
     build_product: String,
+    #[serde(default)]
+    merge_method: String,
     /// The build server for `agentflow remote` ("" for none).
     #[serde(default)]
     build_server: String,
@@ -87,6 +89,7 @@ async fn save_settings(
         effort: Some(f.effort.clone()),
         ports: Some(lines(&f.ports)),
         build_product: Some(f.build_product.clone()),
+        merge_method: if f.merge_method.is_empty() { None } else { Some(f.merge_method.clone()) },
         ..Default::default()
     };
     let s = slug.clone();
@@ -327,7 +330,7 @@ async fn list(
                 }
                 let merges = crate::prs::merge_order(c, p.id)?
                     .iter()
-                    .filter(|o| o.after.is_none() && crate::prs::merge_ready(&o.record).is_ok())
+                    .filter(|o| o.after.is_none() && crate::prs::ready_in_order(o).is_ok())
                     .count() as i64;
                 if merges > 0 {
                     waits.push(("accent", format!("{merges} to merge")));
@@ -606,6 +609,7 @@ pub struct EditView {
     effort: String,
     ports: String,
     build_product: String,
+    merge_method: String,
 }
 
 pub struct ShotCard {
@@ -1123,6 +1127,7 @@ fn build_project_page(
         effort: p.effort.clone(),
         ports: p.ports.join("\n"),
         build_product: p.build_product.clone(),
+        merge_method: p.merge_method.clone(),
     });
     let shots: Vec<ShotCard> = if tab == "screenshots" {
         let mut list: Vec<&Record> =

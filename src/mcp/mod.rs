@@ -30,10 +30,12 @@ const INSTRUCTIONS: &str = "AgentFlow is the owner's project-management server. 
 owner, notes, PRs and builds here instead of in Markdown files, and only it writes here (subagents report back \
 to it). Start every session with `hello`: it returns your project document (how to work on the project, its \
 stack, its roadmap if it has one; keep it current with `edit_project_doc`), `where` (the steps under way, their \
-tasks in doing, the next one, what's blocked) and the notes coming back to you. Work in steps: add a step's tasks \
+tasks in doing, the next one, what's blocked) and the notes coming back to you; after your context is reset or \
+summarized, call `hello` again with `brief: true`. Work in steps: add a step's tasks \
 in one `add_tasks` call, each with an estimate; set a task to doing when you start it (that starts the step) and \
 done when it is; `conclude_step` once its tasks are done, with a few lines. Your open PRs never hold a step: stack \
-them and move on; a PR that isn't a draft is ready to merge, and releases bring their Push tag button. Time is \
+them and move on; every PR gets its Merge button and every release its Push tag button by themselves (a PR \
+that isn't a draft is ready), and pushing a release's tag closes its milestone. Time is \
 counted from the tasks' states; log builds and tests with `agentflow time [--on T-12] -- <command>`. Ask the \
 owner with `ask_question`, one question per call, with numbered options and your recommendation, and repeat the \
 same questions with their ids in your chat reply; `blocks` names the tasks that wait for the answer. Record what \
