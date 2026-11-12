@@ -151,7 +151,7 @@
 {% endfor %}
 {% endif %}
 
-{% if tab == "notes" %}{% if let Some(d) = doc %}{% include "project_doc.html" %}{% endif %}{% endif %}
+{% if tab == "notes" %}{% if let Some(d) = doc %}{% include "project_doc.html" %}{% endif %}{% if let Some(nv) = notes %}{% include "notes_list.html" %}{% endif %}{% endif %}
 
 {% if tab == "settings" %}
 {% if let Some(e) = edit %}
