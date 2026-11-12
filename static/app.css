@@ -848,3 +848,5 @@ a.blk.q:hover { text-decoration: underline; }
 .blocking { border: 1px solid #6b5a1f; background: var(--warn-bg); border-radius: 10px; padding: 12px 16px; display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
 .blocking .rows a { color: var(--ink); }
 .blocked-line a { color: inherit; font-weight: 500; }
+.addtag { font-size: 12px; color: var(--ink2); border: 1px dashed var(--border); border-radius: 6px; padding: 1px 7px; margin-left: 8px; white-space: nowrap; }
+.chip.state-skipped { color: var(--muted); }

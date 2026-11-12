@@ -497,6 +497,20 @@ struct TaskLine {
     /// Open questions it waits for: (Q-1, url).
     blocked_by: Vec<(String, String)>,
     blocked_note: String,
+    /// "added · your feedback": a task that turned up while its step was under way.
+    added: String,
+    skip_reason: String,
+}
+
+/// How a task's source reads on the page.
+pub fn source_label(source: &str) -> &'static str {
+    match source {
+        "owner_feedback" => "your feedback",
+        "found" => "found while building",
+        "review" => "review",
+        "bug" => "bug",
+        _ => "planned",
+    }
 }
 
 /// One PR or issue on someone else's repository, or a draft of one, on the project's overview.
@@ -1135,6 +1149,14 @@ fn build_project_page(
                 next,
                 blocked_by,
                 blocked_note: if t.state == "blocked" { t.str("blocked_note").to_owned() } else { String::new() },
+                added: if t.data.get("added").and_then(Value::as_bool).unwrap_or(false) {
+                    let from = t.str("source_ref");
+                    let src = source_label(t.str("source"));
+                    if from.is_empty() { format!("added · {src}") } else { format!("added · {src} · from {from}") }
+                } else {
+                    String::new()
+                },
+                skip_reason: if t.state == "skipped" { t.str("skip_reason").to_owned() } else { String::new() },
             })
         };
         let lines = |list: &[&Record], active: bool| -> anyhow::Result<Vec<TaskLine>> {
@@ -1523,10 +1545,19 @@ async fn load_record_page(
             if let Some(m) = &r.milestone {
                 extra.push(("Milestone".into(), m.clone()));
             }
-            for (k, label) in [("estimate", "Estimate"), ("resurface_when", "Comes back")] {
+            for (k, label) in [("estimate", "Estimate"), ("resurface_when", "Comes back"), ("importance", "Importance"), ("skip_reason", "Skipped because")] {
                 if !r.str(k).is_empty() {
                     extra.push((label.into(), r.str(k).into()));
                 }
+            }
+            if !r.str("source").is_empty() && r.str("source") != "planned" {
+                let from = r.str("source_ref");
+                let added = if r.data.get("added").and_then(Value::as_bool).unwrap_or(false) { "added during the step: " } else { "" };
+                let src = source_label(r.str("source"));
+                extra.push(("Came from".into(), if from.is_empty() { format!("{added}{src}") } else { format!("{added}{src} ({from})") }));
+            }
+            if !r.str("branch").is_empty() {
+                extra.push(("Branch".into(), r.str("branch").into()));
             }
         }
         Kind::Release => {
