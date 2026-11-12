@@ -1306,6 +1306,24 @@ async fn steps_run_on_batches_blocks_and_conclusions() {
     assert!(ok, "{c}");
     assert_eq!(c["moved"].as_array().unwrap().len(), 3);
     assert!(!call("add_task", json!({"milestone": "K1", "title": "Late", "estimate": "1 h"})).await.0);
+    // A review is a step: reviewers and commit, findings ranked, one skipped.
+    assert!(!call("add_milestone", json!({"name": "R1", "title": "Review", "review": {"reviewers": ["UX"], "commit": "abc1234"}})).await.0);
+    let (ok, r) = call("add_milestone", json!({"name": "K9", "title": "End-of-M4 review", "step_of": "M4",
+        "review": {"reviewers": ["correctness", "UX"], "commit": "abc1234", "owner_words": "rate the issues by importance"}})).await;
+    assert!(ok, "{r}");
+    let (ok, r) = call("add_tasks", json!({"milestone": "K9", "tasks": [
+        {"title": "Low thing", "estimate": "20 min", "source": "review", "importance": "low"},
+        {"title": "Big thing", "estimate": "2 h", "source": "review", "importance": "high"},
+        {"title": "Churn", "state": "skipped", "reason": "no behaviour change", "importance": "low", "source": "review"}]})).await;
+    assert!(ok, "{r}");
+    let tasks = s.http.get(s.url("/p/vinculum?tab=tasks")).header(COOKIE, s.owner_cookie().await).send().await.unwrap().text().await.unwrap();
+    let at = tasks.find("End-of-M4 review").unwrap();
+    assert!(tasks[at..].contains("review step") && tasks[at..].contains("2 reviewers · commit abc1234"), "{tasks}");
+    let step_url = tasks[at..].split("href=\"").nth(1).unwrap().split('"').next().unwrap().to_owned();
+    let page = s.http.get(s.url(&step_url)).header(COOKIE, s.owner_cookie().await).send().await.unwrap().text().await.unwrap();
+    assert!(page.contains("Findings, by importance") && page.contains("rate the issues by importance"), "{page}");
+    assert!(page.find("Big thing").unwrap() < page.find("Low thing").unwrap(), "high first");
+    assert!(page.contains("skipped: no behaviour change"));
 }
 
 #[tokio::test]
