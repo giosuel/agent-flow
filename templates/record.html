@@ -86,9 +86,15 @@
 
     {% if let Some(b) = build %}
     <section class="card pad stack" aria-labelledby="try-h">
-      <h2 id="try-h">Try it</h2>
+      <div class="row wrap"><h2 id="try-h">Try it</h2><span class="plat">{{ b.platform }}</span></div>
+      {% if b.download.is_empty() %}
       <p class="sub">Run this on any of your machines that has <span class="mono">flow-run</span> (Settings › Your devices shows how to set it up). It downloads the build once, checks it, and starts it.</p>
       <pre class="cmd mono">{{ b.run }}</pre>
+      {% else %}
+      <p class="sub">This build is for {{ b.platform }}, so <span class="mono">flow-run</span> doesn't offer it. Download it and run it there.</p>
+      <p><a class="btn" href="{{ b.download }}" download>Download</a></p>
+      {% endif %}
+      {% if !b.needs.is_empty() %}<div class="stack-sm"><span class="label">Needs</span><ul class="plain">{% for n in b.needs %}<li>{{ n }}</li>{% endfor %}</ul></div>{% endif %}
       <dl class="kv">{% for (k, v) in b.facts %}<dt>{{ k }}</dt><dd>{{ v }}</dd>{% endfor %}</dl>
     </section>
     {% if let Some(tt) = to_test %}{% include "to_test.html" %}{% endif %}

@@ -897,3 +897,4 @@ a.blk.q:hover { text-decoration: underline; }
 .seg3 button { font: inherit; font-size: 15px; padding: 10px 18px; min-height: 44px; background: var(--ground); color: var(--ink2); border: 0; border-left: 1px solid var(--border); cursor: pointer; text-transform: capitalize; }
 .seg3 button:first-child { border-left: 0; }
 .seg3 button.on { background: var(--chip-accent); color: var(--chip-accent-ink); font-weight: 600; }
+.plat { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; border: 1px solid var(--border); border-radius: 7px; padding: 3px 9px; color: var(--ink); }
