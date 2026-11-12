@@ -1256,12 +1256,65 @@ async fn only_the_owner_starts_a_project_and_slugs_stay_unique() {
 }
 
 #[tokio::test]
+async fn steps_run_on_batches_blocks_and_conclusions() {
+    let s = TestServer::start().await;
+    let token = s.token(TokenKind::Project, Some("vinculum")).await;
+    let sess = mcp_session(&s, &token).await;
+    let call = |name: &'static str, args: Value| {
+        let (s, token, sess) = (&s, token.clone(), sess.clone());
+        async move { mcp_tool(s, &token, &sess, name, args).await }
+    };
+    assert!(call("add_milestone", json!({"name": "M4", "title": "Keybinds"})).await.0);
+    assert!(call("add_milestone", json!({"name": "K1", "title": "Read binds", "step_of": "M4"})).await.0);
+    assert!(call("add_milestone", json!({"name": "K2", "title": "Write binds", "step_of": "M4"})).await.0);
+    // All or nothing, every problem listed.
+    let (ok, err) = call("add_tasks", json!({"milestone": "K1", "tasks": [
+        {"title": "Parse", "estimate": "2 h"}, {"title": "Store"}, {"title": "Skip me", "state": "skipped"}]})).await;
+    assert!(!ok, "{err}");
+    let err = err.as_str().unwrap();
+    assert!(err.contains("#2: needs an estimate") && err.contains("#3: needs a reason"), "{err}");
+    let (ok, r) = call("add_tasks", json!({"milestone": "K1", "tasks": [
+        {"title": "Parse", "estimate": "2 h", "branch": "feat/binds"},
+        {"title": "Store", "estimate": "40 min"},
+        {"title": "Rename the module", "state": "skipped", "reason": "churn", "importance": "low"}]})).await;
+    assert!(ok, "{r}");
+    assert_eq!(r["ids"], json!(["T-1", "T-2", "T-3"]));
+    // Order, then doing starts the step; one call moves two.
+    let (ok, o) = call("order_tasks", json!({"milestone": "K1", "ids": ["T-2"]})).await;
+    assert!(ok && o["order"] == json!(["T-2", "T-1", "T-3"]), "{o}");
+    let (ok, u) = call("update_task", json!({"ids": ["T-1", "T-2"], "state": "doing"})).await;
+    assert!(ok, "{u}");
+    assert_eq!(u["started"], json!(["K1", "M4"]));
+    // Added once the step is under way: found, unless said.
+    let (ok, t) = call("add_task", json!({"milestone": "K1", "title": "Wider drop zone", "estimate": "30 min", "source": "owner_feedback", "source_ref": "B-3"})).await;
+    assert!(ok, "{t}");
+    // A question blocks T-4; hello says so; the answer unblocks it.
+    assert!(!call("update_task", json!({"id": "T-4", "state": "blocked"})).await.0);
+    let (ok, q) = call("ask_question", json!({"title": "Wide or narrow?", "blocks": ["T-4"]})).await;
+    assert!(ok, "{q}");
+    let (_, hello) = call("hello", json!({"session": "V", "machine": "m", "model": "o", "effort": "h"})).await;
+    let k1 = hello["where"].as_array().unwrap().iter().find(|w| w["step"] == "K1").cloned().unwrap();
+    assert_eq!(k1["blocked"][0]["by"], "Q-1");
+    assert_eq!(k1["doing"].as_array().unwrap().len(), 2);
+    let tasks = s.http.get(s.url("/p/vinculum?tab=tasks")).header(COOKIE, s.owner_cookie().await).send().await.unwrap().text().await.unwrap();
+    assert!(tasks.contains("blocked by Q-1") && tasks.contains("added · your feedback · from B-3"), "{tasks}");
+    assert!(tasks.contains("skipped: churn"));
+    // Concluding needs the open tasks dealt with.
+    let (ok, err) = call("conclude_step", json!({"step": "K1", "summary": "Binds are read."})).await;
+    assert!(!ok && err.as_str().unwrap().contains("still has open tasks"), "{err}");
+    let (ok, c) = call("conclude_step", json!({"step": "K1", "summary": "Binds are read.", "move_open_to": "K2"})).await;
+    assert!(ok, "{c}");
+    assert_eq!(c["moved"].as_array().unwrap().len(), 3);
+    assert!(!call("add_task", json!({"milestone": "K1", "title": "Late", "estimate": "1 h"})).await.0);
+}
+
+#[tokio::test]
 async fn screenshots_are_uploaded_shown_and_linked() {
     let s = TestServer::start().await;
     let token = s.token(TokenKind::Project, Some("vinculum")).await;
     let sess = mcp_session(&s, &token).await;
     assert!(mcp_tool(&s, &token, &sess, "add_milestone", json!({"name": "M4", "title": "Keybinds"})).await.0);
-    let (ok, t) = mcp_tool(&s, &token, &sess, "add_task", json!({"title": "Sidebar", "milestone": "M4"})).await;
+    let (ok, t) = mcp_tool(&s, &token, &sess, "add_task", json!({"title": "Sidebar", "milestone": "M4", "estimate": "1 h"})).await;
     assert!(ok, "{t}");
     let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
     png.extend_from_slice(&1280u32.to_be_bytes());
