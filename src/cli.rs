@@ -402,12 +402,25 @@ pub fn hello(config_path: &Path, args: ClientArgs, mut a: HelloArgs) -> anyhow::
             }
         }
     }
-    let client = Client::new(config_path, &args)?;
     let part = if a.part == HelloPart::Doc { "doc" } else { "" };
     let body = serde_json::json!({"session": a.session, "machine": a.machine, "model": a.model, "effort": a.effort, "source": source, "part": part});
-    let reply = client.post_json("/api/hello", &body)?;
-    print!("{}", hello_text(&reply, &source, a.part));
+    match Client::new(config_path, &args).and_then(|c| c.post_json("/api/hello", &body)) {
+        Ok(reply) => print!("{}", hello_text(&reply, &source, a.part)),
+        // The doc part says it once for both.
+        Err(e) if a.part != HelloPart::NoDoc => println!("{}", unreachable_text(&e, "your project's document, where you are and the news")),
+        Err(_) => {}
+    }
     Ok(())
+}
+
+/// What a hook prints when AgentFlow can't be reached, for the agent to tell the owner (the
+/// owner, 2026-11-12: "if agentflow is unreachable, the agent should say this and not fallback
+/// to anything"). Printed, with exit code 0, because only a hook's printed output reaches the agent.
+pub fn unreachable_text(e: &anyhow::Error, what: &str) -> String {
+    format!(
+        "AgentFlow couldn't be reached ({e:#}), so {what} didn't load. Tell the owner that AgentFlow is unreachable \
+         before anything else, and don't fall back to other files or notes for what AgentFlow holds."
+    )
 }
 
 /// The hello reply as text for the agent's context: the document as written, closed milestones
@@ -608,7 +621,6 @@ fn scalar(v: &serde_json::Value, pad: &str) -> String {
 }
 
 pub fn news(config_path: &Path, args: ClientArgs, again: Option<String>) -> anyhow::Result<()> {
-    let client = Client::new(config_path, &args)?;
     let path = match again.as_deref().map(str::trim).filter(|a| !a.is_empty()) {
         Some(a) => {
             let min = crate::steps::parse_minutes(a).with_context(|| format!("--again {a:?}: a duration, e.g. \"1h\""))?;
@@ -616,7 +628,13 @@ pub fn news(config_path: &Path, args: ClientArgs, again: Option<String>) -> anyh
         }
         None => "/api/news".to_owned(),
     };
-    let res = client.get(&path)?;
+    let res = match Client::new(config_path, &args).and_then(|c| c.get(&path)) {
+        Ok(r) => r,
+        Err(e) => {
+            println!("{}", unreachable_text(&e, "the news since you last looked"));
+            return Ok(());
+        }
+    };
     let events = res.get("events").and_then(|e| e.as_array()).cloned().unwrap_or_default();
     if events.is_empty() {
         return Ok(());
