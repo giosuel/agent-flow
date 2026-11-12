@@ -178,6 +178,21 @@ async fn dashboard(
             if !going.is_empty() {
                 groups.push(Group { title: "Going ahead unless you say otherwise", items: going });
             }
+            // Asked in a chat you're having with the agent: no notification, no badge.
+            let chat: Vec<Item> = w
+                .in_chat
+                .iter()
+                .map(|q| Item {
+                    icon: icon("question"),
+                    title: q.title.clone(),
+                    sub: format!("{} · asked in your chat", name(&q.project)),
+                    url: q.url(),
+                    action: "Answer",
+                })
+                .collect();
+            if !chat.is_empty() {
+                groups.push(Group { title: "Asked in chat", items: chat });
+            }
             let merges: Vec<Item> = w
                 .merges
                 .iter()
