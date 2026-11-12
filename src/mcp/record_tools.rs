@@ -51,9 +51,10 @@ pub struct TaskItem {
     pub state: Option<String>,
     /// Why it's skipped.
     pub reason: Option<String>,
-    /// For a done task brought in as history (e.g. a step folded into another): when it started
-    /// and ended, "2026-11-09" or "2026-11-09 14:30" (UTC).
+    /// For a done task brought in as history (e.g. a step folded into another): when it started,
+    /// "2026-11-09" or "2026-11-09 14:30" (UTC).
     pub started_at: Option<String>,
+    /// For a done task brought in as history: when it was done, like started_at.
     pub done_at: Option<String>,
 }
 
@@ -406,6 +407,11 @@ pub struct FindRecords {
     /// Archived records too (milestones' and steps' tasks, decisions, questions).
     #[serde(default)]
     pub include_archived: bool,
+    /// Skip this many, for the next page (see total and more in the reply).
+    pub offset: Option<i64>,
+    /// Only id, title, state and scope (or milestone): for long lists such as every decision.
+    #[serde(default)]
+    pub compact: bool,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -871,7 +877,8 @@ impl FlowMcp {
     }
 
     #[tool(description = "Add several tasks to a step in one call, in the order you'll do them, each with an estimate \
-        (and where it came from, once the step is under way). For a review, the findings ranked, with importance; \
+        (and where it came from, once the step is under way). Done tasks brought in as history need no estimate and \
+        take started_at and done_at. For a review, the findings ranked, with importance; \
         a finding you won't do goes in as skipped, with the reason. All are added or none.")]
     async fn add_tasks(
         &self,
@@ -1832,11 +1839,21 @@ impl FlowMcp {
                 if let Some(s) = &p.since {
                     q.since = Some(parse_date(s)?);
                 }
-                let found = records::query(c, &q)?;
+                // Everything that matches, then the page asked for: the reply says how many in all.
+                let limit = q.limit.clamp(1, 1000);
+                let offset = p.offset.unwrap_or(0).max(0) as usize;
+                q.limit = 0;
+                let everything = records::query(c, &q)?;
+                let total = everything.len();
+                let found: Vec<Record> = everything.into_iter().skip(offset).take(limit as usize).collect();
+                let more = offset + found.len() < total;
                 let list: Vec<Value> = found
                     .iter()
                     .map(|r| {
                         let mut v = brief(r);
+                        if p.compact {
+                            return v;
+                        }
                         v["kind"] = r.kind.as_str().into();
                         v["updated"] = fmt_utc(r.updated_at).into();
                         if r.kind == Kind::Decision {
@@ -1848,8 +1865,8 @@ impl FlowMcp {
                         v
                     })
                     .collect();
-                let mut o = Outcome::new(json!({"records": list, "count": found.len()}))
-                    .summary(format!("find_records: {} found", found.len()));
+                let mut o = Outcome::new(json!({"records": list, "count": found.len(), "total": total, "more": more}))
+                    .summary(format!("find_records: {} of {total}", found.len()));
                 if let Some(p) = project {
                     o = o.project(p.slug);
                 }

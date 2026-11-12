@@ -74,6 +74,12 @@ pub struct AddMilestone {
     /// Makes it a review step (the owner, 2026-11-12: a review is a step of its own). Add its
     /// findings with add_tasks, ranked, with importance; skipped ones with a reason.
     pub review: Option<ReviewInfo>,
+    /// Its state right away (planned if left out), e.g. "closed" for a concluded step brought in
+    /// as history, with started_at, closed_at ("2026-11-09" or "2026-11-09 14:30", UTC) and summary.
+    pub state: Option<String>,
+    pub started_at: Option<String>,
+    pub closed_at: Option<String>,
+    pub summary: Option<String>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -128,6 +134,17 @@ pub struct ArchiveMilestone {
     pub move_to: Option<String>,
     /// Why, in a line; kept in its history and the event log.
     pub reason: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct GetMilestone {
+    /// A project's slug; your own if left out.
+    pub project: Option<String>,
+    /// The milestone or step, e.g. "P9.3" or "M9" ("M4/K2" if a step name repeats).
+    pub milestone: String,
+    /// Find an archived one too.
+    #[serde(default)]
+    pub include_archived: bool,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -485,6 +502,18 @@ impl FlowMcp {
                     &NewMilestone { name: &p.name, title: &p.title, description: &p.description, parent, before },
                     &a.name(),
                 )?;
+                let m = if p.state.is_some() || p.started_at.is_some() || p.closed_at.is_some() || p.summary.is_some() {
+                    let set = MilestonePatch {
+                        state: p.state.clone(),
+                        started_at: p.started_at.clone(),
+                        closed_at: p.closed_at.clone(),
+                        summary: p.summary.clone(),
+                        ..Default::default()
+                    };
+                    projects::update_milestone(&tx, &m, &set, &a.name())?
+                } else {
+                    m
+                };
                 if let Some(r) = &p.review {
                     if parent.is_none() {
                         anyhow::bail!("a review is a step: give step_of, the milestone it reviews");
@@ -542,7 +571,8 @@ impl FlowMcp {
                     )?;
                 }
                 tx.commit()?;
-                Ok(Outcome::new(json!({"milestone": m.name, "title": m.title, "state": m.state, "tag": m.tag}))
+                Ok(Outcome::new(json!({"milestone": m.name, "title": m.title, "state": m.state, "tag": m.tag, "summary": m.summary,
+                    "started_at": m.started_at.map(crate::util::fmt_utc), "closed_at": m.closed_at.map(crate::util::fmt_utc)}))
                     .summary(format!("milestone {} updated", m.name))
                     .project(project.slug))
             })
@@ -616,6 +646,62 @@ impl FlowMcp {
             })
             .await;
         self.finish(&actor, "archive_milestone", Action::Write, outcome).await
+    }
+
+    #[tool(description = "A milestone or step in full (Imaginarium's agent, 2026-11-12: steps couldn't be read \
+        back): its title, description, state, dates, summary, tag, review details, steps, its tasks in order, and the \
+        notes and decisions that belong to it.")]
+    async fn get_milestone(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(p): Parameters<GetMilestone>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let actor = actor_of(&parts);
+        let a = actor.clone();
+        let outcome = self
+            .state
+            .db
+            .call(move |c| {
+                let project = target_project(c, &a, p.project.as_deref(), false)?;
+                let m = projects::find_milestone_any(c, project.id, &p.milestone, p.include_archived)?;
+                let mut all = projects::milestones(c, project.id)?;
+                if p.include_archived {
+                    all.extend(projects::archived_milestones(c, project.id)?);
+                }
+                let parent = m.parent_id.and_then(|id| all.iter().find(|x| x.id == id).map(|x| x.name.clone()));
+                let steps: Vec<Value> = all
+                    .iter()
+                    .filter(|s| s.parent_id == Some(m.id))
+                    .map(|s| json!({"name": s.name, "title": s.title, "state": s.state, "archived": s.archived_at.is_some()}))
+                    .collect();
+                let mut tasks = records::query(
+                    c,
+                    &Query { project_id: Some(project.id), kinds: vec![Kind::Task], include_archived: p.include_archived, limit: 0, ..Default::default() },
+                )?;
+                tasks.retain(|t| t.milestone_id == Some(m.id));
+                crate::steps::sort_by_position(&mut tasks);
+                let belongs = records::query(
+                    c,
+                    &Query { project_id: Some(project.id), kinds: vec![Kind::Note, Kind::Decision, Kind::Question], include_archived: p.include_archived, limit: 0, ..Default::default() },
+                )?;
+                let fmt = |t: Option<i64>| t.map(crate::util::fmt_utc);
+                let reply = json!({
+                    "name": m.name, "title": m.title, "description": m.description, "state": m.state,
+                    "step_of": parent, "tag": m.tag, "started_at": fmt(m.started_at), "closed_at": fmt(m.closed_at),
+                    "summary": m.summary,
+                    "review": serde_json::from_str::<Value>(&m.review).unwrap_or(Value::Null),
+                    "archived": m.archived_at.map(|at| json!({"at": crate::util::fmt_utc(at), "reason": m.archived_reason})),
+                    "steps": steps,
+                    "tasks": tasks.iter().map(|t| json!({"id": t.short_id(), "title": t.title, "state": t.state,
+                        "estimate": t.data.get("estimate"), "started_at": t.data.get("started_at").and_then(Value::as_i64).map(crate::util::fmt_utc),
+                        "done_at": t.data.get("done_at").and_then(Value::as_i64).map(crate::util::fmt_utc)})).collect::<Vec<_>>(),
+                    "notes": belongs.iter().filter(|r| r.kind == Kind::Note && r.milestone_id == Some(m.id)).map(|r| json!({"id": r.short_id(), "title": r.title})).collect::<Vec<_>>(),
+                    "scoped_here": belongs.iter().filter(|r| r.kind != Kind::Note && r.milestone_id == Some(m.id)).map(|r| json!({"id": r.short_id(), "title": r.title, "state": r.state})).collect::<Vec<_>>(),
+                });
+                Ok(Outcome::new(reply).summary(format!("get_milestone {}", m.name)).project(project.slug))
+            })
+            .await;
+        self.finish(&actor, "get_milestone", Action::Read, outcome).await
     }
 
     #[tool(description = "Bring back an archived step or milestone, with what was archived along with it (its \
