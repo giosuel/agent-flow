@@ -1,9 +1,7 @@
-//! The Conversations page: what agents and the consultant tell each other. The owner reads along;
-//! they don't write here (the owner, 2026-11-11: "why can i write into conversations? this seems
-//! weird, lets remove it"): agents reach them with questions, and they talk to an agent in its own
-//! session.
-
-use std::collections::HashMap;
+//! The Conversations page: what sessions tell each other with Claude Code's SendMessage, and what
+//! each session's subagents were told and reported, read from the transcripts (crate::sessionlog;
+//! the owner, 2026-11-12: "keep the claude code sendmessage and use agent flow only for logging").
+//! The owner reads along; nobody writes here.
 
 use askama::Template;
 use axum::extract::{Query, State};
@@ -15,7 +13,7 @@ use serde::Deserialize;
 use super::pages::{Nav, nav, render};
 use super::{AppResult, AppState};
 use crate::auth::Actor;
-use crate::messages::{self, OWNER};
+use crate::sessionlog;
 use crate::tz::Tz;
 use crate::util::{ago, now_ms};
 use crate::{markdown, records};
@@ -25,20 +23,18 @@ pub fn routes() -> Router<AppState> {
 }
 
 struct ThreadRow {
-    id: i64,
-    subject: String,
-    members: String,
-    when: String,
-    kind: String,
+    key: String,
+    title: String,
+    sub: String,
     count: i64,
+    when: String,
     selected: bool,
 }
 
 struct MessageView {
-    mine: bool,
-    sender: String,
+    from: String,
+    to: String,
     at: String,
-    kind: String,
     body_html: String,
 }
 
@@ -53,33 +49,25 @@ struct ContributionRow {
 #[template(path = "conversations.html")]
 struct ConversationsPage {
     nav: Nav,
-    threads: Vec<ThreadRow>,
-    selected: Option<(i64, String, String)>,
+    sessions: Vec<ThreadRow>,
+    subagents: Vec<ThreadRow>,
+    /// The conversation shown: (title, line).
+    selected: Option<(String, String)>,
     messages: Vec<MessageView>,
     contributions: Vec<ContributionRow>,
     /// A conversation was chosen (not just the newest shown): on the phone, the list steps aside.
     picked: bool,
+    reading: bool,
+    /// The query that brings this page back (for the Reload button).
+    here: String,
+    /// Every subagent, not just the newest.
+    all: bool,
 }
 
 #[derive(Deserialize)]
 struct PageQuery {
-    t: Option<i64>,
-}
-
-/// A member as people read it: the project's name, "Consultant", "you" or "everyone".
-fn display(names: &HashMap<String, String>, m: &str) -> String {
-    match m {
-        OWNER => "you".into(),
-        messages::ALL => "everyone".into(),
-        messages::CONSULTANT => "Consultant".into(),
-        slug => names.get(slug).cloned().unwrap_or_else(|| slug.to_owned()),
-    }
-}
-
-/// "Vinculum → Antimony", "Cold Trace → everyone"
-fn members_line(names: &HashMap<String, String>, started_by: &str, members: &[String]) -> String {
-    let others: Vec<String> = members.iter().filter(|m| *m != started_by).map(|m| display(names, m)).collect();
-    format!("{} → {}", display(names, started_by), others.join(", "))
+    t: Option<String>,
+    all: Option<String>,
 }
 
 async fn page(
@@ -91,59 +79,66 @@ async fn page(
     actor.require_owner()?;
     let now = now_ms();
     let picked = q.t.is_some();
-    let (threads, selected, msgs, contributions, names) = state
+    let all = q.all.is_some();
+    let pick = q.t.clone();
+    let (sessions, subagents, msgs, contributions, names) = state
         .db
         .call(move |c| {
-            let names: HashMap<String, String> =
-                crate::projects::list(c)?.into_iter().map(|p| (p.slug, p.name)).collect();
-            let threads = messages::threads(c, None, 100, None)?;
-            let pick = q.t.or(threads.first().map(|t| t.id));
-            let selected = match pick {
-                Some(id) => messages::thread(c, id)?,
-                None => None,
-            };
-            let msgs = match &selected {
-                Some(t) => messages::messages(c, t.id)?,
+            let names: std::collections::HashMap<i64, String> =
+                crate::projects::list(c)?.into_iter().map(|p| (p.id, p.name)).collect();
+            let sessions = sessionlog::session_threads(c, 200)?;
+            let subagents = sessionlog::subagent_threads(c, None, if all { 2000 } else { 40 })?;
+            let pick = pick.or_else(|| {
+                let a = sessions.first().map(|t| (t.last_at, t.key.clone()));
+                let b = subagents.first().map(|t| (t.last_at, t.key.clone()));
+                a.into_iter().chain(b).max().map(|(_, k)| k)
+            });
+            let msgs = match &pick {
+                Some(k) => sessionlog::messages(c, k)?,
                 None => Vec::new(),
             };
             let contributions = records::query(
                 c,
                 &records::Query { kinds: vec![records::Kind::Contribution], limit: 50, ..Default::default() },
             )?;
-            Ok((threads, selected, msgs, contributions, names))
+            Ok((sessions, subagents, (pick, msgs), contributions, names))
         })
         .await?;
-    let sel_id = selected.as_ref().map(|t| t.id);
+    let (pick, msgs) = msgs;
+    let row = |t: &sessionlog::Thread| ThreadRow {
+        key: t.key.clone(),
+        title: t.title.clone(),
+        sub: [t.sub.clone(), t.project_id.and_then(|p| names.get(&p).cloned()).filter(|_| !t.is_subagent).unwrap_or_default()]
+            .into_iter()
+            .filter(|s| !s.is_empty())
+            .collect::<Vec<_>>()
+            .join(" · "),
+        count: t.count,
+        when: ago(t.last_at, now),
+        selected: pick.as_deref() == Some(t.key.as_str()),
+    };
+    let selected = pick.as_ref().and_then(|k| {
+        sessions.iter().chain(subagents.iter()).find(|t| &t.key == k).map(|t| {
+            let line = if t.is_subagent {
+                format!("Subagent{} · started {}", if t.sub.is_empty() { String::new() } else { format!(" · {}", t.sub) }, msgs.first().map(|m| tz.short(m.at)).unwrap_or_default())
+            } else {
+                format!("Between sessions · {} message{}", t.count, if t.count == 1 { "" } else { "s" })
+            };
+            (t.title.clone(), line)
+        })
+    });
+    let here = match &pick {
+        Some(k) => format!("/conversations?t={}", url_encode(k)),
+        None => "/conversations".into(),
+    };
     render(ConversationsPage {
         nav: nav(&state, &actor, "/conversations").await,
-        threads: threads
-            .iter()
-            .map(|t| ThreadRow {
-                id: t.id,
-                subject: t.subject.clone(),
-                members: members_line(&names, &t.started_by, &t.members),
-                when: ago(t.last_at, now),
-                kind: t.kind.clone(),
-                count: t.count,
-                selected: Some(t.id) == sel_id,
-            })
-            .collect(),
-        selected: selected.map(|t| {
-            (
-                t.id,
-                t.subject.clone(),
-                format!("{} · started {}", members_line(&names, &t.started_by, &t.members), tz.short(t.created_at)),
-            )
-        }),
+        sessions: sessions.iter().map(row).collect(),
+        subagents: subagents.iter().map(row).collect(),
+        selected,
         messages: msgs
             .iter()
-            .map(|m| MessageView {
-                mine: m.sender == OWNER,
-                sender: if m.sender == OWNER { "You".into() } else { display(&names, &m.sender) },
-                at: tz.short(m.created_at),
-                kind: m.kind.clone(),
-                body_html: markdown::to_html(&m.body),
-            })
+            .map(|m| MessageView { from: m.from.clone(), to: m.to.clone(), at: tz.short(m.at), body_html: markdown::to_html(&m.body) })
             .collect(),
         contributions: contributions
             .iter()
@@ -155,5 +150,17 @@ async fn page(
             })
             .collect(),
         picked,
+        reading: super::READING.load(std::sync::atomic::Ordering::Relaxed),
+        here,
+        all,
     })
+}
+
+fn url_encode(s: &str) -> String {
+    s.bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => (b as char).to_string(),
+            _ => format!("%{b:02X}"),
+        })
+        .collect()
 }
