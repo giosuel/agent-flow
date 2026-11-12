@@ -364,7 +364,8 @@ impl FlowMcp {
         self.finish(&actor, "update_project", Action::Write, outcome).await
     }
 
-    #[tool(description = "Say what you're working on right now, in one line, for the project page.")]
+    #[tool(description = "Only when it says more than your tasks in doing (the page shows those by itself): one line on \
+        what you're doing right now, for the project page. Cleared at your next hello.")]
     async fn working_on(
         &self,
         Extension(parts): Extension<Parts>,

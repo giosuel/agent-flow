@@ -1336,7 +1336,18 @@ fn build_project_page(
                 .copied()
                 .collect::<Vec<_>>()
                 .join(" · "),
-            working_on: p.agent.note.clone(),
+            // Its own note if it set one, else the tasks in doing (Imaginarium's agent, 2026-11-12).
+            working_on: if !p.agent.note.trim().is_empty() {
+                p.agent.note.clone()
+            } else {
+                let mut doing: Vec<&Record> = all.iter().filter(|r| r.kind == Kind::Task && r.state == "doing").collect();
+                doing.sort_by(|a, b| a.position.unwrap_or(f64::MAX).partial_cmp(&b.position.unwrap_or(f64::MAX)).unwrap_or(std::cmp::Ordering::Equal));
+                match doing.as_slice() {
+                    [] => String::new(),
+                    [one] => format!("doing {} {}", one.short_id(), one.title),
+                    [first, rest @ ..] => format!("doing {} {} (+{})", first.short_id(), first.title, rest.len()),
+                }
+            },
             seen: p.agent.seen_at.map(|t| ago(t, now)).unwrap_or_else(|| "never".into()),
             online,
             tokens_week: crate::usage::short(week.iter().sum()),
