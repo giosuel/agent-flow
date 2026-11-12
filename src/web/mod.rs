@@ -18,6 +18,7 @@ mod icons;
 mod log;
 mod machine;
 mod new_project;
+mod notes;
 mod pages;
 mod projectdoc;
 mod projects;
@@ -149,6 +150,7 @@ pub fn router(state: AppState) -> Router {
         .merge(buttons::routes())
         .merge(builds::routes())
         .merge(screenshots::routes())
+        .merge(notes::routes())
         .merge(outgoing::routes())
         .merge(remote::routes())
         .merge(totest::routes())
