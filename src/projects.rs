@@ -320,10 +320,14 @@ pub struct Milestone {
     pub tag: String,
     pub reopened_because: String,
     pub closed_at: Option<i64>,
+    /// When its first task went to doing (or it was set active).
+    pub started_at: Option<i64>,
+    /// A concluded step's summary, in the agent's words.
+    pub summary: String,
 }
 
 const MILESTONE_COLUMNS: &str =
-    "id, project_id, parent_id, name, title, description, position, state, tag, reopened_because, closed_at";
+    "id, project_id, parent_id, name, title, description, position, state, tag, reopened_because, closed_at, started_at, summary";
 
 fn milestone_from_row(r: &Row) -> rusqlite::Result<Milestone> {
     Ok(Milestone {
@@ -338,6 +342,8 @@ fn milestone_from_row(r: &Row) -> rusqlite::Result<Milestone> {
         tag: r.get(8)?,
         reopened_because: r.get(9)?,
         closed_at: r.get(10)?,
+        started_at: r.get(11)?,
+        summary: r.get(12)?,
     })
 }
 
@@ -488,6 +494,9 @@ pub fn update_milestone(
         }
         if state == "closed" {
             conn.execute("UPDATE milestones SET closed_at = ?1 WHERE id = ?2", params![now, m.id])?;
+        }
+        if state == "active" {
+            conn.execute("UPDATE milestones SET started_at = coalesce(started_at, ?1) WHERE id = ?2", params![now, m.id])?;
         }
         conn.execute("UPDATE milestones SET state = ?1 WHERE id = ?2", params![state, m.id])?;
         notes.push(format!("now {state}"));

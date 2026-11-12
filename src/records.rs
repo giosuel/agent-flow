@@ -626,6 +626,8 @@ pub fn answer_question(
         _ => ("question.answered", format!("Owner answered {}: {what}", q.short_id())),
     };
     event(conn, Some(q.project_id), Some(q.id), kind, &summary, author)?;
+    // The tasks it blocked go back to todo (the owner, 2026-11-12).
+    crate::steps::unblock_after_answer(conn, &q, author)?;
     Ok(q)
 }
 
