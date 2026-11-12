@@ -178,6 +178,122 @@ pub fn conclude(
     Ok(Concluded { step: projects::get_milestone(conn, step.id)?, moved })
 }
 
+/// Deletes a task for good (the owner, 2026-11-12: "let agents freely edit steps and tasks, edit
+/// or delete them"): its history and links go too; the event log keeps a line saying what it was.
+pub fn delete_task(conn: &Connection, task: &Record, reason: &str, actor: &str) -> anyhow::Result<()> {
+    if task.kind != Kind::Task {
+        bail!("{} isn't a task; only tasks are deleted", task.ref_id);
+    }
+    let reason = reason.trim();
+    if reason.is_empty() {
+        bail!("say why it's deleted, in reason");
+    }
+    conn.execute("DELETE FROM actions WHERE record_id = ?1", [task.id])?;
+    conn.execute("DELETE FROM links WHERE from_id = ?1 OR to_id = ?1", [task.id])?;
+    conn.execute("DELETE FROM revisions WHERE record_id = ?1", [task.id])?;
+    conn.execute("UPDATE events SET record_id = NULL WHERE record_id = ?1", [task.id])?;
+    conn.execute("UPDATE timings SET record_id = NULL WHERE record_id = ?1", [task.id])?;
+    conn.execute("UPDATE usage SET task_id = NULL WHERE task_id = ?1", [task.id])?;
+    conn.execute("DELETE FROM records WHERE id = ?1", [task.id])?;
+    event(
+        conn,
+        Some(task.project_id),
+        None,
+        "task.deleted",
+        &format!("{} deleted ({}, was {}): {reason}", task.short_id(), task.title, task.state),
+        actor,
+    )?;
+    Ok(())
+}
+
+/// What deleting a step did.
+#[derive(Debug, Default)]
+pub struct Deleted {
+    pub moved: Vec<String>,
+    pub deleted: Vec<String>,
+}
+
+/// Deletes a step (or a milestone without steps) for good. Its tasks move to `move_to`, or are
+/// deleted with it when `delete_tasks`; with neither, a step that has tasks stays. Everything
+/// else that belongs to it (notes, PRs, decisions, timings) is never deleted: it moves to
+/// `move_to`, or to the step's milestone.
+pub fn delete_step(
+    conn: &Connection,
+    step: &Milestone,
+    move_to: Option<&Milestone>,
+    delete_tasks: bool,
+    reason: &str,
+    actor: &str,
+) -> anyhow::Result<Deleted> {
+    let reason = reason.trim();
+    if reason.is_empty() {
+        bail!("say why it's deleted, in reason");
+    }
+    let all = projects::milestones(conn, step.project_id)?;
+    if all.iter().any(|m| m.parent_id == Some(step.id)) {
+        bail!("{} has steps; delete or move them first", step.name);
+    }
+    if let Some(to) = move_to {
+        if to.id == step.id || to.project_id != step.project_id {
+            bail!("move_to is another step or milestone of the same project");
+        }
+        if delete_tasks {
+            bail!("either move the tasks (move_to) or delete them (delete_tasks), not both");
+        }
+    }
+    let tasks = tasks_of(conn, step.id)?;
+    if !tasks.is_empty() && move_to.is_none() && !delete_tasks {
+        let list = tasks.iter().map(|t| t.short_id()).collect::<Vec<_>>().join(", ");
+        bail!("{} has tasks ({list}): move them with move_to, or delete them too with delete_tasks", step.name);
+    }
+    let mut out = Deleted::default();
+    for t in &tasks {
+        match move_to {
+            Some(to) => {
+                records::update(
+                    conn,
+                    t,
+                    actor,
+                    Patch { milestone_id: Some(Some(to.id)), note: format!("moved from {}, deleted", step.name), ..Default::default() },
+                )?;
+                out.moved.push(t.short_id());
+            }
+            None => {
+                delete_task(conn, t, &format!("with its step {}: {reason}", step.name), actor)?;
+                out.deleted.push(t.short_id());
+            }
+        }
+    }
+    // The rest goes to move_to, or up to the milestone (or nowhere, for a milestone).
+    let home = move_to.map(|m| m.id).or(step.parent_id);
+    let others: Vec<i64> = {
+        let mut stmt = conn.prepare("SELECT id FROM records WHERE milestone_id = ?1")?;
+        stmt.query_map([step.id], |r| r.get(0))?.collect::<Result<_, _>>()?
+    };
+    for id in others {
+        let r = records::get(conn, id)?;
+        records::update(
+            conn,
+            &r,
+            actor,
+            Patch { milestone_id: Some(home), note: format!("its step {} was deleted", step.name), quiet: true, ..Default::default() },
+        )?;
+        out.moved.push(r.short_id());
+    }
+    conn.execute("UPDATE timings SET milestone_id = ?1 WHERE milestone_id = ?2", params![home, step.id])?;
+    conn.execute("DELETE FROM milestones WHERE id = ?1", [step.id])?;
+    let what = if step.parent_id.is_some() { "Step" } else { "Milestone" };
+    let mut line = format!("{what} {} deleted ({}, {}): {reason}", step.name, step.title, step.state);
+    if !out.moved.is_empty() {
+        line.push_str(&format!("; moved: {}", out.moved.join(", ")));
+    }
+    if !out.deleted.is_empty() {
+        line.push_str(&format!("; deleted with it: {}", out.deleted.join(", ")));
+    }
+    event(conn, Some(step.project_id), None, "milestone.deleted", &line, actor)?;
+    Ok(out)
+}
+
 /// Sets a task blocked. `by` is a question of the project ("Q-12": the task links to it and comes
 /// back when it's answered) or a short note for anything internal ("the UX agent's review").
 pub fn block(conn: &Connection, task: &Record, by: &str, actor: &str) -> anyhow::Result<Record> {
