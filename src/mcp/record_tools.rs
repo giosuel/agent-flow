@@ -27,7 +27,8 @@ pub struct AddTask {
     pub milestone: String,
     #[serde(default)]
     pub tags: Vec<String>,
-    /// Starting state: todo (default), doing, blocked or parked.
+    /// Starting state: todo (default), doing or parked. To block it, add it, then update_task
+    /// with blocked_by.
     pub state: Option<String>,
     /// Your own estimate, e.g. "2 h" or "40 min"; shown with the task.
     pub estimate: Option<String>,
@@ -37,8 +38,13 @@ pub struct AddTask {
 pub struct UpdateTask {
     /// The task, e.g. "T-14" or "vinculum/T-14".
     pub id: String,
-    /// todo, doing, review, done, blocked or parked. Set doing when you start it.
+    /// todo, doing, review, done, blocked or parked. Set doing when you start it: that also starts
+    /// its step. "blocked" needs blocked_by.
     pub state: Option<String>,
+    /// What blocks it: the question (e.g. "Q-12") for anything that needs the owner, or a short
+    /// note for anything internal ("the UX agent's review", "remote job 17"). Sets it blocked; an
+    /// answer to the question unblocks it by itself.
+    pub blocked_by: Option<String>,
     pub title: Option<String>,
     pub body: Option<String>,
     /// Move it to another milestone or step.
@@ -73,7 +79,8 @@ pub struct AskQuestion {
     pub options: Vec<QuestionOption>,
     /// The option you recommend, counting from 1.
     pub recommended: Option<u32>,
-    /// Records this question blocks, e.g. ["T-18", "PR-56"].
+    /// What this question blocks, e.g. ["T-18", "T-19"]: those tasks are set blocked and come back
+    /// to todo by themselves when the owner answers.
     #[serde(default)]
     pub blocks: Vec<String>,
     #[serde(default)]
@@ -243,7 +250,17 @@ impl FlowMcp {
                 let tx = c.transaction()?;
                 let project = target_project(&tx, &a, p.project.as_deref(), true)?;
                 let m = projects::find_milestone(&tx, project.id, &p.milestone)?;
+                if p.state.as_deref() == Some("blocked") {
+                    anyhow::bail!("add it as todo, then update_task with blocked_by (a question or a short note)");
+                }
+                if m.state == "closed" {
+                    anyhow::bail!("{} is concluded; add the task to a step that isn't", m.name);
+                }
+                let doing = p.state.as_deref() == Some("doing");
                 let mut data = Map::new();
+                if doing {
+                    data.insert("started_at".into(), now_ms().into());
+                }
                 if let Some(e) = p.estimate.filter(|e| !e.trim().is_empty()) {
                     data.insert("estimate".into(), e.trim().into());
                 }
@@ -262,8 +279,13 @@ impl FlowMcp {
                         ..Default::default()
                     },
                 )?;
+                let started = if doing { crate::steps::task_started(&tx, &r, &a.name())? } else { Vec::new() };
                 tx.commit()?;
-                Ok(Outcome::new(brief(&r))
+                let mut reply = brief(&r);
+                if !started.is_empty() {
+                    reply["started"] = started.into();
+                }
+                Ok(Outcome::new(reply)
                     .summary(format!("task {} added", r.short_id()))
                     .project(project.slug)
                     .target(r.ref_id))
@@ -291,9 +313,24 @@ impl FlowMcp {
                     anyhow::bail!("{} isn't a task", r.ref_id);
                 }
                 let milestone_id = match &p.milestone {
-                    Some(name) => Some(Some(projects::find_milestone(&tx, r.project_id, name)?.id)),
+                    Some(name) => {
+                        let m = projects::find_milestone(&tx, r.project_id, name)?;
+                        if m.state == "closed" {
+                            anyhow::bail!("{} is concluded; move the task to a step that isn't", m.name);
+                        }
+                        Some(Some(m.id))
+                    }
                     None => None,
                 };
+                let blocked_by = p.blocked_by.as_deref().map(str::trim).filter(|b| !b.is_empty()).map(str::to_owned);
+                if p.state.as_deref() == Some("blocked") && blocked_by.is_none() {
+                    anyhow::bail!("say what blocks it in blocked_by: the question (Q-12) for anything that needs the owner, or a short note");
+                }
+                if blocked_by.is_some() && p.state.as_deref().is_some_and(|s| s != "blocked") {
+                    anyhow::bail!("blocked_by goes with state blocked (or leave state out)");
+                }
+                // Blocking is its own change below; the rest of the patch first.
+                let state = if blocked_by.is_some() { None } else { p.state.clone() };
                 let mut data = Map::new();
                 if let Some(w) = p.resurface_when {
                     data.insert(
@@ -305,17 +342,22 @@ impl FlowMcp {
                     data.insert("estimate".into(), if e.trim().is_empty() { Value::Null } else { e.trim().into() });
                 }
                 // Started now only if it wasn't already in progress.
-                if p.state.as_deref() == Some("doing") && r.state != "doing" {
+                let to_doing = state.as_deref() == Some("doing") && r.state != "doing";
+                if to_doing {
                     data.insert("started_at".into(), now_ms().into());
                 }
-                let (r, changed) = records::update(
+                // Leaving blocked drops the note on what blocked it.
+                if state.as_deref().is_some_and(|s| s != "blocked") && r.state == "blocked" {
+                    data.insert("blocked_note".into(), Value::Null);
+                }
+                let (mut r, mut changed) = records::update(
                     &tx,
                     &r,
                     &a.name(),
                     Patch {
                         title: p.title,
                         body: p.body,
-                        state: p.state,
+                        state,
                         milestone_id,
                         tags: p.tags,
                         data,
@@ -323,9 +365,18 @@ impl FlowMcp {
                         ..Default::default()
                     },
                 )?;
+                if let Some(by) = &blocked_by {
+                    r = crate::steps::block(&tx, &r, by, &a.name())?;
+                    changed = true;
+                }
+                let started = if to_doing { crate::steps::task_started(&tx, &r, &a.name())? } else { Vec::new() };
                 tx.commit()?;
                 let summary = format!("task {} {}", r.short_id(), if changed { "updated" } else { "unchanged" });
-                Ok(Outcome::new(brief(&r)).summary(summary).project(r.project.clone()).target(r.ref_id))
+                let mut reply = brief(&r);
+                if !started.is_empty() {
+                    reply["started"] = started.into();
+                }
+                Ok(Outcome::new(reply).summary(summary).project(r.project.clone()).target(r.ref_id))
             })
             .await;
         self.finish(&actor, "update_task", Action::Write, outcome).await
@@ -392,7 +443,13 @@ impl FlowMcp {
                 )?;
                 for b in &p.blocks {
                     let target = records::find_str(&tx, b, Some(&project.slug))?;
-                    records::link(&tx, &q, &target, "blocks", &a.name())?;
+                    // A task it blocks waits for the answer (the owner, 2026-11-12: "if its facing
+                    // me, it always links to a question"); other records just get the link.
+                    if target.kind == Kind::Task && !matches!(target.state.as_str(), "done" | "parked") {
+                        crate::steps::block(&tx, &target, &q.ref_id, &a.name())?;
+                    } else {
+                        records::link(&tx, &q, &target, "blocks", &a.name())?;
+                    }
                 }
                 tx.commit()?;
                 Ok((

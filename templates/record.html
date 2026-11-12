@@ -7,6 +7,16 @@
   <h1 class="rec-title">{{ title }}</h1>
 </div>
 {% if let Some(e) = error %}<p class="notice warn" role="alert">{{ e }}</p>{% endif %}
+{% if !blocking.is_empty() %}
+<section class="blocking" aria-labelledby="blocking-h">
+  <h2 class="label" id="blocking-h">Blocking</h2>
+  <ul class="rows">{% for (b, step) in blocking %}<li class="item-row"><span class="mono sub id-col">{{ b.short }}</span><div class="ttl"><a href="{{ b.url }}">{{ b.title }}</a>{% if !step.is_empty() %}<span class="sub">{{ step }}</span>{% endif %}</div><span class="chip state-blocked">blocked</span></li>{% endfor %}</ul>
+  {% if state == "open" %}<p class="sub">Your answer unblocks {% if blocking.len() == 1 %}it{% else %}them{% endif %}.</p>{% endif %}
+</section>
+{% endif %}
+{% if !waits_for.is_empty() || !blocked_note.is_empty() %}
+<p class="notice warn blocked-line">{% for q in waits_for %}Blocked by <a href="{{ q.url }}"><span class="mono">{{ q.short }}</span> {{ q.title }} ›</a>{% if !loop.last %}<br>{% endif %}{% endfor %}{% if !blocked_note.is_empty() %}{% if !waits_for.is_empty() %}<br>{% endif %}Blocked: {{ blocked_note }}{% endif %}</p>
+{% endif %}
 {% if let Some((ok, text)) = draft_notice %}<p class="notice{% if *ok %} ok{% else %} warn{% endif %}" role="status">{{ text }}</p>{% endif %}
 
 <div class="split">

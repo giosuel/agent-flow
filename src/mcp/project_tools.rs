@@ -72,6 +72,20 @@ pub struct UpdateMilestone {
     pub patch: MilestonePatch,
 }
 
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct ConcludeStep {
+    /// Only for the consultant: which project.
+    pub project: Option<String>,
+    /// The step, e.g. "P9.3d", or "M4/K2" if the name repeats.
+    pub step: String,
+    /// A few lines in your words: what shipped, what turned up, the biggest miss against the
+    /// estimates and why. AgentFlow adds the numbers, PRs and decisions itself.
+    pub summary: String,
+    /// Move every task still open (todo, doing, blocked) to this step. Without it, each open task
+    /// has to be moved, parked or dropped first.
+    pub move_open_to: Option<String>,
+}
+
 fn project_json(p: &projects::Project, now: i64) -> Value {
     json!({
         "project": p.slug,
@@ -182,6 +196,9 @@ impl FlowMcp {
                 let reply = json!({
                     "project": project_json(&projects::get_by_id(c, project.id)?, now_ms()),
                     "milestones": milestones_json(&ms, &counts),
+                    // Where you are: each step under way, its tasks in doing, the next one, and
+                    // what's blocked by what.
+                    "where": crate::steps::where_json(c, project.id)?,
                     "open_questions": open.iter().map(|q| json!({"id": q.ref_id, "title": q.title})).collect::<Vec<_>>(),
                     "answered_this_week": answered.iter().map(|q| json!({"id": q.ref_id, "title": q.title, "answer": q.data.get("answer")})).collect::<Vec<_>>(),
                     "unread_events": unread,
@@ -386,5 +403,37 @@ impl FlowMcp {
             })
             .await;
         self.finish(&actor, "update_milestone", Action::Write, outcome).await
+    }
+
+    #[tool(description = "Conclude a step once its tasks are done (open PRs and untested builds don't hold it: \
+        stack them and move on). Give a few lines on what it brought; AgentFlow adds the numbers, PRs and the owner's \
+        decisions. Tasks still open must be moved, parked or dropped first, or all moved with move_open_to. Steps start \
+        by themselves when their first task goes to doing.")]
+    async fn conclude_step(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(p): Parameters<ConcludeStep>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let actor = actor_of(&parts);
+        let a = actor.clone();
+        let outcome = self
+            .state
+            .db
+            .call(move |c| {
+                let tx = c.transaction()?;
+                let project = target_project(&tx, &a, p.project.as_deref(), true)?;
+                let step = projects::find_milestone(&tx, project.id, &p.step)?;
+                let to = match p.move_open_to.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+                    Some(n) => Some(projects::find_milestone(&tx, project.id, n)?),
+                    None => None,
+                };
+                let done = crate::steps::conclude(&tx, &step, &p.summary, to.as_ref(), &a.name())?;
+                tx.commit()?;
+                Ok(Outcome::new(json!({"step": done.step.name, "state": "concluded", "moved": done.moved}))
+                    .summary(format!("step {} concluded", done.step.name))
+                    .project(project.slug))
+            })
+            .await;
+        self.finish(&actor, "conclude_step", Action::Write, outcome).await
     }
 }

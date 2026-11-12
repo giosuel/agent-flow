@@ -104,6 +104,13 @@ pub fn create(c: &mut Connection, data_dir: &Path) -> anyhow::Result<String> {
     set(c, &m3, "active", None)?;
     let s1 = ms(c, "S1", "Album model", Some(m3.id))?;
     set(c, &s1, "closed", None)?;
+    c.execute(
+        "UPDATE milestones SET summary = ?1 WHERE id = ?2",
+        rusqlite::params![
+            "Albums table, migrations and smart albums are in. The migration took less than planned: the schema from M1 already had a join table.",
+            s1.id
+        ],
+    )?;
     let s2 = ms(c, "S2", "Album sidebar", Some(m3.id))?;
     set(c, &s2, "active", None)?;
     let s3 = ms(c, "S3", "Tag editor", Some(m3.id))?;
