@@ -65,6 +65,7 @@ pub fn sync(
                 ..Default::default()
             },
         )?;
+        link_by_branch(conn, project.id, &r, &info.head, author)?;
         return Ok((r, SyncResult { created: true, merged: state == "merged", ..Default::default() }));
     };
     let was_ready = merge_ready(&old).is_ok();
@@ -83,6 +84,7 @@ pub fn sync(
         Patch { title: Some(info.title.clone()), state: Some(state.into()), data, quiet, ..Default::default() },
     )?;
     result.became_mergeable = !was_ready && merge_ready(&r).is_ok();
+    link_by_branch(conn, project.id, &r, &info.head, author)?;
     // The agent hears about what GitHub did to its PR.
     for (happened, kind, what) in [
         (result.merged, "pr.merged", format!("#{} merged: {}", r.number, r.title)),
@@ -94,6 +96,24 @@ pub fn sync(
         }
     }
     Ok((r, result))
+}
+
+/// A PR carries out the tasks whose branch is its head branch (Imaginarium's agent, 2026-11-12:
+/// then update_pr with implements is only needed when the branch doesn't match).
+fn link_by_branch(conn: &Connection, project_id: i64, pr: &Record, head: &str, author: &str) -> anyhow::Result<()> {
+    if head.is_empty() {
+        return Ok(());
+    }
+    let mut stmt = conn.prepare(
+        "SELECT id FROM records WHERE project_id = ?1 AND kind = 'task' AND json_extract(data, '$.branch') = ?2
+         AND id NOT IN (SELECT to_id FROM links WHERE from_id = ?3 AND relation = 'implements')",
+    )?;
+    let ids: Vec<i64> = stmt.query_map(rusqlite::params![project_id, head, pr.id], |r| r.get(0))?.collect::<Result<_, _>>()?;
+    for id in ids {
+        let t = records::get(conn, id)?;
+        records::link(conn, pr, &t, "implements", author)?;
+    }
+    Ok(())
 }
 
 /// Why a PR's own Merge button is disabled, or Ok when it can be pressed.
