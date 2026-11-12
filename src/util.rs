@@ -154,3 +154,15 @@ mod tests {
         assert_eq!(ago(now - 5 * 86_400_000, now), "5 days ago");
     }
 }
+
+/// "2026-11-06" or "2026-11-06 14:12" (UTC) → milliseconds.
+pub fn parse_day_or_time(s: &str) -> anyhow::Result<i64> {
+    let s = s.trim();
+    let f = time::macros::format_description!("[year]-[month]-[day]");
+    let fm = time::macros::format_description!("[year]-[month]-[day] [hour]:[minute]");
+    if let Ok(d) = time::PrimitiveDateTime::parse(s, &fm) {
+        return Ok((d.assume_utc().unix_timestamp_nanos() / 1_000_000) as i64);
+    }
+    let d = time::Date::parse(s, &f).map_err(|_| anyhow::anyhow!("dates look like 2026-11-06 or 2026-11-06 14:12"))?;
+    Ok((d.midnight().assume_utc().unix_timestamp_nanos() / 1_000_000) as i64)
+}
