@@ -28,6 +28,7 @@ pub fn routes() -> Router<AppState> {
         .route("/p/{slug}", get(project))
         .route("/p/{slug}/{id}", get(record))
         .route("/p/{slug}/{id}/answer", post(answer))
+        .route("/p/{slug}/{id}/scope", post(set_scope))
         .route("/p/{slug}/status", post(set_status))
         .route("/p/{slug}/settings", post(save_settings))
 }
@@ -672,6 +673,9 @@ struct ProjectPage {
     decisions: Vec<RecordRow>,
     /// Put away in a cleanup: folded away on the Decisions tab.
     decisions_archived: Vec<RecordRow>,
+    /// Decisions of closed milestones, and replaced ones: folded away.
+    decisions_closed: Vec<RecordRow>,
+    decisions_replaced: Vec<RecordRow>,
     groups: Vec<TaskGroup>,
     questions: Vec<RecordRow>,
     /// The Builds tab: every build, newest first.
@@ -787,7 +791,14 @@ async fn project(
         .call(move |c| {
             let Some(p) = projects::get(c, &slug)? else { return Ok(None) };
             let ms = projects::milestones(c, p.id)?;
-            let all = records::query(c, &records::Query { project_id: Some(p.id), limit: 0, ..Default::default() })?;
+            let mut all = records::query(c, &records::Query { project_id: Some(p.id), limit: 0, ..Default::default() })?;
+            // The Decisions tab folds the archived ones at its end.
+            if t == "decisions" {
+                all.extend(records::query(
+                    c,
+                    &records::Query { project_id: Some(p.id), kinds: vec![Kind::Decision], states: vec!["archived".into()], limit: 0, ..Default::default() },
+                )?);
+            }
             let checkout = p.checkout.trim().to_owned();
             Ok(Some((build_project_page(c, p, ms, all, &t, chosen.as_deref(), now, &tz)?, checkout)))
         })
@@ -1070,14 +1081,33 @@ fn build_project_page(
     let mut questions_all: Vec<&Record> = all.iter().filter(|r| r.kind == Kind::Question).collect();
     questions_all.sort_by_key(|r| std::cmp::Reverse(r.number));
 
+    // In force: project-wide decisions and those of milestones that aren't closed (the owner,
+    // 2026-11-12); those of closed milestones, replaced and archived ones fold away.
+    let in_force_scope = |r: &Record| match r.milestone_id {
+        None => true,
+        Some(id) => ms.iter().any(|m| m.id == id && m.state != "closed"),
+    };
+    let scoped_row = |r: &Record| {
+        let mut row = row(r);
+        row.sub = format!("{} · {}", r.milestone.clone().unwrap_or_else(|| "Project-wide".into()), row.sub);
+        row
+    };
     let decisions_archived: Vec<RecordRow> = if tab == "decisions" {
-        decisions_all.iter().filter(|r| r.state == "archived").map(|r| row(r)).collect()
+        decisions_all.iter().filter(|r| r.state == "archived").map(|r| scoped_row(r)).collect()
     } else {
         Vec::new()
     };
+    let (decisions_closed, decisions_replaced): (Vec<RecordRow>, Vec<RecordRow>) = if tab == "decisions" {
+        (
+            decisions_all.iter().filter(|r| r.state == "current" && !in_force_scope(r)).map(|r| scoped_row(r)).collect(),
+            decisions_all.iter().filter(|r| r.state == "replaced").map(|r| scoped_row(r)).collect(),
+        )
+    } else {
+        (Vec::new(), Vec::new())
+    };
     let decisions: Vec<RecordRow> = match tab {
-        "decisions" => decisions_all.iter().filter(|r| r.state != "archived").map(|r| row(r)).collect(),
-        _ => decisions_all.iter().filter(|r| r.state == "current").take(5).map(|r| row(r)).collect(),
+        "decisions" => decisions_all.iter().filter(|r| r.state == "current" && in_force_scope(r)).map(|r| scoped_row(r)).collect(),
+        _ => decisions_all.iter().filter(|r| r.state == "current" && in_force_scope(r)).take(5).map(|r| row(r)).collect(),
     };
     let open_questions = questions_all.iter().filter(|r| r.state == "open").map(|r| row(r)).collect();
     let questions = if tab == "questions" { questions_all.iter().map(|r| row(r)).collect() } else { Vec::new() };
@@ -1377,6 +1407,8 @@ fn build_project_page(
         open_questions,
         decisions,
         decisions_archived,
+        decisions_closed,
+        decisions_replaced,
         groups,
         questions,
         builds,
@@ -1460,6 +1492,10 @@ struct RecordPage {
     can_answer: bool,
     /// "2: Icons with labels" when the agent goes ahead with that option until the owner answers.
     going_ahead: Option<String>,
+    /// A question's or decision's scope ("M9 · Effects" or "Project-wide"); empty otherwise.
+    scope: String,
+    /// For an open question, the owner's choices: (value, label, current).
+    scope_choices: Vec<(String, String, bool)>,
     extra: Vec<(String, String)>,
     links: Vec<LinkGroup>,
     /// A question: the tasks it holds up, with their step (the owner, 2026-11-12: "The question
@@ -1614,11 +1650,35 @@ async fn load_record_page(
                 Some(code) if r.kind == Kind::Contribution => super::outgoing::notice(c, &r, code)?,
                 _ => None,
             };
-            Ok(Some((r, project, links, history, buttons, (session_url, draft, draft_notice, to_test, time, timings))))
+            // A question's or decision's scope; the owner may move an open question's before answering.
+            let scope = if matches!(r.kind, Kind::Question | Kind::Decision) {
+                match r.milestone_id {
+                    Some(id) => {
+                        let m = projects::get_milestone(c, id)?;
+                        format!("{} · {}", m.name, m.title)
+                    }
+                    None => "Project-wide".to_owned(),
+                }
+            } else {
+                String::new()
+            };
+            let scope_choices: Vec<(String, String, bool)> = if is_owner && r.kind == Kind::Question && r.state == "open" {
+                std::iter::once(("project".to_owned(), "Project-wide".to_owned(), r.milestone_id.is_none()))
+                    .chain(
+                        projects::milestones(c, r.project_id)?
+                            .into_iter()
+                            .filter(|m| m.parent_id.is_none() && (m.state != "closed" || r.milestone_id == Some(m.id)))
+                            .map(|m| (m.id.to_string(), format!("{} · {}", m.name, m.title), r.milestone_id == Some(m.id))),
+                    )
+                    .collect()
+            } else {
+                Vec::new()
+            };
+            Ok(Some((r, project, links, history, buttons, (session_url, draft, draft_notice, to_test, time, timings, scope, scope_choices))))
         })
         .await?
         .ok_or(AppError::NotFound)?;
-    let (r, project, links, history, buttons, (session_url, draft, draft_notice, to_test, time, timings)) = page;
+    let (r, project, links, history, buttons, (session_url, draft, draft_notice, to_test, time, timings, scope, scope_choices)) = page;
 
     let mut blocking = Vec::new();
     let mut waits_for = Vec::new();
@@ -1758,6 +1818,8 @@ async fn load_record_page(
         answer: r.str("answer").into(),
         answer_line,
         can_answer: is_owner && r.kind == Kind::Question && r.state == "open",
+        scope,
+        scope_choices,
         going_ahead: (r.kind == Kind::Question && r.state == "open" && crate::waiting::is_going_ahead(&r)).then(|| {
             let n = r.data.get("recommended").and_then(Value::as_u64).unwrap_or(0) as usize;
             let title = r
@@ -1901,6 +1963,52 @@ fn describe_revision(h: &records::Revision, r: &Record) -> String {
 }
 
 #[derive(Deserialize)]
+struct ScopeForm {
+    /// "project" or a milestone's id.
+    scope: String,
+}
+
+/// The owner moves an open question to another scope before answering: its decision lands there.
+async fn set_scope(
+    State(state): State<AppState>,
+    Extension(actor): Extension<Actor>,
+    Path((slug, id)): Path<(String, String)>,
+    Form(form): Form<ScopeForm>,
+) -> AppResult<Response> {
+    actor.require_owner()?;
+    let (s, i) = (slug.clone(), id.clone());
+    state
+        .db
+        .call(move |c| {
+            let tx = c.transaction()?;
+            let q = records::find_str(&tx, &format!("{s}/{i}"), None)?;
+            if q.kind != Kind::Question || q.state != "open" {
+                anyhow::bail!("only an open question's scope can be changed");
+            }
+            let to = match form.scope.trim() {
+                "project" => None,
+                v => {
+                    let m = projects::get_milestone(&tx, v.parse::<i64>()?)?;
+                    if m.project_id != q.project_id || m.parent_id.is_some() || m.archived_at.is_some() {
+                        anyhow::bail!("not a milestone of this project");
+                    }
+                    Some(m.id)
+                }
+            };
+            records::update(
+                &tx,
+                &q,
+                "owner",
+                records::Patch { milestone_id: Some(to), note: format!("scope set to {} by the owner", projects::scope_name(&tx, to)), ..Default::default() },
+            )?;
+            tx.commit()?;
+            Ok(())
+        })
+        .await?;
+    Ok(Redirect::to(&format!("/p/{slug}/{id}")).into_response())
+}
+
+#[derive(Deserialize)]
 struct AnswerForm {
     option: Option<String>,
     words: Option<String>,
@@ -1931,9 +2039,8 @@ async fn answer(
         .call(move |c| {
             let tx = c.transaction()?;
             let q = records::find_str(&tx, &format!("{s}/{i}"), None)?;
-            // The answer stays on the question; the agent records a decision only when it thinks
-            // the answer is one (the owner, 2026-11-12).
-            let q = records::answer_question(&tx, &q, option, &words, "owner")?;
+            // The answer becomes a decision in the question's scope (the owner, 2026-11-12).
+            let (q, _) = records::answer_and_decide(&tx, &q, option, &words, "owner", None, &format!("owner, answering {} in AgentFlow", q.short_id()))?;
             tx.commit()?;
             Ok(q)
         })
