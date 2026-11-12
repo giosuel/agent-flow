@@ -396,6 +396,12 @@ pub struct ScreenshotArgs {
     /// The record it belongs to, e.g. T-12, B-3 or Q-4: it's linked and shows there.
     #[arg(long)]
     pub record: Option<String>,
+    /// For a mockup: the design it shows, e.g. the claude.ai artifact link (with its page).
+    #[arg(long)]
+    pub design_url: Option<String>,
+    /// For a mockup: proposed (default), approved or built.
+    #[arg(long)]
+    pub state: Option<String>,
 }
 
 #[derive(Args)]
@@ -769,6 +775,8 @@ pub fn screenshot(config_path: &Path, a: ScreenshotArgs) -> anyhow::Result<()> {
         ("category", a.category.clone()),
         ("description", a.description.clone()),
         ("record", a.record.clone().unwrap_or_default()),
+        ("design_url", a.design_url.clone().unwrap_or_default()),
+        ("state", a.state.clone().unwrap_or_default()),
     ]);
     let res = client.post_file(&format!("/api/screenshots?{query}"), file)?;
     println!("Uploaded as {}: {}", res["id"].as_str().unwrap_or(""), res["url"].as_str().unwrap_or(""));

@@ -19,6 +19,7 @@ pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/api/screenshots", post(upload).layer(DefaultBodyLimit::max(screenshots::MAX_BYTES + 1)))
         .route("/p/{slug}/{id}/image", get(image))
+        .route("/p/{slug}/{id}/mockup-state", post(set_state))
 }
 
 #[derive(Deserialize)]
@@ -32,6 +33,11 @@ struct UploadQuery {
     record: String,
     /// Only for tokens that may write to more than one project.
     project: Option<String>,
+    /// For a mockup: where the design is (a claude.ai artifact) and its state.
+    #[serde(default)]
+    design_url: String,
+    #[serde(default)]
+    state: String,
 }
 
 async fn upload(
@@ -50,6 +56,23 @@ async fn upload(
     let category = match screenshots::category(&q.category) {
         Ok(c) => c,
         Err(e) => return json_error(StatusCode::BAD_REQUEST, format!("{e:#}")),
+    };
+    let design_url = q.design_url.trim().to_owned();
+    if !design_url.is_empty()
+        && let Err(e) = screenshots::check_design_url(&design_url)
+    {
+        return json_error(StatusCode::BAD_REQUEST, format!("{e:#}"));
+    }
+    // A mockup has a state; proposed until the owner approves it.
+    let mstate = match (q.state.trim(), category.contains("mockup")) {
+        ("", true) => "proposed".to_owned(),
+        ("", false) => String::new(),
+        (st, _) => {
+            if let Err(e) = screenshots::check_mockup_state(st) {
+                return json_error(StatusCode::BAD_REQUEST, format!("{e:#}"));
+            }
+            st.to_owned()
+        }
     };
     if body.len() > screenshots::MAX_BYTES {
         return json_error(StatusCode::PAYLOAD_TOO_LARGE, "a screenshot can be 10 MB at most");
@@ -91,6 +114,12 @@ async fn upload(
             };
             let mut data = Map::new();
             data.insert("category".into(), category.into());
+            if !mstate.is_empty() {
+                data.insert("mockup_state".into(), mstate.into());
+            }
+            if !design_url.is_empty() {
+                data.insert("design_url".into(), design_url.into());
+            }
             data.insert("mime".into(), mime.into());
             data.insert("ext".into(), ext.into());
             data.insert("size".into(), size.into());
@@ -170,4 +199,41 @@ async fn image(
     h.insert(header::CACHE_CONTROL, HeaderValue::from_static("private, max-age=86400"));
     h.insert(header::CONTENT_SECURITY_POLICY, HeaderValue::from_static("default-src 'none'"));
     res
+}
+
+#[derive(Deserialize)]
+struct StateForm {
+    state: String,
+}
+
+/// The owner moves a mockup on: proposed, approved, built.
+async fn set_state(
+    State(state): State<AppState>,
+    Extension(actor): Extension<Actor>,
+    Path((slug, id)): Path<(String, String)>,
+    axum::Form(f): axum::Form<StateForm>,
+) -> crate::web::AppResult<Response> {
+    actor.require_owner()?;
+    let (s, i, st) = (slug.clone(), id.clone(), f.state.clone());
+    let done = state
+        .db
+        .call(move |c| {
+            screenshots::check_mockup_state(&st)?;
+            let r = records::find(c, &RecordRef::parse(&format!("{s}/{i}"))?, None)?;
+            if r.kind != Kind::Screenshot {
+                anyhow::bail!("not a screenshot");
+            }
+            let mut data = Map::new();
+            data.insert("mockup_state".into(), st.clone().into());
+            records::update(c, &r, "owner", records::Patch { data, note: format!("the owner set it {st}"), ..Default::default() })?;
+            Ok(r)
+        })
+        .await;
+    if let Ok(r) = &done {
+        let e = Entry::new(&actor, Via::Page, Action::Write, format!("mockup {} set {}", r.short_id(), f.state))
+            .project(r.project.clone())
+            .target(r.ref_id.clone());
+        activity::write(&state.db, e).await;
+    }
+    Ok(axum::response::Redirect::to(&format!("/p/{slug}/{id}")).into_response())
 }
