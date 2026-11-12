@@ -15,10 +15,9 @@
 </section>
 <section class="card pad stack" aria-labelledby="next-h">
   <h2 id="next-h">Your turn</h2>
-  <p class="sub">1. Register AgentFlow with Claude Code for that folder only. The token is fetched when Claude connects, never stored in its config:</p>
-  <pre class="cmd mono">{{ d.mcp_add }}</pre>
-  <p class="sub">2. Start the agent there (in tmux, with Remote Control if you like):</p>
+  <p class="sub">Start the agent there (in tmux, with Remote Control if you like). Its folder is set up, so there's nothing to register:</p>
   <pre class="cmd mono">{{ d.start }}</pre>
+  <p class="sub">The first time, Claude Code asks whether you trust the folder. Say yes once: until then it doesn't connect to AgentFlow.</p>
   <p class="sub">Its hooks load <span class="mono">hello</span> when it starts and after every compaction; it shows up as online on the project page then.</p>
   <div><a class="btn" href="/p/{{ d.slug }}">Open the project</a></div>
 </section>
@@ -39,9 +38,9 @@
     <ul class="explain">
       <li>The project record and an empty M0 milestone, on {{ host }}.</li>
       <li>The folder with a local git repository (an existing folder or repository is left as it is). You create the GitHub repo later and tell the agent the remote.</li>
-      <li>A project token, in a file only you can read, and the command to register AgentFlow for that folder.</li>
+      <li>A project token, in a file only you can read.</li>
       <li>The agent's first note, in its memory, not the repository.</li>
-      <li>Claude Code hooks in the folder's <span class="mono">.claude/settings.local.json</span>, kept out of git: hello at every start and after compaction, the news before each of your prompts.</li>
+      <li>The agent's Claude Code setup in the folder, kept out of git: the AgentFlow MCP server in <span class="mono">.mcp.json</span>; hooks (hello at every start and after compaction, the news before each of your prompts) and the token for its commands in <span class="mono">.claude/settings.local.json</span>. You only start <span class="mono">claude</span> there.</li>
     </ul>
   </div>
   <div><button class="btn" type="submit">Create project</button></div>

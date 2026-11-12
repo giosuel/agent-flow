@@ -1,10 +1,10 @@
 //! Starting a project from the New project button: the record and an M0 milestone, its folder with
 //! a local git repository, a project token in its file, and the agent's first note in its memory.
 //! The owner, 2026-11-07: "i can create the repo, and then later on tell the agent to use the
-//! remote", so nothing is created on GitHub. Registering AgentFlow with Claude Code is the
-//! owner's command to run (it changes Claude's own settings), so it's shown, not run. The hooks
-//! are written, though, in the folder's git-ignored `.claude/settings.local.json` (the owner,
-//! 2026-11-12: "let's make it so agent-flow writes the hooks").
+//! remote", so nothing is created on GitHub. The agent's Claude Code setup (MCP server, hooks,
+//! token variable) is written into the folder, kept out of git, so the owner only starts `claude`
+//! there (the owner, 2026-11-12: "sets up all the agent stuff as well so we don't need the copy
+//! paste commands"). Claude's own `~/.claude.json` is never touched.
 
 use std::path::{Path, PathBuf};
 
@@ -33,7 +33,6 @@ pub struct NewProject {
 pub struct Outcome {
     pub slug: String,
     pub steps: Vec<String>,
-    pub mcp_add: String,
     pub start: String,
 }
 
@@ -227,17 +226,17 @@ pub fn create_files(
         std::fs::write(&index, text)?;
         steps.push(format!("Left the agent a first note in its memory ({}).", note.display()));
     }
-    steps.push(write_hooks(folder, &token_file, p.name.trim())?);
-    let (mcp_add, start) = commands(folder, &token_file, public_url);
-    Ok(Outcome { slug: p.slug.clone(), steps, mcp_add, start })
+    steps.push(write_setup(folder, &token_file, p.name.trim(), public_url)?);
+    Ok(Outcome { slug: p.slug.clone(), steps, start: start_command(folder) })
 }
 
 /// The Claude Code hooks AgentFlow gives a project's sessions: hello (the document, then the
 /// rest) on every start, resume, /clear and compaction, and the news before each of the owner's
 /// prompts. Claude Code caps a hook's output at 10,000 characters, hence hello's two parts.
-pub fn hook_commands(token_file: &Path, name: &str) -> Vec<(&'static str, Vec<String>)> {
-    let bin = std::env::current_exe().map(|p| p.display().to_string()).unwrap_or_else(|_| "agentflow".into());
-    let tf = token_file.display();
+pub fn hook_commands(token_file: &Path, name: &str, public_url: &str) -> Vec<(&'static str, Vec<String>)> {
+    let bin = bin();
+    // The server and token are named, so the hooks don't depend on a config file being found.
+    let tf = format!("{} --url {}", token_file.display(), shell_word(public_url.trim_end_matches('/')));
     let session = shell_word(name);
     vec![
         (
@@ -248,9 +247,23 @@ pub fn hook_commands(token_file: &Path, name: &str) -> Vec<(&'static str, Vec<St
     ]
 }
 
+fn bin() -> String {
+    std::env::current_exe().map(|p| p.display().to_string()).unwrap_or_else(|_| "agentflow".into())
+}
+
+/// AgentFlow's entry in the folder's `.mcp.json`: the token is read from its file whenever
+/// Claude connects, never stored in a config.
+fn mcp_server(token_file: &Path, public_url: &str) -> serde_json::Value {
+    serde_json::json!({
+        "type": "http",
+        "url": format!("{}/mcp", public_url.trim_end_matches('/')),
+        "headersHelper": format!("{} mcp-headers --token-file {}", bin(), token_file.display()),
+    })
+}
+
 /// A word for the shell: as it is when it's plain, single-quoted otherwise.
 fn shell_word(s: &str) -> String {
-    if !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || "-_.".contains(c)) {
+    if !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || "-_.:/".contains(c)) {
         s.to_owned()
     } else {
         format!("'{}'", s.replace('\'', r"'\''"))
@@ -266,21 +279,65 @@ fn settings_path(folder: &Path) -> PathBuf {
     folder.join(".claude").join("settings.local.json")
 }
 
-/// Writes the hooks into the folder's `.claude/settings.local.json`, replacing AgentFlow's
-/// earlier ones and keeping everything else there. The file stays out of git: when the folder is
-/// a repository that doesn't ignore it, it goes into `.git/info/exclude` (never a committed file).
-pub fn write_hooks(folder: &Path, token_file: &Path, name: &str) -> anyhow::Result<String> {
-    use serde_json::{Map, Value, json};
-    let path = settings_path(folder);
-    let mut settings: Value = match std::fs::read_to_string(&path) {
+/// A JSON object from a file, or an empty one when there's no file; a file that isn't one is an
+/// error, so it's never overwritten.
+fn read_object(path: &Path) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
+    let v: serde_json::Value = match std::fs::read_to_string(path) {
         Ok(text) if !text.trim().is_empty() => serde_json::from_str(&text)
             .with_context(|| format!("{} isn't valid JSON, so it was left alone; fix it and try again", path.display()))?,
-        Ok(_) => json!({}),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => json!({}),
+        Ok(_) => serde_json::json!({}),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => serde_json::json!({}),
         Err(e) => return Err(e).with_context(|| format!("reading {}", path.display())),
     };
-    let Some(top) = settings.as_object_mut() else { bail!("{} isn't a JSON object, so it was left alone", path.display()) };
-    let hooks = top.entry("hooks").or_insert_with(|| json!({}));
+    match v {
+        serde_json::Value::Object(o) => Ok(o),
+        _ => bail!("{} isn't a JSON object, so it was left alone", path.display()),
+    }
+}
+
+fn write_json(path: &Path, v: serde_json::Map<String, serde_json::Value>) -> anyhow::Result<()> {
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let tmp = path.with_extension("json.tmp");
+    std::fs::write(&tmp, serde_json::to_string_pretty(&serde_json::Value::Object(v))? + "\n")?;
+    std::fs::rename(&tmp, path)?;
+    Ok(())
+}
+
+/// Sets the project's agent up in its folder, so the owner only has to start `claude` there (the
+/// owner, 2026-11-12: "let's make it so agent-flow writes the hooks", then "sets up all the agent
+/// stuff as well so we don't need the copy paste commands"):
+/// - `.mcp.json`: the AgentFlow MCP server (its other servers stay);
+/// - `.claude/settings.local.json`: the hooks, the server approved (no prompt), and
+///   `AGENTFLOW_TOKEN_FILE` for the session's commands; AgentFlow's earlier hooks are replaced and
+///   everything else stays.
+///
+/// Both stay out of git through `.git/info/exclude` (local, never committed). A `.mcp.json` the
+/// repository commits is left alone. Claude's own `~/.claude.json` is never touched: running
+/// sessions rewrite it all the time.
+pub fn write_setup(folder: &Path, token_file: &Path, name: &str, public_url: &str) -> anyhow::Result<String> {
+    use serde_json::{Map, Value, json};
+    let mut did = Vec::new();
+    // The MCP server.
+    let mcp_path = folder.join(".mcp.json");
+    if tracked(folder, ".mcp.json") {
+        did.push(format!(
+            "{} is committed in the repository, so AgentFlow's server wasn't added to it; add an \"agentflow\" entry there yourself",
+            mcp_path.display()
+        ));
+    } else {
+        let mut mcp = read_object(&mcp_path)?;
+        let servers = mcp.entry("mcpServers").or_insert_with(|| json!({}));
+        let Some(servers) = servers.as_object_mut() else { bail!("\"mcpServers\" in {} isn't an object, so it was left alone", mcp_path.display()) };
+        servers.insert("agentflow".into(), mcp_server(token_file, public_url));
+        write_json(&mcp_path, mcp)?;
+        did.push(format!("the AgentFlow MCP server in {}{}", mcp_path.display(), keep_out_of_git(folder, ".mcp.json")?));
+    }
+    // Hooks, approval, token variable.
+    let path = settings_path(folder);
+    let mut settings = read_object(&path)?;
+    let hooks = settings.entry("hooks").or_insert_with(|| json!({}));
     let Some(hooks) = hooks.as_object_mut() else { bail!("\"hooks\" in {} isn't an object, so it was left alone", path.display()) };
     // Drop AgentFlow's earlier hooks wherever they are, and groups left empty by that.
     for groups in hooks.values_mut().filter_map(Value::as_array_mut) {
@@ -292,7 +349,7 @@ pub fn write_hooks(folder: &Path, token_file: &Path, name: &str) -> anyhow::Resu
         groups.retain(|g| g.get("hooks").and_then(Value::as_array).is_none_or(|l| !l.is_empty()));
     }
     hooks.retain(|_, v| v.as_array().is_none_or(|a| !a.is_empty()));
-    for (event, commands) in hook_commands(token_file, name) {
+    for (event, commands) in hook_commands(token_file, name, public_url) {
         let list: Vec<Value> = commands.into_iter().map(|c| json!({"type": "command", "command": c, "timeout": 15})).collect();
         let groups = hooks.entry(event).or_insert_with(|| json!([]));
         let Some(groups) = groups.as_array_mut() else { bail!("hooks.{event} in {} isn't a list, so it was left alone", path.display()) };
@@ -300,31 +357,56 @@ pub fn write_hooks(folder: &Path, token_file: &Path, name: &str) -> anyhow::Resu
         group.insert("hooks".into(), Value::Array(list));
         groups.push(Value::Object(group));
     }
-    std::fs::create_dir_all(path.parent().unwrap_or(folder))?;
-    let tmp = path.with_extension("json.tmp");
-    std::fs::write(&tmp, serde_json::to_string_pretty(&settings)? + "\n")?;
-    std::fs::rename(&tmp, &path)?;
-    let ignored = keep_out_of_git(folder)?;
-    Ok(format!(
-        "Wrote AgentFlow's Claude Code hooks into {}: hello on every start, resume, /clear and compaction, and the news before each of your prompts{ignored}.",
-        path.display()
-    ))
+    let approved = settings.entry("enabledMcpjsonServers").or_insert_with(|| json!([]));
+    let Some(approved) = approved.as_array_mut() else { bail!("\"enabledMcpjsonServers\" in {} isn't a list, so it was left alone", path.display()) };
+    if !approved.iter().any(|v| v == "agentflow") {
+        approved.push("agentflow".into());
+    }
+    let env = settings.entry("env").or_insert_with(|| json!({}));
+    let Some(env) = env.as_object_mut() else { bail!("\"env\" in {} isn't an object, so it was left alone", path.display()) };
+    env.insert("AGENTFLOW_TOKEN_FILE".into(), token_file.display().to_string().into());
+    write_json(&path, settings)?;
+    did.push(format!(
+        "in {}: the hooks (hello on every start, resume, /clear and compaction; the news before each of your prompts), the server approved, and AGENTFLOW_TOKEN_FILE for its commands{}",
+        path.display(),
+        keep_out_of_git(folder, ".claude/settings.local.json")?
+    ));
+    Ok(format!("Set the agent up: {}.", did.join("; ")))
 }
 
-/// Whether the folder already has AgentFlow's hooks, as they'd be written now.
-pub fn hooks_present(folder: &Path, token_file: &Path, name: &str) -> bool {
+/// Whether the folder is set up as [`write_setup`] would set it up now.
+pub fn setup_present(folder: &Path, token_file: &Path, name: &str, public_url: &str) -> bool {
     let Ok(text) = std::fs::read_to_string(settings_path(folder)) else { return false };
-    hook_commands(token_file, name).iter().flat_map(|(_, c)| c).all(|c| text.contains(&serde_json::to_string(c).unwrap_or_default()))
+    let Ok(settings) = serde_json::from_str::<serde_json::Value>(&text) else { return false };
+    let hooks = hook_commands(token_file, name, public_url).iter().flat_map(|(_, c)| c).all(|c| text.contains(&serde_json::to_string(c).unwrap_or_default()));
+    let approved = settings["enabledMcpjsonServers"].as_array().is_some_and(|a| a.iter().any(|v| v == "agentflow"));
+    let env = settings["env"]["AGENTFLOW_TOKEN_FILE"].as_str() == Some(&token_file.display().to_string());
+    let mcp = std::fs::read_to_string(folder.join(".mcp.json"))
+        .ok()
+        .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+        .is_some_and(|m| m["mcpServers"]["agentflow"] == mcp_server(token_file, public_url));
+    hooks && approved && env && mcp
 }
 
-/// Makes git ignore `.claude/settings.local.json` in the folder's repository, through
-/// `.git/info/exclude` (local, never committed). Returns a few words for the step.
-fn keep_out_of_git(folder: &Path) -> anyhow::Result<String> {
+/// Whether git tracks this file in the folder's repository.
+fn tracked(folder: &Path, rel: &str) -> bool {
+    folder.join(".git").exists()
+        && std::process::Command::new("git")
+            .arg("-C")
+            .arg(folder)
+            .args(["ls-files", "--error-unmatch", rel])
+            .output()
+            .is_ok_and(|o| o.status.success())
+}
+
+/// Makes git ignore a file in the folder's repository, through `.git/info/exclude` (local, never
+/// committed). Returns a few words for the step.
+fn keep_out_of_git(folder: &Path, rel: &str) -> anyhow::Result<String> {
     if !folder.join(".git").exists() {
         return Ok(String::new());
     }
     let git = |args: &[&str]| std::process::Command::new("git").arg("-C").arg(folder).args(["-c", "core.hooksPath=/dev/null"]).args(args).output();
-    let ignored = git(&["check-ignore", "-q", ".claude/settings.local.json"]).context("running git check-ignore")?;
+    let ignored = git(&["check-ignore", "-q", rel]).context("running git check-ignore")?;
     if ignored.status.success() {
         return Ok(" (git ignores it)".into());
     }
@@ -332,13 +414,13 @@ fn keep_out_of_git(folder: &Path) -> anyhow::Result<String> {
     if !out.status.success() {
         bail!("git rev-parse: {}", String::from_utf8_lossy(&out.stderr).trim());
     }
-    let rel = String::from_utf8_lossy(&out.stdout).trim().to_owned();
-    let exclude = if Path::new(&rel).is_absolute() { PathBuf::from(rel) } else { folder.join(rel) };
+    let path = String::from_utf8_lossy(&out.stdout).trim().to_owned();
+    let exclude = if Path::new(&path).is_absolute() { PathBuf::from(path) } else { folder.join(path) };
     let mut text = std::fs::read_to_string(&exclude).unwrap_or_default();
     if !text.is_empty() && !text.ends_with('\n') {
         text.push('\n');
     }
-    text.push_str(".claude/settings.local.json\n");
+    text.push_str(&format!("/{rel}\n"));
     if let Some(dir) = exclude.parent() {
         std::fs::create_dir_all(dir)?;
     }
@@ -346,19 +428,10 @@ fn keep_out_of_git(folder: &Path) -> anyhow::Result<String> {
     Ok(" (added to .git/info/exclude, so git ignores it without a commit)".into())
 }
 
-/// The owner's two commands for a project's folder: register AgentFlow with Claude Code there
-/// (the token is read from its file on every connect, never stored in Claude's config), and
-/// start the agent. Shown after New project, and on the project's page afterwards.
-pub fn commands(folder: &Path, token_file: &Path, public_url: &str) -> (String, String) {
-    let bin = std::env::current_exe().map(|p| p.display().to_string()).unwrap_or_else(|_| "agentflow".into());
-    let mcp_add = format!(
-        "cd {} && claude mcp add-json agentflow '{{\"type\": \"http\", \"url\": \"{}/mcp\", \"headersHelper\": \"{bin} mcp-headers --token-file {}\"}}'",
-        folder.display(),
-        public_url.trim_end_matches('/'),
-        token_file.display()
-    );
-    // The session's shell commands (agentflow publish, remote, …) find the token through this.
-    (mcp_add, format!("cd {} && env AGENTFLOW_TOKEN_FILE={} claude", folder.display(), token_file.display()))
+/// The owner's one command for a project's folder: start the agent there. Everything else is
+/// set up by [`write_setup`]. Shown after New project, and on the project's page afterwards.
+pub fn start_command(folder: &Path) -> String {
+    format!("cd {} && claude", folder.display())
 }
 
 /// Checks the form before anything is created.
@@ -403,8 +476,10 @@ mod tests {
         .unwrap();
         assert!(folder.join(".git").exists());
         assert_eq!(std::fs::read_to_string(home.path().join("tokens/speculum.token")).unwrap().trim(), secret);
-        assert!(out.mcp_add.contains("https://flow.example/mcp") && out.mcp_add.contains("tokens/speculum.token"));
-        assert!(!out.mcp_add.contains(&secret), "the command never holds the token");
+        assert_eq!(out.start, format!("cd {} && claude", folder.display()));
+        let mcp = std::fs::read_to_string(folder.join(".mcp.json")).unwrap();
+        assert!(mcp.contains("https://flow.example/mcp") && mcp.contains("tokens/speculum.token"), "{mcp}");
+        assert!(!mcp.contains(&secret), "the config never holds the token");
         let note = home
             .path()
             .join("claude")
@@ -421,11 +496,11 @@ mod tests {
         let again =
             create_files(&p, &folder, &secret, &home.path().join("tokens"), &home.path().join("claude"), "x").unwrap();
         assert!(again.steps.iter().any(|s| s.contains("git repository already")));
-        assert!(hooks_present(&folder, &home.path().join("tokens/speculum.token"), "Speculum"));
+        assert!(setup_present(&folder, &home.path().join("tokens/speculum.token"), "Speculum", "x"), "set up again with the last URL");
     }
 
     #[test]
-    fn hooks_are_written_beside_the_settings_already_there() {
+    fn the_setup_is_written_beside_the_settings_already_there() {
         let home = tempfile::tempdir().unwrap();
         let folder = home.path().join("office");
         std::fs::create_dir_all(folder.join(".claude")).unwrap();
@@ -440,11 +515,17 @@ mod tests {
                 {"type": "command", "command": "echo mine"}]}], "Stop": [{"hooks": [{"type": "command", "command": "beep"}]}]}}"#,
         )
         .unwrap();
-        assert!(!hooks_present(&folder, &token, "Imaginarium"));
-        let step = write_hooks(&folder, &token, "Imaginarium").unwrap();
+        std::fs::write(folder.join(".mcp.json"), r#"{"mcpServers": {"other": {"type": "stdio", "command": "x"}}}"#).unwrap();
+        let url = "https://flow.example";
+        assert!(!setup_present(&folder, &token, "Imaginarium", url));
+        let step = write_setup(&folder, &token, "Imaginarium", url).unwrap();
         assert!(step.contains("info/exclude"), "{step}");
-        write_hooks(&folder, &token, "Imaginarium").unwrap();
-        assert!(hooks_present(&folder, &token, "Imaginarium"));
+        write_setup(&folder, &token, "Imaginarium", url).unwrap();
+        assert!(setup_present(&folder, &token, "Imaginarium", url));
+        assert!(!setup_present(&folder, &token, "Imaginarium", "https://elsewhere.example"));
+        let mcp: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(folder.join(".mcp.json")).unwrap()).unwrap();
+        assert_eq!(mcp["mcpServers"]["other"]["command"], "x");
+        assert_eq!(mcp["mcpServers"]["agentflow"]["url"], "https://flow.example/mcp");
         let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&settings).unwrap()).unwrap();
         assert_eq!(v["permissions"]["allow"][0], "Bash(ls)");
         assert_eq!(v["hooks"]["Stop"][0]["hooks"][0]["command"], "beep");
@@ -453,14 +534,32 @@ mod tests {
         assert_eq!(text.matches("hello --doc").count(), 1, "written twice, present once: {text}");
         assert_eq!(text.matches(" news --token-file").count(), 1, "{text}");
         assert!(text.contains("--session Imaginarium"));
+        assert_eq!(v["enabledMcpjsonServers"], serde_json::json!(["agentflow"]), "approved once: {text}");
+        assert_eq!(v["env"]["AGENTFLOW_TOKEN_FILE"], token.display().to_string());
+        for f in [".claude/settings.local.json", ".mcp.json"] {
+            let ignored = std::process::Command::new("git").arg("-C").arg(&folder).args(["check-ignore", "-q", f]).status().unwrap();
+            assert!(ignored.success(), "{f}");
+        }
         let ignored = std::process::Command::new("git").arg("-C").arg(&folder).args(["check-ignore", "-q", ".claude/settings.local.json"]).status().unwrap();
         assert!(ignored.success());
-        assert!(write_hooks(&folder, &token, "Imaginarium").unwrap().contains("git ignores it"));
+        assert!(write_setup(&folder, &token, "Imaginarium", url).unwrap().contains("git ignores it"));
         // A file that isn't JSON is left alone.
         std::fs::write(&settings, "{ not json").unwrap();
-        assert!(write_hooks(&folder, &token, "Imaginarium").is_err());
+        assert!(write_setup(&folder, &token, "Imaginarium", url).is_err());
         assert_eq!(std::fs::read_to_string(&settings).unwrap(), "{ not json");
         assert_eq!(shell_word("Cold Trace"), "'Cold Trace'");
+        // A .mcp.json the repository commits is left alone, and the step says so.
+        let other = home.path().join("other");
+        std::fs::create_dir_all(&other).unwrap();
+        let git = |args: &[&str]| std::process::Command::new("git").arg("-C").arg(&other).args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"]).args(args).output().unwrap();
+        git(&["init", "-q"]);
+        std::fs::write(other.join(".mcp.json"), "{}\n").unwrap();
+        git(&["add", ".mcp.json"]);
+        git(&["commit", "-q", "-m", "x"]);
+        let step = write_setup(&other, &token, "Other", url).unwrap();
+        assert!(step.contains("is committed in the repository"), "{step}");
+        assert_eq!(std::fs::read_to_string(other.join(".mcp.json")).unwrap(), "{}\n");
+        assert!(!setup_present(&other, &token, "Other", url));
     }
 
     #[test]
