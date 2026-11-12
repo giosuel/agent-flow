@@ -113,7 +113,9 @@ impl Kind {
     pub fn states(self) -> &'static [&'static str] {
         match self {
             Kind::Question => &["open", "answered", "withdrawn"],
-            Kind::Decision | Kind::Adr => &["current", "replaced"],
+            // archived: put away in a cleanup the owner asked for (kept, with its history).
+            Kind::Decision => &["current", "replaced", "archived"],
+            Kind::Adr => &["current", "replaced"],
             Kind::Task => &["todo", "doing", "review", "done", "blocked", "parked", "skipped"],
             Kind::Pr => &["open", "merged", "closed"],
             Kind::Release => &["planned", "waiting", "tagged", "dropped"],
