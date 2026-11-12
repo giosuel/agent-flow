@@ -17,7 +17,50 @@ use crate::util::fmt_utc;
 use crate::{records, waiting};
 
 pub fn routes() -> Router<AppState> {
-    Router::new().route("/api/wait", get(wait))
+    Router::new().route("/api/wait", get(wait)).route("/api/timings", axum::routing::post(timing))
+}
+
+/// A timing from `agentflow time`: what ran, how long, CPU and peak memory, on what.
+#[derive(Deserialize)]
+pub struct TimingBody {
+    pub what: String,
+    pub wall_ms: i64,
+    pub cpu_ms: Option<i64>,
+    pub peak_mb: Option<i64>,
+    pub exit_code: Option<i64>,
+    #[serde(default)]
+    pub on: String,
+    #[serde(default)]
+    pub place: String,
+    #[serde(default)]
+    pub note: String,
+}
+
+async fn timing(State(state): State<AppState>, Extension(actor): Extension<Actor>, Json(b): Json<TimingBody>) -> Response {
+    let a = actor.clone();
+    let res = state
+        .db
+        .call(move |c| {
+            let project = crate::mcp::target_project(c, &a, None, true)?;
+            let on = crate::times::resolve_on(c, project.id, &project.slug, Some(b.on.as_str()).filter(|o| !o.is_empty()))?;
+            let place = if b.place.trim().is_empty() { "here" } else { b.place.as_str() };
+            crate::times::add(
+                c,
+                project.id,
+                &on,
+                &crate::times::NewTiming { what: &b.what, place, wall_ms: b.wall_ms, cpu_ms: b.cpu_ms, peak_mb: b.peak_mb, exit_code: b.exit_code, note: &b.note },
+                &a.name(),
+            )
+        })
+        .await;
+    match res {
+        Ok(t) => {
+            let e = crate::activity::Entry::new(&actor, crate::activity::Via::Api, crate::activity::Action::Write, format!("timing on {}: {}", t.on, t.what));
+            crate::activity::write(&state.db, e).await;
+            Json(json!({"on": t.on, "id": t.id})).into_response()
+        }
+        Err(e) => super::json_error(StatusCode::BAD_REQUEST, format!("{e:#}")),
+    }
 }
 
 #[derive(Deserialize)]
