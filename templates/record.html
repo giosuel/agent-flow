@@ -135,10 +135,11 @@
       {% if !scope_choices.is_empty() %}
       <form method="post" action="/p/{{ project_slug }}/{{ short }}/scope" class="row wrap scope-form">
         <label class="sub" for="scope">Its decision goes into</label>
-        <select id="scope" name="scope">{% for (v, l, cur) in scope_choices %}<option value="{{ v }}"{% if cur %} selected{% endif %}>{{ l }}</option>{% endfor %}</select>
-        <button class="btn" type="submit">Change</button>
+        <span class="row scope-pick"><select id="scope" name="scope">{% for (v, l, cur) in scope_choices %}<option value="{{ v }}"{% if cur %} selected{% endif %}>{{ l }}</option>{% endfor %}</select>
+        <button class="btn ghost sm" type="submit">Move</button></span>
       </form>
       {% else if !scope.is_empty() %}<p class="sub">Scope: {{ scope }}</p>{% endif %}
+      {% if !related.is_empty() %}<p class="sub">It touches {% for d in related %}<a href="{{ d.url }}">{{ d.short }} {{ d.title }}</a>{% if !loop.last %}, {% endif %}{% endfor %}.</p>{% endif %}
       {% if let Some(d) = going_ahead %}<p class="notice" role="status">The agent is going ahead with <strong>{{ d }}</strong> meanwhile, built so it's easy to change. Pick it to confirm, or another (or your own words) to change course.</p>{% endif %}
       {% if can_answer %}
       {# Pick an option or write your own answer, never both; nothing is sent until Send answer. #}

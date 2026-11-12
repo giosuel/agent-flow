@@ -1496,6 +1496,8 @@ struct RecordPage {
     scope: String,
     /// For an open question, the owner's choices: (value, label, current).
     scope_choices: Vec<(String, String, bool)>,
+    /// A question: the earlier decisions it touches.
+    related: Vec<RecordRow>,
     extra: Vec<(String, String)>,
     links: Vec<LinkGroup>,
     /// A question: the tasks it holds up, with their step (the owner, 2026-11-12: "The question
@@ -1692,6 +1694,16 @@ async fn load_record_page(
         }
     }
     let blocked_note = if r.state == "blocked" { r.str("blocked_note").to_owned() } else { String::new() };
+    // The earlier decisions a question touches, shown where the owner answers it.
+    let related: Vec<RecordRow> = if r.kind == Kind::Question {
+        links
+            .iter()
+            .filter(|l| l.relation == "relates" && l.outgoing && l.other.kind == Kind::Decision)
+            .map(|l| RecordRow::new(&l.other, l.other.state.clone()))
+            .collect()
+    } else {
+        Vec::new()
+    };
     let mut groups: Vec<LinkGroup> = Vec::new();
     let mut stale = Vec::new();
     for l in &links {
@@ -1820,6 +1832,7 @@ async fn load_record_page(
         can_answer: is_owner && r.kind == Kind::Question && r.state == "open",
         scope,
         scope_choices,
+        related,
         going_ahead: (r.kind == Kind::Question && r.state == "open" && crate::waiting::is_going_ahead(&r)).then(|| {
             let n = r.data.get("recommended").and_then(Value::as_u64).unwrap_or(0) as usize;
             let title = r
