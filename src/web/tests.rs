@@ -2644,3 +2644,34 @@ async fn tool_schemas_have_no_refs() {
     let um = tools.iter().find(|t| t["name"] == "update_milestone").unwrap();
     assert!(um["inputSchema"]["properties"]["review"]["properties"]["reports"].is_object(), "{um}");
 }
+
+/// The project page writes the Claude Code hooks into the project's folder, for a project that
+/// existed before New project wrote them.
+#[tokio::test]
+async fn the_owner_writes_a_projects_hooks_from_its_page() {
+    let s = TestServer::start().await;
+    let token = s.token(TokenKind::Project, Some("vinculum")).await;
+    let dir = tempfile::tempdir().unwrap();
+    let folder = dir.path().to_owned();
+    let f = folder.display().to_string();
+    s.db.call(move |c| {
+        let p = crate::projects::require(c, "vinculum")?;
+        crate::projects::update(c, p.id, &crate::projects::ProjectPatch { checkout: Some(f), ..Default::default() }, "owner")?;
+        Ok(())
+    })
+    .await
+    .unwrap();
+    let cookie = s.owner_cookie().await;
+    let page = s.http.get(s.url("/p/vinculum")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
+    assert!(page.contains("Write the hooks"), "{page}");
+    let res = s.http.post(s.url("/p/vinculum/hooks")).header(COOKIE, &cookie).header(ORIGIN, &s.base).send().await.unwrap();
+    assert!(res.status().is_redirection(), "{}", res.status());
+    let text = std::fs::read_to_string(folder.join(".claude/settings.local.json")).unwrap();
+    assert!(text.contains("hello --doc") && text.contains("hello --no-doc") && text.contains(" news --token-file"), "{text}");
+    let page = s.http.get(s.url("/p/vinculum")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
+    assert!(page.contains("hooks are in place") && !page.contains("Write the hooks"), "{page}");
+    assert!(s.log_summaries().await.iter().any(|l| l.contains("Wrote AgentFlow's Claude Code hooks")));
+    // Not for an agent.
+    let res = s.http.post(s.url("/p/vinculum/hooks")).bearer_auth(&token).send().await.unwrap();
+    assert!(!res.status().is_success() && !res.status().is_redirection());
+}
