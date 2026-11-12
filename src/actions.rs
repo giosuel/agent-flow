@@ -248,12 +248,15 @@ pub fn enabled(conn: &Connection, a: &ActionRow) -> anyhow::Result<Result<(), St
         if let Err(why) = crate::prs::merge_ready(&record) {
             return Ok(Err(why));
         }
-        // A stacked PR merges after the one it's based on (or with "Merge up to here").
-        if let Some(o) =
-            crate::prs::merge_order(conn, record.project_id)?.into_iter().find(|o| o.record.id == record.id)
-            && let Some(after) = o.after
-        {
-            return Ok(Err(format!("merge #{after} first")));
+        // A stacked PR merges after the one it's based on (or with "Merge up to here"); one at
+        // the bottom must be based on main.
+        if let Some(o) = crate::prs::merge_order(conn, record.project_id)?.into_iter().find(|o| o.record.id == record.id) {
+            if let Some(after) = o.after {
+                return Ok(Err(format!("merge #{after} first")));
+            }
+            if let Err(why) = crate::prs::ready_in_order(&o) {
+                return Ok(Err(why));
+            }
         }
     }
     Ok(Ok(()))

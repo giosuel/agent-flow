@@ -47,7 +47,7 @@ pub fn load(conn: &Connection) -> anyhow::Result<Waiting> {
     with_prs.dedup();
     for project_id in with_prs {
         for o in crate::prs::merge_order(conn, project_id)? {
-            if o.after.is_none() && crate::prs::merge_ready(&o.record).is_ok() {
+            if o.after.is_none() && crate::prs::ready_in_order(&o).is_ok() {
                 merges.push(o.record);
             }
         }

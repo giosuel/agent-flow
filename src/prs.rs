@@ -100,6 +100,22 @@ pub fn sync(
     Ok((r, result))
 }
 
+/// A repository's main line: where a PR that isn't stacked on another open PR must point.
+pub fn is_main_branch(base: &str) -> bool {
+    matches!(base, "main" | "master")
+}
+
+/// Whether a PR can be merged now, in its place in the merge order. A PR at the bottom of the
+/// order must be based on main: one based on a side branch with no open PR would otherwise merge
+/// into that branch (Imaginarium's agent, 2026-11-12: "a silent wrong merge, from one press").
+pub fn ready_in_order(o: &Ordered) -> Result<(), String> {
+    merge_ready(&o.record)?;
+    if o.after.is_none() && !o.base_ok {
+        return Err(format!("based on {}, which isn't main and has no open PR", o.record.str("base")));
+    }
+    Ok(())
+}
+
 /// The command a PR's Merge button runs: the project's merge method, deleting the branch so
 /// GitHub moves the next PR of a stack onto main.
 pub fn merge_command(repo: &str, number: i64, method: &str) -> String {
@@ -189,6 +205,9 @@ pub struct Ordered {
     pub position: usize,
     /// The open PR this one is based on, which must be merged first.
     pub after: Option<i64>,
+    /// At the bottom of the order: whether it points at main (or at the branch of a PR just merged,
+    /// which GitHub moves onto main).
+    pub base_ok: bool,
 }
 
 /// Open PRs in merge order: a PR based on another PR's branch comes after it. Independent stacks
@@ -206,6 +225,17 @@ pub fn merge_order(conn: &Connection, project_id: i64) -> anyhow::Result<Vec<Ord
     )?;
     open.sort_by_key(|r| r.number);
     let by_head: HashMap<String, i64> = open.iter().map(|r| (r.str("head").to_owned(), r.number)).collect();
+    let merged_heads: std::collections::HashSet<String> = records::query(
+        conn,
+        &Query { project_id: Some(project_id), kinds: vec![Kind::Pr], states: vec!["merged".into()], limit: 0, ..Default::default() },
+    )?
+    .iter()
+    .map(|r| r.str("head").to_owned())
+    .collect();
+    let base_ok = |r: &Record| {
+        let b = r.str("base");
+        b.is_empty() || is_main_branch(b) || merged_heads.contains(b)
+    };
     let parent = |r: &Record| by_head.get(r.str("base")).copied().filter(|&n| n != r.number);
     let mut out = Vec::new();
     let mut placed = std::collections::HashSet::new();
@@ -220,7 +250,7 @@ pub fn merge_order(conn: &Connection, project_id: i64) -> anyhow::Result<Vec<Ord
         if !placed.insert(r.number) {
             return;
         }
-        out.push(Ordered { record: r.clone(), position: out.len() + 1, after: parent(r) });
+        out.push(Ordered { record: r.clone(), position: out.len() + 1, after: parent(r), base_ok: false });
         for child in open.iter().filter(|c| parent(c) == Some(r.number)) {
             place(child, open, parent, placed, out);
         }
@@ -232,8 +262,11 @@ pub fn merge_order(conn: &Connection, project_id: i64) -> anyhow::Result<Vec<Ord
     for r in &open {
         if !placed.contains(&r.number) {
             placed.insert(r.number);
-            out.push(Ordered { record: r.clone(), position: out.len() + 1, after: parent(r) });
+            out.push(Ordered { record: r.clone(), position: out.len() + 1, after: parent(r), base_ok: false });
         }
+    }
+    for o in &mut out {
+        o.base_ok = base_ok(&o.record);
     }
     Ok(out)
 }
@@ -269,6 +302,24 @@ mod tests {
     use crate::github::fake::pr;
 
     #[test]
+    fn a_pr_on_a_side_branch_isnt_mergeable() {
+        let db = Db::open_memory();
+        db.call_blocking(|c| {
+            let p = crate::projects::create(c, "v", "V", "t")?;
+            sync(c, &p, "o/r", &pr(60, "some-branch", "b60"), "poller")?;
+            sync(c, &p, "o/r", &pr(61, "main", "b61"), "poller")?;
+            sync(c, &p, "o/r", &pr(62, "b61", "b62"), "poller")?;
+            let order = merge_order(c, p.id)?;
+            let of = |n: i64| order.iter().find(|o| o.record.number == n).unwrap();
+            assert_eq!(ready_in_order(of(60)).unwrap_err(), "based on some-branch, which isn't main and has no open PR");
+            assert!(ready_in_order(of(61)).is_ok());
+            assert!(ready_in_order(of(62)).is_ok(), "stacked on an open PR: its turn comes after #61");
+            Ok(())
+        })
+        .unwrap();
+    }
+
+    #[test]
     fn every_pr_of_the_repo_gets_its_merge_button() {
         let db = Db::open_memory();
         db.call_blocking(|c| {
@@ -282,6 +333,9 @@ mod tests {
             let buttons = crate::actions::for_record(c, r.id)?;
             assert_eq!(buttons.len(), 1, "once, however often it syncs");
             assert_eq!(buttons[0].command, "gh pr merge 48 -R o/r --squash --delete-branch");
+            // A new merge method reaches the waiting buttons.
+            crate::projects::update(c, p.id, &crate::projects::ProjectPatch { merge_method: Some("merge".into()), ..Default::default() }, "owner")?;
+            assert_eq!(crate::actions::for_record(c, r.id)?[0].command, "gh pr merge 48 -R o/r --merge --delete-branch");
             assert!(buttons[0].is_merge());
             // Another repository's PR gets none; the agent's own button replaces AgentFlow's.
             let (other, _) = sync(c, &p, "x/y", &pr(7, "main", "b7"), "poller")?;

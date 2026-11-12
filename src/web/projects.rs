@@ -330,7 +330,7 @@ async fn list(
                 }
                 let merges = crate::prs::merge_order(c, p.id)?
                     .iter()
-                    .filter(|o| o.after.is_none() && crate::prs::merge_ready(&o.record).is_ok())
+                    .filter(|o| o.after.is_none() && crate::prs::ready_in_order(o).is_ok())
                     .count() as i64;
                 if merges > 0 {
                     waits.push(("accent", format!("{merges} to merge")));
