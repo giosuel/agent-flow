@@ -39,9 +39,15 @@ that isn't a draft is ready), and pushing a release's tag closes its milestone. 
 counted from the tasks' states; log builds and tests with `agentflow time [--on T-12] -- <command>`. Ask the \
 owner with `ask_question`, one question per call, with numbered options and your recommendation, and repeat the \
 same questions with their ids in your chat reply (`in_chat` when the owner is talking with you right now: no \
-notification); `blocks` names the tasks that wait for the answer; an answer in chat you record with \
-`answer_question`. Answers aren't decisions by themselves: when the owner decides something worth keeping, record \
-it with `record_decision`, quoting their words. Show the \
+notification); `blocks` names the tasks that wait for the answer. A question has a scope (a milestone, by default \
+the current one, or \"project\"), and its answer becomes a decision there by itself (one given in chat: \
+`answer_question`); then check whether it changes an earlier decision and edit, archive, re-scope or replace that \
+one (`update_decision`). Record other things the owner decides with `record_decision`, quoting their words, in \
+the milestone they belong to or \"project\" for what holds across it. You see project-wide decisions and those of \
+milestones that aren't closed; `find_records` reaches the rest with include_closed. Milestones, steps, tasks, \
+decisions and questions are yours to add, edit and archive freely (nothing is deleted; include_archived finds \
+archived ones). The owner's answers and other news come in the replies of your write calls and with \
+`since_last_check`. Show the \
 owner what you see with screenshots: `agentflow screenshot <file> --name \"…\" --category \"…\"` (mockups with \
 --design-url); hand in files (reports, plans, logs) with `agentflow note <file> --name \"…\" --category \"…\"` and \
 short notes or known issues with `add_note`. Never post or push to other people's repositories yourself (PRs, \
@@ -103,20 +109,28 @@ impl FlowMcp {
         // Every reply says when something is waiting to be read, so a busy session notices a
         // message without having to ask. (since_last_check and inbox are the reading itself.)
         let a = actor.clone();
-        let unread = self
+        // A write call's reply carries the news itself (marked read), so a busy agent hears the
+        // owner's answers at its next call without asking; other replies say how much is waiting.
+        let carry = action == Action::Write && outcome.is_ok() && matches!(actor, Actor::Project { .. });
+        let (unread, news) = self
             .state
             .db
             .call(move |c| match &a {
                 Actor::Project { project_id, slug, .. } => {
                     // A sign of life; the first call of a new agent also starts its read cursor.
                     crate::projects::seen(c, *project_id)?;
-                    crate::waiting::unread_count(c, *project_id, slug)
+                    if carry {
+                        let news = crate::waiting::read_news(c, *project_id, slug)?;
+                        Ok((0, news.iter().map(crate::waiting::news_json).collect::<Vec<_>>()))
+                    } else {
+                        Ok((crate::waiting::unread_count(c, *project_id, slug)?, Vec::new()))
+                    }
                 }
-                Actor::Admin { .. } => Ok(crate::messages::consultant_inbox(c)?.len() as i64),
-                _ => Ok(0),
+                Actor::Admin { .. } => Ok((crate::messages::consultant_inbox(c)?.len() as i64, Vec::new())),
+                _ => Ok((0, Vec::new())),
             })
             .await
-            .unwrap_or(0);
+            .unwrap_or((0, Vec::new()));
         match outcome {
             Ok(o) => {
                 let mut e = Entry::new(actor, Via::Mcp, action, o.summary.unwrap_or_else(|| tool.to_owned()));
@@ -128,6 +142,11 @@ impl FlowMcp {
                 }
                 activity::write(&self.state.db, e).await;
                 let mut reply = o.reply;
+                if !news.is_empty()
+                    && let Some(obj) = reply.as_object_mut()
+                {
+                    obj.insert("news".into(), serde_json::Value::Array(news));
+                }
                 if unread > 0
                     && !matches!(tool, "since_last_check" | "inbox" | "hello")
                     && let Some(obj) = reply.as_object_mut()
