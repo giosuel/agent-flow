@@ -500,10 +500,12 @@ struct TaskLine {
     /// "added · your feedback": a task that turned up while its step was under way.
     added: String,
     skip_reason: String,
+    /// Time spent (its share), when it has any.
+    spent: String,
 }
 
 /// How a task's source reads on the page.
-pub fn source_label(source: &str) -> &'static str {
+pub(super) fn source_label(source: &str) -> &'static str {
     match source {
         "owner_feedback" => "your feedback",
         "found" => "found while building",
@@ -1133,7 +1135,7 @@ fn build_project_page(
     };
 
     let groups = if tab == "tasks" {
-        let line = |i: usize, t: &Record, next: bool| -> anyhow::Result<TaskLine> {
+        let line = |i: usize, t: &Record, next: bool, times: &crate::times::Times| -> anyhow::Result<TaskLine> {
             let blocked_by = if t.state == "blocked" {
                 crate::steps::blocking_questions(c, t.id)?.into_iter().map(|(s, _, u)| (s, u)).collect()
             } else {
@@ -1157,11 +1159,15 @@ fn build_project_page(
                     String::new()
                 },
                 skip_reason: if t.state == "skipped" { t.str("skip_reason").to_owned() } else { String::new() },
+                spent: times.share_ms.get(&t.id).filter(|ms| **ms > 0).map(|ms| crate::times::fmt_ms(*ms)).unwrap_or_default(),
             })
         };
-        let lines = |list: &[&Record], active: bool| -> anyhow::Result<Vec<TaskLine>> {
+        let lines = |list: &[&Record], active: bool, times: &crate::times::Times| -> anyhow::Result<Vec<TaskLine>> {
             let next = if active { list.iter().position(|t| t.state == "todo") } else { None };
-            list.iter().enumerate().map(|(i, t)| line(i, t, Some(i) == next)).collect()
+            list.iter().enumerate().map(|(i, t)| line(i, t, Some(i) == next, times)).collect()
+        };
+        let est_of = |list: &[&Record]| -> i64 {
+            list.iter().filter(|t| t.state != "skipped").map(|t| crate::times::estimate_min(t)).sum()
         };
         let mut sorted: Vec<&Record> = tasks.clone();
         sorted.sort_by(|a, b| {
@@ -1177,8 +1183,15 @@ fn build_project_page(
                 continue;
             }
             let mut boxes = Vec::new();
+            let mut agent_ms = 0;
+            let mut est_all = est_of(&own);
             for st in &steps {
                 let mine = of(st.id);
+                let counted: Vec<&Record> = mine.iter().copied().filter(|t| t.state != "skipped").collect();
+                let times = crate::times::times_of(c, &p.slug, &counted, now)?;
+                agent_ms += times.total_ms;
+                let est = est_of(&mine);
+                est_all += est;
                 let open = mine.iter().filter(|t| crate::steps::OPEN.contains(&t.state.as_str())).count();
                 let blocked = mine.iter().filter(|t| t.state == "blocked").count();
                 let state = match st.state.as_str() {
@@ -1188,30 +1201,43 @@ fn build_project_page(
                     _ => "planned",
                 };
                 let n = mine.len();
+                let est_txt = if est > 0 { format!("est. {}", crate::times::fmt_min(est)) } else { String::new() };
                 let sub = match state {
-                    "concluded" => format!("{n} task{}", if n == 1 { "" } else { "s" }),
+                    "concluded" => format!("{est_txt} · took {}", crate::times::fmt_ms(times.total_ms)),
                     "planned" if n == 0 => "starts when its first task does".into(),
-                    _ => format!("{open} open of {n}"),
+                    "planned" => format!("{n} task{} · {est_txt}", if n == 1 { "" } else { "s" }),
+                    _ => format!("{open} open of {n} · {est_txt} · spent {} so far", crate::times::fmt_ms(times.total_ms)),
                 };
+                let sub = sub.trim_start_matches(" · ").trim_end_matches(" · ").replace(" ·  · ", " · ");
                 boxes.push(StepBox {
                     name: st.name.clone(),
                     title: st.title.clone(),
                     state,
                     sub,
                     url: format!("/p/{}/steps/{}", p.slug, st.id),
-                    rows: if state == "concluded" { Vec::new() } else { lines(&mine, st.state == "active")? },
+                    rows: if state == "concluded" { Vec::new() } else { lines(&mine, st.state == "active", &times)? },
                 });
             }
-            let sub = match (steps.len(), count) {
+            let own_counted: Vec<&Record> = own.iter().copied().filter(|t| t.state != "skipped").collect();
+            let own_times = crate::times::times_of(c, &p.slug, &own_counted, now)?;
+            agent_ms += own_times.total_ms;
+            let mut sub = match (steps.len(), count) {
                 (0, n) => format!("{n} task{}", if n == 1 { "" } else { "s" }),
                 (k, n) => format!("{k} step{} · {n} task{}", if k == 1 { "" } else { "s" }, if n == 1 { "" } else { "s" }),
             };
+            if est_all > 0 {
+                sub.push_str(&format!(" · estimated {}", crate::times::fmt_min(est_all)));
+            }
+            if agent_ms > 0 {
+                sub.push_str(&format!(" · {} of agent time", crate::times::fmt_ms(agent_ms)));
+            }
+            let sub = sub;
             groups.push(TaskGroup {
                 name: m.name.clone(),
                 title: m.title.clone(),
                 state: m.state.clone(),
                 sub,
-                rows: lines(&own, m.state == "active" && steps.is_empty())?,
+                rows: lines(&own, m.state == "active" && steps.is_empty(), &own_times)?,
                 steps: boxes,
             });
         }
@@ -1222,7 +1248,7 @@ fn build_project_page(
                 title: "Without a milestone".into(),
                 state: String::new(),
                 sub: format!("{} tasks", loose.len()),
-                rows: lines(&loose, false)?,
+                rows: lines(&loose, false, &crate::times::Times::default())?,
                 steps: Vec::new(),
             });
         }
@@ -1327,6 +1353,16 @@ struct OptionView {
     chosen: bool,
 }
 
+pub struct TimeView {
+    spent: String,
+    est: String,
+    pct: i64,
+    over: bool,
+    raw: String,
+    spans: String,
+    corrected: bool,
+}
+
 struct HistoryRow {
     rev: i64,
     at: String,
@@ -1376,6 +1412,10 @@ struct RecordPage {
     pr_url: String,
     next: String,
     build: Option<BuildView>,
+    /// A task's time spent against its estimate.
+    time: Option<TimeView>,
+    /// Builds and tests timed on this task or PR.
+    timings: Vec<crate::times::TimingRow>,
     /// A screenshot's image and its details.
     shot: Option<ShotView>,
     is_owner: bool,
@@ -1440,6 +1480,7 @@ async fn load_record_page(
 ) -> AppResult<RecordPage> {
     let now = now_ms();
     let is_owner = actor.is_owner();
+    let tz2 = tz.clone();
     let page = state
         .db
         .call(move |c| {
@@ -1450,6 +1491,32 @@ async fn load_record_page(
             let links = records::links_of(c, &r)?;
             let history = records::revisions(c, r.id)?;
             let buttons = super::buttons::views(c, r.id, now)?;
+            // A task's time (its share of its step's) and the timings on it or on a PR.
+            let tz = &tz2;
+            let time = if r.kind == Kind::Task {
+                let siblings = match r.milestone_id {
+                    Some(m) => crate::steps::tasks_of(c, m)?,
+                    None => vec![r.clone()],
+                };
+                let counted: Vec<&Record> = siblings.iter().filter(|t| t.state != "skipped").collect();
+                let times = crate::times::times_of(c, &project.slug, &counted, now)?;
+                let share = times.share_ms.get(&r.id).copied().unwrap_or(0);
+                let raw = times.raw_ms.get(&r.id).copied().unwrap_or(0);
+                let est = crate::times::estimate_min(&r);
+                let spans = crate::times::doing_spans(c, &r, now)?;
+                Some(TimeView {
+                    spent: crate::times::fmt_ms(share),
+                    est: if est > 0 { crate::times::fmt_min(est) } else { String::new() },
+                    pct: if est > 0 { ((share as f64 / (est as f64 * 60_000.0)) * 100.0).min(100.0) as i64 } else { 0 },
+                    over: est > 0 && share > est * 60_000,
+                    raw: if raw > share + 60_000 { format!("{} in doing; shared with tasks in doing at the same time", crate::times::fmt_ms(raw)) } else { String::new() },
+                    spans: spans.iter().map(|(a, b)| if *b >= now - 1000 && r.state == "doing" { format!("{}–now", tz.short(*a)) } else { format!("{}–{}", tz.short(*a), tz.hm(*b)) }).collect::<Vec<_>>().join(", "),
+                    corrected: r.data.get("time_override_min").is_some(),
+                })
+            } else {
+                None
+            };
+            let timings = if matches!(r.kind, Kind::Task | Kind::Pr) { crate::times::rows(&crate::times::of_record(c, r.id)?, tz) } else { Vec::new() };
             let session_url = crate::usage::session_link(c, project.id)?.map(|(u, _)| u);
             let draft = super::outgoing::draft_view(c, &r, now)?;
             // Everything still to test, on a release that isn't tagged yet and on every build.
@@ -1478,11 +1545,11 @@ async fn load_record_page(
                 Some(code) if r.kind == Kind::Contribution => super::outgoing::notice(c, &r, code)?,
                 _ => None,
             };
-            Ok(Some((r, project, links, history, buttons, (session_url, draft, draft_notice, to_test))))
+            Ok(Some((r, project, links, history, buttons, (session_url, draft, draft_notice, to_test, time, timings))))
         })
         .await?
         .ok_or(AppError::NotFound)?;
-    let (r, project, links, history, buttons, (session_url, draft, draft_notice, to_test)) = page;
+    let (r, project, links, history, buttons, (session_url, draft, draft_notice, to_test, time, timings)) = page;
 
     let mut blocking = Vec::new();
     let mut waits_for = Vec::new();
@@ -1640,6 +1707,8 @@ async fn load_record_page(
         waits_for,
         blocked_note,
         stale,
+        time,
+        timings,
         history: history
             .iter()
             .map(|h| HistoryRow { rev: h.rev, at: tz.short(h.at), text: describe_revision(h, &r) })
