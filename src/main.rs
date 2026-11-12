@@ -91,8 +91,6 @@ enum Command {
     /// called by that name runs this. Without a product, lists the products; `run <product>
     /// list` lists its builds.
     Run(cli::RunArgs),
-    /// Wait until something happens in your project (the owner answers, presses a button…), print
-    /// it and exit. Agents run this in the background, so the session is woken when it ends.
     /// What's new from the owner and others since the agent last read its news (marked read);
     /// prints nothing when nothing is. For a Claude Code hook before each prompt.
     News {
@@ -102,6 +100,8 @@ enum Command {
         #[arg(long)]
         again: Option<String>,
     },
+    /// Wait until something happens in your project (the owner answers, presses a button…), print
+    /// it and exit. Agents run this in the background, so the session is woken when it ends.
     Wait {
         #[command(flatten)]
         client: cli::ClientArgs,
