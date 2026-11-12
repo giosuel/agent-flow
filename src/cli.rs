@@ -288,6 +288,29 @@ impl Client {
     }
 }
 
+/// `agentflow news`: the agent's unread news, one line each; nothing when there's none.
+pub fn news(config_path: &Path, args: ClientArgs, again: Option<String>) -> anyhow::Result<()> {
+    let client = Client::new(config_path, &args)?;
+    let path = match again.as_deref().map(str::trim).filter(|a| !a.is_empty()) {
+        Some(a) => {
+            let min = crate::steps::parse_minutes(a).with_context(|| format!("--again {a:?}: a duration, e.g. \"1h\""))?;
+            format!("/api/news?again={min}")
+        }
+        None => "/api/news".to_owned(),
+    };
+    let res = client.get(&path)?;
+    let events = res.get("events").and_then(|e| e.as_array()).cloned().unwrap_or_default();
+    if events.is_empty() {
+        return Ok(());
+    }
+    println!("AgentFlow news for you ({}):", events.len());
+    for e in events {
+        let s = |k: &str| e.get(k).and_then(|v| v.as_str()).unwrap_or("").to_owned();
+        println!("- {} UTC  {}  (by {})", s("at"), s("what"), s("by"));
+    }
+    Ok(())
+}
+
 pub fn wait(config_path: &Path, args: ClientArgs, record: Option<String>, minutes: u64) -> anyhow::Result<()> {
     let client = Client::new(config_path, &args)?.with_timeout(std::time::Duration::from_secs(30 * 60));
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(minutes * 60);

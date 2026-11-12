@@ -167,6 +167,27 @@ pub fn unread(conn: &Connection, project_id: i64, slug: &str) -> anyhow::Result<
 
 pub const UNREAD_PAGE: i64 = 200;
 
+/// Reads the news: unread events by others, oldest first, and moves the bookmark past them, so
+/// each comes once, whichever way it reaches the agent (since_last_check, a write call's reply,
+/// `agentflow news`).
+pub fn read_news(conn: &Connection, project_id: i64, slug: &str) -> anyhow::Result<Vec<Event>> {
+    let events = unread(conn, project_id, slug)?;
+    if let Some(last) = events.last() {
+        set_cursor(conn, project_id, last.seq)?;
+    }
+    Ok(events)
+}
+
+/// News again: events by others within the last `window_ms`, read or not; the bookmark stays.
+pub fn news_again(conn: &Connection, project_id: i64, slug: &str, window_ms: i64) -> anyhow::Result<Vec<Event>> {
+    records::events_by_others_since(conn, project_id, slug, now_ms() - window_ms, UNREAD_PAGE)
+}
+
+/// How an event reads in news.
+pub fn news_json(e: &Event) -> serde_json::Value {
+    serde_json::json!({"at": crate::util::fmt_utc(e.at), "record": e.record, "what": e.summary, "by": e.actor})
+}
+
 /// How many unread events there are, without a cap.
 pub fn unread_count(conn: &Connection, project_id: i64, slug: &str) -> anyhow::Result<i64> {
     let after = cursor(conn, project_id)?;

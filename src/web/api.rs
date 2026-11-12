@@ -17,7 +17,7 @@ use crate::util::fmt_utc;
 use crate::{records, waiting};
 
 pub fn routes() -> Router<AppState> {
-    Router::new().route("/api/wait", get(wait)).route("/api/timings", axum::routing::post(timing))
+    Router::new().route("/api/wait", get(wait)).route("/api/news", get(news)).route("/api/timings", axum::routing::post(timing))
 }
 
 /// A timing from `agentflow time`: what ran, how long, CPU and peak memory, on what.
@@ -60,6 +60,31 @@ async fn timing(State(state): State<AppState>, Extension(actor): Extension<Actor
             Json(json!({"on": t.on, "id": t.id})).into_response()
         }
         Err(e) => super::json_error(StatusCode::BAD_REQUEST, format!("{e:#}")),
+    }
+}
+
+#[derive(Deserialize)]
+struct NewsQuery {
+    /// See the last this-many minutes again, read or not (the bookmark stays).
+    again: Option<i64>,
+}
+
+/// The news for `agentflow news` (a hook before each of the owner's prompts): unread events by
+/// others, marked read; or, with `again`, the last minutes once more.
+async fn news(State(state): State<AppState>, Extension(actor): Extension<Actor>, Query(q): Query<NewsQuery>) -> Response {
+    let Actor::Project { project_id, slug, .. } = actor else {
+        return (StatusCode::FORBIDDEN, Json(json!({"error": "news is for a project's agent"}))).into_response();
+    };
+    let result = state
+        .db
+        .call(move |c| match q.again {
+            Some(min) if min > 0 => waiting::news_again(c, project_id, &slug, min * 60_000),
+            _ => waiting::read_news(c, project_id, &slug),
+        })
+        .await;
+    match result {
+        Ok(events) => Json(json!({"events": events.iter().map(waiting::news_json).collect::<Vec<_>>()})).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": format!("{e:#}")}))).into_response(),
     }
 }
 
