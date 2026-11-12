@@ -352,26 +352,6 @@ pub fn create(c: &mut Connection, data_dir: &Path) -> anyhow::Result<String> {
         }
     }
 
-    // A conversation with the consultant.
-    let (thread, _) = crate::messages::send(
-        c,
-        SLUG,
-        &[crate::messages::CONSULTANT.into()],
-        "How are A milestones tagged?",
-        "The owner wants a feedback round after M3. What do I tag it, and what command do I give them?",
-        "question",
-        None,
-    )?;
-    crate::messages::send(
-        c,
-        crate::messages::CONSULTANT,
-        &[SLUG.into()],
-        "",
-        "`v0.0.<n+1>-m<n>.a<n>`, so A3 is `v0.0.4-m3.a3`, on main's merge commit. Add it as a release with a tag button; the owner presses it.",
-        "answer",
-        Some(thread),
-    )?;
-
     // A week of token usage, so the agent card and Usage have something to show.
     let now = now_ms();
     for i in 0..300i64 {

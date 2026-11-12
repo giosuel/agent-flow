@@ -126,7 +126,6 @@ impl FlowMcp {
                         Ok((crate::waiting::unread_count(c, *project_id, slug)?, Vec::new()))
                     }
                 }
-                Actor::Admin { .. } => Ok((crate::messages::consultant_inbox(c)?.len() as i64, Vec::new())),
                 _ => Ok((0, Vec::new())),
             })
             .await
@@ -151,8 +150,7 @@ impl FlowMcp {
                     && !matches!(tool, "since_last_check" | "inbox" | "hello")
                     && let Some(obj) = reply.as_object_mut()
                 {
-                    let how = if matches!(actor, Actor::Admin { .. }) { "inbox" } else { "since_last_check" };
-                    obj.insert("unread".into(), serde_json::json!(format!("{unread} new for you; call {how}")));
+                    obj.insert("unread".into(), serde_json::json!(format!("{unread} new for you; call since_last_check")));
                 }
                 Ok(json_result(reply))
             }
