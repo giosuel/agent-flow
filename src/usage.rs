@@ -194,6 +194,14 @@ pub struct Read {
     first_at: Option<i64>,
     #[serde(default)]
     remotes: Vec<Remote>,
+    /// What sessions and subagents told each other (crate::sessionlog).
+    #[serde(default)]
+    log: crate::sessionlog::Found,
+    /// The transcript's session and working directory, for the log.
+    #[serde(default)]
+    session: String,
+    #[serde(default)]
+    cwd: String,
 }
 
 /// Where the last round stopped in this file, and (for a subagent) the time of its first own call.
@@ -237,7 +245,12 @@ pub fn read_new(root: &Path, path: &Path, offset: u64, first_at: Option<i64>) ->
         offset,
         first_at,
         remotes: Vec::new(),
+        log: crate::sessionlog::Found::default(),
+        session: path.file_stem().and_then(|s| s.to_str()).unwrap_or("").to_owned(),
+        cwd: String::new(),
     };
+    let sub_info = if subagent { crate::sessionlog::subagent_of(path) } else { None };
+    out.log.subagent = sub_info.clone();
     let start = offset;
     let mut buf = Vec::new();
     while offset - start < MAX_PER_ROUND {
@@ -269,6 +282,14 @@ pub fn read_new(root: &Path, path: &Path, offset: u64, first_at: Option<i64>) ->
             continue;
         }
         offset += n as u64;
+        crate::sessionlog::scan(&buf, sub_info.as_ref(), &mut out.log);
+        if out.cwd.is_empty()
+            && contains(&buf, b"\"cwd\":\"")
+            && let Ok(v) = serde_json::from_slice::<serde_json::Value>(&buf)
+            && let Some(c) = v.get("cwd").and_then(|c| c.as_str())
+        {
+            out.cwd = c.to_owned();
+        }
         // A session's own remote-control lines (a subagent has none of its own). Only lines that
         // are one: a model call that merely mentions the words still counts below.
         if !subagent
@@ -362,6 +383,11 @@ pub fn store(conn: &mut Connection, read: &Read) -> anyhow::Result<usize> {
                 c.usage.cache_read_input_tokens
             ],
         )?;
+    }
+    if !read.log.is_empty() {
+        let cwd = if read.cwd.is_empty() { read.calls.first().map(|c| c.cwd.as_str()).unwrap_or("") } else { read.cwd.as_str() };
+        let project_id = checkouts.project(cwd, &read.folder);
+        crate::sessionlog::store(&tx, &read.log, &read.session, &read.folder, cwd, project_id)?;
     }
     for r in &read.remotes {
         tx.execute(
