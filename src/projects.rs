@@ -324,10 +324,12 @@ pub struct Milestone {
     pub started_at: Option<i64>,
     /// A concluded step's summary, in the agent's words.
     pub summary: String,
+    /// A review step: reviewers, commit, the owner's words, reports (JSON); empty otherwise.
+    pub review: String,
 }
 
 const MILESTONE_COLUMNS: &str =
-    "id, project_id, parent_id, name, title, description, position, state, tag, reopened_because, closed_at, started_at, summary";
+    "id, project_id, parent_id, name, title, description, position, state, tag, reopened_because, closed_at, started_at, summary, review";
 
 fn milestone_from_row(r: &Row) -> rusqlite::Result<Milestone> {
     Ok(Milestone {
@@ -344,6 +346,7 @@ fn milestone_from_row(r: &Row) -> rusqlite::Result<Milestone> {
         closed_at: r.get(10)?,
         started_at: r.get(11)?,
         summary: r.get(12)?,
+        review: r.get(13)?,
     })
 }
 
@@ -374,6 +377,12 @@ pub fn find_milestone(conn: &Connection, project_id: i64, name: &str) -> anyhow:
         (Some(_), Some(_)) => bail!("{name:?} names more than one step; write it as MILESTONE/STEP, e.g. M4/{name}"),
         (None, _) => bail!("no milestone {name:?}"),
     }
+}
+
+/// Makes a step a review step.
+pub fn set_review(conn: &Connection, m: &Milestone, review: &serde_json::Value) -> anyhow::Result<()> {
+    conn.execute("UPDATE milestones SET review = ?1 WHERE id = ?2", params![review.to_string(), m.id])?;
+    Ok(())
 }
 
 pub fn get_milestone(conn: &Connection, id: i64) -> anyhow::Result<Milestone> {
