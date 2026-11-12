@@ -36,6 +36,19 @@ struct MessageView {
     to: String,
     at: String,
     body_html: String,
+    /// A long message folds to its first lines.
+    preview: Option<String>,
+}
+
+/// Messages longer than this fold to a preview (briefs and reports run to pages).
+const FOLD_AT: usize = 1200;
+
+fn preview(body: &str) -> Option<String> {
+    if body.len() <= FOLD_AT {
+        return None;
+    }
+    let flat: String = body.split_whitespace().collect::<Vec<_>>().join(" ");
+    Some(flat.chars().take(300).collect::<String>() + "…")
 }
 
 struct ContributionRow {
@@ -138,7 +151,13 @@ async fn page(
         selected,
         messages: msgs
             .iter()
-            .map(|m| MessageView { from: m.from.clone(), to: m.to.clone(), at: tz.short(m.at), body_html: markdown::to_html(&m.body) })
+            .map(|m| MessageView {
+                from: sessionlog::shown(&m.from),
+                to: sessionlog::shown(&m.to),
+                at: tz.short(m.at),
+                body_html: markdown::to_html(&m.body),
+                preview: preview(&m.body),
+            })
             .collect(),
         contributions: contributions
             .iter()

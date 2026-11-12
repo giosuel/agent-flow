@@ -906,3 +906,6 @@ a.blk.q:hover { text-decoration: underline; }
 /* The Reload button under a page's heading; conversation groups in the list. */
 .reload-form { margin-top: 8px; gap: 10px; }
 .conv-group { padding: 10px 14px 4px; margin: 0; }
+.msg-fold > summary { cursor: pointer; list-style: none; }
+.msg-fold > summary::-webkit-details-marker { display: none; }
+.msg-fold[open] > summary { display: none; }

@@ -33,7 +33,7 @@
     <div class="stack-sm"><h2 id="thread-h">{{ title }}</h2><span class="sub">{{ line }}</span></div>
     <ol class="plain msgs">
       {% for m in messages %}
-      <li class="msg"><div class="row wrap"><strong>{{ m.from }}</strong><span class="sub">→ {{ m.to }}</span><span class="sub mono">{{ m.at }}</span></div><div class="prose">{{ m.body_html|safe }}</div></li>
+      <li class="msg"><div class="row wrap"><strong>{{ m.from }}</strong><span class="sub">→ {{ m.to }}</span><span class="sub mono">{{ m.at }}</span></div>{% if let Some(pv) = m.preview %}<details class="msg-fold"><summary><span class="msg-preview">{{ pv }}</span> <span class="sub">Show all</span></summary><div class="prose">{{ m.body_html|safe }}</div></details>{% else %}<div class="prose">{{ m.body_html|safe }}</div>{% endif %}</li>
       {% endfor %}
     </ol>
     {% endif %}

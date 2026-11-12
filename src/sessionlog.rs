@@ -258,13 +258,26 @@ fn is_agent_id(s: &str) -> bool {
     s.len() >= 9 && s.starts_with('a') && s[1..].bytes().all(|b| b.is_ascii_hexdigit())
 }
 
-/// A session's name for grouping: "agent-flow-22" and "agent-flow" are the same session's
-/// (Claude Code numbers untitled sessions), case aside.
+/// A session's name for grouping: "agent-flow-22", "somedesk-ac" and "agent-flow" are the same
+/// session's (Claude Code gives untitled sessions their folder's name and two hex digits), case aside.
 pub fn norm(name: &str) -> String {
     let n = name.trim().to_lowercase();
     match n.rsplit_once('-') {
-        Some((base, num)) if !base.is_empty() && !num.is_empty() && num.bytes().all(|b| b.is_ascii_digit()) => base.to_owned(),
+        Some((base, tail)) if !base.is_empty() && tail.len() == 2 && tail.bytes().all(|b| b.is_ascii_hexdigit()) => {
+            base.to_owned()
+        }
         _ => n,
+    }
+}
+
+/// A session's name as shown: without the two hex digits Claude Code adds to untitled sessions.
+pub fn shown(name: &str) -> String {
+    let n = name.trim();
+    match n.rsplit_once('-') {
+        Some((base, tail)) if !base.is_empty() && tail.len() == 2 && tail.bytes().all(|b| b.is_ascii_hexdigit()) => {
+            base.to_owned()
+        }
+        _ => n.to_owned(),
     }
 }
 
@@ -413,7 +426,7 @@ pub fn session_threads(conn: &Connection, limit: i64) -> anyhow::Result<Vec<Thre
             .unwrap_or_else(|| n.to_owned())
         };
         out.push(Thread {
-            title: format!("{} ↔ {}", shown(a), shown(b)),
+            title: format!("{} ↔ {}", self::shown(&shown(a)), self::shown(&shown(b))),
             key,
             sub: String::new(),
             project_id,
@@ -490,7 +503,9 @@ mod tests {
     fn names_tags_and_lines() {
         assert_eq!(norm("agent-flow-22"), "agent-flow");
         assert_eq!(norm("Viber Consultant"), "viber consultant");
-        assert_eq!(norm("M9-2026"), "m9");
+        assert_eq!(norm("somedesk-ac"), "somedesk");
+        assert_eq!(norm("realer-xpad-5d"), "realer-xpad");
+        assert_eq!(norm("antimony-mcp"), "antimony-mcp");
         let t = "Another Claude session sent a message:\n<cross-session-message from=\"uds:/run/x.sock\" from-name=\"Imaginarium\" from-mode=\"prompting\">\nHello there\n</cross-session-message>";
         assert_eq!(cross_session(t), vec![("uds:/run/x.sock".into(), "Imaginarium".into(), "Hello there".into())]);
         assert!(is_agent_id("a0ca2a7e879b8b08a") && !is_agent_id("Imaginarium") && !is_agent_id("all"));
