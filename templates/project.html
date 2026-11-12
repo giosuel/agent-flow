@@ -47,13 +47,13 @@
       <details class="connect">
         <summary class="sub">Connect the agent</summary>
         <div class="stack-sm">
-          <p class="sub">1. Register AgentFlow with Claude Code for this folder only (once per machine):</p>
-          <pre class="cmd mono">{{ c.mcp_add }}</pre>
-          <p class="sub">2. Start the agent there:</p>
+          {% if c.set_up %}<p class="sub">Its folder is set up: the AgentFlow MCP server, hello at every start and after compaction, the news before each of your prompts, and the token for its commands. Start the agent there:</p>
           <pre class="cmd mono">{{ c.start }}</pre>
-          {% if c.hooks %}<p class="sub">Its Claude Code hooks are in place: hello at every start, resume, /clear and compaction, and the news before each of your prompts.</p>
-          {% else %}<p class="sub">3. Give its sessions hello at every start and after compaction, and the news before each of your prompts. This writes Claude Code hooks into the folder's <span class="mono">.claude/settings.local.json</span> (kept out of git) and leaves the rest of that file as it is:</p>
-          <form method="post" action="/p/{{ slug }}/hooks"><button class="btn sm" type="submit">Write the hooks</button></form>{% endif %}
+          {% else %}<p class="sub">Its folder isn't set up yet, or not as AgentFlow sets it up now. This writes the AgentFlow MCP server into <span class="mono">.mcp.json</span>, and hooks (hello at every start and after compaction, the news before each of your prompts) and the token for its commands into <span class="mono">.claude/settings.local.json</span>. Both stay out of git, and the rest of those files stays as it is:</p>
+          <form method="post" action="/p/{{ slug }}/setup"><button class="btn sm" type="submit">Set up the agent</button></form>
+          <p class="sub">Then start it there:</p>
+          <pre class="cmd mono">{{ c.start }}</pre>{% endif %}
+          <p class="sub">The first time in a folder, Claude Code asks whether you trust it. Say yes once: until then it doesn't connect to AgentFlow.</p>
           {% if !c.has_file %}<p class="notice warn">The token file <span class="mono">{{ c.token_file }}</span> doesn't exist. Rotate the project's token in <a href="/settings">Settings</a>; that writes it.</p>{% endif %}
         </div>
       </details>
