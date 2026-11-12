@@ -3,7 +3,7 @@
 {% block content %}
 <div class="head">
   <div class="crumb-row"><nav class="crumbs" aria-label="Back"><a class="crumb-back" href="/p/{{ project_slug }}{% if kind == "screenshot" %}?tab=screenshots{% endif %}">{{ crate::web::icons::icon("back")|safe }}<span>{{ project_name }}</span></a><span class="crumb-where">{{ kind_label }}</span></nav>{% if let Some(u) = session_url %}<a class="session-link" href="{{ u }}" target="_blank" rel="noopener" title="The project agent's Claude Code session on claude.ai">{{ crate::web::icons::icon("session")|safe }}<span class="hide-phone">Open the agent's session</span><span class="only-phone">Agent session</span>{{ crate::web::icons::icon("out")|safe }}</a>{% endif %}</div>
-  <p class="row wrap"><span class="mono sub">{{ id }}</span>{% if let Some(d) = draft %}<span class="chip{% if d.waiting %} accent{% endif %}">{% if d.waiting %}waiting on you{% else if d.with_agent %}changes asked{% else %}being sent{% endif %}</span>{% else %}<span class="chip{% if state == "open" %} warn{% endif %}{% if state == "current" || state == "answered" || state == "done" %} ok{% endif %}">{{ state }}</span>{% endif %}{% for t in tags %}<span class="chip">{{ t }}</span>{% endfor %}</p>
+  <p class="row wrap"><span class="mono sub">{{ id }}</span>{% if let Some(d) = draft %}<span class="chip{% if d.waiting %} accent{% endif %}">{% if d.waiting %}waiting on you{% else if d.with_agent %}changes asked{% else %}being sent{% endif %}</span>{% else %}<span class="chip{% if state == "open" %} warn{% endif %}{% if state == "current" || state == "answered" || state == "done" %} ok{% endif %}">{{ state }}</span>{% endif %}{% for t in tags %}<span class="chip">{{ t }}</span>{% endfor %}{% if kind == "decision" && !scope.is_empty() %}<span class="chip" title="Scope">{{ scope }}</span>{% endif %}</p>
   <h1 class="rec-title">{{ title }}</h1>
 </div>
 {% if let Some(e) = error %}<p class="notice warn" role="alert">{{ e }}</p>{% endif %}
@@ -132,6 +132,14 @@
     {% if kind == "question" %}
     <section class="card pad stack" aria-labelledby="answer-h">
       <h2 id="answer-h">{% if can_answer %}Your answer{% else %}Answer{% endif %}</h2>
+      {% if !scope_choices.is_empty() %}
+      <form method="post" action="/p/{{ project_slug }}/{{ short }}/scope" class="row wrap scope-form">
+        <label class="sub" for="scope">Its decision goes into</label>
+        <span class="row scope-pick"><select id="scope" name="scope">{% for (v, l, cur) in scope_choices %}<option value="{{ v }}"{% if cur %} selected{% endif %}>{{ l }}</option>{% endfor %}</select>
+        <button class="btn ghost sm" type="submit">Move</button></span>
+      </form>
+      {% else if !scope.is_empty() %}<p class="sub">Scope: {{ scope }}</p>{% endif %}
+      {% if !related.is_empty() %}<p class="sub">It touches {% for d in related %}<a href="{{ d.url }}">{{ d.short }} {{ d.title }}</a>{% if !loop.last %}, {% endif %}{% endfor %}.</p>{% endif %}
       {% if let Some(d) = going_ahead %}<p class="notice" role="status">The agent is going ahead with <strong>{{ d }}</strong> meanwhile, built so it's easy to change. Pick it to confirm, or another (or your own words) to change course.</p>{% endif %}
       {% if can_answer %}
       {# Pick an option or write your own answer, never both; nothing is sent until Send answer. #}

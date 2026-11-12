@@ -898,3 +898,7 @@ a.blk.q:hover { text-decoration: underline; }
 .seg3 button:first-child { border-left: 0; }
 .seg3 button.on { background: var(--chip-accent); color: var(--chip-accent-ink); font-weight: 600; }
 .plat { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; border: 1px solid var(--border); border-radius: 7px; padding: 3px 9px; color: var(--ink); }
+
+/* A question's scope picker: the select gives way on a phone so Move stays inside the card. */
+.scope-form .scope-pick { flex-wrap: nowrap; min-width: 0; max-width: 100%; }
+.scope-form .scope-pick select { flex: 1 1 auto; min-width: 0; }

@@ -30,6 +30,13 @@ pub struct Hello {
     pub brief: bool,
 }
 
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
+pub struct SinceLastCheck {
+    /// See news again that was already read: everything from others in this last stretch, e.g.
+    /// "1h" or "30 min". The bookmark stays where it is.
+    pub again: Option<String>,
+}
+
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct ProjectArg {
     /// A project's slug, e.g. "vinculum". Leave out for your own project.
@@ -111,18 +118,24 @@ pub struct ConcludeStep {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct DeleteStep {
+pub struct ArchiveMilestone {
     /// Only for the consultant: which project.
     pub project: Option<String>,
-    /// The step, e.g. "P9.3b" (or a milestone without steps).
-    pub step: String,
-    /// Move its tasks to this step, e.g. "P9.3"; its notes, PRs, decisions and timings go there too.
+    /// The step ("P9.3b") or milestone ("M7").
+    pub milestone: String,
+    /// For a step: move its tasks (and its notes, PRs and timings) to this step instead of
+    /// archiving them with it, e.g. when folding small steps into one.
     pub move_to: Option<String>,
-    /// Delete its tasks with it instead.
-    #[serde(default)]
-    pub delete_tasks: bool,
-    /// Why, in a line; kept in the project's event log.
+    /// Why, in a line; kept in its history and the event log.
     pub reason: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct RestoreMilestone {
+    /// Only for the consultant: which project.
+    pub project: Option<String>,
+    /// The archived step or milestone, e.g. "P9.3b".
+    pub milestone: String,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -213,7 +226,7 @@ fn milestones_json(ms: &[projects::Milestone], counts: &[(i64, String, i64)]) ->
 fn task_counts(c: &rusqlite::Connection, project_id: i64) -> anyhow::Result<Vec<(i64, String, i64)>> {
     let mut stmt = c.prepare(
         "SELECT milestone_id, state, count(*) FROM records WHERE project_id = ?1 AND kind = 'task' AND milestone_id IS NOT NULL
-         GROUP BY milestone_id, state",
+         AND state != 'archived' GROUP BY milestone_id, state",
     )?;
     let rows = stmt.query_map([project_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
     Ok(rows.collect::<Result<_, _>>()?)
@@ -238,7 +251,20 @@ impl FlowMcp {
             .db
             .call(move |c| {
                 let project = target_project(c, &a, None, true)?;
-                projects::hello(c, project.id, &p.session, &p.machine, &p.model, &p.effort)?;
+                let prev_hello = projects::hello(c, project.id, &p.session, &p.machine, &p.model, &p.effort)?;
+                // Project-wide decisions since your last session: standing rules to fold into the
+                // project document (Imaginarium's agent, 2026-11-12).
+                let new_project_decisions: Vec<Value> = match prev_hello {
+                    None => Vec::new(),
+                    Some(since) => records::query(
+                        c,
+                        &Query { project_id: Some(project.id), kinds: vec![Kind::Decision], states: vec!["current".into()], limit: 0, ..Default::default() },
+                    )?
+                    .into_iter()
+                    .filter(|d| d.milestone_id.is_none() && d.created_at >= since)
+                    .map(|d| json!({"id": d.ref_id, "title": d.title, "owner_words": d.data.get("owner_words")}))
+                    .collect(),
+                };
                 let ms = projects::milestones(c, project.id)?;
                 let counts = task_counts(c, project.id)?;
                 let open = records::query(
@@ -271,6 +297,7 @@ impl FlowMcp {
                     "notes_back": notes_back(c, project.id)?,
                     "open_questions": open.iter().map(|q| json!({"id": q.ref_id, "title": q.title})).collect::<Vec<_>>(),
                     "answered_this_week": answered.iter().map(|q| json!({"id": q.ref_id, "title": q.title, "answer": q.data.get("answer")})).collect::<Vec<_>>(),
+                    "new_project_decisions": new_project_decisions,
                     "unread_events": unread,
                     "recent_events": recent.iter().map(|e| json!({"at": crate::util::fmt_utc(e.at), "what": e.summary, "by": e.actor})).collect::<Vec<_>>(),
                     // The CLI (publish, screenshot, contribute, remote, wait) needs the same token.
@@ -295,9 +322,14 @@ impl FlowMcp {
     }
 
     #[tool(description = "What happened in your project since you last checked that you didn't do yourself: \
-        the owner's answers, button presses, messages, feedback. Marks them read. Also see `agentflow wait` to block until \
-        something happens.")]
-    async fn since_last_check(&self, Extension(parts): Extension<Parts>) -> Result<CallToolResult, ErrorData> {
+        the owner's answers (and the decisions they made), button presses, messages, feedback. Marks them read; the \
+        replies of your other write calls carry the same news as it comes. again: \"1h\" shows what came in the last \
+        hour once more, read or not. Also see `agentflow wait` to block until something happens.")]
+    async fn since_last_check(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(p): Parameters<SinceLastCheck>,
+    ) -> Result<CallToolResult, ErrorData> {
         let actor = actor_of(&parts);
         let a = actor.clone();
         let outcome = self
@@ -305,10 +337,14 @@ impl FlowMcp {
             .db
             .call(move |c| {
                 let project = target_project(c, &a, None, true)?;
-                let events = crate::waiting::unread(c, project.id, &project.slug)?;
-                if let Some(last) = events.last() {
-                    crate::waiting::set_cursor(c, project.id, last.seq)?;
-                }
+                let events = match p.again.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+                    Some(w) => {
+                        let min = crate::steps::parse_minutes(w)
+                            .ok_or_else(|| anyhow::anyhow!("again is a duration, e.g. \"1h\" or \"30 min\""))?;
+                        crate::waiting::news_again(c, project.id, &project.slug, min * 60_000)?
+                    }
+                    None => crate::waiting::read_news(c, project.id, &project.slug)?,
+                };
                 let more = events.len() as i64 == crate::waiting::UNREAD_PAGE;
                 let list: Vec<Value> = events
                     .iter()
@@ -473,9 +509,9 @@ impl FlowMcp {
 
     #[tool(
         description = "Change a milestone or step: rename, retitle, describe, move it (move_before, or step_of to \
-        another milestone), set its state (planned, active, closed), dates, summary and the tag that closed it. Steps \
-        are yours to edit freely, concluded ones too (the owner, 2026-11-12); a closed milestone should stay closed, \
-        and reopening one needs a reason."
+        another milestone), set its state (planned, active, closed), dates, summary and the tag that closed it. \
+        Milestones and steps are yours to edit freely, closed ones too (the owner, 2026-11-12); archive_milestone \
+        puts one away."
     )]
     async fn update_milestone(
         &self,
@@ -546,14 +582,17 @@ impl FlowMcp {
         self.finish(&actor, "conclude_step", Action::Write, outcome).await
     }
 
-    #[tool(description = "Delete a step for good (the owner, 2026-11-12: agents edit or delete steps and tasks \
-        freely), e.g. to fold small steps into one: move its tasks with move_to, or delete them with delete_tasks. \
-        Its notes, PRs, decisions and timings are never deleted: they go to move_to, or to its milestone. The event \
-        log keeps a line with what it was and your reason.")]
-    async fn delete_step(
+    #[tool(description = "Archive a step, or a milestone with its steps (the owner, 2026-11-12: agents add, edit \
+        and archive milestones, steps, tasks, decisions and questions freely; nothing is deleted). Archived ones are \
+        hidden from the lists and counts, reachable with include_archived, and restore_milestone brings them back. A \
+        step's tasks go with it, or to move_to (with its notes, PRs and timings), e.g. to fold small steps into one: \
+        add a done task per old step to the target first (add_tasks with started_at and done_at), then archive each \
+        with move_to. A milestone takes its steps, tasks and the decisions and questions scoped to it along; \
+        project-wide decisions stay. Archived names stay taken.")]
+    async fn archive_milestone(
         &self,
         Extension(parts): Extension<Parts>,
-        Parameters(p): Parameters<DeleteStep>,
+        Parameters(p): Parameters<ArchiveMilestone>,
     ) -> Result<CallToolResult, ErrorData> {
         let actor = actor_of(&parts);
         let a = actor.clone();
@@ -563,19 +602,44 @@ impl FlowMcp {
             .call(move |c| {
                 let tx = c.transaction()?;
                 let project = target_project(&tx, &a, p.project.as_deref(), true)?;
-                let step = projects::find_milestone(&tx, project.id, &p.step)?;
+                let m = projects::find_milestone(&tx, project.id, &p.milestone)?;
                 let to = match p.move_to.as_deref().map(str::trim).filter(|m| !m.is_empty()) {
                     Some(name) => Some(projects::find_milestone(&tx, project.id, name)?),
                     None => None,
                 };
-                let done = crate::steps::delete_step(&tx, &step, to.as_ref(), p.delete_tasks, &p.reason, &a.name())?;
+                let done = crate::steps::archive_milestone(&tx, &m, to.as_ref(), &p.reason, &a.name())?;
                 tx.commit()?;
-                Ok(Outcome::new(json!({"deleted": step.name, "moved": done.moved, "tasks_deleted": done.deleted, "moved_to": to.map(|t| t.name)}))
-                    .summary(format!("step {} deleted", step.name))
+                Ok(Outcome::new(json!({"archived": m.name, "steps": done.steps, "archived_with_it": done.archived,
+                    "moved": done.moved, "moved_to": to.map(|t| t.name)}))
+                    .summary(format!("{} archived", m.name))
                     .project(project.slug))
             })
             .await;
-        self.finish(&actor, "delete_step", Action::Write, outcome).await
+        self.finish(&actor, "archive_milestone", Action::Write, outcome).await
+    }
+
+    #[tool(description = "Bring back an archived step or milestone, with what was archived along with it (its \
+        steps, tasks, decisions and questions). Tasks moved elsewhere when it was archived stay where they are.")]
+    async fn restore_milestone(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(p): Parameters<RestoreMilestone>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let actor = actor_of(&parts);
+        let a = actor.clone();
+        let outcome = self
+            .state
+            .db
+            .call(move |c| {
+                let tx = c.transaction()?;
+                let project = target_project(&tx, &a, p.project.as_deref(), true)?;
+                let m = projects::find_milestone_any(&tx, project.id, &p.milestone, true)?;
+                let back = crate::steps::restore_milestone(&tx, &m, &a.name())?;
+                tx.commit()?;
+                Ok(Outcome::new(json!({"restored": m.name, "with": back})).summary(format!("{} restored", m.name)).project(project.slug))
+            })
+            .await;
+        self.finish(&actor, "restore_milestone", Action::Write, outcome).await
     }
 
     #[tool(description = "Change your project document: one `##` section at a time (replaced, added or removed), \

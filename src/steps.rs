@@ -178,120 +178,191 @@ pub fn conclude(
     Ok(Concluded { step: projects::get_milestone(conn, step.id)?, moved })
 }
 
-/// Deletes a task for good (the owner, 2026-11-12: "let agents freely edit steps and tasks, edit
-/// or delete them"): its history and links go too; the event log keeps a line saying what it was.
-pub fn delete_task(conn: &Connection, task: &Record, reason: &str, actor: &str) -> anyhow::Result<()> {
-    if task.kind != Kind::Task {
-        bail!("{} isn't a task; only tasks are deleted", task.ref_id);
+/// Archives a task, decision or question (the owner, 2026-11-12: agents "add/edit/delete(archive)"
+/// freely): hidden from the lists, kept with its history, restorable. `with` is the milestone it
+/// was archived along with, so restoring that milestone brings it back. An open question stops
+/// blocking its tasks.
+pub fn archive_record(conn: &Connection, r: &Record, reason: &str, with: Option<i64>, actor: &str) -> anyhow::Result<Record> {
+    if !matches!(r.kind, Kind::Task | Kind::Decision | Kind::Question) {
+        bail!("{} is a {}; tasks, decisions and questions are archived", r.ref_id, r.kind);
     }
     let reason = reason.trim();
     if reason.is_empty() {
-        bail!("say why it's deleted, in reason");
+        bail!("say why it's archived");
     }
-    conn.execute("DELETE FROM actions WHERE record_id = ?1", [task.id])?;
-    conn.execute("DELETE FROM links WHERE from_id = ?1 OR to_id = ?1", [task.id])?;
-    conn.execute("DELETE FROM revisions WHERE record_id = ?1", [task.id])?;
-    conn.execute("UPDATE events SET record_id = NULL WHERE record_id = ?1", [task.id])?;
-    conn.execute("UPDATE timings SET record_id = NULL WHERE record_id = ?1", [task.id])?;
-    conn.execute("UPDATE usage SET task_id = NULL WHERE task_id = ?1", [task.id])?;
-    conn.execute("DELETE FROM records WHERE id = ?1", [task.id])?;
-    event(
+    if r.state == "archived" {
+        return Ok(r.clone());
+    }
+    let mut data = Map::new();
+    data.insert("archived_from".into(), r.state.clone().into());
+    data.insert("archive_reason".into(), reason.into());
+    if let Some(m) = with {
+        data.insert("archived_with".into(), m.into());
+    }
+    let (rec, _) = records::update(
         conn,
-        Some(task.project_id),
-        None,
-        "task.deleted",
-        &format!("{} deleted ({}, was {}): {reason}", task.short_id(), task.title, task.state),
+        r,
         actor,
+        Patch { state: Some("archived".into()), data, note: format!("archived: {reason}"), ..Default::default() },
     )?;
-    Ok(())
+    if r.kind == Kind::Question && r.state == "open" {
+        unblock_after(conn, &rec, &format!("{} archived", r.short_id()), actor)?;
+    }
+    Ok(rec)
 }
 
-/// What deleting a step did.
+/// Brings an archived task, decision or question back to the state it had.
+pub fn restore_record(conn: &Connection, r: &Record, actor: &str) -> anyhow::Result<Record> {
+    if r.state != "archived" {
+        bail!("{} isn't archived", r.ref_id);
+    }
+    let back = match r.str("archived_from") {
+        "" => r.kind.states()[0].to_owned(),
+        s => s.to_owned(),
+    };
+    let mut data = Map::new();
+    for k in ["archived_from", "archive_reason", "archived_with"] {
+        data.insert(k.into(), Value::Null);
+    }
+    let (rec, _) = records::update(conn, r, actor, Patch { state: Some(back), data, note: "restored".into(), ..Default::default() })?;
+    Ok(rec)
+}
+
+/// What archiving a milestone or step did.
 #[derive(Debug, Default)]
-pub struct Deleted {
+pub struct Archived {
+    pub steps: Vec<String>,
+    pub archived: Vec<String>,
     pub moved: Vec<String>,
-    pub deleted: Vec<String>,
 }
 
-/// Deletes a step (or a milestone without steps) for good. Its tasks move to `move_to`, or are
-/// deleted with it when `delete_tasks`; with neither, a step that has tasks stays. Everything
-/// else that belongs to it (notes, PRs, decisions, timings) is never deleted: it moves to
-/// `move_to`, or to the step's milestone.
-pub fn delete_step(
+/// Archives a step, or a milestone with its steps. A step's tasks move to `move_to` (with its
+/// notes, PRs and timings), or are archived with it; what isn't a task goes to `move_to` or up to
+/// its milestone. A milestone's steps, tasks and the decisions and questions scoped to it are
+/// archived with it; project-wide decisions stay.
+pub fn archive_milestone(
     conn: &Connection,
-    step: &Milestone,
+    m: &Milestone,
     move_to: Option<&Milestone>,
-    delete_tasks: bool,
     reason: &str,
     actor: &str,
-) -> anyhow::Result<Deleted> {
+) -> anyhow::Result<Archived> {
     let reason = reason.trim();
     if reason.is_empty() {
-        bail!("say why it's deleted, in reason");
+        bail!("say why it's archived, in reason");
     }
-    let all = projects::milestones(conn, step.project_id)?;
-    if all.iter().any(|m| m.parent_id == Some(step.id)) {
-        bail!("{} has steps; delete or move them first", step.name);
+    if m.archived_at.is_some() {
+        bail!("{} is archived already", m.name);
     }
     if let Some(to) = move_to {
-        if to.id == step.id || to.project_id != step.project_id {
-            bail!("move_to is another step or milestone of the same project");
+        if m.parent_id.is_none() {
+            bail!("{} is a milestone: its steps and tasks are archived with it (move_to is for a step's tasks)", m.name);
         }
-        if delete_tasks {
-            bail!("either move the tasks (move_to) or delete them (delete_tasks), not both");
-        }
-    }
-    let tasks = tasks_of(conn, step.id)?;
-    if !tasks.is_empty() && move_to.is_none() && !delete_tasks {
-        let list = tasks.iter().map(|t| t.short_id()).collect::<Vec<_>>().join(", ");
-        bail!("{} has tasks ({list}): move them with move_to, or delete them too with delete_tasks", step.name);
-    }
-    let mut out = Deleted::default();
-    for t in &tasks {
-        match move_to {
-            Some(to) => {
-                records::update(
-                    conn,
-                    t,
-                    actor,
-                    Patch { milestone_id: Some(Some(to.id)), note: format!("moved from {}, deleted", step.name), ..Default::default() },
-                )?;
-                out.moved.push(t.short_id());
-            }
-            None => {
-                delete_task(conn, t, &format!("with its step {}: {reason}", step.name), actor)?;
-                out.deleted.push(t.short_id());
-            }
+        if to.id == m.id || to.project_id != m.project_id || to.archived_at.is_some() {
+            bail!("move_to is another live step or milestone of the same project");
         }
     }
-    // The rest goes to move_to, or up to the milestone (or nowhere, for a milestone).
-    let home = move_to.map(|m| m.id).or(step.parent_id);
-    let others: Vec<i64> = {
-        let mut stmt = conn.prepare("SELECT id FROM records WHERE milestone_id = ?1")?;
-        stmt.query_map([step.id], |r| r.get(0))?.collect::<Result<_, _>>()?
-    };
-    for id in others {
-        let r = records::get(conn, id)?;
-        records::update(
-            conn,
-            &r,
-            actor,
-            Patch { milestone_id: Some(home), note: format!("its step {} was deleted", step.name), quiet: true, ..Default::default() },
+    let now = now_ms();
+    let mut out = Archived::default();
+    let steps: Vec<Milestone> = projects::milestones(conn, m.project_id)?.into_iter().filter(|s| s.parent_id == Some(m.id)).collect();
+    conn.execute(
+        "UPDATE milestones SET archived_at = ?1, archived_reason = ?2, archived_with = NULL, updated_at = ?1 WHERE id = ?3",
+        params![now, reason, m.id],
+    )?;
+    for s in &steps {
+        conn.execute(
+            "UPDATE milestones SET archived_at = ?1, archived_reason = ?2, archived_with = ?3, updated_at = ?1 WHERE id = ?4",
+            params![now, reason, m.id, s.id],
         )?;
-        out.moved.push(r.short_id());
+        out.steps.push(s.name.clone());
     }
-    conn.execute("UPDATE timings SET milestone_id = ?1 WHERE milestone_id = ?2", params![home, step.id])?;
-    conn.execute("DELETE FROM milestones WHERE id = ?1", [step.id])?;
-    let what = if step.parent_id.is_some() { "Step" } else { "Milestone" };
-    let mut line = format!("{what} {} deleted ({}, {}): {reason}", step.name, step.title, step.state);
+    let ids: Vec<i64> = std::iter::once(m.id).chain(steps.iter().map(|s| s.id)).collect();
+    let recs: Vec<Record> = {
+        let mut stmt = conn.prepare(
+            "SELECT id FROM records WHERE milestone_id IN (SELECT value FROM json_each(?1)) AND state != 'archived' ORDER BY id",
+        )?;
+        let ids: Vec<i64> = stmt.query_map([serde_json::to_string(&ids)?], |r| r.get(0))?.collect::<Result<_, _>>()?;
+        ids.into_iter().map(|id| records::get(conn, id)).collect::<anyhow::Result<_>>()?
+    };
+    let home = move_to.map(|t| t.id).or(m.parent_id);
+    for r in recs {
+        let archive = match r.kind {
+            Kind::Task => move_to.is_none(),
+            // Scoped to the milestone: they go with it.
+            Kind::Decision | Kind::Question => m.parent_id.is_none(),
+            _ => false,
+        };
+        if archive {
+            archive_record(conn, &r, &format!("with {}: {reason}", m.name), Some(m.id), actor)?;
+            out.archived.push(r.short_id());
+        } else if m.parent_id.is_some() {
+            // A step's other records (and its tasks, with move_to) go to move_to or its milestone.
+            records::update(
+                conn,
+                &r,
+                actor,
+                Patch {
+                    milestone_id: Some(home),
+                    note: format!("moved from {}, archived", m.name),
+                    quiet: r.kind != Kind::Task,
+                    ..Default::default()
+                },
+            )?;
+            out.moved.push(r.short_id());
+        }
+    }
+    if m.parent_id.is_some() {
+        conn.execute("UPDATE timings SET milestone_id = ?1 WHERE milestone_id = ?2", params![home, m.id])?;
+    }
+    let what = if m.parent_id.is_some() { "Step" } else { "Milestone" };
+    let mut line = format!("{what} {} archived ({}): {reason}", m.name, m.title);
+    if !out.steps.is_empty() {
+        line.push_str(&format!("; with its steps {}", out.steps.join(", ")));
+    }
     if !out.moved.is_empty() {
-        line.push_str(&format!("; moved: {}", out.moved.join(", ")));
+        line.push_str(&format!("; moved to {}: {}", move_to.map(|t| t.name.as_str()).unwrap_or("its milestone"), out.moved.join(", ")));
     }
-    if !out.deleted.is_empty() {
-        line.push_str(&format!("; deleted with it: {}", out.deleted.join(", ")));
+    if !out.archived.is_empty() {
+        line.push_str(&format!("; archived with it: {}", out.archived.join(", ")));
     }
-    event(conn, Some(step.project_id), None, "milestone.deleted", &line, actor)?;
+    event(conn, Some(m.project_id), None, "milestone.archived", &line, actor)?;
     Ok(out)
+}
+
+/// Restores an archived milestone or step, with what was archived along with it (its steps,
+/// tasks, decisions and questions). What was moved elsewhere stays there.
+pub fn restore_milestone(conn: &Connection, m: &Milestone, actor: &str) -> anyhow::Result<Vec<String>> {
+    if m.archived_at.is_none() {
+        bail!("{} isn't archived", m.name);
+    }
+    if let Some(p) = m.parent_id {
+        let parent = projects::get_milestone(conn, p)?;
+        if parent.archived_at.is_some() {
+            bail!("{} is archived with its milestone {}; restore {}", m.name, parent.name, parent.name);
+        }
+    }
+    let now = now_ms();
+    conn.execute(
+        "UPDATE milestones SET archived_at = NULL, archived_reason = '', archived_with = NULL, updated_at = ?1
+         WHERE id = ?2 OR archived_with = ?2",
+        params![now, m.id],
+    )?;
+    let ids: Vec<i64> = {
+        let mut stmt = conn.prepare(
+            "SELECT id FROM records WHERE state = 'archived' AND json_extract(data, '$.archived_with') = ?1 ORDER BY id",
+        )?;
+        stmt.query_map([m.id], |r| r.get(0))?.collect::<Result<_, _>>()?
+    };
+    let mut back = Vec::new();
+    for id in ids {
+        let r = records::get(conn, id)?;
+        restore_record(conn, &r, actor)?;
+        back.push(r.short_id());
+    }
+    let what = if m.parent_id.is_some() { "Step" } else { "Milestone" };
+    let tail = if back.is_empty() { String::new() } else { format!(", with {}", back.join(", ")) };
+    event(conn, Some(m.project_id), None, "milestone.restored", &format!("{what} {} restored{tail}", m.name), actor)?;
+    Ok(back)
 }
 
 /// Sets a task blocked. `by` is a question of the project ("Q-12": the task links to it and comes
@@ -353,6 +424,11 @@ pub fn blocking_questions(conn: &Connection, task_id: i64) -> anyhow::Result<Vec
 /// After the owner answered a question: the tasks it blocked go back to todo (unless something
 /// else still blocks them), and the agent hears which.
 pub fn unblock_after_answer(conn: &Connection, q: &Record, actor: &str) -> anyhow::Result<Vec<String>> {
+    unblock_after(conn, q, &format!("{} answered", q.short_id()), actor)
+}
+
+/// Unblocks the tasks a question blocked (answered or archived), unless something else still does.
+fn unblock_after(conn: &Connection, q: &Record, why: &str, actor: &str) -> anyhow::Result<Vec<String>> {
     let mut stmt = conn.prepare(
         "SELECT l.to_id FROM links l JOIN records r ON r.id = l.to_id
          WHERE l.from_id = ?1 AND l.relation = 'blocks' AND r.kind = 'task' AND r.state = 'blocked'",
@@ -370,7 +446,7 @@ pub fn unblock_after_answer(conn: &Connection, q: &Record, actor: &str) -> anyho
             actor,
             Patch {
                 state: Some("todo".into()),
-                note: format!("unblocked: {} answered", q.short_id()),
+                note: format!("unblocked: {why}"),
                 quiet: true,
                 ..Default::default()
             },
@@ -383,7 +459,7 @@ pub fn unblock_after_answer(conn: &Connection, q: &Record, actor: &str) -> anyho
             Some(q.project_id),
             Some(q.id),
             "task.unblocked",
-            &format!("{} answered: {} unblocked", q.short_id(), freed.join(", ")),
+            &format!("{why}: {} unblocked", freed.join(", ")),
             actor,
         )?;
     }
