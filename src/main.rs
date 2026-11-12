@@ -91,6 +91,32 @@ enum Command {
     /// called by that name runs this. Without a product, lists the products; `run <product>
     /// list` lists its builds.
     Run(cli::RunArgs),
+    /// Print the hello tool's reply as text (your project, its document, milestones, where you are,
+    /// questions, notes, news), for a Claude Code SessionStart hook. It reads the hook's input on
+    /// stdin when there is one. News in it is marked read.
+    Hello {
+        #[command(flatten)]
+        client: cli::ClientArgs,
+        /// Your session's name (default: the last one given).
+        #[arg(long, default_value = "")]
+        session: String,
+        /// The machine (default: the last one given).
+        #[arg(long, default_value = "")]
+        machine: String,
+        /// Your model (default: from the hook's input, or the last one given).
+        #[arg(long, default_value = "")]
+        model: String,
+        /// Your effort level (default: the last one given).
+        #[arg(long, default_value = "")]
+        effort: String,
+        /// Only the project document (no side effects): one of the two hooks, since Claude Code
+        /// caps a hook's output at 10,000 characters.
+        #[arg(long, conflicts_with = "no_doc")]
+        doc: bool,
+        /// Everything but the project document, shortened to fit a hook: the other hook.
+        #[arg(long)]
+        no_doc: bool,
+    },
     /// What's new from the owner and others since the agent last read its news (marked read);
     /// prints nothing when nothing is. For a Claude Code hook before each prompt.
     News {
@@ -177,6 +203,10 @@ fn main() -> anyhow::Result<()> {
             std::process::exit(code);
         }
         Command::Run(args) => cli::run(&config_path, args),
+        Command::Hello { client, session, machine, model, effort, doc, no_doc } => {
+            let part = if doc { cli::HelloPart::Doc } else if no_doc { cli::HelloPart::NoDoc } else { cli::HelloPart::All };
+            cli::hello(&config_path, client, cli::HelloArgs { session, machine, model, effort, part })
+        }
         Command::News { client, again } => cli::news(&config_path, client, again),
         Command::Wait { client, record, minutes } => cli::wait(&config_path, client, record, minutes),
         Command::McpHeaders { token_file } => cli::mcp_headers(&token_file),
