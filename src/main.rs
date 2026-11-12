@@ -32,6 +32,7 @@ mod remote;
 mod screenshots;
 mod setup;
 mod steps;
+mod times;
 mod tokens;
 mod totest;
 mod tz;
@@ -77,6 +78,10 @@ enum Command {
     /// Copies only what changed, prints the output as it comes, exits with the command's exit code
     /// (75: the server is offline, build here instead).
     Remote(cli::RemoteArgs),
+    /// Run a build or test and log how long it took (agents): `agentflow time --on T-12 -- cargo
+    /// test --workspace`. Measures wall time, CPU and peak memory, prints them, logs them on the
+    /// task, step or PR, and exits with the command's exit code.
+    Time(cli::TimeArgs),
     /// Fetch and start a test build (the owner's machines). Also `flow-run`: the same program
     /// called by that name runs this. Without a product, lists the products; `run <product>
     /// list` lists its builds.
@@ -150,6 +155,10 @@ fn main() -> anyhow::Result<()> {
         Command::Contribute(args) => cli::contribute(&config_path, args),
         Command::Remote(args) => {
             let code = cli::remote(&config_path, args)?;
+            std::process::exit(code);
+        }
+        Command::Time(args) => {
+            let code = cli::time(&config_path, args)?;
             std::process::exit(code);
         }
         Command::Run(args) => cli::run(&config_path, args),
