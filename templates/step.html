@@ -7,6 +7,15 @@
   <h1 class="rec-title">{{ title }}</h1>
 </div>
 <div class="stack-lg">
+  {% if let Some(rv) = review %}
+  <dl class="kv">
+    <dt>Reviewed</dt><dd><span class="mono">{{ rv.commit }}</span></dd>
+    <dt>Reviewers</dt><dd><span class="who">{% for r in rv.reviewers %}<span class="chip">{{ r }}</span> {% endfor %}</span><span class="sub">fresh agents, no context of the work</span></dd>
+    {% if !rv.owner_words.is_empty() %}<dt>You said</dt><dd><blockquote class="quote">“{{ rv.owner_words }}”</blockquote></dd>{% endif %}
+    {% if !rv.reports.is_empty() %}<dt>Reports</dt><dd>{% for (t, u) in rv.reports %}{% if u.is_empty() %}{{ t }}{% else %}<a href="{{ u }}">{{ t }}</a>{% endif %}{% if !loop.last %}, {% endif %}{% endfor %}</dd>{% endif %}
+    <dt>Findings</dt><dd>{{ rv.counts }}</dd>
+  </dl>
+  {% endif %}
   {% if !summary_html.is_empty() %}
   <section class="stack-sm" aria-labelledby="sum-h">
     <h2 class="label" id="sum-h">The agent's summary</h2>
@@ -19,11 +28,11 @@
   </section>
   {% endif %}
   <section class="stack-sm" aria-labelledby="tasks-h">
-    <div class="sec"><h2 class="label" id="tasks-h">Estimated and actual</h2><span class="sub">{{ rows.len() }} task{% if rows.len() != 1 %}s{% endif %}{% if added_count > 0 %}, {{ added_count }} added during the step{% endif %}</span></div>
+    <div class="sec"><h2 class="label" id="tasks-h">{% if review.is_some() %}Findings, by importance{% else %}Estimated and actual{% endif %}</h2><span class="sub">{{ rows.len() }} task{% if rows.len() != 1 %}s{% endif %}{% if added_count > 0 %}, {{ added_count }} added during the step{% endif %}</span></div>
     {% if rows.is_empty() %}<p class="sub">No tasks.</p>{% else %}
-    <div class="table-wrap"><table class="cmp"><thead><tr><th>#</th><th>Task</th><th></th><th>Estimate</th><th>Took</th></tr></thead><tbody>
-    {% for t in rows %}<tr><td class="sub mono">{{ t.n }}</td><td><span class="mono sub">{{ t.short }}</span> <a href="{{ t.url }}">{{ t.title }}</a>{% if !t.added.is_empty() %} <span class="addtag">{{ t.added }}</span>{% endif %}</td><td><span class="chip state-{{ t.state }}">{{ t.state }}</span></td><td class="m">{{ t.est }}</td><td class="m{% if t.over %} over{% endif %}{% if t.under %} under{% endif %}">{{ t.took }}</td></tr>{% endfor %}
-    <tr class="tot"><td></td><td>Together</td><td></td><td class="m">{{ est_total }}</td><td class="m">{{ took_total }}</td></tr>
+    <div class="table-wrap"><table class="cmp"><thead><tr><th>#</th>{% if review.is_some() %}<th>Importance</th>{% endif %}<th>Task</th><th></th><th>Estimate</th><th>Took</th></tr></thead><tbody>
+    {% for t in rows %}<tr><td class="sub mono">{{ t.n }}</td>{% if review.is_some() %}<td>{% if !t.importance.is_empty() %}<span class="imp {{ t.importance }}">{{ t.importance }}</span>{% endif %}</td>{% endif %}<td><span class="mono sub">{{ t.short }}</span> <a href="{{ t.url }}">{{ t.title }}</a>{% if !t.added.is_empty() && review.is_none() %} <span class="addtag">{{ t.added }}</span>{% endif %}{% if !t.skip_reason.is_empty() %}<span class="sub skip-why">skipped: {{ t.skip_reason }}</span>{% endif %}</td><td><span class="chip state-{{ t.state }}">{{ t.state }}</span></td><td class="m">{{ t.est }}</td><td class="m{% if t.over %} over{% endif %}{% if t.under %} under{% endif %}">{{ t.took }}</td></tr>{% endfor %}
+    <tr class="tot"><td></td>{% if review.is_some() %}<td></td>{% endif %}<td>Together</td><td></td><td class="m">{{ est_total }}</td><td class="m">{{ took_total }}</td></tr>
     </tbody></table></div>
     <p class="sub">Took: time in doing, counted from the tasks' state changes; time when several were in doing at once counts once and is split between them. Blocked, review and time the agent was away don't count.{% if !biggest_miss.is_empty() %} Biggest miss: {{ biggest_miss }}.{% endif %}</p>
     {% endif %}

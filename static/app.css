@@ -867,3 +867,7 @@ a.blk.q:hover { text-decoration: underline; }
 .cmp tr.tot td { font-weight: 600; border-bottom: 0; }
 .cmp a { color: var(--ink); }
 .timing td.mono { white-space: nowrap; }
+.imp { font-size: 12px; border-radius: 6px; padding: 2px 8px; white-space: nowrap; }
+.imp.high { background: #3A1414; color: #FFC9C9; } .imp.medium { background: var(--warn-bg); color: var(--warn-ink); } .imp.low { background: var(--chip); color: var(--ink2); }
+.who { display: inline-flex; flex-wrap: wrap; gap: 6px; margin-right: 8px; }
+.skip-why { display: block; margin-top: 2px; }
