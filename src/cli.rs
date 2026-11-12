@@ -376,6 +376,13 @@ pub struct PublishArgs {
     /// A tag this build is, e.g. v0.0.5-m4.
     #[arg(long)]
     pub tag: Option<String>,
+    /// What it runs on: linux-x86_64 (the default), windows-x86_64, linux-aarch64, … Only Linux
+    /// x86_64 builds are offered to flow-run here; others are a download on their page.
+    #[arg(long)]
+    pub platform: Option<String>,
+    /// What it needs, one per flag, e.g. --needs "glibc 2.39 or newer" --needs "Vulkan (lavapipe works)".
+    #[arg(long = "needs")]
+    pub needs: Vec<String>,
 }
 
 #[derive(Args)]
@@ -823,6 +830,8 @@ pub fn publish(config_path: &Path, a: PublishArgs) -> anyhow::Result<()> {
         ("entry", a.entry.clone().unwrap_or_default()),
         ("tag", a.tag.clone().unwrap_or_default()),
         ("features", if a.features.is_empty() { String::new() } else { serde_json::to_string(&a.features)? }),
+        ("platform", a.platform.clone().unwrap_or_default()),
+        ("needs", if a.needs.is_empty() { String::new() } else { serde_json::to_string(&a.needs)? }),
     ]);
     let res = client.post_file(&format!("/api/builds?{query}"), file)?;
     println!(
@@ -864,9 +873,27 @@ pub fn run(config_path: &Path, a: RunArgs) -> anyhow::Result<()> {
         return Ok(());
     };
     crate::builds::check_product(&product)?;
-    let builds = client.get(&format!("/api/builds/{product}"))?["builds"].as_array().cloned().unwrap_or_default();
-    if builds.is_empty() {
+    let all = client.get(&format!("/api/builds/{product}"))?["builds"].as_array().cloned().unwrap_or_default();
+    if all.is_empty() {
         bail!("{product} has no builds");
+    }
+    // Only builds for this machine (a Windows exe is a download on its page).
+    let here = crate::builds::this_platform();
+    let for_here = |b: &serde_json::Value| b["platform"].as_str().unwrap_or(crate::builds::DEFAULT_PLATFORM) == here;
+    if let Some(want) = a.build.as_deref().filter(|w| *w != "list")
+        && let Some(b) = all.iter().find(|b| want.trim_start_matches('#').parse::<i64>().ok() == b["number"].as_i64())
+        && !for_here(b)
+    {
+        bail!(
+            "#{} is for {}, not this machine ({here}); download it from its page: {}",
+            b["number"],
+            b["platform"].as_str().unwrap_or("?"),
+            b["page"].as_str().unwrap_or("")
+        );
+    }
+    let builds: Vec<serde_json::Value> = all.iter().filter(|b| for_here(b)).cloned().collect();
+    if builds.is_empty() {
+        bail!("{product} has no builds for {here}");
     }
     let cache_root = expand_home("~/.local/share/agentflow/builds").join(&product);
     if a.build.as_deref() == Some("list") {
