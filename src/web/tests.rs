@@ -1506,6 +1506,22 @@ async fn answers_make_decisions_and_releases_bring_their_tag_button() {
     let decisions = s.http.get(s.url("/p/vinculum?tab=decisions")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
     assert!(decisions.contains("Tabs or a list: A list"), "{decisions}");
 
+    // A cleanup the owner asked for: fix a decision, archive a duplicate, bring it back.
+    let (ok, d) = call("record_decision", json!({"title": "Tabs on the left", "owner_words": "paraphrase, from memory: tabs left", "source": "owner", "tags": ["paraphrase"]})).await;
+    assert!(ok, "{d}");
+    let id = d["id"].as_str().unwrap().to_owned();
+    assert!(!call("update_decision", json!({"id": id, "owner_words": "tabs on the left please"})).await.0, "a reason");
+    let (ok, r) = call("update_decision", json!({"id": id, "owner_words": "tabs on the left please", "said_at": "2026-11-01", "tags": [], "reason": "owner asked: recover the exact words"})).await;
+    assert!(ok && r["changed"] == true, "{r}");
+    let (_, got) = call("get_record", json!({"id": id})).await;
+    assert!(got.to_string().contains("tabs on the left please") && got.to_string().contains("cleanup: owner asked"), "{got}");
+    let (ok, r) = call("update_decision", json!({"id": id, "state": "archived", "reason": "owner asked: duplicate of D-2"})).await;
+    assert!(ok && r["state"] == "archived", "{r}");
+    let decisions = s.http.get(s.url("/p/vinculum?tab=decisions")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
+    assert!(decisions.contains("1 archived in a cleanup"), "{decisions}");
+    assert!(!call("update_decision", json!({"id": "D-1", "state": "deleted", "reason": "x"})).await.0);
+    assert!(call("update_decision", json!({"id": id, "state": "current", "reason": "owner: keep it after all"})).await.0);
+
     // A release brings its Push tag button once the project has a folder.
     let (ok, r) = call("add_release", json!({"tag": "v0.0.5-m4", "title": "M4: Keybinds"})).await;
     assert!(ok && r["tag_button"].as_str().unwrap_or("").starts_with("none"), "{r}");
