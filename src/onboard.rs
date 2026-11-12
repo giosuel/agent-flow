@@ -129,13 +129,22 @@ pub fn create_records(c: &mut Connection, p: &NewProject, folder: &Path) -> anyh
         description: Some(p.description.clone()),
         checkout: Some(folder.display().to_string()),
         machine: Some(crate::machine::hostname()),
-        stack: Some(p.stack.clone()),
-        platform: Some(p.platform.clone()),
         model: Some(p.model.clone()),
         effort: Some(p.effort.clone()),
         ..Default::default()
     };
     projects::update(&tx, project.id, &patch, "owner")?;
+    // The stack and platform start the project document (the owner, 2026-11-12).
+    let mut doc = String::new();
+    if !p.stack.is_empty() {
+        doc.push_str(&format!("## Tech stack\n\n{}\n\n", p.stack.join(" · ")));
+    }
+    if !p.platform.trim().is_empty() {
+        doc.push_str(&format!("## Platform\n\n{}\n\n", p.platform.trim()));
+    }
+    if !doc.is_empty() {
+        crate::projectdoc::set(&tx, project.id, &doc, "owner", "started with the project")?;
+    }
     projects::add_milestone(
         &tx,
         project.id,

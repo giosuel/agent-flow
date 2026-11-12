@@ -103,6 +103,21 @@ pub struct ConcludeStep {
     pub move_open_to: Option<String>,
 }
 
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct EditProjectDoc {
+    /// Only for the consultant: which project.
+    pub project: Option<String>,
+    /// The `##` section to change, e.g. "Roadmap": replaced, added at the end if there's none, or
+    /// removed when text is empty. Leave it out to replace the whole document.
+    pub section: Option<String>,
+    /// Markdown: the section's text (without its heading), or the whole document.
+    pub text: String,
+}
+
+fn doc_json(d: &crate::projectdoc::Doc) -> Value {
+    json!({"text": d.text, "rev": d.rev, "edited": if d.rev > 0 { format!("{} by {} ({})", crate::util::fmt_utc(d.updated_at), d.author, d.what) } else { String::new() }})
+}
+
 fn project_json(p: &projects::Project, now: i64) -> Value {
     json!({
         "project": p.slug,
@@ -112,12 +127,8 @@ fn project_json(p: &projects::Project, now: i64) -> Value {
         "repo": p.repo,
         "checkout": p.checkout,
         "machine": p.machine,
-        "stack": p.stack,
-        "platform": p.platform,
         "model": p.model,
         "effort": p.effort,
-        "pm_rules": p.pm_rules,
-        "git_rules": p.git_rules,
         "ports": p.ports,
         "build_product": p.build_product,
         "agent": {
@@ -212,6 +223,9 @@ impl FlowMcp {
                 let unread = crate::waiting::unread_count(c, project.id, &project.slug)?;
                 let reply = json!({
                     "project": project_json(&projects::get_by_id(c, project.id)?, now_ms()),
+                    // Your project document: rules for working on it, stack, roadmap, pointers.
+                    // Keep it current with edit_project_doc; the owner may edit it too.
+                    "doc": doc_json(&crate::projectdoc::get(c, project.id)?),
                     "milestones": milestones_json(&ms, &counts),
                     // Where you are: each step under way, its tasks in doing, the next one, and
                     // what's blocked by what.
@@ -259,7 +273,7 @@ impl FlowMcp {
     }
 
     #[tool(
-        description = "All projects: name, what it is, stack, status, whether its agent is online. Every agent can read this."
+        description = "All projects: name, what it is, status, whether its agent is online. Every agent can read this; project_info has a project's document."
     )]
     async fn list_projects(&self, Extension(parts): Extension<Parts>) -> Result<CallToolResult, ErrorData> {
         let actor = actor_of(&parts);
@@ -271,7 +285,7 @@ impl FlowMcp {
                 let list: Vec<Value> = projects::list(c)?
                     .iter()
                     .map(|p| {
-                        json!({"project": p.slug, "name": p.name, "description": p.description, "stack": p.stack,
+                        json!({"project": p.slug, "name": p.name, "description": p.description,
                                "status": p.status, "machine": p.machine, "agent_online": p.agent.online(now)})
                     })
                     .collect();
@@ -282,7 +296,7 @@ impl FlowMcp {
     }
 
     #[tool(
-        description = "A project's details and milestones with task counts. Your own project if you leave `project` out."
+        description = "A project's details, its document and milestones with task counts. Your own project if you leave `project` out."
     )]
     async fn project_info(
         &self,
@@ -298,16 +312,17 @@ impl FlowMcp {
                 let project = target_project(c, &a, p.project.as_deref(), false)?;
                 let ms = projects::milestones(c, project.id)?;
                 let counts = task_counts(c, project.id)?;
-                let reply =
-                    json!({"project": project_json(&project, now_ms()), "milestones": milestones_json(&ms, &counts)});
+                let reply = json!({"project": project_json(&project, now_ms()), "milestones": milestones_json(&ms, &counts),
+                    "doc": doc_json(&crate::projectdoc::get(c, project.id)?)});
                 Ok(Outcome::new(reply).summary(format!("project_info {}", project.slug)).project(project.slug))
             })
             .await;
         self.finish(&actor, "project_info", Action::Read, outcome).await
     }
 
-    #[tool(description = "Change your project's details: description, repo, checkout, machine, stack, platform, \
-        default model and effort, PM rules that override the defaults, git rules, ports, viber-run product.")]
+    #[tool(description = "Change your project's details: description, repo, checkout, machine, default model and \
+        effort, ports, build product. Everything else about the project (stack, platform, git and PM rules, roadmap) \
+        goes in its document: edit_project_doc.")]
     async fn update_project(
         &self,
         Extension(parts): Extension<Parts>,
@@ -465,5 +480,40 @@ impl FlowMcp {
             })
             .await;
         self.finish(&actor, "conclude_step", Action::Write, outcome).await
+    }
+
+    #[tool(description = "Change your project document: one `##` section at a time (replaced, added or removed), \
+        or the whole document. It holds what's specific to the project: how to work on it (commit rules, tests, \
+        tools), tech stack and platform, the roadmap if it has one, pointers. hello returns it in full, so keep it \
+        short (16 KB at most) and current; long material goes into notes. The owner reads and may edit it.")]
+    async fn edit_project_doc(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(p): Parameters<EditProjectDoc>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let actor = actor_of(&parts);
+        let a = actor.clone();
+        let outcome = self
+            .state
+            .db
+            .call(move |c| {
+                let tx = c.transaction()?;
+                let project = target_project(&tx, &a, p.project.as_deref(), true)?;
+                let old = crate::projectdoc::get(&tx, project.id)?;
+                let (text, what) = match p.section.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+                    Some(sec) => {
+                        let what = if p.text.trim().is_empty() { format!("removed section {sec}") } else { format!("section {sec}") };
+                        (crate::projectdoc::edit_section(&old.text, sec, &p.text)?, what)
+                    }
+                    None => (p.text.clone(), "the whole document".to_owned()),
+                };
+                let (d, changed) = crate::projectdoc::set(&tx, project.id, &text, &a.name(), &what)?;
+                tx.commit()?;
+                Ok(Outcome::new(json!({"rev": d.rev, "changed": changed, "bytes": d.text.len()}))
+                    .summary(format!("project document: {what}"))
+                    .project(project.slug))
+            })
+            .await;
+        self.finish(&actor, "edit_project_doc", Action::Write, outcome).await
     }
 }

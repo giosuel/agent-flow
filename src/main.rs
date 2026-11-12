@@ -24,6 +24,7 @@ mod onboard;
 mod outgoing;
 mod passkey;
 mod poller;
+mod projectdoc;
 mod projects;
 mod prs;
 mod push;

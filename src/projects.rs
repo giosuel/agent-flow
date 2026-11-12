@@ -117,17 +117,25 @@ pub struct ProjectPatch {
     pub checkout: Option<String>,
     /// Machine the project is worked on, e.g. "giosuel.ch", "HEADQUARTERS".
     pub machine: Option<String>,
-    /// Languages and main libraries, e.g. ["Rust", "Slint", "zbus"].
+    /// Moved into the project document (2026-11-12); not set through the API any more.
+    #[serde(skip)]
+    #[schemars(skip)]
     pub stack: Option<Vec<String>>,
-    /// What it runs on, e.g. "Linux · Hyprland 0.55+".
+    /// Moved into the project document (2026-11-12); not set through the API any more.
+    #[serde(skip)]
+    #[schemars(skip)]
     pub platform: Option<String>,
     /// Default AI model for the project, e.g. "Claude Opus 5.5".
     pub model: Option<String>,
     /// Default effort, e.g. "high".
     pub effort: Option<String>,
-    /// Project-management rules that override the usual ones, one per entry.
+    /// Moved into the project document (2026-11-12); not set through the API any more.
+    #[serde(skip)]
+    #[schemars(skip)]
     pub pm_rules: Option<Vec<String>>,
-    /// Git rules of this repository, e.g. "Conventional Commits, DCO sign-off".
+    /// Moved into the project document (2026-11-12); not set through the API any more.
+    #[serde(skip)]
+    #[schemars(skip)]
     pub git_rules: Option<String>,
     /// Ports the project's dev servers use, e.g. ["5173 vite"].
     pub ports: Option<Vec<String>>,

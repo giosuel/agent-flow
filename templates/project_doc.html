@@ -1,0 +1,40 @@
+{# The project document, laid out like a guide (the owner, 2026-11-12: "make it look the same as
+   the global notes"). #}
+{% if let Some((ok, text)) = d.notice %}<p class="notice{% if *ok %} ok{% else %} warn{% endif %}" role="status">{{ text }}</p>{% endif %}
+<section class="stack pdoc" aria-labelledby="pd-h">
+  <div class="sec guide-head"><h2 id="pd-h">Project document</h2>
+    <span class="row wrap"><span class="sub">{% if d.rev > 0 %}{{ d.line }} · {{ d.bytes }}{% else %}kept by the agent, read at the start of every session{% endif %}</span>
+      {% if d.rev > 0 %}<a class="sub" href="/p/{{ slug }}?tab=notes&amp;history=1#pd-hist">History</a>{% endif %}
+      {% if d.editing.is_none() %}<a class="icon-only" href="/p/{{ slug }}?tab=notes&amp;edit=all" title="Edit the whole document" aria-label="Edit the whole document">{{ crate::web::icons::icon("pencil")|safe }}</a>{% endif %}</span></div>
+  {% if let Some(ed) = d.editing %}
+  <form method="post" action="/p/{{ slug }}/doc" class="card pad stack">
+    <h3>Editing {% if ed.section.is_some() %}“{{ ed.label }}”{% else %}the whole document{% endif %}</h3>
+    <input type="hidden" name="version" value="{{ d.version }}">
+    <input type="hidden" name="section" value="{% if let Some(i) = ed.section %}{{ i }}{% endif %}">
+    <label class="vh" for="doc-text">Markdown</label>
+    <textarea id="doc-text" name="text" class="mono editor" rows="{% if ed.section.is_some() %}14{% else %}30{% endif %}">{{ ed.text }}</textarea>
+    <p class="sub">The agent reads it at the start of its next session. {% if ed.section.is_some() %}Empty removes the section.{% endif %}</p>
+    <div class="row wrap"><button class="btn" type="submit">Save</button><a class="btn ghost" href="/p/{{ slug }}?tab=notes">Cancel</a></div>
+  </form>
+  {% else %}
+  {% if d.sections.is_empty() %}<p class="card pad sub">No project document yet. The agent writes it with <span class="mono">edit_project_doc</span>: how to work on the project, its stack and platform, the roadmap if it has one. You can start it too.</p>{% endif %}
+  {% for s in d.sections %}
+  <article class="card pad stack guide-sec">
+    <div class="sec"><span class="label">{{ s.title }}</span><a class="icon-only" href="/p/{{ slug }}?tab=notes&amp;edit={{ s.index }}" title="Edit this section" aria-label="Edit the section {{ s.title }}">{{ crate::web::icons::icon("pencil")|safe }}</a></div>
+    <div class="prose">{{ s.html|safe }}</div>
+  </article>
+  {% endfor %}
+  {% endif %}
+  {% if !d.history.is_empty() %}
+  <section class="card pad stack-sm" id="pd-hist" aria-labelledby="pd-hist-h">
+    <h3 class="label" id="pd-hist-h">History</h3>
+    <ol class="plain history">{% for r in d.history %}<li><span class="mono sub">rev {{ r.rev }} · {{ r.when }}</span> {{ r.who }}: {{ r.what }}{% if r.rev < d.rev %} · <a href="/p/{{ slug }}?tab=notes&amp;rev={{ r.rev }}#pd-old">see it</a>{% endif %}</li>{% endfor %}</ol>
+  </section>
+  {% endif %}
+  {% if let Some((r, secs)) = d.old %}
+  <section class="stack" id="pd-old" aria-labelledby="pd-old-h">
+    <div class="sec"><h3 id="pd-old-h">As it was at rev {{ r }}</h3><a class="sub" href="/p/{{ slug }}?tab=notes">Back to now</a></div>
+    {% for s in secs %}<article class="card pad stack guide-sec old"><span class="label">{{ s.title }}</span><div class="prose">{{ s.html|safe }}</div></article>{% endfor %}
+  </section>
+  {% endif %}
+</section>
