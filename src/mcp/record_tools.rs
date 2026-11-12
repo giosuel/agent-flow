@@ -180,9 +180,6 @@ pub struct AnswerQuestion {
     pub owner_words: String,
     /// The option they picked, counting from 1, if they picked one ("lets go with 1").
     pub option: Option<u32>,
-    /// The decision in one statement, e.g. "The sidebar is a list of names"; made from the
-    /// question and their answer if left out.
-    pub decision: Option<String>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -255,6 +252,11 @@ pub struct AskQuestion {
     /// Send it as an urgent notification. Only when waiting would really cost something.
     #[serde(default)]
     pub urgent: bool,
+    /// The owner is talking with you right now and you're asking it in that chat too: it's
+    /// recorded, but sends no notification and isn't counted in the badge (the owner,
+    /// 2026-11-12: "when I am just talking to it, I don't want to always get notifications").
+    #[serde(default)]
+    pub in_chat: bool,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -1026,8 +1028,8 @@ impl FlowMcp {
     }
 
     #[tool(description = "The owner answered one of your questions in chat: record it. Answers the question with their \
-        words, unblocks the tasks it blocked, and records the decision (with their words, said now). Questions they \
-        answer in AgentFlow need nothing from you; the decision is recorded by itself.")]
+        words and unblocks the tasks it blocked. An answer isn't a decision by itself (the owner, 2026-11-12): when it \
+        decides something worth keeping, record that with record_decision yourself.")]
     async fn answer_question(
         &self,
         Extension(parts): Extension<Parts>,
@@ -1048,10 +1050,9 @@ impl FlowMcp {
                     anyhow::bail!("owner_words: quote what the owner said");
                 }
                 let q = records::answer_question(&tx, &q, p.option, p.owner_words.trim(), &a.name())?;
-                let d = records::decision_from_answer(&tx, &q, p.decision.as_deref(), "owner, in chat", &a.name())?;
                 tx.commit()?;
-                Ok(Outcome::new(json!({"question": q.ref_id, "state": q.state, "decision": d.ref_id}))
-                    .summary(format!("{} answered in chat; decision {}", q.short_id(), d.short_id()))
+                Ok(Outcome::new(json!({"question": q.ref_id, "state": q.state}))
+                    .summary(format!("{} answered in chat", q.short_id()))
                     .project(q.project.clone())
                     .target(q.ref_id))
             })
@@ -1210,8 +1211,9 @@ impl FlowMcp {
     #[tool(description = "Ask the owner a question. One question per call, with the context they need, numbered \
         options and your recommendation when it's a choice. Ask in chat as well: your chat reply (or the summary at the \
         end of a long task) repeats the same numbered questions with their ids (Q-12), so the owner can answer in either \
-        place (the owner, 2026-11-12). An answer on the page comes back verbatim in hello and get_record, its decision \
-        recorded by itself; one given in chat you record with answer_question. Never stop for a question: when the \
+        place (the owner, 2026-11-12). When the owner is talking with you right now, set in_chat: no notification. An \
+        answer on the page comes back verbatim in hello and get_record; one given in chat you record with \
+        answer_question. An answer isn't a decision by itself: record one with record_decision when it's worth keeping. Never stop for a question: when the \
         choice is cheap to change, set going_ahead and build your recommendation meanwhile; otherwise keep working on \
         whatever doesn't depend on it (blocks names the tasks that wait, and they come back when it's answered).")]
     async fn ask_question(
@@ -1223,6 +1225,7 @@ impl FlowMcp {
         let a = actor.clone();
         let urgent = p.urgent;
         let going_ahead = p.going_ahead;
+        let in_chat = p.in_chat;
         let outcome = self
             .state
             .db
@@ -1254,6 +1257,12 @@ impl FlowMcp {
                         anyhow::bail!("a question you go ahead on isn't urgent");
                     }
                     data.insert("going_ahead".into(), true.into());
+                }
+                if in_chat {
+                    if urgent {
+                        anyhow::bail!("a question asked in chat isn't urgent: the owner is right there");
+                    }
+                    data.insert("in_chat".into(), true.into());
                 }
                 let q = records::create(
                     &tx,
@@ -1292,8 +1301,9 @@ impl FlowMcp {
         let outcome = match outcome {
             Ok((o, q, name)) => {
                 let kind = if urgent { push::Kind::Urgent } else { push::Kind::Question };
-                // Going ahead: no notification (the owner, 2026-11-11: no badge, no push).
-                if !going_ahead {
+                // Going ahead or asked in chat: no notification (the owner, 2026-11-11: no badge,
+                // no push; 2026-11-12 for chat).
+                if !going_ahead && !in_chat {
                     self.state.push.spawn(
                         kind,
                         Notification {
