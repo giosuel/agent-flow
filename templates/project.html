@@ -139,8 +139,14 @@
 {% if groups.is_empty() %}<section class="card pad empty"><h2>No tasks yet</h2></section>{% endif %}
 {% for g in groups %}
 <section class="card pad stack">
-  <div class="sec"><h2>{% if !g.name.is_empty() %}<span class="mono">{{ g.name }}</span> {% endif %}{{ g.title }}</h2><span class="sub">{{ g.state }} · {{ g.rows.len() }} task{% if g.rows.len() != 1 %}s{% endif %}</span></div>
-  <ul class="rows">{% for t in g.rows %}<li class="item-row"><span class="mono sub id-col">{{ t.short }}</span><div class="ttl"><a href="{{ t.url }}">{{ t.title }}</a></div><span class="chip state-{{ t.state }}">{{ t.sub }}</span></li>{% endfor %}</ul>
+  <div class="sec"><h2>{% if !g.name.is_empty() %}<span class="mono">{{ g.name }}</span> {% endif %}{{ g.title }}</h2><span class="sub">{% if !g.state.is_empty() %}{{ g.state }} · {% endif %}{{ g.sub }}</span></div>
+  {% if !g.rows.is_empty() %}{% let rows = g.rows %}{% include "task_lines.html" %}{% endif %}
+  {% for st in g.steps %}
+  <div class="stp {{ st.state }}">
+    <div class="stp-h"><span class="mono">{{ st.name }}</span><h3>{{ st.title }}</h3><span class="chip {% if st.state == "concluded" %}state-done{% else if st.state == "active" %}accent{% else if st.state == "blocked" %}state-blocked{% else %}quiet{% endif %}">{{ st.state }}</span><span class="grow"></span><span class="sub">{{ st.sub }}</span>{% if st.state == "concluded" %}<a class="btn sm ghost" href="{{ st.url }}">Summary</a>{% endif %}</div>
+    {% if !st.rows.is_empty() %}{% let rows = st.rows %}{% include "task_lines.html" %}{% endif %}
+  </div>
+  {% endfor %}
 </section>
 {% endfor %}
 {% endif %}
