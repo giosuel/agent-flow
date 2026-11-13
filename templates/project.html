@@ -176,7 +176,7 @@
     <label>Build server<select name="build_server">
       <option value=""{% if e.build_server.is_empty() %} selected{% endif %}>None: builds where the agent is</option>
       {% for b in e.servers %}<option value="{{ b }}"{% if *b == e.build_server %} selected{% endif %}>{{ b }}</option>{% endfor %}
-    </select><span class="sub">Where <span class="mono">agentflow remote</span> runs its builds and tests. Add machines in <a href="/settings#s-builds">Settings</a>.</span></label>
+    </select><span class="sub">Where <span class="mono">flow remote</span> runs its builds and tests. Add machines in <a href="/settings#s-builds">Settings</a>.</span></label>
     <p class="sub span-all">Tech stack, platform, git and project rules are in the <a href="/p/{{ slug }}?tab=notes">project document</a> now.</p>
     <label class="span-all">Ports<textarea name="ports" rows="2" placeholder="One per line, e.g. 5173 vite">{{ e.ports }}</textarea></label>
   </div>
@@ -202,7 +202,7 @@
 {% if tab == "screenshots" %}
 <section class="stack" aria-label="Screenshots">
   {% if shots_all == 0 %}
-  <p class="card pad sub">No screenshots yet. The agent uploads them with <span class="mono">agentflow screenshot</span>: test builds, mockups, spike tests, bugs.</p>
+  <p class="card pad sub">No screenshots yet. The agent uploads them with <span class="mono">flow screenshot</span>: test builds, mockups, spike tests, bugs.</p>
   {% else %}
   <nav class="pills" aria-label="Categories">{% for (label, href, n, on) in shot_cats %}<a href="{{ href }}"{% if *on %} class="on" aria-current="true"{% endif %}>{{ label }} <span class="mono">{{ n }}</span></a>{% endfor %}</nav>
   <ul class="shots">{% for s in shots %}<li><a class="shot" href="{{ s.url }}"><img src="{{ s.image }}" alt="" loading="lazy" decoding="async"><span class="shot-meta"><strong>{{ s.title }}</strong><span class="sub"><span class="chip">{{ s.category }}</span>{% if !s.mstate.is_empty() %} <span class="mstate {{ s.mstate }}">{{ s.mstate }}</span>{% endif %} {{ s.when }}{% if s.design %} · design ↗{% endif %}</span></span></a></li>{% endfor %}</ul>
@@ -225,7 +225,7 @@
 
 {% if tab == "builds" %}
 <section class="card pad stack">
-  {% if builds.is_empty() %}<p class="sub">No builds yet. The agent publishes them with <span class="mono">agentflow publish</span>.</p>{% endif %}
+  {% if builds.is_empty() %}<p class="sub">No builds yet. The agent publishes them with <span class="mono">flow publish</span>.</p>{% endif %}
   <ul class="rows">{% for b in builds %}<li class="item-row"><span class="mono sub id-col">{{ b.short }}</span><div class="ttl"><a href="{{ b.url }}">{{ b.title }}</a><span class="sub">{{ b.sub }}</span></div><span class="chip{% if b.state == "tried" %} ok{% endif %}">{{ b.state }}</span></li>{% endfor %}</ul>
 </section>
 {% endif %}

@@ -271,7 +271,7 @@ fn task_counts(c: &rusqlite::Connection, project_id: i64) -> anyhow::Result<Vec<
     Ok(rows.collect::<Result<_, _>>()?)
 }
 
-/// What hello returns (the tool, and `agentflow hello` for a SessionStart hook): records the
+/// What hello returns (the tool, and `flow hello` for a SessionStart hook): records the
 /// session, then the project, its document, milestones, where it is, questions, notes and news.
 pub(crate) fn hello_reply(
     c: &rusqlite::Connection,
@@ -331,7 +331,7 @@ pub(crate) fn hello_reply(
         // The CLI (publish, screenshot, contribute, remote, wait) needs the same token.
         "cli": {
             "token_file": crate::tokens::token_path(token_dir, Some(&project.slug), &project.name),
-            "how": "Run agentflow commands with AGENTFLOW_TOKEN_FILE set to token_file (sessions started with AgentFlow's start command have it), or add --token-file token_file."
+            "how": "Run flow commands with AGENTFLOW_TOKEN_FILE set to token_file (a project folder set up by AgentFlow sets it, with AGENTFLOW_URL), or add --token-file token_file."
         },
     });
     let mut reply = reply;
@@ -375,7 +375,7 @@ impl FlowMcp {
     #[tool(description = "What happened in your project since you last checked that you didn't do yourself: \
         the owner's answers (and the decisions they made), button presses, messages, feedback. Marks them read; the \
         replies of your other write calls carry the same news as it comes. again: \"1h\" shows what came in the last \
-        hour once more, read or not. Also see `agentflow wait` to block until something happens.")]
+        hour once more, read or not. Also see `flow wait` to block until something happens.")]
     async fn since_last_check(
         &self,
         Extension(parts): Extension<Parts>,

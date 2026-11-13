@@ -1,4 +1,4 @@
-//! JSON API for the CLI: `agentflow wait` blocks here until something happens in the caller's
+//! JSON API for the CLI: `flow wait` blocks here until something happens in the caller's
 //! project. Agents run it in the background, so an idle session is woken when the owner answers.
 
 use std::time::{Duration, Instant};
@@ -20,7 +20,7 @@ pub fn routes() -> Router<AppState> {
     Router::new().route("/api/wait", get(wait)).route("/api/news", get(news)).route("/api/hello", axum::routing::post(hello)).route("/api/timings", axum::routing::post(timing))
 }
 
-/// A timing from `agentflow time`: what ran, how long, CPU and peak memory, on what.
+/// A timing from `flow time`: what ran, how long, CPU and peak memory, on what.
 #[derive(Deserialize)]
 pub struct TimingBody {
     pub what: String,
@@ -69,7 +69,7 @@ struct NewsQuery {
     again: Option<i64>,
 }
 
-/// The news for `agentflow news` (a hook before each of the owner's prompts): unread events by
+/// The news for `flow news` (a hook before each of the owner's prompts): unread events by
 /// others, marked read; or, with `again`, the last minutes once more.
 async fn news(State(state): State<AppState>, Extension(actor): Extension<Actor>, Query(q): Query<NewsQuery>) -> Response {
     let Actor::Project { project_id, slug, .. } = actor else {
@@ -88,7 +88,7 @@ async fn news(State(state): State<AppState>, Extension(actor): Extension<Actor>,
     }
 }
 
-/// Who is saying hello, from `agentflow hello` (a SessionStart hook); what's left empty keeps the
+/// Who is saying hello, from `flow hello` (a SessionStart hook); what's left empty keeps the
 /// project's last values.
 #[derive(Deserialize, Default)]
 #[serde(default)]
@@ -103,7 +103,7 @@ pub struct HelloBody {
     pub part: String,
 }
 
-/// `agentflow hello`: the hello tool's reply, for a SessionStart hook (Imaginarium's agent and the
+/// `flow hello`: the hello tool's reply, for a SessionStart hook (Imaginarium's agent and the
 /// owner, 2026-11-12: the full hello on every start, resume, /clear and compaction). The news in it
 /// is marked read, so the hook before the next prompt doesn't repeat it.
 async fn hello(State(state): State<AppState>, Extension(actor): Extension<Actor>, Json(b): Json<HelloBody>) -> Response {

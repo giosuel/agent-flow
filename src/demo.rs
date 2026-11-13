@@ -300,7 +300,7 @@ pub fn create(c: &mut Connection, data_dir: &Path) -> anyhow::Result<String> {
     };
     crate::actions::add(c, &release, &b, SLUG)?;
 
-    // Two builds that `flow-run lumen-demo` really runs: B-1 tried, B-2 waiting for feedback.
+    // Two builds that `flow run lumen-demo` really runs: B-1 tried, B-2 waiting for feedback.
     let b1 =
         build(c, p.id, data_dir, "M2 thumbnails", "f3a91c2", &["Thumbnails: open a folder of 500 photos"], "tried")?;
     for (title, state, words) in [
@@ -376,7 +376,7 @@ pub fn create(c: &mut Connection, data_dir: &Path) -> anyhow::Result<String> {
     Ok(format!("Created {NAME} at /p/{SLUG}: archive it from its page when you're done."))
 }
 
-/// A real build: a folder with a script that says it's the demo, packed like `agentflow publish`.
+/// A real build: a folder with a script that says it's the demo, packed like `flow publish`.
 fn build(
     c: &Connection,
     project: i64,
@@ -390,7 +390,7 @@ fn build(
     let script = src.path().join(SLUG);
     std::fs::write(
         &script,
-        format!("#!/bin/sh\necho 'Lumen demo build: {summary}. Nothing to see; it only shows that flow-run works.'\n"),
+        format!("#!/bin/sh\necho 'Lumen demo build: {summary}. Nothing to see; it only shows that flow run works.'\n"),
     )?;
     {
         use std::os::unix::fs::PermissionsExt;
