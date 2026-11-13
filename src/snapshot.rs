@@ -103,13 +103,20 @@ pub struct Uploaded {
     pub sent_files: usize,
 }
 
-pub fn upload(client: &Client, top: &Path, server: Option<&str>) -> anyhow::Result<Uploaded> {
+/// Where a job would run: (`kind`, online) of the builder, None when the server doesn't say.
+pub fn target(client: &Client, server: Option<&str>) -> Option<(String, bool, String)> {
+    let v =
+        client.get(&format!("/api/remote/base{}", server.map(|s| format!("?server={s}")).unwrap_or_default())).ok()?;
+    Some((
+        v["kind"].as_str().unwrap_or("").to_owned(),
+        v["online"].as_bool().unwrap_or(false),
+        v["commit"].as_str().unwrap_or("").to_owned(),
+    ))
+}
+
+pub fn upload(client: &Client, top: &Path, base: &str) -> anyhow::Result<Uploaded> {
     let m = manifest(top)?;
-    let base = client
-        .get(&format!("/api/remote/base{}", server.map(|s| format!("?server={s}")).unwrap_or_default()))
-        .ok()
-        .and_then(|v| v["commit"].as_str().map(str::to_owned))
-        .unwrap_or_default();
+    let base = base.to_owned();
     let bundle = bundle(top, &base, &m.commit)?;
     let manifest_bytes = serde_json::to_vec(&m)?;
     let manifest_sha = crate::blobs::sha_of(&manifest_bytes);
@@ -197,12 +204,24 @@ pub fn fetch_results(
         let dec = zstd::stream::read::Decoder::new(std::fs::File::open(tmp.path())?)?;
         let mut ar = tar::Archive::new(dec);
         ar.set_preserve_permissions(true);
+        let mut total = 0u64;
         for entry in ar.entries()? {
             let mut e = entry?;
             let p = e.path()?.to_path_buf();
             crate::builds::safe_relative(&p)?;
             if !p.starts_with(base) {
                 bail!("the result holds {}, not {base}", p.display());
+            }
+            total += e.size();
+            if total > crate::blobs::MAX_PACK {
+                bail!("the result unpacks to more than {} GB", crate::blobs::MAX_PACK >> 30);
+            }
+            // Links stay inside the result: relative, without `..`.
+            if let Some(target) = e.link_name()? {
+                let kind = e.header().entry_type();
+                if (kind.is_symlink() || kind.is_hard_link()) && crate::builds::safe_relative(&target).is_err() {
+                    bail!("the result has a link out of it: {} -> {}", p.display(), target.display());
+                }
             }
             e.unpack_in(&parent)?;
         }
