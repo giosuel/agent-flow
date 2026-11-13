@@ -43,7 +43,10 @@ fn results_dir(state: &AppState, job: i64) -> std::path::PathBuf {
 
 /// A result's name: the path asked for, made into one file name.
 pub fn result_name(path: &str) -> String {
-    path.chars().map(|c| if c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_' { c } else { '_' }).collect::<String>() + ".tar.zst"
+    path.chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_' { c } else { '_' })
+        .collect::<String>()
+        + ".tar.zst"
 }
 
 /// A builder's own name, if the caller is one that's registered as a daemon builder.
@@ -52,17 +55,19 @@ async fn builder_of(state: &AppState, actor: &Actor) -> Option<String> {
     let n = name.clone();
     let known: bool = state
         .db
-        .call(move |c| Ok(c.query_row("SELECT EXISTS (SELECT 1 FROM build_servers WHERE name = ?1 AND kind = 'daemon')", [&n], |r| r.get(0))?))
+        .call(move |c| {
+            Ok(c.query_row(
+                "SELECT EXISTS (SELECT 1 FROM build_servers WHERE name = ?1 AND kind = 'daemon')",
+                [&n],
+                |r| r.get(0),
+            )?)
+        })
         .await
         .unwrap_or(false);
     known.then(|| name.clone())
 }
 
-async fn connect(
-    State(state): State<AppState>,
-    Extension(actor): Extension<Actor>,
-    ws: WebSocketUpgrade,
-) -> Response {
+async fn connect(State(state): State<AppState>, Extension(actor): Extension<Actor>, ws: WebSocketUpgrade) -> Response {
     let Some(name) = builder_of(&state, &actor).await else {
         return json_error(StatusCode::FORBIDDEN, "only a builder's own token connects here");
     };
@@ -74,7 +79,11 @@ async fn serve(state: AppState, name: String, socket: WebSocket) {
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     let conn = hub().connect(&name, tx);
     tracing::info!("builder {name} connected");
-    activity::write(&state.db, Entry::new(&Actor::System("builders"), Via::Build, Action::Login, format!("builder {name} connected"))).await;
+    activity::write(
+        &state.db,
+        Entry::new(&Actor::System("builders"), Via::Build, Action::Login, format!("builder {name} connected")),
+    )
+    .await;
     crate::remote::reload(&state).await;
     let mut ping = tokio::time::interval(std::time::Duration::from_secs(20));
     loop {
@@ -103,7 +112,11 @@ async fn serve(state: AppState, name: String, socket: WebSocket) {
     }
     hub().disconnect(&name, conn);
     tracing::info!("builder {name} disconnected");
-    activity::write(&state.db, Entry::new(&Actor::System("builders"), Via::Build, Action::Login, format!("builder {name} disconnected"))).await;
+    activity::write(
+        &state.db,
+        Entry::new(&Actor::System("builders"), Via::Build, Action::Login, format!("builder {name} disconnected")),
+    )
+    .await;
 }
 
 #[derive(Deserialize)]
@@ -201,7 +214,11 @@ struct BaseQuery {
 }
 
 /// The newest commit a builder has of this project, so flow's git bundle carries only what's new.
-async fn base(State(state): State<AppState>, Extension(actor): Extension<Actor>, Query(q): Query<BaseQuery>) -> Response {
+async fn base(
+    State(state): State<AppState>,
+    Extension(actor): Extension<Actor>,
+    Query(q): Query<BaseQuery>,
+) -> Response {
     let Actor::Project { project_id, .. } = actor else {
         return json_error(StatusCode::FORBIDDEN, "for projects' agents");
     };
@@ -233,7 +250,8 @@ async fn result_in(
     let Some(builder) = builder_of(&state, &actor).await else {
         return json_error(StatusCode::FORBIDDEN, "for builders");
     };
-    let mine = state.db.call(move |c| crate::remote::get(c, job)).await.ok().flatten().is_some_and(|j| j.server == builder);
+    let mine =
+        state.db.call(move |c| crate::remote::get(c, job)).await.ok().flatten().is_some_and(|j| j.server == builder);
     if !mine || !name.ends_with(".tar.zst") || name.contains('/') || name.starts_with('.') {
         return json_error(StatusCode::FORBIDDEN, "not this builder's job");
     }
@@ -257,12 +275,21 @@ async fn result_out(
     let Actor::Project { project_id, .. } = actor else {
         return json_error(StatusCode::FORBIDDEN, "for projects' agents");
     };
-    let mine = state.db.call(move |c| crate::remote::get(c, id)).await.ok().flatten().is_some_and(|j| j.project_id == project_id);
+    let mine = state
+        .db
+        .call(move |c| crate::remote::get(c, id))
+        .await
+        .ok()
+        .flatten()
+        .is_some_and(|j| j.project_id == project_id);
     if !mine || name.contains('/') || name.starts_with('.') {
         return json_error(StatusCode::NOT_FOUND, "no such result");
     }
     match tokio::fs::File::open(results_dir(&state, id).join(&name)).await {
-        Ok(f) => ([(header::CONTENT_TYPE, "application/zstd")], Body::from_stream(tokio_util::io::ReaderStream::new(f))).into_response(),
+        Ok(f) => {
+            ([(header::CONTENT_TYPE, "application/zstd")], Body::from_stream(tokio_util::io::ReaderStream::new(f)))
+                .into_response()
+        }
         Err(_) => json_error(StatusCode::NOT_FOUND, "no such result"),
     }
 }
@@ -280,8 +307,14 @@ async fn list(State(state): State<AppState>, Extension(actor): Extension<Actor>)
         return json_error(StatusCode::FORBIDDEN, "for your machines");
     }
     let servers = crate::remote::servers(&state);
-    let live: std::collections::HashMap<String, bool> =
-        state.remote.lock().unwrap_or_else(|e| e.into_inner()).servers.iter().map(|(k, v)| (k.clone(), v.probe.online)).collect();
+    let live: std::collections::HashMap<String, bool> = state
+        .remote
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .servers
+        .iter()
+        .map(|(k, v)| (k.clone(), v.probe.online))
+        .collect();
     let jobs = state
         .db
         .call(|c| {
@@ -317,17 +350,30 @@ struct Edit {
 }
 
 /// `flow builder edit`: its name and limits, from a connected machine (the owner, 2026-11-13).
-async fn edit(State(state): State<AppState>, Extension(actor): Extension<Actor>, Path(name): Path<String>, Json(e): Json<Edit>) -> Response {
+async fn edit(
+    State(state): State<AppState>,
+    Extension(actor): Extension<Actor>,
+    Path(name): Path<String>,
+    Json(e): Json<Edit>,
+) -> Response {
     if !matches!(actor, Actor::Device { .. } | Actor::Owner { .. }) {
         return json_error(StatusCode::FORBIDDEN, "for your machines");
     }
     let Some(mut b) = crate::remote::servers(&state).into_iter().find(|s| s.name == name) else {
         return json_error(StatusCode::NOT_FOUND, format!("no builder called {name}"));
     };
-    if let Some(v) = e.min_threads { b.min_threads = v; }
-    if let Some(v) = e.min_memory_gb { b.min_memory_gb = v; }
-    if let Some(v) = e.reserve_memory_gb { b.reserve_memory_gb = v; }
-    if let Some(v) = e.keep_days { b.keep_days = v; }
+    if let Some(v) = e.min_threads {
+        b.min_threads = v;
+    }
+    if let Some(v) = e.min_memory_gb {
+        b.min_memory_gb = v;
+    }
+    if let Some(v) = e.reserve_memory_gb {
+        b.reserve_memory_gb = v;
+    }
+    if let Some(v) = e.keep_days {
+        b.keep_days = v;
+    }
     let (n, b2) = (name.clone(), b.clone());
     if let Err(err) = state.db.call(move |c| crate::remote::set_limits(c, &n, &b2)).await {
         return json_error(StatusCode::BAD_REQUEST, format!("{err:#}"));
@@ -342,7 +388,11 @@ async fn edit(State(state): State<AppState>, Extension(actor): Extension<Actor>,
         now_called = new;
     }
     crate::remote::reload(&state).await;
-    activity::write(&state.db, Entry::new(&actor, Via::Api, Action::Write, format!("builder {name} edited (now {now_called})"))).await;
+    activity::write(
+        &state.db,
+        Entry::new(&actor, Via::Api, Action::Write, format!("builder {name} edited (now {now_called})")),
+    )
+    .await;
     Json(json!({"name": now_called})).into_response()
 }
 
@@ -357,6 +407,7 @@ async fn remove_self(State(state): State<AppState>, Extension(actor): Extension<
     }
     hub().drop_builder(&name);
     crate::remote::reload(&state).await;
-    activity::write(&state.db, Entry::new(&actor, Via::Api, Action::Write, format!("builder {name} removed itself"))).await;
+    activity::write(&state.db, Entry::new(&actor, Via::Api, Action::Write, format!("builder {name} removed itself")))
+        .await;
     Json(json!({"removed": name})).into_response()
 }

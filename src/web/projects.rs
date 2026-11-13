@@ -192,7 +192,9 @@ async fn setup_code(
             Ok((p, code))
         })
         .await?;
-    let e = Entry::new(&actor, Via::Page, Action::Write, "setup code made (Set up on another machine)").project(slug.clone()).ip(Some(ip.0));
+    let e = Entry::new(&actor, Via::Page, Action::Write, "setup code made (Set up on another machine)")
+        .project(slug.clone())
+        .ip(Some(ip.0));
     activity::write(&state.db, e).await;
     render(SetupCodePage {
         nav: nav(&state, &actor, "/projects").await,
@@ -834,12 +836,19 @@ async fn project(
         .call(move |c| {
             let Some(p) = projects::get(c, &slug)? else { return Ok(None) };
             let ms = projects::milestones(c, p.id)?;
-            let mut all = records::query(c, &records::Query { project_id: Some(p.id), limit: 0, ..Default::default() })?;
+            let mut all =
+                records::query(c, &records::Query { project_id: Some(p.id), limit: 0, ..Default::default() })?;
             // The Decisions tab folds the archived ones at its end.
             if t == "decisions" {
                 all.extend(records::query(
                     c,
-                    &records::Query { project_id: Some(p.id), kinds: vec![Kind::Decision], states: vec!["archived".into()], limit: 0, ..Default::default() },
+                    &records::Query {
+                        project_id: Some(p.id),
+                        kinds: vec![Kind::Decision],
+                        states: vec!["archived".into()],
+                        limit: 0,
+                        ..Default::default()
+                    },
                 )?);
             }
             let checkout = (p.checkout.trim().to_owned(), p.machine.trim().to_owned());
@@ -1137,15 +1146,23 @@ fn build_project_page(
     };
     let (decisions_closed, decisions_replaced): (Vec<RecordRow>, Vec<RecordRow>) = if tab == "decisions" {
         (
-            decisions_all.iter().filter(|r| r.state == "current" && !in_force_scope(r)).map(|r| scoped_row(r)).collect(),
+            decisions_all
+                .iter()
+                .filter(|r| r.state == "current" && !in_force_scope(r))
+                .map(|r| scoped_row(r))
+                .collect(),
             decisions_all.iter().filter(|r| r.state == "replaced").map(|r| scoped_row(r)).collect(),
         )
     } else {
         (Vec::new(), Vec::new())
     };
     let decisions: Vec<RecordRow> = match tab {
-        "decisions" => decisions_all.iter().filter(|r| r.state == "current" && in_force_scope(r)).map(|r| scoped_row(r)).collect(),
-        _ => decisions_all.iter().filter(|r| r.state == "current" && in_force_scope(r)).take(5).map(|r| row(r)).collect(),
+        "decisions" => {
+            decisions_all.iter().filter(|r| r.state == "current" && in_force_scope(r)).map(|r| scoped_row(r)).collect()
+        }
+        _ => {
+            decisions_all.iter().filter(|r| r.state == "current" && in_force_scope(r)).take(5).map(|r| row(r)).collect()
+        }
     };
     let open_questions = questions_all.iter().filter(|r| r.state == "open").map(|r| row(r)).collect();
     let questions = if tab == "questions" { questions_all.iter().map(|r| row(r)).collect() } else { Vec::new() };
@@ -1267,7 +1284,12 @@ fn build_project_page(
                     String::new()
                 },
                 skip_reason: if t.state == "skipped" { t.str("skip_reason").to_owned() } else { String::new() },
-                spent: times.share_ms.get(&t.id).filter(|ms| **ms > 0).map(|ms| crate::times::fmt_ms(*ms)).unwrap_or_default(),
+                spent: times
+                    .share_ms
+                    .get(&t.id)
+                    .filter(|ms| **ms > 0)
+                    .map(|ms| crate::times::fmt_ms(*ms))
+                    .unwrap_or_default(),
             })
         };
         let lines = |list: &[&Record], active: bool, times: &crate::times::Times| -> anyhow::Result<Vec<TaskLine>> {
@@ -1279,7 +1301,10 @@ fn build_project_page(
         };
         let mut sorted: Vec<&Record> = tasks.clone();
         sorted.sort_by(|a, b| {
-            a.position.unwrap_or(f64::MAX).partial_cmp(&b.position.unwrap_or(f64::MAX)).unwrap_or(std::cmp::Ordering::Equal)
+            a.position
+                .unwrap_or(f64::MAX)
+                .partial_cmp(&b.position.unwrap_or(f64::MAX))
+                .unwrap_or(std::cmp::Ordering::Equal)
         });
         let of = |id: i64| -> Vec<&Record> { sorted.iter().copied().filter(|t| t.milestone_id == Some(id)).collect() };
         let mut groups = Vec::new();
@@ -1314,14 +1339,21 @@ fn build_project_page(
                     "concluded" => format!("{est_txt} · took {}", crate::times::fmt_ms(times.total_ms)),
                     "planned" if n == 0 => "starts when its first task does".into(),
                     "planned" => format!("{n} task{} · {est_txt}", if n == 1 { "" } else { "s" }),
-                    _ => format!("{open} open of {n} · {est_txt} · spent {} so far", crate::times::fmt_ms(times.total_ms)),
+                    _ => format!(
+                        "{open} open of {n} · {est_txt} · spent {} so far",
+                        crate::times::fmt_ms(times.total_ms)
+                    ),
                 };
                 let sub = sub.trim_start_matches(" · ").trim_end_matches(" · ").replace(" ·  · ", " · ");
                 let review = !st.review.is_empty();
                 let sub = if review {
                     let r: Value = serde_json::from_str(&st.review).unwrap_or_default();
                     let n = r["reviewers"].as_array().map(Vec::len).unwrap_or(0);
-                    format!("{n} reviewer{} · commit {} · {sub}", if n == 1 { "" } else { "s" }, r["commit"].as_str().unwrap_or(""))
+                    format!(
+                        "{n} reviewer{} · commit {} · {sub}",
+                        if n == 1 { "" } else { "s" },
+                        r["commit"].as_str().unwrap_or("")
+                    )
                 } else {
                     sub
                 };
@@ -1340,7 +1372,9 @@ fn build_project_page(
             agent_ms += own_times.total_ms;
             let mut sub = match (steps.len(), count) {
                 (0, n) => format!("{n} task{}", if n == 1 { "" } else { "s" }),
-                (k, n) => format!("{k} step{} · {n} task{}", if k == 1 { "" } else { "s" }, if n == 1 { "" } else { "s" }),
+                (k, n) => {
+                    format!("{k} step{} · {n} task{}", if k == 1 { "" } else { "s" }, if n == 1 { "" } else { "s" })
+                }
             };
             if est_all > 0 {
                 sub.push_str(&format!(" · estimated {}", crate::times::fmt_min(est_all)));
@@ -1420,8 +1454,14 @@ fn build_project_page(
             working_on: if !p.agent.note.trim().is_empty() {
                 p.agent.note.clone()
             } else {
-                let mut doing: Vec<&Record> = all.iter().filter(|r| r.kind == Kind::Task && r.state == "doing").collect();
-                doing.sort_by(|a, b| a.position.unwrap_or(f64::MAX).partial_cmp(&b.position.unwrap_or(f64::MAX)).unwrap_or(std::cmp::Ordering::Equal));
+                let mut doing: Vec<&Record> =
+                    all.iter().filter(|r| r.kind == Kind::Task && r.state == "doing").collect();
+                doing.sort_by(|a, b| {
+                    a.position
+                        .unwrap_or(f64::MAX)
+                        .partial_cmp(&b.position.unwrap_or(f64::MAX))
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                });
                 match doing.as_slice() {
                     [] => String::new(),
                     [one] => format!("doing {} {}", one.short_id(), one.title),
@@ -1654,14 +1694,32 @@ async fn load_record_page(
                     est: if est > 0 { crate::times::fmt_min(est) } else { String::new() },
                     pct: if est > 0 { ((share as f64 / (est as f64 * 60_000.0)) * 100.0).min(100.0) as i64 } else { 0 },
                     over: est > 0 && share > est * 60_000,
-                    raw: if raw > share + 60_000 { format!("{} in doing; shared with tasks in doing at the same time", crate::times::fmt_ms(raw)) } else { String::new() },
-                    spans: spans.iter().map(|(a, b)| if *b >= now - 1000 && r.state == "doing" { format!("{}–now", tz.short(*a)) } else { format!("{}–{}", tz.short(*a), tz.hm(*b)) }).collect::<Vec<_>>().join(", "),
+                    raw: if raw > share + 60_000 {
+                        format!("{} in doing; shared with tasks in doing at the same time", crate::times::fmt_ms(raw))
+                    } else {
+                        String::new()
+                    },
+                    spans: spans
+                        .iter()
+                        .map(|(a, b)| {
+                            if *b >= now - 1000 && r.state == "doing" {
+                                format!("{}–now", tz.short(*a))
+                            } else {
+                                format!("{}–{}", tz.short(*a), tz.hm(*b))
+                            }
+                        })
+                        .collect::<Vec<_>>()
+                        .join(", "),
                     corrected: r.data.get("time_override_min").is_some(),
                 })
             } else {
                 None
             };
-            let timings = if matches!(r.kind, Kind::Task | Kind::Pr) { crate::times::rows(&crate::times::of_record(c, r.id)?, tz) } else { Vec::new() };
+            let timings = if matches!(r.kind, Kind::Task | Kind::Pr) {
+                crate::times::rows(&crate::times::of_record(c, r.id)?, tz)
+            } else {
+                Vec::new()
+            };
             let session_url = crate::usage::session_link(c, project.id)?.map(|(u, _)| u);
             let draft = super::outgoing::draft_view(c, &r, now)?;
             // Everything still to test, on a release that isn't tagged yet and on every build.
@@ -1702,23 +1760,42 @@ async fn load_record_page(
             } else {
                 String::new()
             };
-            let scope_choices: Vec<(String, String, bool)> = if is_owner && r.kind == Kind::Question && r.state == "open" {
+            let scope_choices: Vec<(String, String, bool)> = if is_owner
+                && r.kind == Kind::Question
+                && r.state == "open"
+            {
                 std::iter::once(("project".to_owned(), "Project-wide".to_owned(), r.milestone_id.is_none()))
                     .chain(
                         projects::milestones(c, r.project_id)?
                             .into_iter()
                             .filter(|m| m.parent_id.is_none() && (m.state != "closed" || r.milestone_id == Some(m.id)))
-                            .map(|m| (m.id.to_string(), format!("{} · {}", m.name, m.title), r.milestone_id == Some(m.id))),
+                            .map(|m| {
+                                (m.id.to_string(), format!("{} · {}", m.name, m.title), r.milestone_id == Some(m.id))
+                            }),
                     )
                     .collect()
             } else {
                 Vec::new()
             };
-            Ok(Some((r, project, links, history, buttons, (session_url, draft, draft_notice, to_test, time, timings, scope, scope_choices))))
+            Ok(Some((
+                r,
+                project,
+                links,
+                history,
+                buttons,
+                (session_url, draft, draft_notice, to_test, time, timings, scope, scope_choices),
+            )))
         })
         .await?
         .ok_or(AppError::NotFound)?;
-    let (r, project, links, history, buttons, (session_url, draft, draft_notice, to_test, time, timings, scope, scope_choices)) = page;
+    let (
+        r,
+        project,
+        links,
+        history,
+        buttons,
+        (session_url, draft, draft_notice, to_test, time, timings, scope, scope_choices),
+    ) = page;
 
     let mut blocking = Vec::new();
     let mut waits_for = Vec::new();
@@ -1727,7 +1804,12 @@ async fn load_record_page(
             let step = l.other.milestone.clone().unwrap_or_default();
             blocking.push((RecordRow::new(&l.other, l.other.state.clone()), step));
         }
-        if !l.outgoing && r.kind == Kind::Task && r.state == "blocked" && l.other.kind == Kind::Question && l.other.state == "open" {
+        if !l.outgoing
+            && r.kind == Kind::Task
+            && r.state == "blocked"
+            && l.other.kind == Kind::Question
+            && l.other.state == "open"
+        {
             waits_for.push(RecordRow::new(&l.other, "open".into()));
         }
     }
@@ -1791,16 +1873,28 @@ async fn load_record_page(
             if let Some(m) = &r.milestone {
                 extra.push(("Milestone".into(), m.clone()));
             }
-            for (k, label) in [("estimate", "Estimate"), ("resurface_when", "Comes back"), ("importance", "Importance"), ("skip_reason", "Skipped because")] {
+            for (k, label) in [
+                ("estimate", "Estimate"),
+                ("resurface_when", "Comes back"),
+                ("importance", "Importance"),
+                ("skip_reason", "Skipped because"),
+            ] {
                 if !r.str(k).is_empty() {
                     extra.push((label.into(), r.str(k).into()));
                 }
             }
             if !r.str("source").is_empty() && r.str("source") != "planned" {
                 let from = r.str("source_ref");
-                let added = if r.data.get("added").and_then(Value::as_bool).unwrap_or(false) { "added during the step: " } else { "" };
+                let added = if r.data.get("added").and_then(Value::as_bool).unwrap_or(false) {
+                    "added during the step: "
+                } else {
+                    ""
+                };
                 let src = source_label(r.str("source"));
-                extra.push(("Came from".into(), if from.is_empty() { format!("{added}{src}") } else { format!("{added}{src} ({from})") }));
+                extra.push((
+                    "Came from".into(),
+                    if from.is_empty() { format!("{added}{src}") } else { format!("{added}{src} ({from})") },
+                ));
             }
             if !r.str("branch").is_empty() {
                 extra.push(("Branch".into(), r.str("branch").into()));
@@ -1850,7 +1944,11 @@ async fn load_record_page(
         ),
         session_url,
         // A text note's body is its text, shown in its own section.
-        body_html: if draft.is_some() || (r.kind == Kind::Note && r.str("ext").is_empty()) { String::new() } else { markdown::to_html(&r.body) },
+        body_html: if draft.is_some() || (r.kind == Kind::Note && r.str("ext").is_empty()) {
+            String::new()
+        } else {
+            markdown::to_html(&r.body)
+        },
         draft,
         draft_notice,
         to_test,
@@ -1961,8 +2059,17 @@ fn build_view(r: &Record, links: &[records::LinkView], sent: bool) -> BuildView 
     BuildView {
         run: format!("flow run {} {}", r.str("product"), r.number),
         platform: crate::builds::platform_label(platform),
-        download: if platform == crate::builds::DEFAULT_PLATFORM { String::new() } else { format!("{}/download", r.url()) },
-        needs: r.data.get("needs").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_str).map(str::to_owned).collect()).unwrap_or_default(),
+        download: if platform == crate::builds::DEFAULT_PLATFORM {
+            String::new()
+        } else {
+            format!("{}/download", r.url())
+        },
+        needs: r
+            .data
+            .get("needs")
+            .and_then(Value::as_array)
+            .map(|a| a.iter().filter_map(Value::as_str).map(str::to_owned).collect())
+            .unwrap_or_default(),
         facts,
         features,
         given,
@@ -2050,7 +2157,11 @@ async fn set_scope(
                 &tx,
                 &q,
                 "owner",
-                records::Patch { milestone_id: Some(to), note: format!("scope set to {} by the owner", projects::scope_name(&tx, to)), ..Default::default() },
+                records::Patch {
+                    milestone_id: Some(to),
+                    note: format!("scope set to {} by the owner", projects::scope_name(&tx, to)),
+                    ..Default::default()
+                },
             )?;
             tx.commit()?;
             Ok(())
@@ -2091,7 +2202,15 @@ async fn answer(
             let tx = c.transaction()?;
             let q = records::find_str(&tx, &format!("{s}/{i}"), None)?;
             // The answer becomes a decision in the question's scope (the owner, 2026-11-12).
-            let (q, _) = records::answer_and_decide(&tx, &q, option, &words, "owner", None, &format!("owner, answering {} in AgentFlow", q.short_id()))?;
+            let (q, _) = records::answer_and_decide(
+                &tx,
+                &q,
+                option,
+                &words,
+                "owner",
+                None,
+                &format!("owner, answering {} in AgentFlow", q.short_id()),
+            )?;
             tx.commit()?;
             Ok(q)
         })

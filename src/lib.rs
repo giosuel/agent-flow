@@ -2,8 +2,8 @@
 //! (`agentflow-builder`) are thin programs on top of it.
 
 pub mod actions;
-pub mod approvals;
 pub mod activity;
+pub mod approvals;
 pub mod auth;
 pub mod backup;
 pub mod blobs;
@@ -13,8 +13,8 @@ pub mod builders;
 pub mod builds;
 pub mod cli;
 pub mod config;
-pub mod consultant;
 pub mod connect;
+pub mod consultant;
 pub mod contributions;
 pub mod db;
 pub mod demo;
@@ -33,13 +33,13 @@ pub mod passkey;
 pub mod poller;
 pub mod projectdoc;
 pub mod projects;
-pub mod sessionlog;
 pub mod prs;
 pub mod push;
 pub mod records;
 pub mod remote;
 pub mod screenshots;
 pub mod secrets;
+pub mod sessionlog;
 pub mod setup;
 pub mod snapshot;
 pub mod steps;

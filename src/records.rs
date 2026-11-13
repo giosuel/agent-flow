@@ -692,7 +692,13 @@ fn answer(
 
 /// The decision an answer makes, in the question's scope: the owner's words are their answer,
 /// the title says what was chosen (or `title` when given).
-fn decision_from_answer(conn: &Connection, q: &Record, title: Option<&str>, source: &str, author: &str) -> anyhow::Result<Record> {
+fn decision_from_answer(
+    conn: &Connection,
+    q: &Record,
+    title: Option<&str>,
+    source: &str,
+    author: &str,
+) -> anyhow::Result<Record> {
     let option = q.str("answer_option_title").to_owned();
     let words = q.str("answer").trim().to_owned();
     let owner_words = match (option.is_empty(), words.is_empty()) {
@@ -966,7 +972,13 @@ pub fn recent_events(conn: &Connection, project_id: Option<i64>, limit: i64) -> 
 }
 
 /// Events by others since a time, oldest first: to see news again that was already read.
-pub fn events_by_others_since(conn: &Connection, project_id: i64, actor: &str, since: i64, limit: i64) -> anyhow::Result<Vec<Event>> {
+pub fn events_by_others_since(
+    conn: &Connection,
+    project_id: i64,
+    actor: &str,
+    since: i64,
+    limit: i64,
+) -> anyhow::Result<Vec<Event>> {
     let mut stmt = conn.prepare(
         "SELECT e.seq, e.at, p.slug, r.kind, r.number, e.kind, e.summary, e.actor
          FROM events e LEFT JOIN projects p ON p.id = e.project_id LEFT JOIN records r ON r.id = e.record_id

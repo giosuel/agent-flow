@@ -85,7 +85,8 @@ fn open(data_dir: &Path, sealed: &str) -> anyhow::Result<String> {
     let (nonce, ct) = raw.split_at(12);
     let nonce: [u8; 12] = nonce.try_into()?;
     let cipher = Aes256Gcm::new_from_slice(&key(data_dir)?).map_err(|_| anyhow::anyhow!("aes key"))?;
-    let plain = cipher.decrypt(&nonce.into(), ct).map_err(|_| anyhow::anyhow!("the key doesn't fit (secret.key changed?)"))?;
+    let plain =
+        cipher.decrypt(&nonce.into(), ct).map_err(|_| anyhow::anyhow!("the key doesn't fit (secret.key changed?)"))?;
     Ok(String::from_utf8(plain)?)
 }
 
@@ -171,7 +172,8 @@ mod tests {
         db.call_blocking(move |c| {
             let t = "github_pat_11ABCDEFG0123456789_abcdefghijklmnop";
             store(c, &data, GitHub::External, t)?;
-            let raw: String = c.query_row("SELECT value FROM settings WHERE key = 'github.token.external'", [], |r| r.get(0))?;
+            let raw: String =
+                c.query_row("SELECT value FROM settings WHERE key = 'github.token.external'", [], |r| r.get(0))?;
             assert!(!raw.contains("abcdefghijklmnop"), "stored sealed");
             assert_eq!(load(c, &data, GitHub::External)?.as_deref(), Some(t));
             assert_eq!(token(GitHub::External).as_deref(), Some(t));

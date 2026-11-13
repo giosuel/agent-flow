@@ -141,5 +141,4 @@ impl FlowMcp {
         .await;
         self.finish(&actor, "track_contribution", Action::Write, outcome).await
     }
-
 }

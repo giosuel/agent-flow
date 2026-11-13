@@ -98,7 +98,10 @@ async fn start(State(state): State<AppState>, Extension(actor): Extension<Actor>
     let new = if s.setup || server.kind == "daemon" {
         // From anywhere: what runs comes with the job, the server reads no checkout.
         if !s.setup && s.manifest.is_empty() {
-            return json_error(StatusCode::BAD_REQUEST, "this builder takes a snapshot of your checkout: update flow and run flow remote again");
+            return json_error(
+                StatusCode::BAD_REQUEST,
+                "this builder takes a snapshot of your checkout: update flow and run flow remote again",
+            );
         }
         if !s.manifest.is_empty() {
             let store = crate::blobs::Store::new(crate::web::builders::store_dir(&state));
@@ -128,8 +131,12 @@ async fn start(State(state): State<AppState>, Extension(actor): Extension<Actor>
         if !dir.is_absolute() || !dir.is_dir() {
             return json_error(StatusCode::BAD_REQUEST, "dir is the absolute path of a folder in your checkout");
         }
-        let top =
-            tokio::process::Command::new("git").arg("-C").arg(dir).args(["rev-parse", "--show-toplevel"]).output().await;
+        let top = tokio::process::Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(["rev-parse", "--show-toplevel"])
+            .output()
+            .await;
         let top = match top {
             Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).trim().to_owned(),
             _ => return json_error(StatusCode::BAD_REQUEST, "dir isn't in a git checkout"),
@@ -827,7 +834,11 @@ pub async fn rename_server(
     }
     crate::builders::hub().drop_builder(&name);
     remote::reload(&state).await;
-    activity::write(&state.db, Entry::new(&actor, Via::Page, Action::Write, format!("builder {name} renamed to {new}"))).await;
+    activity::write(
+        &state.db,
+        Entry::new(&actor, Via::Page, Action::Write, format!("builder {name} renamed to {new}")),
+    )
+    .await;
     Ok(back_to_card("renamed"))
 }
 

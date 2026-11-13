@@ -79,7 +79,12 @@ async fn create(
     actor.require_owner()?;
     let name = f.name.trim().to_owned();
     if name.is_empty() || name.chars().count() > 60 {
-        return page(&state, nav(&state, &actor, "/projects").await, &f, Some("Give the project a name (up to 60 characters).".into()));
+        return page(
+            &state,
+            nav(&state, &actor, "/projects").await,
+            &f,
+            Some("Give the project a name (up to 60 characters).".into()),
+        );
     }
     let slug = if f.slug.trim().is_empty() { onboard::slug_for(&name) } else { f.slug.trim().to_owned() };
     let p = NewProject {
@@ -107,9 +112,14 @@ async fn create(
         Ok(code) => code,
         Err(e) => return page(&state, nav(&state, &actor, "/projects").await, &f, Some(format!("{e:#}"))),
     };
-    let e = Entry::new(&actor, Via::Page, Action::Write, format!("project {slug} created on the page, to be set up on a machine"))
-        .project(slug.clone())
-        .ip(Some(ip.0));
+    let e = Entry::new(
+        &actor,
+        Via::Page,
+        Action::Write,
+        format!("project {slug} created on the page, to be set up on a machine"),
+    )
+    .project(slug.clone())
+    .ip(Some(ip.0));
     activity::write(&state.db, e).await;
     render(super::projects::SetupCodePage {
         nav: nav(&state, &actor, "/projects").await,

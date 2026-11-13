@@ -66,7 +66,8 @@ fn section_views(text: &str) -> Vec<SectionView> {
         .enumerate()
         .map(|(index, (title, body))| {
             // The heading is the card's label; the rest is the card.
-            let rest = if body.starts_with("## ") { body.split_once('\n').map(|x| x.1).unwrap_or("") } else { body.as_str() };
+            let rest =
+                if body.starts_with("## ") { body.split_once('\n').map(|x| x.1).unwrap_or("") } else { body.as_str() };
             SectionView { index, title, html: crate::markdown::to_html(rest) }
         })
         .collect()
@@ -77,7 +78,13 @@ pub fn view(c: &Connection, project_id: i64, ask: &Ask, tz: &Tz, now: i64) -> an
     let parts = projectdoc::sections(&d.text);
     let editing = match ask.edit {
         Some("all") => Some(Editing { section: None, label: "the whole document".into(), text: d.text.clone() }),
-        Some(i) => i.parse::<usize>().ok().and_then(|i| parts.get(i).map(|(t, body)| Editing { section: Some(i), label: t.clone(), text: body.trim_end().to_owned() })),
+        Some(i) => i.parse::<usize>().ok().and_then(|i| {
+            parts.get(i).map(|(t, body)| Editing {
+                section: Some(i),
+                label: t.clone(),
+                text: body.trim_end().to_owned(),
+            })
+        }),
         None => None,
     };
     let history = if ask.history {

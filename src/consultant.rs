@@ -46,7 +46,11 @@ pub fn claude_program() -> PathBuf {
         .map(|p| std::env::split_paths(&p).map(|d| d.join("claude")).find(|c| c.is_file()))
         .unwrap_or_default();
     on_path
-        .or_else(|| [home.join(".local/bin/claude"), home.join(".claude/local/claude"), PathBuf::from("/usr/local/bin/claude")].into_iter().find(|c| c.is_file()))
+        .or_else(|| {
+            [home.join(".local/bin/claude"), home.join(".claude/local/claude"), PathBuf::from("/usr/local/bin/claude")]
+                .into_iter()
+                .find(|c| c.is_file())
+        })
         .unwrap_or_else(|| PathBuf::from("claude"))
 }
 
@@ -83,7 +87,10 @@ pub fn set_resume_first(c: &Connection, session: &str) -> anyhow::Result<()> {
 /// Its one token: a new one each time it's set up; any other consultant token is revoked.
 pub fn new_token(c: &mut Connection) -> anyhow::Result<String> {
     let tx = c.transaction()?;
-    tx.execute("UPDATE tokens SET revoked_at = ?1 WHERE kind = 'admin' AND revoked_at IS NULL", [crate::util::now_ms()])?;
+    tx.execute(
+        "UPDATE tokens SET revoked_at = ?1 WHERE kind = 'admin' AND revoked_at IS NULL",
+        [crate::util::now_ms()],
+    )?;
     let (_, secret) = auth::create_token(&tx, TokenKind::Admin, NAME, None)?;
     tx.commit()?;
     Ok(secret)
@@ -91,13 +98,18 @@ pub fn new_token(c: &mut Connection) -> anyhow::Result<String> {
 
 /// Is the server's user signed in to claude.ai (needed for Remote Control)?
 pub async fn login_ok() -> anyhow::Result<()> {
-    let out = tokio::time::timeout(Duration::from_secs(20), tokio::process::Command::new(claude_program()).args(["auth", "status", "--json"]).kill_on_drop(true).output())
-        .await
-        .context("claude auth status took too long")?
-        .context("Claude Code isn't installed for the server's user (claude)")?;
+    let out = tokio::time::timeout(
+        Duration::from_secs(20),
+        tokio::process::Command::new(claude_program()).args(["auth", "status", "--json"]).kill_on_drop(true).output(),
+    )
+    .await
+    .context("claude auth status took too long")?
+    .context("Claude Code isn't installed for the server's user (claude)")?;
     let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap_or_default();
     if v["loggedIn"].as_bool() != Some(true) || v["authMethod"].as_str() != Some("claude.ai") {
-        bail!("the server's user isn't signed in to claude.ai with a subscription (Remote Control needs that). Sign it in once: claude auth login (as the server's user, e.g. sudo -u agentflow claude auth login)");
+        bail!(
+            "the server's user isn't signed in to claude.ai with a subscription (Remote Control needs that). Sign it in once: claude auth login (as the server's user, e.g. sudo -u agentflow claude auth login)"
+        );
     }
     Ok(())
 }
@@ -156,7 +168,12 @@ pub async fn start(data_dir: &Path, folder: &Path, resume: Option<&str>, has_his
     // In a scope of its own, so restarting AgentFlow's service doesn't end it (systemd stops
     // everything in a service's group); plain when there's no user manager.
     let tmux_args = |c: &mut tokio::process::Command| {
-        c.arg("tmux").arg("-S").arg(tmux_socket(data_dir)).args(["new-session", "-d", "-s", TMUX, "-x", "200", "-y", "50", "-c"]).arg(folder).arg(&shell);
+        c.arg("tmux")
+            .arg("-S")
+            .arg(tmux_socket(data_dir))
+            .args(["new-session", "-d", "-s", TMUX, "-x", "200", "-y", "50", "-c"])
+            .arg(folder)
+            .arg(&shell);
     };
     let mut scoped = tokio::process::Command::new("systemd-run");
     scoped.args(["--user", "--scope", "--quiet", "--collect", "--unit", "agentflow-consultant"]);
@@ -176,20 +193,28 @@ pub async fn start(data_dir: &Path, folder: &Path, resume: Option<&str>, has_his
 }
 
 pub async fn stop(data_dir: &Path) -> anyhow::Result<()> {
-    let _ = tokio::process::Command::new("tmux").arg("-S").arg(tmux_socket(data_dir)).args(["kill-session", "-t", TMUX]).output().await?;
+    let _ = tokio::process::Command::new("tmux")
+        .arg("-S")
+        .arg(tmux_socket(data_dir))
+        .args(["kill-session", "-t", TMUX])
+        .output()
+        .await?;
     Ok(())
 }
 
 /// Has it talked in this folder before (Claude Code keeps its conversations by folder)?
 pub fn has_history(transcripts: &Path, folder: &Path) -> bool {
     let d = transcripts.join(crate::usage::folder_for(&folder.display().to_string()));
-    std::fs::read_dir(d).map(|rd| rd.flatten().any(|e| e.path().extension().is_some_and(|x| x == "jsonl"))).unwrap_or(false)
+    std::fs::read_dir(d)
+        .map(|rd| rd.flatten().any(|e| e.path().extension().is_some_and(|x| x == "jsonl")))
+        .unwrap_or(false)
 }
 
 /// Its newest claude.ai link (from its own conversations' Remote Control lines).
 pub fn session_link(c: &Connection, folder: &Path) -> anyhow::Result<Option<String>> {
     let f = crate::usage::folder_for(&folder.display().to_string());
-    Ok(c.query_row("SELECT url FROM remote_sessions WHERE folder = ?1 ORDER BY at DESC LIMIT 1", [f], |r| r.get(0)).optional()?)
+    Ok(c.query_row("SELECT url FROM remote_sessions WHERE folder = ?1 ORDER BY at DESC LIMIT 1", [f], |r| r.get(0))
+        .optional()?)
 }
 
 /// Reads what's new in its conversations (the server reads no other transcripts when

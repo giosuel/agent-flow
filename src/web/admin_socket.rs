@@ -78,7 +78,12 @@ async fn handle(state: &AppState, mut stream: UnixStream, me: u32) -> anyhow::Re
 pub async fn passkey_link(state: &AppState, by: &str) -> anyhow::Result<String> {
     let secret = state.db.call(|c| crate::auth::create_login_link(c, PURPOSE)).await?;
     let url = format!("{}/login/link/{secret}", state.config.public_url.trim_end_matches('/'));
-    let e = Entry::new(&Actor::System("admin-socket"), Via::Cli, Action::Write, format!("passkey link made on the server, as {by}"));
+    let e = Entry::new(
+        &Actor::System("admin-socket"),
+        Via::Cli,
+        Action::Write,
+        format!("passkey link made on the server, as {by}"),
+    );
     activity::write(&state.db, e).await;
     state.push.spawn(
         push::Kind::Urgent,

@@ -284,7 +284,14 @@ fn main() -> anyhow::Result<()> {
                 if !matches!(kind.as_str(), "project" | "consultant") {
                     anyhow::bail!("create a `project <project>` or a `consultant` token");
                 }
-                connect::token_create(&config_path, &client, &kind, project.as_deref(), name.as_deref(), file.as_deref())
+                connect::token_create(
+                    &config_path,
+                    &client,
+                    &kind,
+                    project.as_deref(),
+                    name.as_deref(),
+                    file.as_deref(),
+                )
             }
             TokenCommand::List => connect::token_list(&config_path, &client),
             TokenCommand::Revoke { id } => connect::token_revoke(&config_path, &client, id),
@@ -293,7 +300,9 @@ fn main() -> anyhow::Result<()> {
         Command::Project { command, client } => match command {
             ProjectCommand::Add { slug, name } => connect::project_add(&config_path, &client, &slug, &name),
             ProjectCommand::List => connect::project_list(&config_path, &client),
-            ProjectCommand::Setup { folder, code, name } => connect::project_setup(&config_path, &client, folder, code, name),
+            ProjectCommand::Setup { folder, code, name } => {
+                connect::project_setup(&config_path, &client, folder, code, name)
+            }
         },
         Command::Backup(client) => connect::backup(&config_path, &client),
         Command::ImportPrs { project, range, client } => connect::import_prs(&config_path, &client, &project, &range),
@@ -301,11 +310,15 @@ fn main() -> anyhow::Result<()> {
         Command::Builder { command, client } => {
             use agentflow::builder_cmd as b;
             match command {
-                BuilderCommand::Add { name, user, current_user } => b::add(&config_path, &client, b::AddArgs { name, user, current_user }),
-                BuilderCommand::List => b::list(&config_path, &client),
-                BuilderCommand::Edit { name, rename, min_threads, min_memory, reserve_memory, keep_days } => {
-                    b::edit(&config_path, &client, b::EditArgs { name, rename, min_threads, min_memory, reserve_memory, keep_days })
+                BuilderCommand::Add { name, user, current_user } => {
+                    b::add(&config_path, &client, b::AddArgs { name, user, current_user })
                 }
+                BuilderCommand::List => b::list(&config_path, &client),
+                BuilderCommand::Edit { name, rename, min_threads, min_memory, reserve_memory, keep_days } => b::edit(
+                    &config_path,
+                    &client,
+                    b::EditArgs { name, rename, min_threads, min_memory, reserve_memory, keep_days },
+                ),
                 BuilderCommand::Remove { name } => b::remove(&config_path, &client, name),
             }
         }
@@ -324,7 +337,13 @@ fn main() -> anyhow::Result<()> {
         }
         Command::Run(args) => cli::run(&config_path, args),
         Command::Hello { client, session, machine, model, effort, doc, no_doc } => {
-            let part = if doc { cli::HelloPart::Doc } else if no_doc { cli::HelloPart::NoDoc } else { cli::HelloPart::All };
+            let part = if doc {
+                cli::HelloPart::Doc
+            } else if no_doc {
+                cli::HelloPart::NoDoc
+            } else {
+                cli::HelloPart::All
+            };
             cli::hello(&config_path, client, cli::HelloArgs { session, machine, model, effort, part })
         }
         Command::News { client, again } => cli::news(&config_path, client, again),
