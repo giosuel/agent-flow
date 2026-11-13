@@ -9,7 +9,7 @@ systemd-run --user --scope -q -p MemoryMax=6G -p MemorySwapMax=0 \
   cargo build --release --locked -j "${JOBS:-2}"
 install -d "$HOME/.local/bin" "$HOME/.config/systemd/user"
 # Copy next to the old binary, then rename: a running server keeps its file until it restarts.
-for bin in agentflow flow; do
+for bin in agentflow flow agentflow-builder; do
   install -m 755 "$CARGO_TARGET_DIR/release/$bin" "$HOME/.local/bin/.$bin.new"
   mv "$HOME/.local/bin/.$bin.new" "$HOME/.local/bin/$bin"
 done
