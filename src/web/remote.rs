@@ -48,6 +48,19 @@ struct StartJob {
     /// Which build server; the first if left out.
     #[serde(default)]
     server: Option<String>,
+    /// A snapshot `flow remote` uploaded (its manifest's SHA-256), so the server needn't read
+    /// `dir`: the agent may work on any machine.
+    #[serde(default)]
+    manifest: String,
+    /// New commits and tags as a git bundle in the store, or "".
+    #[serde(default)]
+    bundle: String,
+    /// Where in the checkout to run, with a snapshot.
+    #[serde(default)]
+    subdir: String,
+    /// `flow remote --setup`: run in the builder's home, to install tools.
+    #[serde(default)]
+    setup: bool,
 }
 
 /// An agent starts a job. Refused at once when the server is offline, so the agent builds locally.
@@ -68,8 +81,11 @@ async fn start(State(state): State<AppState>, Extension(actor): Extension<Actor>
         };
         return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({"error": why, "offline": true}))).into_response();
     };
-    let online =
-        state.remote.lock().unwrap_or_else(|e| e.into_inner()).servers.get(&server.name).map(|l| l.probe.online);
+    let online = if server.kind == "daemon" {
+        Some(crate::builders::hub().is_online(&server.name))
+    } else {
+        state.remote.lock().unwrap_or_else(|e| e.into_inner()).servers.get(&server.name).map(|l| l.probe.online)
+    };
     if online == Some(false) {
         return (
             StatusCode::SERVICE_UNAVAILABLE,
@@ -77,31 +93,62 @@ async fn start(State(state): State<AppState>, Extension(actor): Extension<Actor>
         )
             .into_response();
     }
-    // The checkout's top level and where in it to run.
-    let dir = std::path::Path::new(&s.dir);
-    if !dir.is_absolute() || !dir.is_dir() {
-        return json_error(StatusCode::BAD_REQUEST, "dir is the absolute path of a folder in your checkout");
-    }
-    let top =
-        tokio::process::Command::new("git").arg("-C").arg(dir).args(["rev-parse", "--show-toplevel"]).output().await;
-    let top = match top {
-        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).trim().to_owned(),
-        _ => return json_error(StatusCode::BAD_REQUEST, "dir isn't in a git checkout"),
-    };
-    let subdir = dir
-        .canonicalize()
-        .ok()
-        .and_then(|d| d.strip_prefix(&top).ok().map(|p| p.to_string_lossy().to_string()))
-        .unwrap_or_default();
-    let new = NewJob {
-        server: server.name.clone(),
-        project_id: *project_id,
-        actor: slug.clone(),
-        dir: top,
-        subdir,
-        command: s.command,
-        fetch: s.fetch,
-        gpu: s.gpu,
+    // A builder that connects itself takes the snapshot; an SSH one reads the checkout here.
+    let new = if s.setup || server.kind == "daemon" {
+        // From anywhere: what runs comes with the job, the server reads no checkout.
+        if !s.setup && s.manifest.is_empty() {
+            return json_error(StatusCode::BAD_REQUEST, "this builder takes a snapshot of your checkout: update flow and run flow remote again");
+        }
+        if !s.manifest.is_empty() {
+            let store = crate::blobs::Store::new(crate::web::builders::store_dir(&state));
+            if !store.has(&s.manifest) || (!s.bundle.is_empty() && !store.has(&s.bundle)) {
+                return json_error(StatusCode::BAD_REQUEST, "upload the snapshot first (flow remote does)");
+            }
+        }
+        if !s.subdir.is_empty() && crate::blobs::check_path(&s.subdir).is_err() {
+            return json_error(StatusCode::BAD_REQUEST, "subdir is a folder inside the checkout");
+        }
+        NewJob {
+            server: server.name.clone(),
+            project_id: *project_id,
+            actor: slug.clone(),
+            dir: s.dir.chars().take(500).collect(),
+            subdir: if s.setup { String::new() } else { s.subdir },
+            command: s.command,
+            fetch: if s.setup { Vec::new() } else { s.fetch },
+            gpu: s.gpu,
+            manifest: s.manifest,
+            bundle: s.bundle,
+            setup: s.setup,
+        }
+    } else {
+        // The SSH path: the checkout on this machine. Its top level and where in it to run.
+        let dir = std::path::Path::new(&s.dir);
+        if !dir.is_absolute() || !dir.is_dir() {
+            return json_error(StatusCode::BAD_REQUEST, "dir is the absolute path of a folder in your checkout");
+        }
+        let top =
+            tokio::process::Command::new("git").arg("-C").arg(dir).args(["rev-parse", "--show-toplevel"]).output().await;
+        let top = match top {
+            Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).trim().to_owned(),
+            _ => return json_error(StatusCode::BAD_REQUEST, "dir isn't in a git checkout"),
+        };
+        let subdir = dir
+            .canonicalize()
+            .ok()
+            .and_then(|d| d.strip_prefix(&top).ok().map(|p| p.to_string_lossy().to_string()))
+            .unwrap_or_default();
+        NewJob {
+            server: server.name.clone(),
+            project_id: *project_id,
+            actor: slug.clone(),
+            dir: top,
+            subdir,
+            command: s.command,
+            fetch: s.fetch,
+            gpu: s.gpu,
+            ..Default::default()
+        }
     };
     let created = state.db.call(move |c| remote::create(c, &new)).await;
     let id = match created {
@@ -155,6 +202,8 @@ async fn output(
         "errors": job.errors,
         "finished": job.is_finished(),
         "time": took(&job),
+        // What a builder sent back, for flow to fetch (GET …/results/<name>).
+        "results": job.artifacts,
     }))
     .into_response()
 }
