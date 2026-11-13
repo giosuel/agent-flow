@@ -1,0 +1,4 @@
+post_install() {
+  echo "Next: sudo agentflow setup --public-url https://… --agents-user <user>"
+  echo "Then your first passkey: sudo flow server add-passkey (or the link in journalctl -u agentflow)"
+}

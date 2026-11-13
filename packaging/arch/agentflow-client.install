@@ -1,0 +1,5 @@
+post_install() {
+  echo "flow is installed. Connect it to your AgentFlow server: flow connect https://…"
+  echo "To make this machine a builder: flow builder add. Its service keeps running while its user"
+  echo "isn't logged in only with linger on, once: sudo loginctl enable-linger <user>"
+}
