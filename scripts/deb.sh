@@ -17,7 +17,7 @@ trap 'rm -rf "$stage"' EXIT
 chmod 755 "$stage"
 
 install -Dm755 "$bin" "$stage/usr/bin/agentflow"
-ln -s agentflow "$stage/usr/bin/flow-run"
+install -Dm755 "$(dirname "$bin")/flow" "$stage/usr/bin/flow"
 sed 's|@BIN@|/usr/bin/agentflow|' packaging/system/agentflow.service >"$stage/agentflow.service"
 sed 's|@BIN@|/usr/bin/agentflow|' packaging/system/agentflow-hands.service >"$stage/agentflow-hands.service"
 install -Dm644 "$stage/agentflow.service" "$stage/usr/lib/systemd/system/agentflow.service"
