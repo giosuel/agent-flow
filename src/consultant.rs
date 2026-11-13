@@ -28,6 +28,28 @@ pub fn dir(data_dir: &Path) -> PathBuf {
     data_dir.join("consultant")
 }
 
+/// Its tmux server's socket, in its folder: the service may have a /tmp of its own, where the
+/// owner's shell wouldn't find tmux's usual socket.
+pub fn tmux_socket(data_dir: &Path) -> PathBuf {
+    dir(data_dir).join("tmux.sock")
+}
+
+/// The owner's command to reach it directly.
+pub fn attach_command(data_dir: &Path) -> String {
+    format!("tmux -S {} attach -t {TMUX}", tmux_socket(data_dir).display())
+}
+
+/// Claude Code: on PATH, else where its installer puts it (a service's PATH is short).
+pub fn claude_program() -> PathBuf {
+    let home = crate::util::home_dir();
+    let on_path = std::env::var_os("PATH")
+        .map(|p| std::env::split_paths(&p).map(|d| d.join("claude")).find(|c| c.is_file()))
+        .unwrap_or_default();
+    on_path
+        .or_else(|| [home.join(".local/bin/claude"), home.join(".claude/local/claude"), PathBuf::from("/usr/local/bin/claude")].into_iter().find(|c| c.is_file()))
+        .unwrap_or_else(|| PathBuf::from("claude"))
+}
+
 fn setting(c: &Connection, key: &str) -> anyhow::Result<Option<String>> {
     Ok(c.query_row("SELECT value FROM settings WHERE key = ?1", [key], |r| r.get(0)).optional()?)
 }
@@ -69,7 +91,7 @@ pub fn new_token(c: &mut Connection) -> anyhow::Result<String> {
 
 /// Is the server's user signed in to claude.ai (needed for Remote Control)?
 pub async fn login_ok() -> anyhow::Result<()> {
-    let out = tokio::time::timeout(Duration::from_secs(20), tokio::process::Command::new("claude").args(["auth", "status", "--json"]).kill_on_drop(true).output())
+    let out = tokio::time::timeout(Duration::from_secs(20), tokio::process::Command::new(claude_program()).args(["auth", "status", "--json"]).kill_on_drop(true).output())
         .await
         .context("claude auth status took too long")?
         .context("Claude Code isn't installed for the server's user (claude)")?;
@@ -107,8 +129,10 @@ pub fn write_folder(data_dir: &Path, token: &str, public_url: &str, flow: &Path)
     Ok(d)
 }
 
-pub async fn running() -> bool {
+pub async fn running(data_dir: &Path) -> bool {
     tokio::process::Command::new("tmux")
+        .arg("-S")
+        .arg(tmux_socket(data_dir))
         .args(["has-session", "-t", TMUX])
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
@@ -119,8 +143,8 @@ pub async fn running() -> bool {
 }
 
 /// Starts it in tmux: the conversation moved in (once), else the folder's last one, else new.
-pub async fn start(folder: &Path, resume: Option<&str>, has_history: bool) -> anyhow::Result<()> {
-    let mut cmd = vec!["claude".to_owned()];
+pub async fn start(data_dir: &Path, folder: &Path, resume: Option<&str>, has_history: bool) -> anyhow::Result<()> {
+    let mut cmd = vec![claude_program().display().to_string()];
     match resume {
         Some(id) => cmd.extend(["--resume".into(), id.to_owned()]),
         None if has_history => cmd.push("--continue".into()),
@@ -129,21 +153,30 @@ pub async fn start(folder: &Path, resume: Option<&str>, has_history: bool) -> an
     // The name other sessions find it by (ListAgents, SendMessage) and its title on claude.ai.
     cmd.extend(["--name".into(), NAME.into(), "--remote-control".into(), NAME.into(), "--model".into(), MODEL.into()]);
     let shell = cmd.iter().map(|w| crate::remote::sh_quote(w)).collect::<Vec<_>>().join(" ");
-    let out = tokio::process::Command::new("tmux")
-        .args(["new-session", "-d", "-s", TMUX, "-x", "200", "-y", "50", "-c"])
-        .arg(folder)
-        .arg(shell)
-        .output()
-        .await
-        .context("running tmux (is it installed for the server's user?)")?;
+    // In a scope of its own, so restarting AgentFlow's service doesn't end it (systemd stops
+    // everything in a service's group); plain when there's no user manager.
+    let tmux_args = |c: &mut tokio::process::Command| {
+        c.arg("tmux").arg("-S").arg(tmux_socket(data_dir)).args(["new-session", "-d", "-s", TMUX, "-x", "200", "-y", "50", "-c"]).arg(folder).arg(&shell);
+    };
+    let mut scoped = tokio::process::Command::new("systemd-run");
+    scoped.args(["--user", "--scope", "--quiet", "--collect", "--unit", "agentflow-consultant"]);
+    tmux_args(&mut scoped);
+    let out = match scoped.output().await {
+        Ok(o) if o.status.success() => o,
+        _ => {
+            let mut plain = tokio::process::Command::new("env");
+            tmux_args(&mut plain);
+            plain.output().await.context("running tmux (is it installed for the server's user?)")?
+        }
+    };
     if !out.status.success() {
         bail!("tmux: {}", String::from_utf8_lossy(&out.stderr).trim());
     }
     Ok(())
 }
 
-pub async fn stop() -> anyhow::Result<()> {
-    let _ = tokio::process::Command::new("tmux").args(["kill-session", "-t", TMUX]).output().await?;
+pub async fn stop(data_dir: &Path) -> anyhow::Result<()> {
+    let _ = tokio::process::Command::new("tmux").arg("-S").arg(tmux_socket(data_dir)).args(["kill-session", "-t", TMUX]).output().await?;
     Ok(())
 }
 

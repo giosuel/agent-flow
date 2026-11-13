@@ -36,7 +36,7 @@ pub async fn view(state: &AppState) -> View {
         })
         .await
         .unwrap_or((false, None, None));
-    View { on, running: consultant::running().await, link, attach: format!("tmux attach -t {}", consultant::TMUX), error }
+    View { on, running: consultant::running(&state.config.data_dir()).await, link, attach: consultant::attach_command(&state.config.data_dir()), error }
 }
 
 async fn note_error(state: &AppState, e: &str) {
@@ -58,7 +58,7 @@ async fn bring_up(state: &AppState) -> anyhow::Result<()> {
     let folder = consultant::write_folder(&data, &token, &state.config.public_url, &state.config.flow_bin())?;
     let resume = state.db.call(|c| consultant::resume_first(c)).await?;
     let history = consultant::has_history(&crate::usage::root(&state.config), &folder);
-    consultant::start(&folder, resume.as_deref(), history).await?;
+    consultant::start(&data, &folder, resume.as_deref(), history).await?;
     if resume.is_some() {
         state.db.call(|c| { c.execute("DELETE FROM settings WHERE key = 'consultant.resume'", [])?; Ok(()) }).await?;
     }
@@ -73,7 +73,7 @@ async fn on(State(state): State<AppState>, Extension(actor): Extension<Actor>, E
         return Ok(Redirect::to("/settings#s-consultant").into_response());
     }
     state.db.call(|c| consultant::set_on(c, true)).await?;
-    if !consultant::running().await
+    if !consultant::running(&state.config.data_dir()).await
         && let Err(e) = bring_up(&state).await
     {
         note_error(&state, &format!("{e:#}")).await;
@@ -85,7 +85,7 @@ async fn on(State(state): State<AppState>, Extension(actor): Extension<Actor>, E
 async fn off(State(state): State<AppState>, Extension(actor): Extension<Actor>, Extension(ip): Extension<ClientIp>) -> AppResult<Response> {
     actor.require_owner()?;
     state.db.call(|c| consultant::set_on(c, false)).await?;
-    let _ = consultant::stop().await;
+    let _ = consultant::stop(&state.config.data_dir()).await;
     activity::write(&state.db, Entry::new(&actor, Via::Page, Action::Write, "consultant switched off").ip(Some(ip.0))).await;
     Ok(Redirect::to("/settings#s-consultant").into_response())
 }
@@ -101,7 +101,7 @@ pub fn spawn_watchdog(state: AppState) {
             if !on {
                 continue;
             }
-            if !consultant::running().await {
+            if !consultant::running(&state.config.data_dir()).await {
                 tracing::info!("the consultant isn't running; starting it");
                 if let Err(e) = bring_up(&state).await {
                     tracing::warn!("the consultant couldn't start: {e:#}");
