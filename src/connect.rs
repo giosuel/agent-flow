@@ -22,9 +22,10 @@ pub fn token_file() -> PathBuf {
 
 /// This machine as the owner sees it on the approval page: "viber@mothman".
 pub fn machine_name() -> String {
-    let user = std::env::var("USER").ok().filter(|u| !u.is_empty()).unwrap_or_else(|| {
-        rustix::process::getuid().as_raw().to_string()
-    });
+    let user = std::env::var("USER")
+        .ok()
+        .filter(|u| !u.is_empty())
+        .unwrap_or_else(|| rustix::process::getuid().as_raw().to_string());
     format!("{user}@{}", crate::machine::hostname())
 }
 
@@ -47,7 +48,8 @@ fn open_browser(url: &str) -> bool {
 /// Asks for something the owner approves on the page, and waits for their answer. Returns the
 /// result the server hands over once (e.g. a new token).
 pub fn approve(client: &Client, action: &str, args: Value) -> anyhow::Result<Value> {
-    let asked = client.post_json("/api/approvals", &json!({"action": action, "args": args, "machine": machine_name()}))?;
+    let asked =
+        client.post_json("/api/approvals", &json!({"action": action, "args": args, "machine": machine_name()}))?;
     let code = asked["code"].as_str().context("no code in the answer")?.to_owned();
     let url = asked["url"].as_str().context("no link in the answer")?.to_owned();
     let poll = asked["poll"].as_str().context("no poll secret in the answer")?.to_owned();
@@ -68,7 +70,9 @@ pub fn approve(client: &Client, action: &str, args: Value) -> anyhow::Result<Val
         };
         match got["state"].as_str().unwrap_or("") {
             "pending" if start.elapsed() < wait => continue,
-            "pending" | "expired" => bail!("nobody approved it within {} minutes; run it again", crate::approvals::MINUTES),
+            "pending" | "expired" => {
+                bail!("nobody approved it within {} minutes; run it again", crate::approvals::MINUTES)
+            }
             "approved" => return Ok(got["result"].clone()),
             "denied" => bail!("denied on the page; nothing was done"),
             "failed" => bail!("approved, but it failed: {}", got["error"].as_str().unwrap_or("no reason given")),
@@ -154,7 +158,10 @@ pub fn status(config_path: &Path, args: &ClientArgs) -> anyhow::Result<()> {
     match client.get("/api/status") {
         Ok(s) => {
             let theirs = s["version"].as_str().unwrap_or("?");
-            println!("version  {theirs}{}", if theirs == mine { "" } else { "  (differs from flow's: run flow update)" });
+            println!(
+                "version  {theirs}{}",
+                if theirs == mine { "" } else { "  (differs from flow's: run flow update)" }
+            );
             println!(
                 "as       {} ({})",
                 s["who"]["name"].as_str().unwrap_or("?"),
@@ -200,7 +207,14 @@ fn client_text(client: &Client, path: &str) -> anyhow::Result<String> {
 }
 
 /// `flow token create project <project> [--file]`, `consultant`; list; revoke; rotate.
-pub fn token_create(config_path: &Path, args: &ClientArgs, kind: &str, project: Option<&str>, name: Option<&str>, file: Option<&Path>) -> anyhow::Result<()> {
+pub fn token_create(
+    config_path: &Path,
+    args: &ClientArgs,
+    kind: &str,
+    project: Option<&str>,
+    name: Option<&str>,
+    file: Option<&Path>,
+) -> anyhow::Result<()> {
     let client = Client::new(config_path, args)?;
     let kind = if kind == "consultant" { "admin" } else { kind };
     let result = approve(
@@ -216,11 +230,20 @@ fn hand_over_token(result: &Value, file: Option<&Path>) -> anyhow::Result<()> {
     match file {
         Some(f) => {
             write_secret(f, token)?;
-            println!("Token {} ({}) written to {} (only you can read it).", result["id"], result["name"].as_str().unwrap_or(""), f.display());
+            println!(
+                "Token {} ({}) written to {} (only you can read it).",
+                result["id"],
+                result["name"].as_str().unwrap_or(""),
+                f.display()
+            );
         }
         None => {
             println!("{token}");
-            eprintln!("Token {} ({}): shown once; AgentFlow keeps only its hash.", result["id"], result["name"].as_str().unwrap_or(""));
+            eprintln!(
+                "Token {} ({}): shown once; AgentFlow keeps only its hash.",
+                result["id"],
+                result["name"].as_str().unwrap_or("")
+            );
         }
     }
     Ok(())
@@ -293,7 +316,12 @@ pub fn backup(config_path: &Path, args: &ClientArgs) -> anyhow::Result<()> {
 pub fn import_prs(config_path: &Path, args: &ClientArgs, project: &str, range: &str) -> anyhow::Result<()> {
     let (from, to) = range
         .split_once(['-', '–'])
-        .and_then(|(a, b)| Some((a.trim().trim_start_matches('#').parse::<i64>().ok()?, b.trim().trim_start_matches('#').parse::<i64>().ok()?)))
+        .and_then(|(a, b)| {
+            Some((
+                a.trim().trim_start_matches('#').parse::<i64>().ok()?,
+                b.trim().trim_start_matches('#').parse::<i64>().ok()?,
+            ))
+        })
         .context("give a range of PR numbers, e.g. 300-374")?;
     let client = Client::new(config_path, args)?;
     let r = approve(&client, "import_prs", json!({"project": project, "from": from, "to": to}))?;
@@ -389,7 +417,8 @@ fn ask_hidden(question: &str) -> anyhow::Result<String> {
 
 /// The GitHub repository of a folder's `origin`, as owner/name, if it's on GitHub.
 fn github_repo(folder: &Path) -> Option<String> {
-    let out = std::process::Command::new("git").arg("-C").arg(folder).args(["remote", "get-url", "origin"]).output().ok()?;
+    let out =
+        std::process::Command::new("git").arg("-C").arg(folder).args(["remote", "get-url", "origin"]).output().ok()?;
     let url = String::from_utf8_lossy(&out.stdout).trim().to_owned();
     let rest = url
         .strip_prefix("https://github.com/")
@@ -454,17 +483,22 @@ pub fn project_setup(
     let (url, slug, project_name, token) = if !code.trim().is_empty() {
         let url = match &args.url {
             Some(u) => u.clone(),
-            None => server_url(config_path, args).context("which server? pass --url <server> (the page shows the command)")?,
+            None => server_url(config_path, args)
+                .context("which server? pass --url <server> (the page shows the command)")?,
         };
-        let got = Client::anonymous(&url).post_json("/api/setup/redeem", &json!({"code": code.trim(), "machine": machine}))?;
+        let got = Client::anonymous(&url)
+            .post_json("/api/setup/redeem", &json!({"code": code.trim(), "machine": machine}))?;
         (url, s(&got["project"]), s(&got["name"]), s(&got["token"]))
     } else {
-        let client = Client::new(config_path, args).context("creating a project needs a connected machine: flow connect <server> first")?;
+        let client = Client::new(config_path, args)
+            .context("creating a project needs a connected machine: flow connect <server> first")?;
         let base = folder.file_name().and_then(|n| n.to_str()).unwrap_or("project");
         let default = title_of(base);
         let project_name = match name {
             Some(n) => n,
-            None if interactive => ask(&format!("New project \"{}\": name", crate::onboard::slug_for(&default)), &default)?,
+            None if interactive => {
+                ask(&format!("New project \"{}\": name", crate::onboard::slug_for(&default)), &default)?
+            }
             None => default,
         };
         let slug = crate::onboard::slug_for(&project_name);
@@ -496,7 +530,14 @@ fn existing_setup(folder: &Path) -> Option<(String, String)> {
 
 /// The local part of a setup: folder, git, token file, first note, Claude Code setup; then where
 /// it lies, and the folder's earlier conversations (only what the server doesn't have yet).
-fn finish_setup(folder: &Path, url: &str, slug: &str, project_name: &str, token: &str, machine: &str) -> anyhow::Result<()> {
+fn finish_setup(
+    folder: &Path,
+    url: &str,
+    slug: &str,
+    project_name: &str,
+    token: &str,
+    machine: &str,
+) -> anyhow::Result<()> {
     let p = crate::onboard::NewProject { name: project_name.to_owned(), slug: slug.to_owned(), ..Default::default() };
     let token_dir = expand_home("~/.config/agentflow/tokens");
     let outcome = crate::onboard::create_files(&p, folder, token, &token_dir, &crate::sync::transcripts_root(), url)?;

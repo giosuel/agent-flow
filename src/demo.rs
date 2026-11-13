@@ -145,7 +145,12 @@ pub fn create(c: &mut Connection, data_dir: &Path) -> anyhow::Result<String> {
     for (title, importance, state, extra) in [
         ("Import can follow a symlink out of the library folder", "high", "todo", json!({})),
         ("Sidebar re-renders every album on each thumbnail load", "medium", "todo", json!({})),
-        ("Album colours aren't in the theme file", "low", "skipped", json!({"skip_reason": "the palette is reworked in M5 anyway"})),
+        (
+            "Album colours aren't in the theme file",
+            "low",
+            "skipped",
+            json!({"skip_reason": "the palette is reworked in M5 anyway"}),
+        ),
     ] {
         let mut data = json!({"estimate": "1 h", "source": "review", "importance": importance});
         if let (Some(d), Some(e)) = (data.as_object_mut(), extra.as_object()) {

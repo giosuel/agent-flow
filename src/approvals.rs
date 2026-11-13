@@ -125,7 +125,8 @@ pub fn check_args(c: &Connection, action: &str, args: &Value) -> anyhow::Result<
             let name = s("name");
             let b = crate::config::BuildServer { name: name.clone(), ssh: "daemon".into(), ..Default::default() };
             crate::remote::check_server(&b)?;
-            let taken: bool = c.query_row("SELECT EXISTS (SELECT 1 FROM build_servers WHERE name = ?1)", [&name], |r| r.get(0))?;
+            let taken: bool =
+                c.query_row("SELECT EXISTS (SELECT 1 FROM build_servers WHERE name = ?1)", [&name], |r| r.get(0))?;
             if taken {
                 bail!("a builder called {name} exists already");
             }
@@ -133,7 +134,8 @@ pub fn check_args(c: &Connection, action: &str, args: &Value) -> anyhow::Result<
         }
         "builder_remove" => {
             let name = s("name");
-            let known: bool = c.query_row("SELECT EXISTS (SELECT 1 FROM build_servers WHERE name = ?1)", [&name], |r| r.get(0))?;
+            let known: bool =
+                c.query_row("SELECT EXISTS (SELECT 1 FROM build_servers WHERE name = ?1)", [&name], |r| r.get(0))?;
             if !known {
                 bail!("no builder called {name}");
             }
@@ -359,7 +361,9 @@ pub fn execute(c: &mut Connection, a: &Approval, data_dir: &std::path::Path) -> 
             crate::remote::add_daemon(&tx, &b)?;
             let (id, secret) = auth::create_token(&tx, TokenKind::Builder, &b.name, None)?;
             tx.commit()?;
-            Ok(json!({"token": secret, "id": id, "name": b.name, "min_threads": b.min_threads, "min_memory_gb": b.min_memory_gb, "reserve_memory_gb": b.reserve_memory_gb}))
+            Ok(
+                json!({"token": secret, "id": id, "name": b.name, "min_threads": b.min_threads, "min_memory_gb": b.min_memory_gb, "reserve_memory_gb": b.reserve_memory_gb}),
+            )
         }
         "builder_remove" => {
             crate::remote::remove_server(c, &s("name"))?;
@@ -420,7 +424,8 @@ mod tests {
             assert!(auth::token_actor(c, &token, "x")?.is_some());
             // Handed out once: the secret is gone from the database.
             assert_eq!(super::poll(c, &poll)?.unwrap()["state"], "done");
-            let left: Option<String> = c.query_row("SELECT result FROM approvals WHERE id = ?1", [a.id], |r| r.get(0))?;
+            let left: Option<String> =
+                c.query_row("SELECT result FROM approvals WHERE id = ?1", [a.id], |r| r.get(0))?;
             assert!(left.is_none());
             assert!(decide(c, &code, true).is_err(), "decided once");
             Ok(())

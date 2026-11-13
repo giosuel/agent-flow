@@ -201,7 +201,9 @@ pub fn redeem_setup_code(c: &mut Connection, code: &str, machine: &str) -> anyho
             |r| r.get(0),
         )
         .optional()?;
-    let Some(project_id) = found else { bail!("that setup code is unknown, used or expired; make a new one on the project's page") };
+    let Some(project_id) = found else {
+        bail!("that setup code is unknown, used or expired; make a new one on the project's page")
+    };
     let p = projects::get_by_id(&tx, project_id)?;
     let (_, secret) = auth::create_token(&tx, TokenKind::Project, &format!("{} on {machine}", p.name), Some(&p.slug))?;
     tx.commit()?;
@@ -216,7 +218,8 @@ pub fn mark_set_up(c: &Connection, project_id: i64, folder: &str, machine: &str)
     }
     crate::approvals::check_machine(machine)?;
     let host = machine.rsplit('@').next().unwrap_or(machine);
-    let patch = ProjectPatch { checkout: Some(folder.to_owned()), machine: Some(host.to_owned()), ..Default::default() };
+    let patch =
+        ProjectPatch { checkout: Some(folder.to_owned()), machine: Some(host.to_owned()), ..Default::default() };
     projects::update(c, project_id, &patch, "flow project setup")?;
     Ok(())
 }
@@ -305,7 +308,10 @@ pub fn hook_commands(token_file: &Path, name: &str, public_url: &str) -> Vec<(&'
     vec![
         (
             "SessionStart",
-            vec![format!("{bin} hello --doc --token-file {tf}"), format!("{bin} hello --no-doc --session {session} --token-file {tf}")],
+            vec![
+                format!("{bin} hello --doc --token-file {tf}"),
+                format!("{bin} hello --no-doc --session {session} --token-file {tf}"),
+            ],
         ),
         ("UserPromptSubmit", vec![format!("{bin} news --token-file {tf}")]),
         // The conversations reach AgentFlow from wherever the project lies (the owner, 2026-11-13).
@@ -357,8 +363,9 @@ fn settings_path(folder: &Path) -> PathBuf {
 /// error, so it's never overwritten.
 fn read_object(path: &Path) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
     let v: serde_json::Value = match std::fs::read_to_string(path) {
-        Ok(text) if !text.trim().is_empty() => serde_json::from_str(&text)
-            .with_context(|| format!("{} isn't valid JSON, so it was left alone; fix it and try again", path.display()))?,
+        Ok(text) if !text.trim().is_empty() => serde_json::from_str(&text).with_context(|| {
+            format!("{} isn't valid JSON, so it was left alone; fix it and try again", path.display())
+        })?,
         Ok(_) => serde_json::json!({}),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => serde_json::json!({}),
         Err(e) => return Err(e).with_context(|| format!("reading {}", path.display())),
@@ -403,16 +410,24 @@ pub fn write_setup(folder: &Path, token_file: &Path, name: &str, public_url: &st
     } else {
         let mut mcp = read_object(&mcp_path)?;
         let servers = mcp.entry("mcpServers").or_insert_with(|| json!({}));
-        let Some(servers) = servers.as_object_mut() else { bail!("\"mcpServers\" in {} isn't an object, so it was left alone", mcp_path.display()) };
+        let Some(servers) = servers.as_object_mut() else {
+            bail!("\"mcpServers\" in {} isn't an object, so it was left alone", mcp_path.display())
+        };
         servers.insert("agentflow".into(), mcp_server(token_file, public_url));
         write_json(&mcp_path, mcp)?;
-        did.push(format!("the AgentFlow MCP server in {}{}", mcp_path.display(), keep_out_of_git(folder, ".mcp.json")?));
+        did.push(format!(
+            "the AgentFlow MCP server in {}{}",
+            mcp_path.display(),
+            keep_out_of_git(folder, ".mcp.json")?
+        ));
     }
     // Hooks, approval, token variable.
     let path = settings_path(folder);
     let mut settings = read_object(&path)?;
     let hooks = settings.entry("hooks").or_insert_with(|| json!({}));
-    let Some(hooks) = hooks.as_object_mut() else { bail!("\"hooks\" in {} isn't an object, so it was left alone", path.display()) };
+    let Some(hooks) = hooks.as_object_mut() else {
+        bail!("\"hooks\" in {} isn't an object, so it was left alone", path.display())
+    };
     // Drop AgentFlow's earlier hooks wherever they are, and groups left empty by that.
     for groups in hooks.values_mut().filter_map(Value::as_array_mut) {
         for g in groups.iter_mut() {
@@ -424,20 +439,27 @@ pub fn write_setup(folder: &Path, token_file: &Path, name: &str, public_url: &st
     }
     hooks.retain(|_, v| v.as_array().is_none_or(|a| !a.is_empty()));
     for (event, commands) in hook_commands(token_file, name, public_url) {
-        let list: Vec<Value> = commands.into_iter().map(|c| json!({"type": "command", "command": c, "timeout": 15})).collect();
+        let list: Vec<Value> =
+            commands.into_iter().map(|c| json!({"type": "command", "command": c, "timeout": 15})).collect();
         let groups = hooks.entry(event).or_insert_with(|| json!([]));
-        let Some(groups) = groups.as_array_mut() else { bail!("hooks.{event} in {} isn't a list, so it was left alone", path.display()) };
+        let Some(groups) = groups.as_array_mut() else {
+            bail!("hooks.{event} in {} isn't a list, so it was left alone", path.display())
+        };
         let mut group = Map::new();
         group.insert("hooks".into(), Value::Array(list));
         groups.push(Value::Object(group));
     }
     let approved = settings.entry("enabledMcpjsonServers").or_insert_with(|| json!([]));
-    let Some(approved) = approved.as_array_mut() else { bail!("\"enabledMcpjsonServers\" in {} isn't a list, so it was left alone", path.display()) };
+    let Some(approved) = approved.as_array_mut() else {
+        bail!("\"enabledMcpjsonServers\" in {} isn't a list, so it was left alone", path.display())
+    };
     if !approved.iter().any(|v| v == "agentflow") {
         approved.push("agentflow".into());
     }
     let env = settings.entry("env").or_insert_with(|| json!({}));
-    let Some(env) = env.as_object_mut() else { bail!("\"env\" in {} isn't an object, so it was left alone", path.display()) };
+    let Some(env) = env.as_object_mut() else {
+        bail!("\"env\" in {} isn't an object, so it was left alone", path.display())
+    };
     env.insert("AGENTFLOW_TOKEN_FILE".into(), token_file.display().to_string().into());
     env.insert("AGENTFLOW_URL".into(), public_url.trim_end_matches('/').into());
     write_json(&path, settings)?;
@@ -453,7 +475,10 @@ pub fn write_setup(folder: &Path, token_file: &Path, name: &str, public_url: &st
 pub fn setup_present(folder: &Path, token_file: &Path, name: &str, public_url: &str) -> bool {
     let Ok(text) = std::fs::read_to_string(settings_path(folder)) else { return false };
     let Ok(settings) = serde_json::from_str::<serde_json::Value>(&text) else { return false };
-    let hooks = hook_commands(token_file, name, public_url).iter().flat_map(|(_, c)| c).all(|c| text.contains(&serde_json::to_string(c).unwrap_or_default()));
+    let hooks = hook_commands(token_file, name, public_url)
+        .iter()
+        .flat_map(|(_, c)| c)
+        .all(|c| text.contains(&serde_json::to_string(c).unwrap_or_default()));
     let approved = settings["enabledMcpjsonServers"].as_array().is_some_and(|a| a.iter().any(|v| v == "agentflow"));
     let env = settings["env"]["AGENTFLOW_TOKEN_FILE"].as_str() == Some(&token_file.display().to_string())
         && settings["env"]["AGENTFLOW_URL"].as_str() == Some(public_url.trim_end_matches('/'));
@@ -481,7 +506,14 @@ fn keep_out_of_git(folder: &Path, rel: &str) -> anyhow::Result<String> {
     if !folder.join(".git").exists() {
         return Ok(String::new());
     }
-    let git = |args: &[&str]| std::process::Command::new("git").arg("-C").arg(folder).args(["-c", "core.hooksPath=/dev/null"]).args(args).output();
+    let git = |args: &[&str]| {
+        std::process::Command::new("git")
+            .arg("-C")
+            .arg(folder)
+            .args(["-c", "core.hooksPath=/dev/null"])
+            .args(args)
+            .output()
+    };
     let ignored = git(&["check-ignore", "-q", rel]).context("running git check-ignore")?;
     if ignored.status.success() {
         return Ok(" (git ignores it)".into());
@@ -583,7 +615,10 @@ mod tests {
         let again =
             create_files(&p, &folder, &secret, &home.path().join("tokens"), &home.path().join("claude"), "x").unwrap();
         assert!(again.steps.iter().any(|s| s.contains("git repository already")));
-        assert!(setup_present(&folder, &home.path().join("tokens/speculum.token"), "Speculum", "x"), "set up again with the last URL");
+        assert!(
+            setup_present(&folder, &home.path().join("tokens/speculum.token"), "Speculum", "x"),
+            "set up again with the last URL"
+        );
     }
 
     #[test]
@@ -602,7 +637,8 @@ mod tests {
                 {"type": "command", "command": "echo mine"}]}], "Stop": [{"hooks": [{"type": "command", "command": "beep"}]}]}}"#,
         )
         .unwrap();
-        std::fs::write(folder.join(".mcp.json"), r#"{"mcpServers": {"other": {"type": "stdio", "command": "x"}}}"#).unwrap();
+        std::fs::write(folder.join(".mcp.json"), r#"{"mcpServers": {"other": {"type": "stdio", "command": "x"}}}"#)
+            .unwrap();
         let url = "https://flow.example";
         assert!(!setup_present(&folder, &token, "Imaginarium", url));
         let step = write_setup(&folder, &token, "Imaginarium", url).unwrap();
@@ -610,7 +646,8 @@ mod tests {
         write_setup(&folder, &token, "Imaginarium", url).unwrap();
         assert!(setup_present(&folder, &token, "Imaginarium", url));
         assert!(!setup_present(&folder, &token, "Imaginarium", "https://elsewhere.example"));
-        let mcp: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(folder.join(".mcp.json")).unwrap()).unwrap();
+        let mcp: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(folder.join(".mcp.json")).unwrap()).unwrap();
         assert_eq!(mcp["mcpServers"]["other"]["command"], "x");
         assert_eq!(mcp["mcpServers"]["agentflow"]["url"], "https://flow.example/mcp");
         let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&settings).unwrap()).unwrap();
@@ -625,10 +662,20 @@ mod tests {
         assert_eq!(v["env"]["AGENTFLOW_TOKEN_FILE"], token.display().to_string());
         assert_eq!(v["env"]["AGENTFLOW_URL"], url.trim_end_matches('/'));
         for f in [".claude/settings.local.json", ".mcp.json"] {
-            let ignored = std::process::Command::new("git").arg("-C").arg(&folder).args(["check-ignore", "-q", f]).status().unwrap();
+            let ignored = std::process::Command::new("git")
+                .arg("-C")
+                .arg(&folder)
+                .args(["check-ignore", "-q", f])
+                .status()
+                .unwrap();
             assert!(ignored.success(), "{f}");
         }
-        let ignored = std::process::Command::new("git").arg("-C").arg(&folder).args(["check-ignore", "-q", ".claude/settings.local.json"]).status().unwrap();
+        let ignored = std::process::Command::new("git")
+            .arg("-C")
+            .arg(&folder)
+            .args(["check-ignore", "-q", ".claude/settings.local.json"])
+            .status()
+            .unwrap();
         assert!(ignored.success());
         assert!(write_setup(&folder, &token, "Imaginarium", url).unwrap().contains("git ignores it"));
         // A file that isn't JSON is left alone.
@@ -639,7 +686,15 @@ mod tests {
         // A .mcp.json the repository commits is left alone, and the step says so.
         let other = home.path().join("other");
         std::fs::create_dir_all(&other).unwrap();
-        let git = |args: &[&str]| std::process::Command::new("git").arg("-C").arg(&other).args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"]).args(args).output().unwrap();
+        let git = |args: &[&str]| {
+            std::process::Command::new("git")
+                .arg("-C")
+                .arg(&other)
+                .args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"])
+                .args(args)
+                .output()
+                .unwrap()
+        };
         git(&["init", "-q"]);
         std::fs::write(other.join(".mcp.json"), "{}\n").unwrap();
         git(&["add", ".mcp.json"]);

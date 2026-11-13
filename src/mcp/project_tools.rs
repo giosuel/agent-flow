@@ -100,7 +100,11 @@ impl ReviewInfo {
     /// This review over an earlier one: what's left out stays as it was.
     fn over(&self, old: &str) -> Value {
         let old: Value = serde_json::from_str(old).unwrap_or(Value::Null);
-        let reviewers = if self.reviewers.is_empty() { old.get("reviewers").cloned().unwrap_or_else(|| json!([])) } else { json!(self.reviewers) };
+        let reviewers = if self.reviewers.is_empty() {
+            old.get("reviewers").cloned().unwrap_or_else(|| json!([]))
+        } else {
+            json!(self.reviewers)
+        };
         let commit = match self.commit.trim() {
             "" => old.get("commit").and_then(Value::as_str).unwrap_or("").to_owned(),
             c => c.to_owned(),
@@ -190,7 +194,16 @@ pub struct EditProjectDoc {
 
 fn notes_back(c: &rusqlite::Connection, project_id: i64) -> anyhow::Result<Value> {
     let now = now_ms();
-    let notes = records::query(c, &Query { project_id: Some(project_id), kinds: vec![Kind::Note], states: vec!["current".into()], limit: 0, ..Default::default() })?;
+    let notes = records::query(
+        c,
+        &Query {
+            project_id: Some(project_id),
+            kinds: vec![Kind::Note],
+            states: vec!["current".into()],
+            limit: 0,
+            ..Default::default()
+        },
+    )?;
     Ok(Value::Array(
         notes
             .iter()
@@ -286,7 +299,13 @@ pub(crate) fn hello_reply(
         None => Vec::new(),
         Some(since) => records::query(
             c,
-            &Query { project_id: Some(project.id), kinds: vec![Kind::Decision], states: vec!["current".into()], limit: 0, ..Default::default() },
+            &Query {
+                project_id: Some(project.id),
+                kinds: vec![Kind::Decision],
+                states: vec!["current".into()],
+                limit: 0,
+                ..Default::default()
+            },
         )?
         .into_iter()
         .filter(|d| d.milestone_id.is_none() && d.created_at >= since)
@@ -297,7 +316,12 @@ pub(crate) fn hello_reply(
     let counts = task_counts(c, project.id)?;
     let open = records::query(
         c,
-        &Query { project_id: Some(project.id), kinds: vec![Kind::Question], states: vec!["open".into()], ..Default::default() },
+        &Query {
+            project_id: Some(project.id),
+            kinds: vec![Kind::Question],
+            states: vec!["open".into()],
+            ..Default::default()
+        },
     )?;
     let answered = records::query(
         c,
@@ -366,7 +390,9 @@ impl FlowMcp {
                 let project = target_project(c, &a, None, true)?;
                 let reply = hello_reply(c, &project, &p, &token_dir)?;
                 let what = if p.brief { "hello (brief)" } else { "hello" };
-                Ok(Outcome::new(reply).summary(format!("{what} from {} on {}", p.session, p.machine)).project(project.slug))
+                Ok(Outcome::new(reply)
+                    .summary(format!("{what} from {} on {}", p.session, p.machine))
+                    .project(project.slug))
             })
             .await;
         self.finish(&actor, "hello", Action::Read, outcome).await
@@ -484,8 +510,10 @@ impl FlowMcp {
         self.finish(&actor, "update_project", Action::Write, outcome).await
     }
 
-    #[tool(description = "Only when it says more than your tasks in doing (the page shows those by itself): one line on \
-        what you're doing right now, for the project page. Cleared at your next hello.")]
+    #[tool(
+        description = "Only when it says more than your tasks in doing (the page shows those by itself): one line on \
+        what you're doing right now, for the project page. Cleared at your next hello."
+    )]
     async fn working_on(
         &self,
         Extension(parts): Extension<Parts>,
@@ -570,12 +598,10 @@ impl FlowMcp {
         self.finish(&actor, "add_milestone", Action::Write, outcome).await
     }
 
-    #[tool(
-        description = "Change a milestone or step: rename, retitle, describe, move it (move_before, or step_of to \
+    #[tool(description = "Change a milestone or step: rename, retitle, describe, move it (move_before, or step_of to \
         another milestone), set its state (planned, active, closed), dates, summary and the tag that closed it. \
         Milestones and steps are yours to edit freely, closed ones too (the owner, 2026-11-12); archive_milestone \
-        puts one away."
-    )]
+        puts one away.")]
     async fn update_milestone(
         &self,
         Extension(parts): Extension<Parts>,
@@ -672,8 +698,8 @@ impl FlowMcp {
                 tx.commit()?;
                 Ok(Outcome::new(json!({"archived": m.name, "steps": done.steps, "archived_with_it": done.archived,
                     "moved": done.moved, "moved_to": to.map(|t| t.name)}))
-                    .summary(format!("{} archived", m.name))
-                    .project(project.slug))
+                .summary(format!("{} archived", m.name))
+                .project(project.slug))
             })
             .await;
         self.finish(&actor, "archive_milestone", Action::Write, outcome).await
@@ -753,7 +779,9 @@ impl FlowMcp {
                 let m = projects::find_milestone_any(&tx, project.id, &p.milestone, true)?;
                 let back = crate::steps::restore_milestone(&tx, &m, &a.name())?;
                 tx.commit()?;
-                Ok(Outcome::new(json!({"restored": m.name, "with": back})).summary(format!("{} restored", m.name)).project(project.slug))
+                Ok(Outcome::new(json!({"restored": m.name, "with": back}))
+                    .summary(format!("{} restored", m.name))
+                    .project(project.slug))
             })
             .await;
         self.finish(&actor, "restore_milestone", Action::Write, outcome).await
@@ -779,7 +807,11 @@ impl FlowMcp {
                 let old = crate::projectdoc::get(&tx, project.id)?;
                 let (text, what) = match p.section.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
                     Some(sec) => {
-                        let what = if p.text.trim().is_empty() { format!("removed section {sec}") } else { format!("section {sec}") };
+                        let what = if p.text.trim().is_empty() {
+                            format!("removed section {sec}")
+                        } else {
+                            format!("section {sec}")
+                        };
                         (crate::projectdoc::edit_section(&old.text, sec, &p.text)?, what)
                     }
                     None => (p.text.clone(), "the whole document".to_owned()),

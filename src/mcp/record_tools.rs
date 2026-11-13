@@ -439,7 +439,11 @@ fn parse_date(s: &str) -> anyhow::Result<i64> {
 }
 
 fn check_branch(b: &str) -> anyhow::Result<()> {
-    if b.is_empty() || b.len() > 120 || b.starts_with('-') || !b.chars().all(|c| c.is_ascii_alphanumeric() || "/._-".contains(c)) {
+    if b.is_empty()
+        || b.len() > 120
+        || b.starts_with('-')
+        || !b.chars().all(|c| c.is_ascii_alphanumeric() || "/._-".contains(c))
+    {
         anyhow::bail!("a branch name is letters, digits and / . _ - (e.g. feat/stroke-dash-gap)");
     }
     Ok(())
@@ -449,7 +453,9 @@ fn check_branch(b: &str) -> anyhow::Result<()> {
 fn check_item(t: &TaskItem) -> Result<(), String> {
     let state = t.state.as_deref().unwrap_or("todo");
     if !["todo", "doing", "parked", "skipped", "done"].contains(&state) {
-        return Err(format!("state {state:?}: add tasks as todo, doing, parked, skipped or done (block them afterwards with update_task)"));
+        return Err(format!(
+            "state {state:?}: add tasks as todo, doing, parked, skipped or done (block them afterwards with update_task)"
+        ));
     }
     if t.title.trim().is_empty() {
         return Err("a title".into());
@@ -464,7 +470,9 @@ fn check_item(t: &TaskItem) -> Result<(), String> {
         match t.estimate.as_deref().map(str::trim) {
             None | Some("") => return Err("an estimate, e.g. \"2 h\" or \"40 min\"".into()),
             Some(e) if crate::steps::parse_minutes(e).is_none() => {
-                return Err(format!("estimate {e:?} isn't a duration; write it like \"2 h\", \"40 min\" or \"1 h 30 min\""));
+                return Err(format!(
+                    "estimate {e:?} isn't a duration; write it like \"2 h\", \"40 min\" or \"1 h 30 min\""
+                ));
             }
             _ => {}
         }
@@ -495,7 +503,13 @@ fn check_item(t: &TaskItem) -> Result<(), String> {
 
 /// Adds one checked task to a step. Added while the step is under way (and not said to be
 /// planned), it's marked added, with where it came from ("found" unless said).
-fn add_one(tx: &rusqlite::Connection, project_id: i64, m: Option<&projects::Milestone>, t: TaskItem, actor: &str) -> anyhow::Result<(Record, Vec<String>)> {
+fn add_one(
+    tx: &rusqlite::Connection,
+    project_id: i64,
+    m: Option<&projects::Milestone>,
+    t: TaskItem,
+    actor: &str,
+) -> anyhow::Result<(Record, Vec<String>)> {
     let state = t.state.clone().unwrap_or_else(|| "todo".into());
     if m.is_none() && state != "parked" {
         anyhow::bail!("only a parked task can be without a step or milestone");
@@ -549,7 +563,12 @@ fn add_one(tx: &rusqlite::Connection, project_id: i64, m: Option<&projects::Mile
 }
 
 /// One task's update (update_task applies it to each of `ids`).
-fn update_one(tx: &rusqlite::Connection, a: &crate::auth::Actor, id: &str, p: &UpdateTask) -> anyhow::Result<(Record, bool, Vec<String>)> {
+fn update_one(
+    tx: &rusqlite::Connection,
+    a: &crate::auth::Actor,
+    id: &str,
+    p: &UpdateTask,
+) -> anyhow::Result<(Record, bool, Vec<String>)> {
     let mut r = writable(tx, a, id)?;
     if r.kind != Kind::Task {
         anyhow::bail!("{} isn't a task", r.ref_id);
@@ -576,7 +595,9 @@ fn update_one(tx: &rusqlite::Connection, a: &crate::auth::Actor, id: &str, p: &U
     };
     let blocked_by = p.blocked_by.as_deref().map(str::trim).filter(|b| !b.is_empty()).map(str::to_owned);
     if p.state.as_deref() == Some("blocked") && blocked_by.is_none() {
-        anyhow::bail!("say what blocks it in blocked_by: the question (Q-12) for anything that needs the owner, or a short note");
+        anyhow::bail!(
+            "say what blocks it in blocked_by: the question (Q-12) for anything that needs the owner, or a short note"
+        );
     }
     if blocked_by.is_some() && p.state.as_deref().is_some_and(|s| s != "blocked") {
         anyhow::bail!("blocked_by goes with state blocked (or leave state out)");
@@ -669,7 +690,12 @@ fn one_or_many(id: &str, ids: &[String]) -> anyhow::Result<Vec<String>> {
     }
 }
 
-fn update_decision_one(tx: &rusqlite::Connection, a: &crate::auth::Actor, id: &str, p: &UpdateDecision) -> anyhow::Result<(Record, bool)> {
+fn update_decision_one(
+    tx: &rusqlite::Connection,
+    a: &crate::auth::Actor,
+    id: &str,
+    p: &UpdateDecision,
+) -> anyhow::Result<(Record, bool)> {
     let d = writable(tx, a, id)?;
     if d.kind != Kind::Decision {
         anyhow::bail!("{} isn't a decision", d.ref_id);
@@ -704,7 +730,15 @@ fn update_decision_one(tx: &rusqlite::Connection, a: &crate::auth::Actor, id: &s
         tx,
         &d,
         &a.name(),
-        Patch { title: p.title.clone(), body: p.body.clone(), tags: p.tags.clone(), milestone_id, data, note: reason.to_owned(), ..Default::default() },
+        Patch {
+            title: p.title.clone(),
+            body: p.body.clone(),
+            tags: p.tags.clone(),
+            milestone_id,
+            data,
+            note: reason.to_owned(),
+            ..Default::default()
+        },
     )?;
     if let Some(by) = p.replaced_by.as_deref().map(str::trim).filter(|b| !b.is_empty()) {
         let newer = records::find_str(tx, by, Some(&d.project))?;
@@ -730,7 +764,13 @@ fn update_decision_one(tx: &rusqlite::Connection, a: &crate::auth::Actor, id: &s
 
 /// Records one decision (record_decision, and each of record_decisions). `earlier` maps "#n" to
 /// the decisions made before it in the same batch, so a batch can replace its own entries.
-fn decide(tx: &rusqlite::Connection, a: &crate::auth::Actor, project: &projects::Project, p: &RecordDecision, earlier: &[Record]) -> anyhow::Result<Record> {
+fn decide(
+    tx: &rusqlite::Connection,
+    a: &crate::auth::Actor,
+    project: &projects::Project,
+    p: &RecordDecision,
+    earlier: &[Record],
+) -> anyhow::Result<Record> {
     if p.owner_words.trim().is_empty() {
         anyhow::bail!("owner_words: quote what the owner said");
     }
@@ -743,7 +783,10 @@ fn decide(tx: &rusqlite::Connection, a: &crate::auth::Actor, project: &projects:
     };
     let find = |id: &str| -> anyhow::Result<Record> {
         if let Some(n) = id.trim().strip_prefix('#').and_then(|n| n.parse::<usize>().ok()) {
-            return earlier.get(n.wrapping_sub(1)).cloned().ok_or_else(|| anyhow::anyhow!("#{n} isn't an earlier decision of this batch"));
+            return earlier
+                .get(n.wrapping_sub(1))
+                .cloned()
+                .ok_or_else(|| anyhow::anyhow!("#{n} isn't an earlier decision of this batch"));
         }
         records::find_str(tx, id, Some(&project.slug))
     };
@@ -791,7 +834,12 @@ fn decide(tx: &rusqlite::Connection, a: &crate::auth::Actor, project: &projects:
     Ok(d)
 }
 
-fn adr(tx: &rusqlite::Connection, a: &crate::auth::Actor, project: &projects::Project, p: &AddAdr) -> anyhow::Result<Record> {
+fn adr(
+    tx: &rusqlite::Connection,
+    a: &crate::auth::Actor,
+    project: &projects::Project,
+    p: &AddAdr,
+) -> anyhow::Result<Record> {
     let mut data = Map::new();
     data.insert("repo".into(), p.repo.trim().into());
     data.insert("path".into(), p.path.trim().trim_start_matches('/').into());
@@ -876,10 +924,12 @@ impl FlowMcp {
         self.finish(&actor, "add_task", Action::Write, outcome).await
     }
 
-    #[tool(description = "Add several tasks to a step in one call, in the order you'll do them, each with an estimate \
+    #[tool(
+        description = "Add several tasks to a step in one call, in the order you'll do them, each with an estimate \
         (and where it came from, once the step is under way). Done tasks brought in as history need no estimate and \
         take started_at and done_at. For a review, the findings ranked, with importance; \
-        a finding you won't do goes in as skipped, with the reason. All are added or none.")]
+        a finding you won't do goes in as skipped, with the reason. All are added or none."
+    )]
     async fn add_tasks(
         &self,
         Extension(parts): Extension<Parts>,
@@ -902,7 +952,10 @@ impl FlowMcp {
                     && m.state == "closed"
                     && !history
                 {
-                    anyhow::bail!("{} is concluded; add the tasks to a step that isn't (done tasks, as history, may go there)", m.name);
+                    anyhow::bail!(
+                        "{} is concluded; add the tasks to a step that isn't (done tasks, as history, may go there)",
+                        m.name
+                    );
                 }
                 if p.tasks.is_empty() || p.tasks.len() > 100 {
                     anyhow::bail!("give 1 to 100 tasks");
@@ -935,7 +988,12 @@ impl FlowMcp {
                 if !started_all.is_empty() {
                     reply["started"] = started_all.into();
                 }
-                Ok(Outcome::new(reply).summary(format!("{n} tasks added to {}", if name.is_empty() { "no milestone" } else { name.as_str() })).project(project.slug))
+                Ok(Outcome::new(reply)
+                    .summary(format!(
+                        "{n} tasks added to {}",
+                        if name.is_empty() { "no milestone" } else { name.as_str() }
+                    ))
+                    .project(project.slug))
             })
             .await;
         self.finish(&actor, "add_tasks", Action::Write, outcome).await
@@ -978,12 +1036,19 @@ impl FlowMcp {
                 for (i, t) in order.iter().enumerate() {
                     let pos = base + i as f64;
                     if t.position != Some(pos) {
-                        records::update(&tx, t, &a.name(), Patch { position: Some(pos), quiet: true, ..Default::default() })?;
+                        records::update(
+                            &tx,
+                            t,
+                            &a.name(),
+                            Patch { position: Some(pos), quiet: true, ..Default::default() },
+                        )?;
                     }
                 }
                 let ids: Vec<String> = order.iter().map(|t| t.short_id()).collect();
                 tx.commit()?;
-                Ok(Outcome::new(json!({"milestone": m.name, "order": ids})).summary(format!("tasks of {} ordered", m.name)).project(project.slug))
+                Ok(Outcome::new(json!({"milestone": m.name, "order": ids}))
+                    .summary(format!("tasks of {} ordered", m.name))
+                    .project(project.slug))
             })
             .await;
         self.finish(&actor, "order_tasks", Action::Write, outcome).await
@@ -1020,7 +1085,9 @@ impl FlowMcp {
                     },
                     &a.name(),
                 )?;
-                Ok(Outcome::new(json!({"on": t.on, "logged": t.what})).summary(format!("timing on {}", t.on)).project(project.slug))
+                Ok(Outcome::new(json!({"on": t.on, "logged": t.what}))
+                    .summary(format!("timing on {}", t.on))
+                    .project(project.slug))
             })
             .await;
         self.finish(&actor, "log_timing", Action::Write, outcome).await
@@ -1061,13 +1128,23 @@ impl FlowMcp {
                     &tx,
                     project.id,
                     &a.name(),
-                    NewRecord { kind: Some(Kind::Note), title: p.name, body: p.text, milestone_id: step, data, ..Default::default() },
+                    NewRecord {
+                        kind: Some(Kind::Note),
+                        title: p.name,
+                        body: p.text,
+                        milestone_id: step,
+                        data,
+                        ..Default::default()
+                    },
                 )?;
                 if let Some(target) = &target {
                     records::link(&tx, &n, target, "relates", &a.name())?;
                 }
                 tx.commit()?;
-                Ok(Outcome::new(json!({"id": n.ref_id})).summary(format!("note {} added", n.short_id())).project(project.slug).target(n.ref_id))
+                Ok(Outcome::new(json!({"id": n.ref_id}))
+                    .summary(format!("note {} added", n.short_id()))
+                    .project(project.slug)
+                    .target(n.ref_id))
             })
             .await;
         self.finish(&actor, "add_note", Action::Write, outcome).await
@@ -1092,7 +1169,11 @@ impl FlowMcp {
                     anyhow::bail!("{} isn't a note", n.ref_id);
                 }
                 if p.text.is_some() && !n.str("ext").is_empty() {
-                    anyhow::bail!("{} is a file; upload a new version with `flow note <file> --replaces {}`", n.short_id(), n.short_id());
+                    anyhow::bail!(
+                        "{} is a file; upload a new version with `flow note <file> --replaces {}`",
+                        n.short_id(),
+                        n.short_id()
+                    );
                 }
                 if p.state.as_deref() == Some("resolved") && p.note.trim().is_empty() {
                     anyhow::bail!("say why it's resolved, in note");
@@ -1158,21 +1239,30 @@ impl FlowMcp {
                         data.insert("design_url".into(), u.into());
                     }
                 }
-                let (r, changed) = records::update(&tx, &r, &a.name(), Patch { title: p.name, body: p.description, data, ..Default::default() })?;
+                let (r, changed) = records::update(
+                    &tx,
+                    &r,
+                    &a.name(),
+                    Patch { title: p.name, body: p.description, data, ..Default::default() },
+                )?;
                 tx.commit()?;
-                Ok(Outcome::new(json!({"id": r.ref_id, "mockup_state": r.data.get("mockup_state"), "changed": changed}))
-                    .summary(format!("screenshot {} updated", r.short_id()))
-                    .project(r.project.clone())
-                    .target(r.ref_id))
+                Ok(Outcome::new(
+                    json!({"id": r.ref_id, "mockup_state": r.data.get("mockup_state"), "changed": changed}),
+                )
+                .summary(format!("screenshot {} updated", r.short_id()))
+                .project(r.project.clone())
+                .target(r.ref_id))
             })
             .await;
         self.finish(&actor, "update_screenshot", Action::Write, outcome).await
     }
 
-    #[tool(description = "The owner answered one of your questions in chat: record it. Answers the question with their \
+    #[tool(
+        description = "The owner answered one of your questions in chat: record it. Answers the question with their \
         words, unblocks the tasks it blocked, and records the decision in the question's scope (with their words, said \
         now). Then check whether it changes an earlier decision (update_decision). Questions they answer in AgentFlow \
-        need nothing from you: the decision is recorded by itself, and you hear of it in your news.")]
+        need nothing from you: the decision is recorded by itself, and you hear of it in your news."
+    )]
     async fn answer_question(
         &self,
         Extension(parts): Extension<Parts>,
@@ -1276,11 +1366,16 @@ impl FlowMcp {
                 }
                 tx.commit()?;
                 let first = out[0].clone();
-                let mut reply = if out.len() == 1 { brief(&first) } else { json!({"tasks": out.iter().map(brief).collect::<Vec<_>>()}) };
+                let mut reply = if out.len() == 1 {
+                    brief(&first)
+                } else {
+                    json!({"tasks": out.iter().map(brief).collect::<Vec<_>>()})
+                };
                 if !started_all.is_empty() {
                     reply["started"] = started_all.into();
                 }
-                let what = if out.len() == 1 { format!("task {}", first.short_id()) } else { format!("{} tasks", out.len()) };
+                let what =
+                    if out.len() == 1 { format!("task {}", first.short_id()) } else { format!("{} tasks", out.len()) };
                 let summary = format!("{what} {}", if any { "updated" } else { "unchanged" });
                 Ok(Outcome::new(reply).summary(summary).project(first.project.clone()).target(first.ref_id))
             })
@@ -1457,9 +1552,9 @@ impl FlowMcp {
                 Ok((
                     Outcome::new(json!({"id": q.ref_id, "state": "open", "going_ahead": going_ahead,
                         "scope": scope.as_ref().map(|m| m.name.clone()).unwrap_or_else(|| "project".into())}))
-                        .summary(format!("question {} asked", q.short_id()))
-                        .project(project.slug.clone())
-                        .target(q.ref_id.clone()),
+                    .summary(format!("question {} asked", q.short_id()))
+                    .project(project.slug.clone())
+                    .target(q.ref_id.clone()),
                     q,
                     project.name,
                 ))
@@ -1653,12 +1748,15 @@ impl FlowMcp {
                 let project = target_project(&tx, &a, p.project.as_deref(), true)?;
                 let mut made: Vec<Record> = Vec::new();
                 for (i, d) in p.decisions.iter().enumerate() {
-                    let r = decide(&tx, &a, &project, d, &made).map_err(|e| anyhow::anyhow!("nothing recorded; #{}: {e:#}", i + 1))?;
+                    let r = decide(&tx, &a, &project, d, &made)
+                        .map_err(|e| anyhow::anyhow!("nothing recorded; #{}: {e:#}", i + 1))?;
                     made.push(r);
                 }
                 tx.commit()?;
                 let ids: Vec<String> = made.iter().map(|r| r.short_id()).collect();
-                Ok(Outcome::new(json!({"ids": ids})).summary(format!("{} decisions recorded", ids.len())).project(project.slug))
+                Ok(Outcome::new(json!({"ids": ids}))
+                    .summary(format!("{} decisions recorded", ids.len()))
+                    .project(project.slug))
             })
             .await;
         self.finish(&actor, "record_decisions", Action::Write, outcome).await
@@ -1684,7 +1782,8 @@ impl FlowMcp {
                 let project = target_project(&tx, &a, p.project.as_deref(), true)?;
                 let mut ids = Vec::new();
                 for (i, x) in p.adrs.iter().enumerate() {
-                    let r = adr(&tx, &a, &project, x).map_err(|e| anyhow::anyhow!("nothing added; #{}: {e:#}", i + 1))?;
+                    let r =
+                        adr(&tx, &a, &project, x).map_err(|e| anyhow::anyhow!("nothing added; #{}: {e:#}", i + 1))?;
                     ids.push(r.short_id());
                 }
                 tx.commit()?;
@@ -1720,7 +1819,9 @@ impl FlowMcp {
                 }
                 let open = crate::totest::open_count(&tx, project.id)?;
                 tx.commit()?;
-                Ok(Outcome::new(json!({"ids": ids, "open": open})).summary(format!("{} to-test items added", ids.len())).project(project.slug))
+                Ok(Outcome::new(json!({"ids": ids, "open": open}))
+                    .summary(format!("{} to-test items added", ids.len()))
+                    .project(project.slug))
             })
             .await;
         self.finish(&actor, "add_to_tests", Action::Write, outcome).await

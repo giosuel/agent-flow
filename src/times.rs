@@ -64,7 +64,8 @@ pub fn present_spans(conn: &Connection, slug: &str, from: i64, to: i64) -> anyho
          SELECT j.started_at, coalesce(j.finished_at, ?3) FROM remote_jobs j JOIN projects p ON p.id = j.project_id
          WHERE p.slug = ?1 AND j.started_at IS NOT NULL AND coalesce(j.finished_at, ?3) >= ?2 AND j.started_at <= ?3",
     )?;
-    let runs: Vec<Span> = stmt.query_map(params![slug, from, to], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<Result<_, _>>()?;
+    let runs: Vec<Span> =
+        stmt.query_map(params![slug, from, to], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<Result<_, _>>()?;
     spans.extend(runs);
     spans.sort_unstable();
     let mut out: Vec<Span> = Vec::new();
@@ -168,7 +169,11 @@ pub fn step_times(conn: &Connection, step_id: i64, now: i64) -> anyhow::Result<(
 
 /// A task's estimate in minutes (older tasks only have the text).
 pub fn estimate_min(t: &Record) -> i64 {
-    t.data.get("estimate_min").and_then(Value::as_i64).or_else(|| crate::steps::parse_minutes(t.str("estimate"))).unwrap_or(0)
+    t.data
+        .get("estimate_min")
+        .and_then(Value::as_i64)
+        .or_else(|| crate::steps::parse_minutes(t.str("estimate")))
+        .unwrap_or(0)
 }
 
 /// "1 h 50 min", "35 min", "—".

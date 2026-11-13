@@ -9,7 +9,12 @@ use serde_json::{Map, Value};
 const MAX_DEPTH: usize = 8;
 
 pub fn inline(schema: &Map<String, Value>) -> Map<String, Value> {
-    let defs = schema.get("$defs").or_else(|| schema.get("definitions")).and_then(Value::as_object).cloned().unwrap_or_default();
+    let defs = schema
+        .get("$defs")
+        .or_else(|| schema.get("definitions"))
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
     let mut out = match walk(&Value::Object(schema.clone()), &defs, 0) {
         Value::Object(o) => o,
         _ => schema.clone(),
@@ -49,7 +54,8 @@ fn walk(v: &Value, defs: &Map<String, Value>, depth: usize) -> Value {
             }
             // "X or null" is just X: leaving a field out already means none.
             if let Some(Value::Array(any)) = out.get("anyOf").cloned() {
-                let non_null: Vec<&Value> = any.iter().filter(|x| x.get("type").and_then(Value::as_str) != Some("null")).collect();
+                let non_null: Vec<&Value> =
+                    any.iter().filter(|x| x.get("type").and_then(Value::as_str) != Some("null")).collect();
                 if non_null.len() == 1 && any.len() == 2 {
                     out.remove("anyOf");
                     if let Value::Object(inner) = non_null[0] {

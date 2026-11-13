@@ -153,7 +153,8 @@ pub struct ProjectPatch {
 /// Slugs end up in record ids and URLs: lowercase letters, digits and dashes.
 /// A GitHub repository as owner/name: letters, digits, `-`, `_` and `.`.
 pub fn looks_like_repo(repo: &str) -> bool {
-    let ok = |p: &str| !p.is_empty() && p.len() <= 100 && p.chars().all(|c| c.is_ascii_alphanumeric() || "-_.".contains(c));
+    let ok =
+        |p: &str| !p.is_empty() && p.len() <= 100 && p.chars().all(|c| c.is_ascii_alphanumeric() || "-_.".contains(c));
     matches!(repo.split_once('/'), Some((o, n)) if ok(o) && ok(n) && !n.contains('/'))
 }
 
@@ -262,7 +263,8 @@ pub fn update(
             "SELECT a.id, r.number FROM actions a JOIN records r ON r.id = a.record_id
              WHERE r.project_id = ?1 AND r.kind = 'pr' AND a.kind = 'merge' AND a.added_by = 'agentflow' AND a.state = 'waiting'",
         )?;
-        let rows: Vec<(i64, i64)> = stmt.query_map([project_id], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<Result<_, _>>()?;
+        let rows: Vec<(i64, i64)> =
+            stmt.query_map([project_id], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<Result<_, _>>()?;
         for (id, number) in rows {
             conn.execute(
                 "UPDATE actions SET command = ?1 WHERE id = ?2",
@@ -322,7 +324,8 @@ pub fn hello(
     model: &str,
     effort: &str,
 ) -> anyhow::Result<Option<i64>> {
-    let prev: Option<i64> = conn.query_row("SELECT agent_hello_at FROM projects WHERE id = ?1", [project_id], |r| r.get(0))?;
+    let prev: Option<i64> =
+        conn.query_row("SELECT agent_hello_at FROM projects WHERE id = ?1", [project_id], |r| r.get(0))?;
     conn.execute("UPDATE projects SET agent_hello_at = ?1 WHERE id = ?2", params![now_ms(), project_id])?;
     conn.execute(
         // A new session starts without the last one's "working on" note (it'd be stale).
@@ -375,8 +378,7 @@ pub struct Milestone {
     pub archived_reason: String,
 }
 
-const MILESTONE_COLUMNS: &str =
-    "id, project_id, parent_id, name, title, description, position, state, tag, reopened_because, closed_at, started_at, summary, review, archived_at, archived_reason";
+const MILESTONE_COLUMNS: &str = "id, project_id, parent_id, name, title, description, position, state, tag, reopened_because, closed_at, started_at, summary, review, archived_at, archived_reason";
 
 fn milestone_from_row(r: &Row) -> rusqlite::Result<Milestone> {
     Ok(Milestone {
@@ -438,7 +440,10 @@ fn find_in(all: &[Milestone], conn: &Connection, name: &str) -> anyhow::Result<M
         .filter(|m| m.name.eq_ignore_ascii_case(step))
         .filter(|m| match parent {
             None => true,
-            Some(p) => m.parent_id.and_then(|id| get_milestone(conn, id).ok()).is_some_and(|pm| pm.name.eq_ignore_ascii_case(p)),
+            Some(p) => m
+                .parent_id
+                .and_then(|id| get_milestone(conn, id).ok())
+                .is_some_and(|pm| pm.name.eq_ignore_ascii_case(p)),
         })
         .collect();
     match hits.as_slice() {
@@ -458,7 +463,8 @@ pub fn default_scope(conn: &Connection, project_id: i64) -> anyhow::Result<Optio
         return Ok(active.first().map(|m| (*m).clone()));
     }
     let doing: Vec<Option<i64>> = {
-        let mut stmt = conn.prepare("SELECT milestone_id FROM records WHERE project_id = ?1 AND kind = 'task' AND state = 'doing'")?;
+        let mut stmt = conn
+            .prepare("SELECT milestone_id FROM records WHERE project_id = ?1 AND kind = 'task' AND state = 'doing'")?;
         stmt.query_map([project_id], |r| r.get(0))?.collect::<Result<_, _>>()?
     };
     for id in doing.into_iter().flatten() {
@@ -653,7 +659,10 @@ pub fn update_milestone(
             conn.execute("UPDATE milestones SET closed_at = ?1 WHERE id = ?2", params![now, m.id])?;
         }
         if state == "active" {
-            conn.execute("UPDATE milestones SET started_at = coalesce(started_at, ?1) WHERE id = ?2", params![now, m.id])?;
+            conn.execute(
+                "UPDATE milestones SET started_at = coalesce(started_at, ?1) WHERE id = ?2",
+                params![now, m.id],
+            )?;
         }
         conn.execute("UPDATE milestones SET state = ?1 WHERE id = ?2", params![state, m.id])?;
         notes.push(format!("now {state}"));
@@ -807,9 +816,19 @@ mod tests {
             )?;
             assert_eq!(closed.state, "closed");
             // Reopening needs no reason any more (the owner, 2026-11-12: agents edit freely).
-            let open = update_milestone(c, &closed, &MilestonePatch { state: Some("active".into()), ..Default::default() }, "a")?;
+            let open = update_milestone(
+                c,
+                &closed,
+                &MilestonePatch { state: Some("active".into()), ..Default::default() },
+                "a",
+            )?;
             assert_eq!(open.state, "active");
-            let closed = update_milestone(c, &open, &MilestonePatch { state: Some("closed".into()), ..Default::default() }, "a")?;
+            let closed = update_milestone(
+                c,
+                &open,
+                &MilestonePatch { state: Some("closed".into()), ..Default::default() },
+                "a",
+            )?;
             let reopened = update_milestone(
                 c,
                 &closed,

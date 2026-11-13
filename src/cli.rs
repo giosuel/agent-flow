@@ -48,7 +48,9 @@ pub fn server_url(config_path: &Path, args: &ClientArgs) -> anyhow::Result<Strin
         return Ok(saved.url);
     }
     if !config_path.exists() {
-        bail!("not connected to an AgentFlow server: run flow connect <server>, e.g. flow connect https://flow.example");
+        bail!(
+            "not connected to an AgentFlow server: run flow connect <server>, e.g. flow connect https://flow.example"
+        );
     }
     Ok(Config::load(config_path)?.public_url)
 }
@@ -89,7 +91,12 @@ impl Client {
     }
 
     /// Sends JSON with any method and returns the JSON answer.
-    pub fn request_json(&self, method: reqwest::Method, path: &str, body: &serde_json::Value) -> anyhow::Result<serde_json::Value> {
+    pub fn request_json(
+        &self,
+        method: reqwest::Method,
+        path: &str,
+        body: &serde_json::Value,
+    ) -> anyhow::Result<serde_json::Value> {
         let res = self.request(method, path).json(body).send()?;
         let status = res.status();
         let body: serde_json::Value = res.json().unwrap_or(serde_json::Value::Null);
@@ -115,7 +122,12 @@ impl Client {
     }
 
     /// Uploads a file as the request body with its content type and returns the JSON answer.
-    pub fn post_file_as(&self, path: &str, file: std::fs::File, content_type: &str) -> anyhow::Result<serde_json::Value> {
+    pub fn post_file_as(
+        &self,
+        path: &str,
+        file: std::fs::File,
+        content_type: &str,
+    ) -> anyhow::Result<serde_json::Value> {
         let len = file.metadata()?.len();
         let res = self
             .request(reqwest::Method::POST, path)
@@ -217,7 +229,9 @@ pub fn hello(config_path: &Path, args: ClientArgs, mut a: HelloArgs) -> anyhow::
             if a.model.is_empty() {
                 a.model = match v.get("model") {
                     Some(serde_json::Value::String(m)) => m.clone(),
-                    Some(m) => m.get("display_name").or_else(|| m.get("id")).and_then(|s| s.as_str()).unwrap_or("").to_owned(),
+                    Some(m) => {
+                        m.get("display_name").or_else(|| m.get("id")).and_then(|s| s.as_str()).unwrap_or("").to_owned()
+                    }
                     None => String::new(),
                 };
             }
@@ -228,7 +242,9 @@ pub fn hello(config_path: &Path, args: ClientArgs, mut a: HelloArgs) -> anyhow::
     match Client::new(config_path, &args).and_then(|c| c.post_json("/api/hello", &body)) {
         Ok(reply) => print!("{}", hello_text(&reply, &source, a.part)),
         // The doc part says it once for both.
-        Err(e) if a.part != HelloPart::NoDoc => println!("{}", unreachable_text(&e, "your project's document, where you are and the news")),
+        Err(e) if a.part != HelloPart::NoDoc => {
+            println!("{}", unreachable_text(&e, "your project's document, where you are and the news"))
+        }
         Err(_) => {}
     }
     Ok(())
@@ -269,7 +285,10 @@ pub fn hello_text(r: &serde_json::Value, source: &str, part: HelloPart) -> Strin
             text = cut_at_line(&text, limit);
             text.push_str("\n(… the document goes on; it's cut here to fit Claude Code's hook limit. The hello tool returns all of it.)");
         }
-        format!("=== Project document (rev {}{e}) ===\n{text}\n=== End of the project document ===\n\n", d.get("rev").unwrap_or(&Value::Null))
+        format!(
+            "=== Project document (rev {}{e}) ===\n{text}\n=== End of the project document ===\n\n",
+            d.get("rev").unwrap_or(&Value::Null)
+        )
     };
     if part == HelloPart::Doc {
         let head = format!(
@@ -307,7 +326,14 @@ pub fn hello_text(r: &serde_json::Value, source: &str, part: HelloPart) -> Strin
         for m in ms {
             let tag = s(m, "tag");
             let tag = if tag.is_empty() { tag } else { format!(", {tag}") };
-            let _ = writeln!(out, "- {} {} [{}{tag}] tasks: {}", s(m, "name"), s(m, "title"), s(m, "state"), counts(m.get("tasks")));
+            let _ = writeln!(
+                out,
+                "- {} {} [{}{tag}] tasks: {}",
+                s(m, "name"),
+                s(m, "title"),
+                s(m, "state"),
+                counts(m.get("tasks"))
+            );
             if s(m, "state") == "closed" {
                 continue;
             }
@@ -315,7 +341,14 @@ pub fn hello_text(r: &serde_json::Value, source: &str, part: HelloPart) -> Strin
                 let _ = writeln!(out, "    {line}");
             }
             for st in m.get("steps").and_then(Value::as_array).into_iter().flatten() {
-                let _ = writeln!(out, "  - {} {} [{}] tasks: {}", s(st, "name"), s(st, "title"), s(st, "state"), counts(st.get("tasks")));
+                let _ = writeln!(
+                    out,
+                    "  - {} {} [{}] tasks: {}",
+                    s(st, "name"),
+                    s(st, "title"),
+                    s(st, "state"),
+                    counts(st.get("tasks"))
+                );
             }
         }
         out.push_str("(closed milestones show one line; get_milestone has the rest)\n\n");
@@ -325,7 +358,11 @@ pub fn hello_text(r: &serde_json::Value, source: &str, part: HelloPart) -> Strin
     parts.push(section(6, "Notes coming back", r.get("notes_back")));
     parts.push(section(7, "Open questions", r.get("open_questions")));
     parts.push(section(3, "Answered this week", r.get("answered_this_week")));
-    parts.push(section(6, "New project-wide decisions since your last session (fold them into the document)", r.get("new_project_decisions")));
+    parts.push(section(
+        6,
+        "New project-wide decisions since your last session (fold them into the document)",
+        r.get("new_project_decisions"),
+    ));
     // Long news (a batch of merges) shows its latest lines; the rest stay a call away.
     const NEWS_LINES: usize = 25;
     let news = r.get("news").and_then(Value::as_array).cloned().unwrap_or_default();
@@ -333,7 +370,10 @@ pub fn hello_text(r: &serde_json::Value, source: &str, part: HelloPart) -> Strin
         let skip = news.len().saturating_sub(NEWS_LINES);
         let mut title = "News since you last looked (now marked read)".to_owned();
         if skip > 0 {
-            title = format!("{title}: the latest {NEWS_LINES} of {}; since_last_check {{again: \"1h\"}} shows them all", news.len());
+            title = format!(
+                "{title}: the latest {NEWS_LINES} of {}; since_last_check {{again: \"1h\"}} shows them all",
+                news.len()
+            );
         }
         parts.push(section(7, &title, Some(&Value::Array(news[skip..].to_vec()))));
     }
@@ -372,7 +412,11 @@ fn fit(parts: &mut [(u8, String)], limit: usize) {
         }
         let keep = len.saturating_sub(over + NOTE.len());
         let title = parts[i].1.lines().next().unwrap_or("").to_owned();
-        parts[i].1 = if keep > title.len() + 40 { format!("{}\n{NOTE}", cut_at_line(&parts[i].1, keep)) } else { format!("{title}\n{NOTE}") };
+        parts[i].1 = if keep > title.len() + 40 {
+            format!("{}\n{NOTE}", cut_at_line(&parts[i].1, keep))
+        } else {
+            format!("{title}\n{NOTE}")
+        };
     }
 }
 
@@ -444,7 +488,8 @@ fn scalar(v: &serde_json::Value, pad: &str) -> String {
 pub fn news(config_path: &Path, args: ClientArgs, again: Option<String>) -> anyhow::Result<()> {
     let path = match again.as_deref().map(str::trim).filter(|a| !a.is_empty()) {
         Some(a) => {
-            let min = crate::steps::parse_minutes(a).with_context(|| format!("--again {a:?}: a duration, e.g. \"1h\""))?;
+            let min =
+                crate::steps::parse_minutes(a).with_context(|| format!("--again {a:?}: a duration, e.g. \"1h\""))?;
             format!("/api/news?again={min}")
         }
         None => "/api/news".to_owned(),
@@ -663,7 +708,12 @@ pub fn note(config_path: &Path, a: NoteArgs) -> anyhow::Result<()> {
     let client = Client::new(config_path, &a.client)?.with_timeout(std::time::Duration::from_secs(300));
     let file = std::fs::File::open(&a.file).with_context(|| format!("can't open {}", a.file.display()))?;
     let filename = a.file.file_name().and_then(|n| n.to_str()).unwrap_or("note").to_owned();
-    let mut q = vec![("name", a.name.clone()), ("category", a.category.clone()), ("filename", filename), ("description", a.description.clone())];
+    let mut q = vec![
+        ("name", a.name.clone()),
+        ("category", a.category.clone()),
+        ("filename", filename),
+        ("description", a.description.clone()),
+    ];
     for (k, v) in [("record", &a.record), ("resurface", &a.resurface), ("replaces", &a.replaces)] {
         if let Some(v) = v {
             q.push((k, v.clone()));
@@ -711,7 +761,9 @@ fn tree_rss_kb(root: u32) -> u64 {
         let Ok(text) = std::fs::read_to_string(format!("/proc/{pid}/stat")) else { continue };
         let Some(close) = text.rfind(')') else { continue };
         let f: Vec<&str> = text[close + 1..].split_whitespace().collect();
-        if let (Some(pp), Some(r)) = (f.get(1).and_then(|x| x.parse().ok()), f.get(21).and_then(|x| x.parse::<u64>().ok())) {
+        if let (Some(pp), Some(r)) =
+            (f.get(1).and_then(|x| x.parse().ok()), f.get(21).and_then(|x| x.parse::<u64>().ok()))
+        {
             parent.insert(pid, pp);
             rss.insert(pid, r * 4);
         }
@@ -798,7 +850,13 @@ pub fn remote(config_path: &Path, a: RemoteArgs) -> anyhow::Result<i32> {
         "bundle": up.as_ref().map(|u| u.bundle.clone()).unwrap_or_default(),
     });
     // An SSH builder reads the checkout itself; the field stays the checkout's path.
-    let body = if a.setup { body } else { let mut b = body; b["dir"] = serde_json::json!(dir); b };
+    let body = if a.setup {
+        body
+    } else {
+        let mut b = body;
+        b["dir"] = serde_json::json!(dir);
+        b
+    };
     let res =
         client.http.post(format!("{}/api/remote/jobs", client.base)).bearer_auth(&client.token).json(&body).send()?;
     let status = res.status();
@@ -843,10 +901,13 @@ pub fn remote(config_path: &Path, a: RemoteArgs) -> anyhow::Result<i32> {
         }
         last_reason = reason;
         if o["finished"].as_bool().unwrap_or(false) && text.is_empty() {
-            let results: Vec<String> =
-                o["results"].as_array().map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_owned)).collect()).unwrap_or_default();
+            let results: Vec<String> = o["results"]
+                .as_array()
+                .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_owned)).collect())
+                .unwrap_or_default();
             if state == "done" && !results.is_empty() {
-                let long = Client::with_token(&client.base, &client.token).with_timeout(std::time::Duration::from_secs(1800));
+                let long =
+                    Client::with_token(&client.base, &client.token).with_timeout(std::time::Duration::from_secs(1800));
                 match crate::snapshot::fetch_results(&long, id, &top, &a.fetch, &results) {
                     Ok(got) if !got.is_empty() => eprintln!("· brought back {}", got.join(", ")),
                     Ok(_) => {}

@@ -182,8 +182,13 @@ impl GhCli {
     /// As the agents' user, with its `gh` login (see [`crate::hands`]).
     async fn run(args: &[&str]) -> anyhow::Result<Vec<u8>> {
         let argv = std::iter::once("gh").chain(args.iter().copied()).map(String::from).collect();
-        let out: crate::hands::ExecOut =
-            crate::hands::run_async(crate::hands::Job::Exec { argv, cwd: None, timeout_s: 60, env: crate::secrets::gh_env() }).await?;
+        let out: crate::hands::ExecOut = crate::hands::run_async(crate::hands::Job::Exec {
+            argv,
+            cwd: None,
+            timeout_s: 60,
+            env: crate::secrets::gh_env(),
+        })
+        .await?;
         if out.timed_out {
             bail!("gh took longer than a minute");
         }

@@ -225,7 +225,12 @@ async fn set_state(
             }
             let mut data = Map::new();
             data.insert("mockup_state".into(), st.clone().into());
-            records::update(c, &r, "owner", records::Patch { data, note: format!("the owner set it {st}"), ..Default::default() })?;
+            records::update(
+                c,
+                &r,
+                "owner",
+                records::Patch { data, note: format!("the owner set it {st}"), ..Default::default() },
+            )?;
             Ok(r)
         })
         .await;

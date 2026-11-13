@@ -59,7 +59,12 @@ async fn upload(
     let category = if q.replaces.trim().is_empty() || !q.category.trim().is_empty() {
         match crate::screenshots::category(&q.category) {
             Ok(c) => Some(c),
-            Err(_) => return json_error(StatusCode::BAD_REQUEST, "give it a category, e.g. morning report, estimate, known issue"),
+            Err(_) => {
+                return json_error(
+                    StatusCode::BAD_REQUEST,
+                    "give it a category, e.g. morning report, estimate, known issue",
+                );
+            }
         }
     } else {
         None
@@ -149,7 +154,11 @@ async fn upload(
             let to = notes::path(&dd, &project.slug, r.number, &ext, 0);
             std::fs::create_dir_all(to.parent().unwrap_or(&dd))?;
             if let Err(e) = std::fs::rename(&tmp2, &to) {
-                let patch = Patch { state: Some("resolved".into()), note: "the file couldn't be stored".into(), ..Default::default() };
+                let patch = Patch {
+                    state: Some("resolved".into()),
+                    note: "the file couldn't be stored".into(),
+                    ..Default::default()
+                };
                 records::update(c, &r, &a.name(), patch)?;
                 return Err(e.into());
             }
@@ -252,13 +261,23 @@ pub struct NotesView {
     pub resolved: Vec<NoteRow>,
 }
 
-pub fn view(c: &rusqlite::Connection, slug: &str, project_id: i64, pick: Option<&str>, now: i64) -> anyhow::Result<NotesView> {
-    let all = records::query(c, &records::Query { project_id: Some(project_id), kinds: vec![Kind::Note], limit: 0, ..Default::default() })?;
+pub fn view(
+    c: &rusqlite::Connection,
+    slug: &str,
+    project_id: i64,
+    pick: Option<&str>,
+    now: i64,
+) -> anyhow::Result<NotesView> {
+    let all = records::query(
+        c,
+        &records::Query { project_id: Some(project_id), kinds: vec![Kind::Note], limit: 0, ..Default::default() },
+    )?;
     let row = |r: &records::Record| -> anyhow::Result<NoteRow> {
         let ext = r.str("ext").to_owned();
         let cat = r.str("category").to_owned();
         let issue = cat.contains("issue");
-        let linked: Vec<String> = records::links_of(c, r)?.iter().filter(|l| l.outgoing).map(|l| l.other.short_id()).collect();
+        let linked: Vec<String> =
+            records::links_of(c, r)?.iter().filter(|l| l.outgoing).map(|l| l.other.short_id()).collect();
         let size = r.data.get("size").and_then(Value::as_i64).map(notes::size).unwrap_or_else(|| "text".into());
         let versions = r.data.get("versions").and_then(Value::as_i64).unwrap_or(0);
         let mut meta = vec![size, crate::util::ago(r.updated_at, now)];
@@ -270,12 +289,20 @@ pub fn view(c: &rusqlite::Connection, slug: &str, project_id: i64, pick: Option<
             url: r.url(),
             title: r.title.clone(),
             category: cat,
-            ext: if issue { "!".into() } else if ext.is_empty() { "txt".into() } else { ext.clone() },
+            ext: if issue {
+                "!".into()
+            } else if ext.is_empty() {
+                "txt".into()
+            } else {
+                ext.clone()
+            },
             issue,
             linked: linked.join(", "),
             resurface: match (r.str("resurface"), r.data.get("resurface_at").and_then(Value::as_i64)) {
                 ("", _) => String::new(),
-                (_, Some(at)) => format!("comes back {}", crate::tz::Tz::named("UTC").map(|t| t.date(at)).unwrap_or_default()),
+                (_, Some(at)) => {
+                    format!("comes back {}", crate::tz::Tz::named("UTC").map(|t| t.date(at)).unwrap_or_default())
+                }
                 (w, None) => format!("comes back {w}"),
             },
             meta: meta.join(" · "),

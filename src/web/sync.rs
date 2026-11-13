@@ -49,7 +49,11 @@ struct StateBody {
 }
 
 /// Where the last sync of this file stopped.
-async fn state_of(State(state): State<AppState>, Extension(actor): Extension<Actor>, Json(b): Json<StateBody>) -> Response {
+async fn state_of(
+    State(state): State<AppState>,
+    Extension(actor): Extension<Actor>,
+    Json(b): Json<StateBody>,
+) -> Response {
     let Some((_, slug)) = project_of(&actor) else {
         return json_error(StatusCode::FORBIDDEN, "flow sync runs with a project's token");
     };
@@ -72,7 +76,11 @@ struct UploadBody {
     read: Read,
 }
 
-async fn upload(State(state): State<AppState>, Extension(actor): Extension<Actor>, Json(b): Json<UploadBody>) -> Response {
+async fn upload(
+    State(state): State<AppState>,
+    Extension(actor): Extension<Actor>,
+    Json(b): Json<UploadBody>,
+) -> Response {
     let Some((project_id, slug)) = project_of(&actor) else {
         return json_error(StatusCode::FORBIDDEN, "flow sync runs with a project's token");
     };

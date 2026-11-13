@@ -33,7 +33,9 @@ pub enum Request {
 impl Request {
     pub fn id(&self) -> u64 {
         match self {
-            Request::Sh { id, .. } | Request::Sync { id, .. } | Request::Upload { id, .. } | Request::Kill { id } => *id,
+            Request::Sh { id, .. } | Request::Sync { id, .. } | Request::Upload { id, .. } | Request::Kill { id } => {
+                *id
+            }
         }
     }
 }
@@ -176,7 +178,12 @@ impl Hub {
     }
 
     /// Asks and waits for the whole answer: (exit code, stdout, stderr).
-    pub async fn ask(&self, name: &str, make: impl FnOnce(u64) -> Request, timeout: Duration) -> anyhow::Result<(i32, String, String)> {
+    pub async fn ask(
+        &self,
+        name: &str,
+        make: impl FnOnce(u64) -> Request,
+        timeout: Duration,
+    ) -> anyhow::Result<(i32, String, String)> {
         let (tx, rx) = oneshot::channel();
         let id = self.send(name, make, Waiter::Whole(tx))?;
         match tokio::time::timeout(timeout, rx).await {
@@ -226,7 +233,12 @@ mod tests {
         hub.connect("hq", tx);
         let h = hub.clone();
         let ask = tokio::spawn(async move {
-            h.ask("hq", |id| Request::Sh { id, script: "echo hi".into(), stream: false, timeout_s: 5 }, Duration::from_secs(5)).await
+            h.ask(
+                "hq",
+                |id| Request::Sh { id, script: "echo hi".into(), stream: false, timeout_s: 5 },
+                Duration::from_secs(5),
+            )
+            .await
         });
         let Some(Request::Sh { id, .. }) = rx.recv().await else { panic!("no request") };
         // Another builder can't answer it.
