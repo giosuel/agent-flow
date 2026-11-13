@@ -20,6 +20,8 @@ use crate::util::{hash_secret, new_secret, now_ms};
 pub const MINUTES: i64 = 10;
 /// At most this many requests wait at once: anyone may ask to connect, so a flood is cut off.
 pub const MAX_PENDING: i64 = 30;
+/// Requests waiting from one address (anonymous) or one connected machine.
+pub const MAX_PENDING_PER_IP: i64 = 5;
 
 /// What can be asked for.
 pub const ACTIONS: &[&str] = &[
@@ -166,8 +168,18 @@ pub fn create(
     ip: Option<&str>,
 ) -> anyhow::Result<(String, String)> {
     expire(c)?;
-    let pending: i64 = c.query_row("SELECT count(*) FROM approvals WHERE state = 'pending'", [], |r| r.get(0))?;
-    if pending >= MAX_PENDING {
+    // Anyone may ask to connect: those requests have their own limits, overall and per address,
+    // so they can't crowd out the owner's own requests (from connected machines, per machine).
+    let count = |sql: &str, p: &dyn rusqlite::ToSql| -> rusqlite::Result<i64> { c.query_row(sql, [p], |r| r.get(0)) };
+    let full = if requested_by.is_empty() {
+        count("SELECT count(*) FROM approvals WHERE state = 'pending' AND requested_by = ?1", &"")? >= MAX_PENDING
+            || count("SELECT count(*) FROM approvals WHERE state = 'pending' AND requested_by = '' AND ip IS ?1", &ip)?
+                >= MAX_PENDING_PER_IP
+    } else {
+        count("SELECT count(*) FROM approvals WHERE state = 'pending' AND requested_by = ?1", &requested_by)?
+            >= MAX_PENDING_PER_IP
+    };
+    if full {
         bail!("too many requests are waiting for approval; try again in a few minutes");
     }
     check_args(c, action, args)?;
@@ -461,10 +473,15 @@ mod tests {
             let (_, poll) = create(c, "connect", &json!({}), "viber@pc", "", None)?;
             c.execute("UPDATE approvals SET expires_at = 0 WHERE state = 'pending'", [])?;
             assert_eq!(super::poll(c, &poll)?.unwrap()["state"], "expired");
-            for i in 0..MAX_PENDING {
-                create(c, "connect", &json!({}), &format!("m{i}"), "", None)?;
+            for i in 0..MAX_PENDING_PER_IP {
+                create(c, "connect", &json!({}), &format!("m{i}"), "", Some("10.0.0.1"))?;
             }
-            assert!(create(c, "connect", &json!({}), "one more", "", None).is_err(), "a flood is cut off");
+            assert!(create(c, "connect", &json!({}), "m", "", Some("10.0.0.1")).is_err(), "one address is cut off");
+            for i in MAX_PENDING_PER_IP..MAX_PENDING {
+                create(c, "connect", &json!({}), &format!("m{i}"), "", Some(&format!("10.0.1.{i}")))?;
+            }
+            assert!(create(c, "connect", &json!({}), "m", "", Some("10.0.2.1")).is_err(), "a flood is cut off");
+            assert!(create(c, "backup", &json!({}), "viber@pc", "pc", None).is_ok(), "the owner still gets through");
             Ok(())
         })
         .unwrap();
