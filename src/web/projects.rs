@@ -30,7 +30,7 @@ pub fn routes() -> Router<AppState> {
         .route("/p/{slug}/{id}/answer", post(answer))
         .route("/p/{slug}/{id}/scope", post(set_scope))
         .route("/p/{slug}/status", post(set_status))
-        .route("/p/{slug}/setup", post(write_setup))
+        .route("/p/{slug}/setup-code", post(setup_code))
         .route("/p/{slug}/settings", post(save_settings))
 }
 
@@ -163,7 +163,20 @@ async fn set_status(
 
 /// Sets the project's agent up in its folder, or brings that up to date (the owner, 2026-11-12:
 /// "sets up all the agent stuff as well so we don't need the copy paste commands").
-async fn write_setup(
+#[derive(Template)]
+#[template(path = "setup_code.html")]
+pub(super) struct SetupCodePage {
+    pub(super) nav: Nav,
+    pub(super) slug: String,
+    pub(super) name: String,
+    pub(super) code: String,
+    pub(super) public_url: String,
+    pub(super) minutes: i64,
+}
+
+/// "Set up on another machine" (the owner, 2026-11-13): a setup code for `flow project setup` on
+/// that machine, shown once, valid 15 minutes.
+async fn setup_code(
     State(state): State<AppState>,
     Extension(actor): Extension<Actor>,
     Extension(ip): Extension<ClientIp>,
@@ -171,19 +184,24 @@ async fn write_setup(
 ) -> AppResult<Response> {
     actor.require_owner()?;
     let s = slug.clone();
-    let p = state.db.call(move |c| projects::require(c, &s)).await?;
-    if p.checkout.trim().is_empty() {
-        return Err(AppError::BadRequest("the project has no folder; set it in Settings first".into()));
-    }
-    let folder = crate::util::expand_home(p.checkout.trim());
-    let token_file = crate::tokens::token_path(&state.config.token_dir(), Some(&p.slug), &p.name);
-    let public_url = state.config.public_url.clone();
-    let step: String = crate::hands::run_async(crate::hands::Job::WriteSetup { folder, token_file, name: p.name.clone(), public_url })
-        .await
-        .map_err(|e| AppError::BadRequest(format!("{e:#}")))?;
-    let e = Entry::new(&actor, Via::Page, Action::Write, step).project(slug.clone()).ip(Some(ip.0));
+    let (p, code) = state
+        .db
+        .call(move |c| {
+            let p = projects::require(c, &s)?;
+            let code = crate::onboard::new_setup_code(c, p.id)?;
+            Ok((p, code))
+        })
+        .await?;
+    let e = Entry::new(&actor, Via::Page, Action::Write, "setup code made (Set up on another machine)").project(slug.clone()).ip(Some(ip.0));
     activity::write(&state.db, e).await;
-    Ok(Redirect::to(&format!("/p/{slug}")).into_response())
+    render(SetupCodePage {
+        nav: nav(&state, &actor, "/projects").await,
+        slug: p.slug,
+        name: p.name,
+        code,
+        public_url: state.config.public_url.trim_end_matches('/').to_owned(),
+        minutes: crate::onboard::SETUP_CODE_MINUTES,
+    })
 }
 
 #[derive(Deserialize, Default)]
@@ -661,11 +679,9 @@ pub struct ShotView {
 }
 
 pub struct Connect {
-    start: String,
-    token_file: String,
-    has_file: bool,
-    /// The folder is set up (MCP server, hooks, token variable) as it'd be set up now.
-    set_up: bool,
+    /// Where it's set up: the folder and the machine, if it is.
+    folder: String,
+    machine: String,
 }
 
 #[derive(Template)]
@@ -826,12 +842,12 @@ async fn project(
                     &records::Query { project_id: Some(p.id), kinds: vec![Kind::Decision], states: vec!["archived".into()], limit: 0, ..Default::default() },
                 )?);
             }
-            let checkout = p.checkout.trim().to_owned();
+            let checkout = (p.checkout.trim().to_owned(), p.machine.trim().to_owned());
             Ok(Some((build_project_page(c, p, ms, all, &t, chosen.as_deref(), now, &tz)?, checkout)))
         })
         .await?
         .ok_or(AppError::NotFound)?;
-    let (mut page, checkout) = page;
+    let (mut page, (checkout, page_machine)) = page;
     if tab == "screenshots" {
         let mut cats: Vec<(String, usize)> = Vec::new();
         for s in &page.shots {
@@ -854,21 +870,8 @@ async fn project(
         }
         page.shot_cats = pills;
     }
-    if tab == "overview" && actor.is_owner() && !checkout.is_empty() {
-        let folder = crate::util::expand_home(&checkout);
-        let token_file = crate::tokens::token_path(&state.config.token_dir(), Some(&page.slug), &page.name);
-        let start = crate::onboard::start_command(&folder);
-        let has_file: bool =
-            crate::hands::run_async(crate::hands::Job::TokenExists { path: token_file.clone() }).await.unwrap_or(true);
-        let set_up: bool = crate::hands::run_async(crate::hands::Job::SetupPresent {
-            folder: folder.clone(),
-            token_file: token_file.clone(),
-            name: page.name.clone(),
-            public_url: state.config.public_url.clone(),
-        })
-        .await
-        .unwrap_or(false);
-        page.connect = Some(Connect { start, token_file: token_file.display().to_string(), has_file, set_up });
+    if tab == "overview" && actor.is_owner() {
+        page.connect = Some(Connect { folder: checkout.clone(), machine: page_machine.clone() });
     }
     if tab == "notes" {
         let (slug, edit, rev, outcome) = (page.slug.clone(), q.edit.clone(), q.rev, q.doc.clone());
