@@ -9,6 +9,7 @@ pub mod backup;
 pub mod builds;
 pub mod cli;
 pub mod config;
+pub mod connect;
 pub mod contributions;
 pub mod db;
 pub mod demo;
