@@ -247,8 +247,9 @@ pub fn hook_commands(token_file: &Path, name: &str, public_url: &str) -> Vec<(&'
     ]
 }
 
+/// The `flow` program the hooks and the MCP sign-in call: installed next to the server.
 fn bin() -> String {
-    std::env::current_exe().map(|p| p.display().to_string()).unwrap_or_else(|_| "agentflow".into())
+    crate::util::flow_path().display().to_string()
 }
 
 /// AgentFlow's entry in the folder's `.mcp.json`: the token is read from its file whenever
@@ -270,9 +271,14 @@ fn shell_word(s: &str) -> String {
     }
 }
 
-/// One of AgentFlow's own hooks (any version of them), found by its command.
+/// One of AgentFlow's own hooks (any version of them: `flow hello` from before the split,
+/// `flow hello` since), found by its command.
 fn is_ours(command: &str) -> bool {
-    command.contains("agentflow") && command.contains("--token-file") && (command.contains(" hello ") || command.contains(" news "))
+    let program = command.split_whitespace().next().unwrap_or("");
+    let name = Path::new(program).file_name().and_then(|n| n.to_str()).unwrap_or("");
+    matches!(name, "agentflow" | "flow")
+        && command.contains("--token-file")
+        && (command.contains(" hello ") || command.contains(" news "))
 }
 
 fn settings_path(folder: &Path) -> PathBuf {
@@ -365,9 +371,10 @@ pub fn write_setup(folder: &Path, token_file: &Path, name: &str, public_url: &st
     let env = settings.entry("env").or_insert_with(|| json!({}));
     let Some(env) = env.as_object_mut() else { bail!("\"env\" in {} isn't an object, so it was left alone", path.display()) };
     env.insert("AGENTFLOW_TOKEN_FILE".into(), token_file.display().to_string().into());
+    env.insert("AGENTFLOW_URL".into(), public_url.trim_end_matches('/').into());
     write_json(&path, settings)?;
     did.push(format!(
-        "in {}: the hooks (hello on every start, resume, /clear and compaction; the news before each of your prompts), the server approved, and AGENTFLOW_TOKEN_FILE for its commands{}",
+        "in {}: the hooks (hello on every start, resume, /clear and compaction; the news before each of your prompts), the server approved, and AGENTFLOW_TOKEN_FILE and AGENTFLOW_URL for its `flow` commands{}",
         path.display(),
         keep_out_of_git(folder, ".claude/settings.local.json")?
     ));
@@ -380,7 +387,8 @@ pub fn setup_present(folder: &Path, token_file: &Path, name: &str, public_url: &
     let Ok(settings) = serde_json::from_str::<serde_json::Value>(&text) else { return false };
     let hooks = hook_commands(token_file, name, public_url).iter().flat_map(|(_, c)| c).all(|c| text.contains(&serde_json::to_string(c).unwrap_or_default()));
     let approved = settings["enabledMcpjsonServers"].as_array().is_some_and(|a| a.iter().any(|v| v == "agentflow"));
-    let env = settings["env"]["AGENTFLOW_TOKEN_FILE"].as_str() == Some(&token_file.display().to_string());
+    let env = settings["env"]["AGENTFLOW_TOKEN_FILE"].as_str() == Some(&token_file.display().to_string())
+        && settings["env"]["AGENTFLOW_URL"].as_str() == Some(public_url.trim_end_matches('/'));
     let mcp = std::fs::read_to_string(folder.join(".mcp.json"))
         .ok()
         .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
@@ -456,6 +464,16 @@ mod tests {
     use super::*;
 
     #[test]
+    fn hooks_from_before_and_after_the_split_are_ours() {
+        assert!(is_ours("/home/v/.local/bin/agentflow hello --doc --token-file /t --url https://f"));
+        assert!(is_ours("/home/v/.local/bin/flow news --token-file /t"));
+        assert!(is_ours("flow hello --no-doc --session X --token-file /t"));
+        assert!(!is_ours("/usr/bin/notflow hello --token-file /t"));
+        assert!(!is_ours("/home/v/.local/bin/flow sync --token-file /t"));
+        assert!(!is_ours("echo agentflow hello --token-file"));
+    }
+
+    #[test]
     fn a_project_starts_with_its_folder_token_and_note() {
         assert_eq!(slug_for("Speculum Tool!"), "speculum-tool");
         let home = tempfile::tempdir().unwrap();
@@ -511,7 +529,7 @@ mod tests {
         std::fs::write(
             &settings,
             r#"{"permissions": {"allow": ["Bash(ls)"]}, "hooks": {"UserPromptSubmit": [{"hooks": [
-                {"type": "command", "command": "/old/agentflow news --token-file /x.token"},
+                {"type": "command", "command": "/old/flow news --token-file /x.token"},
                 {"type": "command", "command": "echo mine"}]}], "Stop": [{"hooks": [{"type": "command", "command": "beep"}]}]}}"#,
         )
         .unwrap();
@@ -536,6 +554,7 @@ mod tests {
         assert!(text.contains("--session Imaginarium"));
         assert_eq!(v["enabledMcpjsonServers"], serde_json::json!(["agentflow"]), "approved once: {text}");
         assert_eq!(v["env"]["AGENTFLOW_TOKEN_FILE"], token.display().to_string());
+        assert_eq!(v["env"]["AGENTFLOW_URL"], url.trim_end_matches('/'));
         for f in [".claude/settings.local.json", ".mcp.json"] {
             let ignored = std::process::Command::new("git").arg("-C").arg(&folder).args(["check-ignore", "-q", f]).status().unwrap();
             assert!(ignored.success(), "{f}");
