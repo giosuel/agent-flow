@@ -911,6 +911,64 @@ async fn a_build_goes_from_agent_to_owner_and_feedback_comes_back() {
 }
 
 #[tokio::test]
+async fn older_builds_move_over_with_their_number_and_date() {
+    let s = TestServer::start().await;
+    let token = s.token(TokenKind::Project, Some("imaginarium")).await;
+    let device = s.token(TokenKind::Device, None).await;
+    let src = tempfile::tempdir().unwrap();
+    let bin = src.path().join("imaginarium");
+    std::fs::write(&bin, b"#!/bin/sh\necho hi\n").unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let mut tar = Vec::new();
+    crate::builds::pack(&bin, &mut tar).unwrap();
+    let post = |q: String| s.http.post(s.url(&format!("/api/builds?product=imaginarium&summary=Old%20one&{q}"))).bearer_auth(&token).body(tar.clone()).send();
+
+    // viber-run's #63, then its #5 from October: each keeps its number, date and name.
+    let res: Value = post("commit=79916898&branch=feat%2Fstroke-dash-gap&built_at=2026-11-11%2021%3A37&number=63".into()).await.unwrap().json().await.unwrap();
+    assert_eq!(res["number"], 63, "{res}");
+    assert_eq!(res["name"], "2026-11-11-2137-stroke-dash-gap-79916898");
+    let res: Value = post("commit=2925797&branch=feat%2Fm6.12-text-style&built_at=2026-10-26%2010%3A28&number=5".into()).await.unwrap().json().await.unwrap();
+    assert_eq!(res["number"], 5, "{res}");
+    assert_eq!(res["name"], "2026-10-26-1028-m6.12-text-style-2925797");
+
+    // A taken number, a number without a date, a date ahead, and something to try are refused.
+    let res = post("commit=2925797&built_at=2026-10-26%2010%3A28&number=5".into()).await.unwrap();
+    assert_eq!(res.status(), StatusCode::CONFLICT);
+    for q in ["commit=2925797&number=6", "commit=2925797&built_at=2099-01-01%2000%3A00&number=6", "built_at=2026-10-26%2010%3A28&number=6&features=%5B%22A%3A%20b%22%5D", "built_at=yesterday&number=6"] {
+        assert_eq!(post(q.into()).await.unwrap().status(), StatusCode::BAD_REQUEST, "{q}");
+    }
+
+    // The newest is still the newest, the October one is dated October, and the next new build
+    // continues after the highest number.
+    let list: Value = s.http.get(s.url("/api/builds/imaginarium")).bearer_auth(&device).send().await.unwrap().json().await.unwrap();
+    let numbers: Vec<i64> = list["builds"].as_array().unwrap().iter().map(|b| b["number"].as_i64().unwrap()).collect();
+    assert_eq!(numbers, [63, 5]);
+    let old = s.state.db.call(|c| crate::records::find_str(c, "imaginarium/B-5", None)).await.unwrap();
+    assert_eq!(old.created_at, 1_793_010_480_000, "2026-10-26 10:28 UTC");
+    let res: Value = post("commit=a1b2c3d&branch=main".into()).await.unwrap().json().await.unwrap();
+    assert_eq!(res["number"], 64, "{res}");
+
+    // A long summary (viber-run's #7 had 292 characters) goes through; the client asks first,
+    // and a refusal then comes back as an answer rather than as a dropped upload.
+    let long = "x".repeat(292);
+    let ask = |summary: String| {
+        s.http.post(s.url(&format!("/api/builds?product=imaginarium&summary={summary}&built_at=2026-10-27%2010%3A00&number=7&check=true"))).bearer_auth(&token).send()
+    };
+    let ok: Value = ask(long.clone()).await.unwrap().json().await.unwrap();
+    assert_eq!(ok["ok"], true);
+    assert_eq!(ask("y".repeat(301)).await.unwrap().status(), StatusCode::BAD_REQUEST);
+    let res = s.http.post(s.url("/api/builds?product=imaginarium&summary=x&built_at=2026-10-27%2010%3A00&number=5&check=true")).bearer_auth(&token).send().await.unwrap();
+    assert_eq!(res.status(), StatusCode::CONFLICT, "a taken number is known before the upload");
+    let res: Value = s.http.post(s.url(&format!("/api/builds?product=imaginarium&summary={long}&commit=abcdef1&built_at=2026-10-27%2010%3A00&number=7"))).bearer_auth(&token).body(tar.clone()).send().await.unwrap().json().await.unwrap();
+    assert_eq!(res["number"], 7, "{res}");
+
+    // Nothing was put on the To test list for the old ones.
+    let tests: i64 = s.state.db.call(|c| Ok(c.query_row("SELECT count(*) FROM records WHERE kind = 'test'", [], |r| r.get(0))?)).await.unwrap();
+    assert_eq!(tests, 0);
+}
+
+#[tokio::test]
 async fn contributions_are_watched_for_their_project() {
     use crate::github::ItemInfo;
     let s = TestServer::start().await;
@@ -1548,6 +1606,14 @@ async fn answers_make_scoped_decisions_and_releases_bring_their_tag_button() {
     let (_, b) = call("hello", json!({"session": "V", "machine": "m", "model": "o", "effort": "h", "brief": true})).await;
     assert!(b.get("doc").is_none() && b.get("milestones").is_none() && b.get("where").is_some(), "{b}");
     assert!(!call("add_release", json!({"tag": "v1; rm -rf ~", "title": "x"})).await.0);
+    // Its text can be changed later; its tag can't, and other kinds aren't releases.
+    let (ok, u) = call("update_release", json!({"id": r["id"], "body": "Closes M5. Build B-63."})).await;
+    assert!(ok, "{u}");
+    let (_, got) = call("get_record", json!({"id": r["id"]})).await;
+    assert!(got.to_string().contains("Build B-63.") && got.to_string().contains("v0.0.6-m5"), "{got}");
+    assert!(!call("update_release", json!({"id": r["id"]})).await.0);
+    assert!(!call("update_release", json!({"id": r["id"], "title": " "})).await.0);
+    assert!(!call("update_release", json!({"id": "D-1", "body": "x"})).await.0);
     // A question holds a release's tag button until it's answered.
     let rel = r["id"].as_str().unwrap().rsplit('/').next().unwrap().to_owned();
     let (ok, q) = call("ask_question", json!({"title": "Tag name: v0.0.6-m5 or v0.1.0?", "blocks": [rel.clone()]})).await;

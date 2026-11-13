@@ -98,6 +98,15 @@ struct UploadQuery {
     needs: String,
     /// The consultant names the project; agents publish to their own.
     project: Option<String>,
+    /// An older build moved over (from viber-run): when it was built, "2026-10-26 10:28" UTC.
+    #[serde(default)]
+    built_at: String,
+    /// An older build moved over: the number it had, if it's free.
+    number: Option<i64>,
+    /// Only check what's asked, without a build: the client asks first, because a refusal in the
+    /// middle of a large upload reaches it only as a dropped connection.
+    #[serde(default)]
+    check: bool,
 }
 
 /// The features, sent as a JSON list of "Title: what to do".
@@ -137,13 +146,10 @@ async fn upload(
     if let Err(e) = builds::check_product(&q.product) {
         return json_error(StatusCode::BAD_REQUEST, format!("{e:#}"));
     }
-    if q.summary.trim().is_empty() {
-        return json_error(StatusCode::BAD_REQUEST, "summary: one line on what's in it");
-    }
     let checks = builds::check_commit(q.commit.trim())
         .and_then(|_| builds::check_label("branch", &q.branch))
         .and_then(|_| builds::check_label("tag", &q.tag))
-        .and_then(|_| builds::check_label("summary", &q.summary))
+        .and_then(|_| builds::check_summary(&q.summary))
         // Stored text is redacted; a branch that looks like a token would no longer match the
         // build's file name.
         .and_then(|_| {
@@ -166,11 +172,30 @@ async fn upload(
         Ok(f) => f,
         Err(e) => return json_error(StatusCode::BAD_REQUEST, format!("features: {e:#}")),
     };
+    let built_at = match builds::built_at(&q.built_at, time::OffsetDateTime::now_utc()) {
+        Ok(t) => t,
+        Err(e) => return json_error(StatusCode::BAD_REQUEST, format!("{e:#}")),
+    };
+    if let Err(e) = builds::check_history(built_at.is_some(), q.number, !features.is_empty()) {
+        return json_error(StatusCode::BAD_REQUEST, format!("{e:#}"));
+    }
     let (a, product, project_arg) = (actor.clone(), q.product.clone(), q.project.clone());
     let project = match state.db.call(move |c| product_project(c, &a, &product, project_arg.as_deref())).await {
         Ok(p) => p,
         Err(e) => return json_error(StatusCode::FORBIDDEN, format!("{e:#}")),
     };
+    // A taken number is refused before the upload, not after 2 GB of it.
+    if let Some(n) = q.number {
+        let pid = project.id;
+        match state.db.call(move |c| number_taken(c, pid, n)).await {
+            Ok(false) => {}
+            Ok(true) => return json_error(StatusCode::CONFLICT, format!("build #{n} exists already")),
+            Err(e) => return json_error(StatusCode::INTERNAL_SERVER_ERROR, format!("{e:#}")),
+        }
+    }
+    if q.check {
+        return Json(json!({"ok": true})).into_response();
+    }
 
     // One upload at a time: each may take 2 GB of disk until it's checked.
     let Ok(_uploading) = state.uploads.clone().try_lock_owned() else {
@@ -241,7 +266,7 @@ async fn upload(
     }
     // The name is taken atomically: a hard link fails if it exists, so two uploads in the same
     // minute from the same commit never share one, and a build never changes.
-    let base = builds::build_name(time::OffsetDateTime::now_utc(), q.branch.trim(), q.commit.trim());
+    let base = builds::build_name(built_at.unwrap_or_else(time::OffsetDateTime::now_utc), q.branch.trim(), q.commit.trim());
     let mut name = base.clone();
     let mut n = 1;
     loop {
@@ -315,9 +340,11 @@ async fn upload(
                 &a.name(),
                 NewRecord {
                     kind: Some(Kind::Build),
+                    number: q.number,
                     title: q.summary.trim().into(),
                     state: Some("published".into()),
                     data,
+                    created_at: built_at.map(|t| (t.unix_timestamp_nanos() / 1_000_000) as i64),
                     ..Default::default()
                 },
             )?;
@@ -349,6 +376,14 @@ async fn upload(
         format!("download it from {}{}", state.config.public_url.trim_end_matches('/'), r.url())
     };
     Json(json!({"id": r.ref_id, "number": r.number, "name": name, "run": run})).into_response()
+}
+
+fn number_taken(c: &Connection, project_id: i64, number: i64) -> anyhow::Result<bool> {
+    Ok(c.query_row(
+        "SELECT count(*) FROM records WHERE project_id = ?1 AND kind = 'build' AND number = ?2",
+        rusqlite::params![project_id, number],
+        |r| r.get::<_, i64>(0),
+    )? > 0)
 }
 
 pub fn notify_build(state: &AppState, project_name: &str, r: &Record) {
