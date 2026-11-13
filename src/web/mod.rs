@@ -3,6 +3,7 @@
 
 pub(crate) mod admin_socket;
 mod api;
+mod sync;
 mod approvals;
 mod assets;
 mod builds;
@@ -150,6 +151,7 @@ pub fn router(state: AppState) -> Router {
         .merge(projects::routes())
         .merge(api::routes())
         .merge(approvals::routes())
+        .merge(sync::routes())
         .merge(buttons::routes())
         .merge(builds::routes())
         .merge(screenshots::routes())

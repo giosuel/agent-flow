@@ -36,6 +36,7 @@ pub mod remote;
 pub mod screenshots;
 pub mod setup;
 pub mod steps;
+pub mod sync;
 pub mod times;
 pub mod tokens;
 pub mod totest;
