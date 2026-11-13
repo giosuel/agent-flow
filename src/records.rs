@@ -322,6 +322,8 @@ pub struct NewRecord {
     pub milestone_id: Option<i64>,
     pub tags: Vec<String>,
     pub data: Map<String, Value>,
+    /// When it happened, if not now: a build moved over from viber-run keeps its build time.
+    pub created_at: Option<i64>,
 }
 
 /// Creates a record with revision 1 and an event. The caller decides who may.
@@ -341,7 +343,7 @@ pub fn create(conn: &Connection, project_id: i64, author: &str, new: NewRecord) 
     }
     let state = new.state.unwrap_or_else(|| kind.states()[0].to_owned());
     kind.check_state(&state)?;
-    let now = now_ms();
+    let now = new.created_at.unwrap_or_else(now_ms);
     let number: i64 = match new.number {
         Some(n) => n,
         None => conn.query_row(
