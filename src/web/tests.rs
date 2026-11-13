@@ -1606,6 +1606,14 @@ async fn answers_make_scoped_decisions_and_releases_bring_their_tag_button() {
     let (_, b) = call("hello", json!({"session": "V", "machine": "m", "model": "o", "effort": "h", "brief": true})).await;
     assert!(b.get("doc").is_none() && b.get("milestones").is_none() && b.get("where").is_some(), "{b}");
     assert!(!call("add_release", json!({"tag": "v1; rm -rf ~", "title": "x"})).await.0);
+    // Its text can be changed later; its tag can't, and other kinds aren't releases.
+    let (ok, u) = call("update_release", json!({"id": r["id"], "body": "Closes M5. Build B-63."})).await;
+    assert!(ok, "{u}");
+    let (_, got) = call("get_record", json!({"id": r["id"]})).await;
+    assert!(got.to_string().contains("Build B-63.") && got.to_string().contains("v0.0.6-m5"), "{got}");
+    assert!(!call("update_release", json!({"id": r["id"]})).await.0);
+    assert!(!call("update_release", json!({"id": r["id"], "title": " "})).await.0);
+    assert!(!call("update_release", json!({"id": "D-1", "body": "x"})).await.0);
     // A question holds a release's tag button until it's answered.
     let rel = r["id"].as_str().unwrap().rsplit('/').next().unwrap().to_owned();
     let (ok, q) = call("ask_question", json!({"title": "Tag name: v0.0.6-m5 or v0.1.0?", "blocks": [rel.clone()]})).await;

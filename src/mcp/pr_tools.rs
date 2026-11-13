@@ -54,6 +54,19 @@ pub struct AddRelease {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct UpdateRelease {
+    /// The release, e.g. "R-1".
+    pub id: String,
+    /// A new title.
+    pub title: Option<String>,
+    /// New notes, in Markdown; replaces the old ones.
+    pub body: Option<String>,
+    /// A line for its history.
+    #[serde(default)]
+    pub note: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct AddButton {
     /// The PR or release, e.g. "PR-58" or "R-3".
     pub record: String,
@@ -277,6 +290,42 @@ impl FlowMcp {
             })
             .await;
         self.finish(&actor, "add_release", Action::Write, outcome).await
+    }
+
+    #[tool(description = "Change a planned release's title or text (its notes, what the tag closes). The tag and the \
+        PRs it waits for stay as planned.")]
+    async fn update_release(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(p): Parameters<UpdateRelease>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let actor = actor_of(&parts);
+        let a = actor.clone();
+        let outcome = self
+            .state
+            .db
+            .call(move |c| {
+                let tx = c.transaction()?;
+                let r = writable(&tx, &a, &p.id)?;
+                if r.kind != Kind::Release {
+                    anyhow::bail!("{} isn't a release", r.ref_id);
+                }
+                if p.title.is_none() && p.body.is_none() {
+                    anyhow::bail!("give a new title or body");
+                }
+                if p.title.as_deref().is_some_and(|t| t.trim().is_empty()) {
+                    anyhow::bail!("a release needs a title");
+                }
+                let patch = records::Patch { title: p.title, body: p.body, note: p.note, ..Default::default() };
+                let (r, _) = records::update(&tx, &r, &a.name(), patch)?;
+                tx.commit()?;
+                Ok(Outcome::new(json!({"id": r.ref_id, "title": r.title}))
+                    .summary(format!("release {} updated", r.short_id()))
+                    .project(r.project.clone())
+                    .target(r.ref_id.clone()))
+            })
+            .await;
+        self.finish(&actor, "update_release", Action::Write, outcome).await
     }
 
     #[tool(
