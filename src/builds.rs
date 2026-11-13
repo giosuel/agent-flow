@@ -100,6 +100,40 @@ pub fn check_commit(commit: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// When an older build (moved over from viber-run) was built: "2026-10-26 10:28", in UTC, and
+/// not after `now`. None when it's left out: the build is from now.
+pub fn built_at(raw: &str, now: time::OffsetDateTime) -> anyhow::Result<Option<time::OffsetDateTime>> {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return Ok(None);
+    }
+    let f = time::macros::format_description!("[year]-[month]-[day] [hour]:[minute]");
+    let t = time::PrimitiveDateTime::parse(raw, &f)
+        .map_err(|_| anyhow::anyhow!("built_at {raw:?}: write it as 2026-10-26 10:28 (UTC)"))?
+        .assume_utc();
+    if t > now {
+        bail!("built_at {raw:?} is in the future");
+    }
+    Ok(Some(t))
+}
+
+/// An older build keeps its number and time; it isn't news, so it has nothing to try (and the
+/// owner isn't notified). A number alone would put a new build among the old ones.
+pub fn check_history(built_at: bool, number: Option<i64>, features: bool) -> anyhow::Result<()> {
+    if let Some(n) = number {
+        if !built_at {
+            bail!("a build's number is only given for an older build, with built_at");
+        }
+        if !(1..=1_000_000).contains(&n) {
+            bail!("number {n}: a build number is 1 or more");
+        }
+    }
+    if built_at && features {
+        bail!("an older build has nothing new to try; leave out the features");
+    }
+    Ok(())
+}
+
 /// Branches and tags are shown and stored, so keep them short and printable.
 pub fn check_label(what: &str, value: &str) -> anyhow::Result<()> {
     if value.len() > 200 || value.chars().any(char::is_control) {
@@ -466,6 +500,24 @@ mod tests {
         assert!(entry_path(out.path(), &m, "app").is_ok());
         assert!(entry_path(out.path(), &m, "extra").is_err(), "not executable");
         assert!(entry_path(out.path(), &m, "../app").is_err());
+    }
+
+    #[test]
+    fn older_builds() {
+        let now = time::macros::datetime!(2026-11-13 09:00 UTC);
+        assert_eq!(built_at("", now).unwrap(), None);
+        assert_eq!(built_at(" 2026-10-26 10:28 ", now).unwrap(), Some(time::macros::datetime!(2026-10-26 10:28 UTC)));
+        assert!(built_at("2026-11-14 10:00", now).is_err());
+        assert!(built_at("26.10.2026", now).is_err());
+        assert!(check_history(true, Some(5), false).is_ok());
+        assert!(check_history(false, Some(5), false).is_err());
+        assert!(check_history(true, Some(0), false).is_err());
+        assert!(check_history(true, None, true).is_err());
+        assert!(check_history(false, None, true).is_ok());
+        assert_eq!(
+            build_name(time::macros::datetime!(2026-10-26 10:28 UTC), "feat/m6.12-text-style", "2925797"),
+            "2026-10-26-1028-m6.12-text-style-2925797"
+        );
     }
 
     #[test]
