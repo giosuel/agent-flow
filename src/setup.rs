@@ -248,8 +248,7 @@ pub fn setup(a: SetupArgs) -> anyhow::Result<()> {
     }
     println!(
         "\nNow, as {agents} (fish works too):\n  systemctl --user daemon-reload; systemctl --user enable --now agentflow-hands\n\
-         Then sign in from your browser with a link (valid 15 minutes):\n  sudo -u agentflow {} --config /etc/agentflow/config.toml admin login-link",
-        bin.display()
+         Then add your first passkey with the link it prints (valid 15 minutes):\n  sudo flow server add-passkey"
     );
     Ok(())
 }

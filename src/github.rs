@@ -104,7 +104,7 @@ async fn pr_query(args: &[&str]) -> anyhow::Result<Vec<u8>> {
     }
 }
 
-/// Every PR of a repository, any state, newest first (for `agentflow admin import-prs`): `gh pr
+/// Every PR of a repository, any state, newest first (for `flow import-prs`): `gh pr
 /// list` as the agents' user, without CI (history doesn't need it).
 pub fn all_prs_blocking(repo: &str, limit: u32) -> anyhow::Result<Vec<PrInfo>> {
     check_repo(repo)?;

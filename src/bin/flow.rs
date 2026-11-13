@@ -19,7 +19,52 @@ struct Args {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Ask the server who your token belongs to.
+    /// Connect this machine to an AgentFlow server: you approve it in the browser (it opens when
+    /// it can; otherwise open the link it shows, e.g. on your phone).
+    Connect {
+        /// The server, e.g. https://flow.example
+        url: String,
+    },
+    /// Disconnect this machine: its token is revoked on the server and removed here.
+    Disconnect,
+    /// The server this machine uses, whether it's reachable, both versions and who you are.
+    Status(cli::ClientArgs),
+    /// Replace this flow with the one the server hands out.
+    Update(cli::ClientArgs),
+    /// Tokens: create (projects, the consultant), list, revoke, rotate. Changes need your approval
+    /// in the browser.
+    Token {
+        #[command(subcommand)]
+        command: TokenCommand,
+        #[command(flatten)]
+        client: cli::ClientArgs,
+    },
+    /// Projects: add (with your approval in the browser), list.
+    Project {
+        #[command(subcommand)]
+        command: ProjectCommand,
+        #[command(flatten)]
+        client: cli::ClientArgs,
+    },
+    /// Back up the server's database now and export every project (with your approval).
+    Backup(cli::ClientArgs),
+    /// Bring a project's older PRs in as records, e.g. `flow import-prs imaginarium 300-374`
+    /// (with your approval).
+    ImportPrs {
+        project: String,
+        /// The PR numbers, e.g. 300-374.
+        range: String,
+        #[command(flatten)]
+        client: cli::ClientArgs,
+    },
+    /// On the server itself: `sudo flow server add-passkey` makes a one-time link to add a passkey,
+    /// when you've lost yours or have none yet.
+    Server {
+        #[command(subcommand)]
+        command: ServerCommand,
+    },
+    /// Who your token belongs to (now part of `flow status`).
+    #[command(hide = true)]
     Whoami(cli::ClientArgs),
     /// Publish a test build for the owner (agents; like viber-run's publish.sh).
     Publish(cli::PublishArgs),
@@ -98,6 +143,58 @@ enum Command {
     },
 }
 
+#[derive(Subcommand)]
+enum TokenCommand {
+    /// Create a token: `project <project>` for a project's agent, or `consultant`.
+    Create {
+        /// project or consultant
+        kind: String,
+        /// The project, for a project token.
+        project: Option<String>,
+        /// What it's for; for a project token, "<project> agent" if left out.
+        #[arg(long)]
+        name: Option<String>,
+        /// Write it to this file (mode 600) instead of printing it.
+        #[arg(long)]
+        file: Option<PathBuf>,
+    },
+    /// Every active token, without its secret.
+    List,
+    /// Revoke a token by its id (from `flow token list`).
+    Revoke { id: i64 },
+    /// Replace a token with a new one and revoke the old.
+    Rotate {
+        id: i64,
+        /// Write the new one to this file (mode 600) instead of printing it.
+        #[arg(long)]
+        file: Option<PathBuf>,
+    },
+}
+
+#[derive(Subcommand)]
+enum ProjectCommand {
+    /// Add a project (its folder and agent come with `flow project setup` there).
+    Add {
+        /// Short name used in record ids and URLs, e.g. "speculum".
+        slug: String,
+        /// Display name, e.g. "Speculum".
+        #[arg(long)]
+        name: String,
+    },
+    /// Every project with its folder.
+    List,
+}
+
+#[derive(Subcommand)]
+enum ServerCommand {
+    /// A one-time link to add a passkey (run as root, or as the server's user, on the server).
+    AddPasskey {
+        /// The server's admin socket, if it isn't in the usual place.
+        #[arg(long)]
+        socket: Option<PathBuf>,
+    },
+}
+
 fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     tracing_subscriber::fmt()
@@ -105,7 +202,30 @@ fn main() -> anyhow::Result<()> {
         .with_writer(std::io::stderr)
         .init();
     let config_path = args.config.unwrap_or_else(agentflow::config::Config::default_path);
+    use agentflow::connect;
     match args.command {
+        Command::Connect { url } => connect::connect(&url),
+        Command::Disconnect => connect::disconnect(&config_path),
+        Command::Status(client) => connect::status(&config_path, &client),
+        Command::Update(client) => connect::update(&config_path, &client),
+        Command::Token { command, client } => match command {
+            TokenCommand::Create { kind, project, name, file } => {
+                if !matches!(kind.as_str(), "project" | "consultant") {
+                    anyhow::bail!("create a `project <project>` or a `consultant` token");
+                }
+                connect::token_create(&config_path, &client, &kind, project.as_deref(), name.as_deref(), file.as_deref())
+            }
+            TokenCommand::List => connect::token_list(&config_path, &client),
+            TokenCommand::Revoke { id } => connect::token_revoke(&config_path, &client, id),
+            TokenCommand::Rotate { id, file } => connect::token_rotate(&config_path, &client, id, file.as_deref()),
+        },
+        Command::Project { command, client } => match command {
+            ProjectCommand::Add { slug, name } => connect::project_add(&config_path, &client, &slug, &name),
+            ProjectCommand::List => connect::project_list(&config_path, &client),
+        },
+        Command::Backup(client) => connect::backup(&config_path, &client),
+        Command::ImportPrs { project, range, client } => connect::import_prs(&config_path, &client, &project, &range),
+        Command::Server { command: ServerCommand::AddPasskey { socket } } => connect::add_passkey(socket.as_deref()),
         Command::Whoami(client) => cli::whoami(&config_path, client),
         Command::Publish(args) => cli::publish(&config_path, args),
         Command::Screenshot(args) => cli::screenshot(&config_path, args),

@@ -295,6 +295,62 @@ pub fn release_ready(c: &Connection, r: &Record) -> anyhow::Result<bool> {
     Ok(true)
 }
 
+/// Brings a project's older PRs (from before AgentFlow) in as PR records, so tasks can link to
+/// them: those of `wanted` that aren't records yet. Returns the PRs added and how many task links
+/// the import made by branch. The agent hears of it in one line, not one per PR.
+pub fn import(
+    c: &mut rusqlite::Connection,
+    p: &crate::projects::Project,
+    repo: &str,
+    wanted: &[crate::github::PrInfo],
+    by: &str,
+) -> anyhow::Result<(Vec<i64>, i64)> {
+    let tx = c.transaction()?;
+    // The agent hears of the import in one line, not one per PR: if it had read all its
+    // news before, the import's own events are marked read too.
+    let caught_up = crate::waiting::unread_count(&tx, p.id, &p.slug)? == 0;
+    let mut added = Vec::new();
+    for info in wanted {
+        let exists = crate::records::try_find(
+            &tx,
+            &crate::records::RecordRef { project: Some(p.slug.clone()), kind: crate::records::Kind::Pr, number: info.number },
+            None,
+        )?
+        .is_some();
+        if !exists {
+            sync(&tx, p, repo, info, "import")?;
+            added.push(info.number);
+        }
+    }
+    if caught_up {
+        let latest: i64 = tx.query_row("SELECT coalesce(max(seq), 0) FROM events", [], |r| r.get(0))?;
+        crate::waiting::set_cursor(&tx, p.id, latest)?;
+    }
+    let linked: i64 = tx.query_row(
+        "SELECT count(*) FROM links l JOIN records r ON r.id = l.from_id
+         WHERE r.project_id = ?1 AND r.kind = 'pr' AND l.relation = 'implements' AND l.author = 'import'",
+        [p.id],
+        |r| r.get(0),
+    )?;
+    if !added.is_empty() {
+        crate::records::event(
+            &tx,
+            Some(p.id),
+            None,
+            "pr.imported",
+            &format!(
+                "{} older PRs imported as records ({}–{}); link tasks to them with link (implements)",
+                added.len(),
+                added.iter().min().unwrap_or(&0),
+                added.iter().max().unwrap_or(&0)
+            ),
+            by,
+        )?;
+    }
+    tx.commit()?;
+    Ok((added, linked))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

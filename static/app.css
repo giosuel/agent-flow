@@ -909,3 +909,7 @@ a.blk.q:hover { text-decoration: underline; }
 .msg-fold > summary { cursor: pointer; list-style: none; }
 .msg-fold > summary::-webkit-details-marker { display: none; }
 .msg-fold[open] > summary { display: none; }
+
+/* Approvals (flow connect, the owner's admin jobs): the code both sides show. */
+.approve { max-width: 640px; }
+.approve-code { font-size: 32px; letter-spacing: 0.08em; color: var(--ink); margin: 4px 0; }
