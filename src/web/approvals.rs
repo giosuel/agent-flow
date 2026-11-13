@@ -34,7 +34,10 @@ pub fn routes() -> Router<AppState> {
 /// Paths anyone may call: asking to connect, polling with the secret only `flow` has, the install
 /// script and the `flow` program with its checksum.
 pub fn is_public(path: &str) -> bool {
-    matches!(path, "/api/approvals" | "/api/approvals/poll" | "/install.sh" | "/download/flow" | "/download/flow.sha256")
+    matches!(
+        path,
+        "/api/approvals" | "/api/approvals/poll" | "/install.sh" | "/download/flow" | "/download/agentflow" | "/download/flow.sha256"
+    )
 }
 
 #[derive(Deserialize)]
@@ -355,7 +358,8 @@ case ":$PATH:" in
   *":$bin:"*) ;;
   *) say "~/.local/bin isn't on your PATH yet. fish: fish_add_path ~/.local/bin   bash: echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> ~/.bashrc" ;;
 esac
-if [ -r /dev/tty ]; then
+# Piped into sh, stdin is the script: connect reads from the terminal, if there is one.
+if (exec </dev/tty) 2>/dev/null; then
   exec "$bin/flow" connect "$url" </dev/tty
 else
   say "Now connect it: flow connect $url"

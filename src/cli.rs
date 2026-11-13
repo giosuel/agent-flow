@@ -48,7 +48,7 @@ pub fn server_url(config_path: &Path, args: &ClientArgs) -> anyhow::Result<Strin
         return Ok(saved.url);
     }
     if !config_path.exists() {
-        bail!("not connected to an AgentFlow server: run `flow connect <server>` (e.g. flow connect https://flow.example)");
+        bail!("not connected to an AgentFlow server: run flow connect <server>, e.g. flow connect https://flow.example");
     }
     Ok(Config::load(config_path)?.public_url)
 }

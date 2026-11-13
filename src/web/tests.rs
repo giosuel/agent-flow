@@ -2513,15 +2513,15 @@ async fn devices_download_flow() {
     std::fs::write(&flow, b"\x7fELF flow").unwrap();
     let f = flow.clone();
     let s = TestServer::start_with(move |c, _| c.flow_bin = f.display().to_string()).await;
-    let res = s.http.get(s.url("/download/flow")).send().await.unwrap();
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
-    let device = s.token(TokenKind::Device, None).await;
+    // Public, like the install script: a machine gets its token only by flow connect.
     for path in ["/download/flow", "/download/agentflow"] {
-        let res = s.http.get(s.url(path)).bearer_auth(&device).send().await.unwrap();
+        let res = s.http.get(s.url(path)).send().await.unwrap();
         assert_eq!(res.status(), StatusCode::OK, "{path}");
         assert!(res.headers()["content-disposition"].to_str().unwrap().contains("\"flow\""));
         assert_eq!(res.bytes().await.unwrap().as_ref(), b"\x7fELF flow", "flow, not the server");
     }
+    let sum = s.http.get(s.url("/download/flow.sha256")).send().await.unwrap().text().await.unwrap();
+    assert_eq!(sum.trim(), crate::builds::sha256_of(&b"\x7fELF flow"[..]).unwrap().0);
 }
 
 /// The owner, 2026-11-12: agents "freely add/edit/delete(archive)" milestones, steps, tasks,

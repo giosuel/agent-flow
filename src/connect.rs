@@ -137,7 +137,7 @@ pub fn status(config_path: &Path, args: &ClientArgs) -> anyhow::Result<()> {
     let url = match server_url(config_path, args) {
         Ok(u) => u,
         Err(e) => {
-            println!("server   not connected ({e:#})");
+            println!("server   {e:#}");
             return Ok(());
         }
     };
