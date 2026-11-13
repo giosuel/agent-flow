@@ -2987,4 +2987,33 @@ async fn a_builders_token_is_only_for_building() {
     crate::blobs::pack_bytes(&[(sha, b"other".to_vec())], &mut bad).unwrap();
     let res = s.http.post(s.url("/api/remote/blobs")).bearer_auth(&agent).body(bad).send().await.unwrap();
     assert_eq!(res.status(), StatusCode::OK, "known already: kept as it was");
+
+    // flow builder list / edit: a connected machine sees it and changes its name and limits; the
+    // token moves with the name.
+    let list: Value = s.http.get(s.url("/api/builders")).bearer_auth(&device).send().await.unwrap().json().await.unwrap();
+    assert!(list["builders"].as_array().unwrap().iter().any(|b| b["name"] == "testbox" && b["kind"] == "daemon"), "{list}");
+    let res = s.http.get(s.url("/api/builders")).bearer_auth(&agent).send().await.unwrap();
+    assert_eq!(res.status(), StatusCode::FORBIDDEN, "not for agents");
+    let res = s
+        .http
+        .patch(s.url("/api/builders/edit/testbox"))
+        .bearer_auth(&device)
+        .json(&json!({"name": "box-2", "min_threads": 6.0, "keep_days": 7}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let res = s.http.post(s.url("/api/builders/blobs")).bearer_auth(&token).json(&json!({"shas": []})).send().await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK, "the token works under the new name");
+    let (n, t, k): (String, f64, i64) = s
+        .db
+        .call(|c| Ok(c.query_row("SELECT b.name, b.min_threads, b.keep_days FROM build_servers b JOIN tokens t ON t.name = b.name AND t.kind = 'builder'", [], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?))
+        .await
+        .unwrap();
+    assert_eq!((n.as_str(), t, k), ("box-2", 6.0, 7));
+    // flow builder remove, on the builder: it leaves and its token stops working.
+    let res = s.http.delete(s.url("/api/builders/self")).bearer_auth(&token).send().await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let res = s.http.post(s.url("/api/builders/blobs")).bearer_auth(&token).json(&json!({"shas": []})).send().await.unwrap();
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }

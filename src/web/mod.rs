@@ -154,6 +154,7 @@ pub fn router(state: AppState) -> Router {
         .merge(approvals::routes())
         .merge(sync::routes())
         .merge(builders::routes())
+        .merge(builders::admin_routes())
         .merge(buttons::routes())
         .merge(builds::routes())
         .merge(screenshots::routes())

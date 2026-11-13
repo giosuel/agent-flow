@@ -88,6 +88,17 @@ impl Client {
         if self.token.is_empty() { r } else { r.bearer_auth(&self.token) }
     }
 
+    /// Sends JSON with any method and returns the JSON answer.
+    pub fn request_json(&self, method: reqwest::Method, path: &str, body: &serde_json::Value) -> anyhow::Result<serde_json::Value> {
+        let res = self.request(method, path).json(body).send()?;
+        let status = res.status();
+        let body: serde_json::Value = res.json().unwrap_or(serde_json::Value::Null);
+        if !status.is_success() {
+            bail!("{status}: {}", body.get("error").and_then(|e| e.as_str()).unwrap_or("request failed"));
+        }
+        Ok(body)
+    }
+
     pub fn delete(&self, path: &str) -> anyhow::Result<serde_json::Value> {
         let res = self.request(reqwest::Method::DELETE, path).send()?;
         let status = res.status();
