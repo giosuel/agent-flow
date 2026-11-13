@@ -1,7 +1,9 @@
 //! The HTTP server: the owner's pages, the JSON API, and the MCP endpoint, all behind one
 //! authentication step.
 
+pub(crate) mod admin_socket;
 mod api;
+mod approvals;
 mod assets;
 mod builds;
 pub mod outgoing;
@@ -147,6 +149,7 @@ pub fn router(state: AppState) -> Router {
         .merge(settings::routes())
         .merge(projects::routes())
         .merge(api::routes())
+        .merge(approvals::routes())
         .merge(buttons::routes())
         .merge(builds::routes())
         .merge(screenshots::routes())
@@ -195,6 +198,8 @@ pub async fn serve(state: AppState) -> anyhow::Result<()> {
     crate::machine::spawn_sampler(state.clone());
     crate::remote::spawn(state.clone());
     spawn_archiver(state.clone());
+    admin_socket::spawn(state.clone());
+    admin_socket::first_start_link(&state).await;
     let app = router(state).into_make_service_with_connect_info::<SocketAddr>();
     axum::serve(listener, app).with_graceful_shutdown(shutdown_signal()).await?;
     Ok(())
@@ -298,7 +303,11 @@ async fn shutdown_signal() {
 
 /// Paths anyone may load: the sign-in pages and what they need to render.
 fn is_public(path: &str) -> bool {
-    path == "/login" || path.starts_with("/login/") || assets::is_asset(path) || pwa::is_public(path)
+    path == "/login"
+        || path.starts_with("/login/")
+        || assets::is_asset(path)
+        || pwa::is_public(path)
+        || approvals::is_public(path)
 }
 
 /// Pages and API calls that don't get a row of their own in the activity log. MCP tool calls log
@@ -449,7 +458,13 @@ fn wants_html(headers: &HeaderMap) -> bool {
 
 fn unauthenticated(path: &str, html: bool) -> Response {
     if html && !path.starts_with("/api/") && !path.starts_with("/mcp") {
-        return Redirect::to("/login").into_response();
+        // Back to the page after signing in, e.g. an approval link opened on the phone.
+        let plain = path.chars().all(|c| c.is_ascii_alphanumeric() || "/-_.".contains(c));
+        return if plain && path != "/" && !path.starts_with("//") {
+            Redirect::to(&format!("/login?next={path}")).into_response()
+        } else {
+            Redirect::to("/login").into_response()
+        };
     }
     let mut res =
         (StatusCode::UNAUTHORIZED, axum::Json(serde_json::json!({"error": "sign in or send a token"}))).into_response();

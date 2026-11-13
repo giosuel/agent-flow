@@ -218,7 +218,8 @@ pub fn finish(c: &Connection, id: i64, outcome: &anyhow::Result<Value>) -> anyho
 /// What flow sees when it polls: the state, and once approved, the result (handed out once).
 pub fn poll(c: &Connection, secret: &str) -> anyhow::Result<Option<Value>> {
     expire(c)?;
-    let found: Option<(i64, String, Option<String>, Option<String>, Option<i64>)> = c
+    type Polled = (i64, String, Option<String>, Option<String>, Option<i64>);
+    let found: Option<Polled> = c
         .query_row(
             "SELECT id, state, result, error, fetched_at FROM approvals WHERE poll_hash = ?1",
             [hash_secret(secret)],
