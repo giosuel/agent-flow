@@ -252,17 +252,17 @@ async fn link_use(
     let session = state
         .db
         .call(move |c| {
-            let Some(_purpose) = auth::consume_login_link(c, &secret)? else { return Ok(None) };
-            Ok(Some(auth::create_session(c, "link", &limits, ua.as_deref(), Some(&ip2))?))
+            let Some(purpose) = auth::consume_login_link(c, &secret)? else { return Ok(None) };
+            Ok(Some((purpose, auth::create_session(c, "link", &limits, ua.as_deref(), Some(&ip2))?)))
         })
         .await?;
-    let Some(session) = session else {
+    let Some((purpose, session)) = session else {
         let e = Entry::new(&Actor::Anonymous, Via::Page, Action::Denied, "sign-in link unknown, used or expired")
             .ip(Some(ip));
         activity::write(&state.db, e).await;
         let page = LoginPage::new(
             None,
-            Some("This link has expired or was already used. Run `agentflow admin login-link` on the server for a new one.".into()),
+            Some("This link has expired or was already used. Run `sudo flow server add-passkey` on the server for a new one.".into()),
         );
         return Ok((StatusCode::GONE, Html(page.render()?)).into_response());
     };
@@ -270,7 +270,9 @@ async fn link_use(
         Entry::new(&Actor::Anonymous, Via::Page, Action::Login, "owner signed in with a one-time link").ip(Some(ip));
     activity::write(&state.db, e).await;
     let jar = jar.add(session_cookie(&state, session));
-    Ok((jar, Redirect::to("/")).into_response())
+    // A link from `flow server add-passkey` (or the first start) leads straight to adding one.
+    let to = if purpose == super::admin_socket::PURPOSE { "/settings?add_passkey=1#passkeys" } else { "/" };
+    Ok((jar, Redirect::to(to)).into_response())
 }
 
 fn session_cookie(state: &AppState, value: String) -> Cookie<'static> {

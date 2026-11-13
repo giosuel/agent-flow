@@ -10,6 +10,8 @@ use serde::Deserialize;
 use crate::util::expand_home;
 
 pub const SYSTEM_PATH: &str = "/etc/agentflow/config.toml";
+/// A system install's socket for `sudo flow server add-passkey` (systemd's RuntimeDirectory).
+pub const SYSTEM_ADMIN_SOCKET: &str = "/run/agentflow/admin.sock";
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -30,6 +32,9 @@ pub struct Config {
     pub handbook_dir: String,
     /// That repository on GitHub, for its pull requests and links.
     pub handbook_repo: String,
+    /// The socket for `sudo flow server add-passkey`; empty: `$XDG_RUNTIME_DIR/agentflow/admin.sock`
+    /// for a user install, `/run/agentflow/admin.sock` otherwise.
+    pub admin_socket: String,
     /// The `flow` program the server hands out for download and writes into hooks; empty: the one
     /// installed next to the server.
     pub flow_bin: String,
@@ -113,6 +118,7 @@ impl Default for Config {
             handbook_dir: "~/ai-handbook".into(),
             handbook_repo: "giosuel/ai-handbook".into(),
             flow_bin: String::new(),
+            admin_socket: String::new(),
             git_author: "giosuel <me@giosuel.ch>".into(),
             github_writes: true,
             trusted_proxies: vec!["127.0.0.1".parse().unwrap(), "::1".parse().unwrap()],
@@ -189,6 +195,16 @@ impl Config {
 
     pub fn token_dir(&self) -> PathBuf {
         expand_home(&self.token_dir)
+    }
+
+    pub fn admin_socket(&self) -> PathBuf {
+        if !self.admin_socket.is_empty() {
+            return expand_home(&self.admin_socket);
+        }
+        match std::env::var_os("XDG_RUNTIME_DIR") {
+            Some(d) if !d.is_empty() => PathBuf::from(d).join("agentflow").join("admin.sock"),
+            _ => PathBuf::from(SYSTEM_ADMIN_SOCKET),
+        }
     }
 
     /// The `flow` program: as configured, else next to the server.
