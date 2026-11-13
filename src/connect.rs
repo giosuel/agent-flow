@@ -353,3 +353,178 @@ pub fn add_passkey(socket: Option<&Path>) -> anyhow::Result<()> {
     }
     bail!("couldn't reach the server's socket: {} (run it with sudo)", tried.join("; "))
 }
+
+/// Asks a question on the terminal; Enter takes the default.
+fn ask(question: &str, default: &str) -> anyhow::Result<String> {
+    use std::io::BufRead;
+    if default.is_empty() {
+        eprint!("{question}: ");
+    } else {
+        eprint!("{question} [{default}]: ");
+    }
+    std::io::stderr().flush()?;
+    let mut line = String::new();
+    std::io::stdin().lock().read_line(&mut line)?;
+    let line = line.trim();
+    Ok(if line.is_empty() { default.to_owned() } else { line.to_owned() })
+}
+
+/// Reads a line without showing it (the setup code).
+fn ask_hidden(question: &str) -> anyhow::Result<String> {
+    use rustix::termios::{LocalModes, OptionalActions, tcgetattr, tcsetattr};
+    let stdin = std::io::stdin();
+    let before = tcgetattr(&stdin).ok();
+    if let Some(t) = &before {
+        let mut quiet = t.clone();
+        quiet.local_modes.remove(LocalModes::ECHO);
+        let _ = tcsetattr(&stdin, OptionalActions::Now, &quiet);
+    }
+    let got = ask(question, "");
+    if let Some(t) = &before {
+        let _ = tcsetattr(&stdin, OptionalActions::Now, t);
+        eprintln!();
+    }
+    got
+}
+
+/// The GitHub repository of a folder's `origin`, as owner/name, if it's on GitHub.
+fn github_repo(folder: &Path) -> Option<String> {
+    let out = std::process::Command::new("git").arg("-C").arg(folder).args(["remote", "get-url", "origin"]).output().ok()?;
+    let url = String::from_utf8_lossy(&out.stdout).trim().to_owned();
+    let rest = url
+        .strip_prefix("https://github.com/")
+        .or_else(|| url.strip_prefix("git@github.com:"))
+        .or_else(|| url.strip_prefix("ssh://git@github.com/"))?;
+    let repo = rest.trim_end_matches('/').trim_end_matches(".git").to_owned();
+    crate::projects::looks_like_repo(&repo).then_some(repo)
+}
+
+/// "speculum-tool" → "Speculum Tool"
+fn title_of(name: &str) -> String {
+    name.split(['-', '_', ' '])
+        .filter(|w| !w.is_empty())
+        .map(|w| {
+            let mut c = w.chars();
+            c.next().map(|f| f.to_uppercase().collect::<String>() + c.as_str()).unwrap_or_default()
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// `flow project setup [folder]` (the owner, 2026-11-13): sets a project up in this folder (or the
+/// one given), with a setup code from its page, or, with none, creates it (with the owner's
+/// approval). Writes the folder's git repository, the project's token, the agent's first memory
+/// note and its Claude Code setup, tells the server where it lies, and sends the folder's earlier
+/// conversations once. Running it again changes nothing that's there and sends nothing twice.
+pub fn project_setup(
+    config_path: &Path,
+    args: &ClientArgs,
+    folder: Option<PathBuf>,
+    code: Option<String>,
+    name: Option<String>,
+) -> anyhow::Result<()> {
+    use std::io::IsTerminal;
+    let cwd = std::env::current_dir()?;
+    let folder = match folder {
+        Some(f) if f.is_absolute() => f,
+        Some(f) => cwd.join(f),
+        None => cwd,
+    };
+    let home = crate::util::home_dir();
+    if folder == home || [".config", ".claude", ".local", ".ssh"].iter().any(|d| folder.starts_with(home.join(d))) {
+        bail!("{} can't be a project's folder; use one of its own, e.g. ~/speculum", folder.display());
+    }
+    let interactive = std::io::stdin().is_terminal();
+    // Set up before: refresh what's there, with the token it has; nothing new is created.
+    if code.is_none()
+        && let Some((url, token)) = existing_setup(&folder)
+        && let Ok(st) = Client::with_token(&url, &token).get("/api/status")
+        && st["who"]["kind"] == "project"
+    {
+        let slug = s(&st["who"]["name"]);
+        println!("{} is set up already as {slug} on {url}; refreshing its setup.", folder.display());
+        return finish_setup(&folder, &url, &slug, &slug, &token, &machine_name());
+    }
+    let code = match code {
+        Some(c) => c,
+        None if interactive => ask_hidden("Setup code (or press Enter to create a new project)")?,
+        None => String::new(),
+    };
+    let machine = machine_name();
+    let (url, slug, project_name, token) = if !code.trim().is_empty() {
+        let url = match &args.url {
+            Some(u) => u.clone(),
+            None => server_url(config_path, args).context("which server? pass --url <server> (the page shows the command)")?,
+        };
+        let got = Client::anonymous(&url).post_json("/api/setup/redeem", &json!({"code": code.trim(), "machine": machine}))?;
+        (url, s(&got["project"]), s(&got["name"]), s(&got["token"]))
+    } else {
+        let client = Client::new(config_path, args).context("creating a project needs a connected machine: flow connect <server> first")?;
+        let base = folder.file_name().and_then(|n| n.to_str()).unwrap_or("project");
+        let default = title_of(base);
+        let project_name = match name {
+            Some(n) => n,
+            None if interactive => ask(&format!("New project \"{}\": name", crate::onboard::slug_for(&default)), &default)?,
+            None => default,
+        };
+        let slug = crate::onboard::slug_for(&project_name);
+        let repo = github_repo(&folder).unwrap_or_default();
+        let got = approve(
+            &client,
+            "project_create",
+            json!({"name": project_name, "slug": slug, "folder": folder.display().to_string(), "repo": repo}),
+        )?;
+        eprintln!("  ✓ approved");
+        (client.base.clone(), s(&got["project"]), s(&got["name"]), s(&got["token"]))
+    };
+    if token.is_empty() || slug.is_empty() {
+        bail!("the server sent no project or token");
+    }
+    println!("{project_name} ({slug}) on {url}");
+    finish_setup(&folder, &url, &slug, &project_name, &token, &machine)
+}
+
+/// The token file and server a folder's setup names (`.claude/settings.local.json`).
+fn existing_setup(folder: &Path) -> Option<(String, String)> {
+    let text = std::fs::read_to_string(folder.join(".claude/settings.local.json")).ok()?;
+    let v: Value = serde_json::from_str(&text).ok()?;
+    let token_file = v["env"]["AGENTFLOW_TOKEN_FILE"].as_str()?;
+    let url = v["env"]["AGENTFLOW_URL"].as_str()?.to_owned();
+    let token = std::fs::read_to_string(token_file).ok()?.trim().to_owned();
+    (!token.is_empty()).then_some((url, token))
+}
+
+/// The local part of a setup: folder, git, token file, first note, Claude Code setup; then where
+/// it lies, and the folder's earlier conversations (only what the server doesn't have yet).
+fn finish_setup(folder: &Path, url: &str, slug: &str, project_name: &str, token: &str, machine: &str) -> anyhow::Result<()> {
+    let p = crate::onboard::NewProject { name: project_name.to_owned(), slug: slug.to_owned(), ..Default::default() };
+    let token_dir = expand_home("~/.config/agentflow/tokens");
+    let outcome = crate::onboard::create_files(&p, folder, token, &token_dir, &crate::sync::transcripts_root(), url)?;
+    for step in &outcome.steps {
+        println!("  ✓ {step}");
+    }
+    let client = Client::with_token(url, token);
+    client.post_json("/api/setup/done", &json!({"folder": folder.display().to_string(), "machine": machine}))?;
+    let (n, _) = crate::sync::session_count(folder);
+    if n > 0 {
+        let files = crate::sync::conversations(folder);
+        let calls = crate::sync::send(&client.with_timeout(Duration::from_secs(300)), &files)?;
+        let plural = if n == 1 { "conversation" } else { "conversations" };
+        if calls > 0 {
+            println!("  ✓ sent the folder's {n} earlier {plural} to AgentFlow ({calls} calls it didn't have)");
+        } else {
+            println!("  ✓ AgentFlow has the folder's {n} earlier {plural} already");
+        }
+        println!();
+        println!("This folder already has {n} Claude Code conversation{}.", if n == 1 { "" } else { "s" });
+        println!("If its agent keeps the project's plans, decisions or tasks in its own files,");
+        println!("you can now tell it to move them into AgentFlow.");
+    }
+    println!();
+    println!("The project has been set up.");
+    Ok(())
+}
+
+fn s(v: &Value) -> String {
+    v.as_str().unwrap_or("").to_owned()
+}

@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Set up {{ name }}{% endblock %}
+{% block content %}
+<div class="head"><h1>Set up {{ name }} on a machine</h1></div>
+<section class="card pad stack approve" aria-labelledby="setup-code">
+  <p class="sub">On the machine where its agent will run, as the user who'll run it:</p>
+  <ol class="steps-list stack-sm">
+    <li><p class="sub">Install <span class="mono">flow</span>, once per machine (it asks for your approval here):</p>
+      <pre class="cmd mono">curl -fsSL {{ public_url }}/install.sh | sh</pre></li>
+    <li><p class="sub">In the project's folder (made if it doesn't exist):</p>
+      <pre class="cmd mono">mkdir -p ~/{{ slug }} && cd ~/{{ slug }} && flow project setup --url {{ public_url }}</pre></li>
+    <li><p class="sub">When it asks, paste the setup code. It works once, for {{ minutes }} minutes:</p>
+      <p class="approve-code mono" id="setup-code">{{ code }}</p></li>
+  </ol>
+  <p class="sub">Then start the agent there with <span class="mono">claude</span>. The first time, Claude Code asks whether you trust the folder: say yes once.</p>
+  <p><a href="/p/{{ slug }}">Back to {{ name }}</a></p>
+</section>
+{% endblock %}

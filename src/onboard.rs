@@ -9,7 +9,7 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, bail};
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 
 use crate::auth::{self, TokenKind};
 use crate::projects::{self, NewMilestone, ProjectPatch};
@@ -122,14 +122,22 @@ impl Taken {
     }
 }
 
-/// The database part: project, details, M0, token. Returns the token's secret.
-pub fn create_records(c: &mut Connection, p: &NewProject, folder: &Path) -> anyhow::Result<(i64, String)> {
+/// The database part: project, details, M0, token. Returns the token's secret. Without a folder
+/// (created on the page, set up later with `flow project setup`), the folder and machine come
+/// when it's set up.
+pub fn create_records(
+    c: &mut Connection,
+    p: &NewProject,
+    folder: Option<&Path>,
+    machine: Option<&str>,
+    with_token: bool,
+) -> anyhow::Result<(i64, Option<String>)> {
     let tx = c.transaction()?;
     let project = projects::create(&tx, &p.slug, p.name.trim(), "owner")?;
     let patch = ProjectPatch {
         description: Some(p.description.clone()),
-        checkout: Some(folder.display().to_string()),
-        machine: Some(crate::machine::hostname()),
+        checkout: folder.map(|f| f.display().to_string()),
+        machine: machine.map(str::to_owned),
         model: Some(p.model.clone()),
         effort: Some(p.effort.clone()),
         ..Default::default()
@@ -152,9 +160,65 @@ pub fn create_records(c: &mut Connection, p: &NewProject, folder: &Path) -> anyh
         &NewMilestone { name: "M0", title: "Getting started", description: "", parent: None, before: None },
         "owner",
     )?;
-    let (_, secret) = auth::create_token(&tx, TokenKind::Project, p.name.trim(), Some(&p.slug))?;
+    let secret = match with_token {
+        true => Some(auth::create_token(&tx, TokenKind::Project, p.name.trim(), Some(&p.slug))?.1),
+        // Set up later: the setup code brings the token.
+        false => None,
+    };
     tx.commit()?;
     Ok((project.id, secret))
+}
+
+/// How long a setup code works.
+pub const SETUP_CODE_MINUTES: i64 = 15;
+
+/// A setup code for a project: what the page shows for `flow project setup` on a machine (the
+/// owner, 2026-11-13). It's traded once for the project's token, so it's long enough not to be
+/// guessed: twelve characters without look-alikes, about 59 bits, valid 15 minutes.
+pub fn new_setup_code(c: &Connection, project_id: i64) -> anyhow::Result<String> {
+    const ALPHABET: &[u8] = b"ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+    let raw = crate::util::random_bytes::<12>();
+    let s: String = raw.iter().map(|b| ALPHABET[*b as usize % ALPHABET.len()] as char).collect();
+    let code = format!("{}-{}-{}", &s[..4], &s[4..8], &s[8..]);
+    let now = crate::util::now_ms();
+    c.execute(
+        "INSERT INTO setup_codes (hash, project_id, created_at, expires_at) VALUES (?1, ?2, ?3, ?4)",
+        rusqlite::params![crate::util::hash_secret(&code), project_id, now, now + SETUP_CODE_MINUTES * 60_000],
+    )?;
+    Ok(code)
+}
+
+/// Trades a setup code for a new token of its project (once). Returns the project and the token.
+pub fn redeem_setup_code(c: &mut Connection, code: &str, machine: &str) -> anyhow::Result<(projects::Project, String)> {
+    let code = code.trim().to_uppercase();
+    let tx = c.transaction()?;
+    let now = crate::util::now_ms();
+    let found: Option<i64> = tx
+        .query_row(
+            "UPDATE setup_codes SET used_at = ?1, used_by = ?2 WHERE hash = ?3 AND used_at IS NULL AND expires_at > ?1
+             RETURNING project_id",
+            rusqlite::params![now, machine, crate::util::hash_secret(&code)],
+            |r| r.get(0),
+        )
+        .optional()?;
+    let Some(project_id) = found else { bail!("that setup code is unknown, used or expired; make a new one on the project's page") };
+    let p = projects::get_by_id(&tx, project_id)?;
+    let (_, secret) = auth::create_token(&tx, TokenKind::Project, &format!("{} on {machine}", p.name), Some(&p.slug))?;
+    tx.commit()?;
+    Ok((p, secret))
+}
+
+/// The project is set up in this folder on this machine (what `flow project setup` reports).
+pub fn mark_set_up(c: &Connection, project_id: i64, folder: &str, machine: &str) -> anyhow::Result<()> {
+    let folder = folder.trim();
+    if folder.is_empty() || !folder.starts_with('/') || folder.len() > 500 || folder.chars().any(char::is_control) {
+        bail!("the folder must be an absolute path");
+    }
+    crate::approvals::check_machine(machine)?;
+    let host = machine.rsplit('@').next().unwrap_or(machine);
+    let patch = ProjectPatch { checkout: Some(folder.to_owned()), machine: Some(host.to_owned()), ..Default::default() };
+    projects::update(c, project_id, &patch, "flow project setup")?;
+    Ok(())
 }
 
 /// The files: the folder and its git repository (an existing one is left as it is), the token
@@ -244,6 +308,10 @@ pub fn hook_commands(token_file: &Path, name: &str, public_url: &str) -> Vec<(&'
             vec![format!("{bin} hello --doc --token-file {tf}"), format!("{bin} hello --no-doc --session {session} --token-file {tf}")],
         ),
         ("UserPromptSubmit", vec![format!("{bin} news --token-file {tf}")]),
+        // The conversations reach AgentFlow from wherever the project lies (the owner, 2026-11-13).
+        ("Stop", vec![format!("{bin} sync --token-file {tf}")]),
+        ("SubagentStop", vec![format!("{bin} sync --token-file {tf}")]),
+        ("SessionEnd", vec![format!("{bin} sync --token-file {tf}")]),
     ]
 }
 
@@ -278,7 +346,7 @@ fn is_ours(command: &str) -> bool {
     let name = Path::new(program).file_name().and_then(|n| n.to_str()).unwrap_or("");
     matches!(name, "agentflow" | "flow")
         && command.contains("--token-file")
-        && (command.contains(" hello ") || command.contains(" news "))
+        && (command.contains(" hello ") || command.contains(" news ") || command.contains(" sync "))
 }
 
 fn settings_path(folder: &Path) -> PathBuf {
@@ -374,7 +442,7 @@ pub fn write_setup(folder: &Path, token_file: &Path, name: &str, public_url: &st
     env.insert("AGENTFLOW_URL".into(), public_url.trim_end_matches('/').into());
     write_json(&path, settings)?;
     did.push(format!(
-        "in {}: the hooks (hello on every start, resume, /clear and compaction; the news before each of your prompts), the server approved, and AGENTFLOW_TOKEN_FILE and AGENTFLOW_URL for its `flow` commands{}",
+        "in {}: the hooks (hello on every start, resume, /clear and compaction; the news before each of your prompts; the conversations sent after each reply), the server approved, and AGENTFLOW_TOKEN_FILE and AGENTFLOW_URL for its `flow` commands{}",
         path.display(),
         keep_out_of_git(folder, ".claude/settings.local.json")?
     ));
@@ -469,7 +537,7 @@ mod tests {
         assert!(is_ours("/home/v/.local/bin/flow news --token-file /t"));
         assert!(is_ours("flow hello --no-doc --session X --token-file /t"));
         assert!(!is_ours("/usr/bin/notflow hello --token-file /t"));
-        assert!(!is_ours("/home/v/.local/bin/flow sync --token-file /t"));
+        assert!(is_ours("/home/v/.local/bin/flow sync --token-file /t"));
         assert!(!is_ours("echo agentflow hello --token-file"));
     }
 
@@ -481,7 +549,8 @@ mod tests {
         let p = NewProject { name: "Speculum".into(), slug: "speculum".into(), ..Default::default() };
         let db = crate::db::Db::open_memory();
         let f = folder.clone();
-        let (id, secret) = db.call_blocking(move |c| create_records(c, &p, &f)).unwrap();
+        let (id, secret) = db.call_blocking(move |c| create_records(c, &p, Some(&f), Some("box"), true)).unwrap();
+        let secret = secret.unwrap();
         let p = NewProject { name: "Speculum".into(), slug: "speculum".into(), ..Default::default() };
         let out = create_files(
             &p,

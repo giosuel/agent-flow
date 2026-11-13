@@ -116,6 +116,17 @@ pub fn ready_in_order(o: &Ordered) -> Result<(), String> {
     Ok(())
 }
 
+/// A release's tag through GitHub's API (the owner, 2026-11-13: the server needs no project
+/// folder): an annotated tag `tag` on main's newest commit. Tag and repository are checked values
+/// (letters, digits and `._-+`; owner/name).
+pub fn tag_command(repo: &str, tag: &str) -> String {
+    format!(
+        "sha=$(gh api repos/{repo}/git/ref/heads/main --jq .object.sha) && \\\n\
+         obj=$(gh api -X POST repos/{repo}/git/tags -f tag={tag} -f message={tag} -f object=\"$sha\" -f type=commit --jq .sha) && \\\n\
+         gh api -X POST repos/{repo}/git/refs -f ref=refs/tags/{tag} -f sha=\"$obj\" --jq .ref"
+    )
+}
+
 /// The command a PR's Merge button runs: the project's merge method, deleting the branch so
 /// GitHub moves the next PR of a stack onto main.
 pub fn merge_command(repo: &str, number: i64, method: &str) -> String {

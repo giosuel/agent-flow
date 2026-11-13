@@ -12,10 +12,10 @@ use crate::util::expand_home;
 #[derive(Args, Default)]
 pub struct ClientArgs {
     /// The server, e.g. https://flow.giosuel.io (default: the config's public_url).
-    #[arg(long, env = "AGENTFLOW_URL")]
+    #[arg(long, env = "AGENTFLOW_URL", global = true)]
     pub url: Option<String>,
     /// File holding your token (default: ~/.config/agentflow/token).
-    #[arg(long, env = "AGENTFLOW_TOKEN_FILE")]
+    #[arg(long, env = "AGENTFLOW_TOKEN_FILE", global = true)]
     pub token_file: Option<PathBuf>,
 }
 
@@ -67,6 +67,11 @@ impl Client {
         let token = read_token(&token_file)?;
         let http = reqwest::blocking::Client::builder().timeout(std::time::Duration::from_secs(30)).build()?;
         Ok(Self { base: base.trim_end_matches('/').to_owned(), token, http })
+    }
+
+    /// A client with a token in hand (one `flow project setup` just got).
+    pub fn with_token(base: &str, token: &str) -> Self {
+        Self { token: token.to_owned(), ..Self::anonymous(base) }
     }
 
     /// A client without a token: asking to connect, polling, downloading `flow`.

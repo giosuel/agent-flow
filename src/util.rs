@@ -147,7 +147,7 @@ pub fn parse_day_or_time(s: &str) -> anyhow::Result<i64> {
 /// (2026-11-13). The server forwards them for one release.
 pub const MOVED_TO_FLOW: &[&str] = &[
     "whoami", "publish", "screenshot", "contribute", "remote", "time", "note", "run", "hello", "news", "wait",
-    "mcp-headers",
+    "mcp-headers", "sync",
 ];
 
 /// The `flow` program: next to this one (they're installed together), else the one on PATH.

@@ -28,6 +28,8 @@ pub fn routes() -> Router<AppState> {
         .route("/api/projects", get(projects))
         .route("/api/tokens/self", axum::routing::delete(revoke_self))
         .route("/install.sh", get(install_script))
+        .route("/api/setup/redeem", post(redeem))
+        .route("/api/setup/done", post(set_up))
         .route("/download/flow.sha256", get(flow_sum))
 }
 
@@ -36,7 +38,7 @@ pub fn routes() -> Router<AppState> {
 pub fn is_public(path: &str) -> bool {
     matches!(
         path,
-        "/api/approvals" | "/api/approvals/poll" | "/install.sh" | "/download/flow" | "/download/agentflow" | "/download/flow.sha256"
+        "/api/approvals" | "/api/approvals/poll" | "/api/setup/redeem" | "/install.sh" | "/download/flow" | "/download/agentflow" | "/download/flow.sha256"
     )
 }
 
@@ -237,6 +239,57 @@ async fn carry_out(state: &AppState, a: &Approval) -> anyhow::Result<Value> {
     let data = state.config.data_dir();
     let a = a.clone();
     state.db.call(move |c| approvals::execute(c, &a, &data)).await
+}
+
+#[derive(Deserialize)]
+struct RedeemBody {
+    code: String,
+    machine: String,
+}
+
+/// `flow project setup` with a setup code from the page: the code, once, for a new token of its
+/// project. Public: the code is the proof (about 59 bits, 15 minutes, once).
+async fn redeem(
+    State(state): State<AppState>,
+    Extension(ClientIp(ip)): Extension<ClientIp>,
+    Json(b): Json<RedeemBody>,
+) -> Response {
+    let machine = match approvals::check_machine(&b.machine) {
+        Ok(m) => m,
+        Err(e) => return json_error(StatusCode::BAD_REQUEST, format!("{e:#}")),
+    };
+    let m2 = machine.clone();
+    match state.db.call(move |c| crate::onboard::redeem_setup_code(c, &b.code, &m2)).await {
+        Ok((p, token)) => {
+            let e = Entry::new(&Actor::Anonymous, Via::Api, Action::Write, format!("setup code used for {} on {machine}", p.slug))
+                .project(p.slug.clone())
+                .ip(Some(ip));
+            activity::write(&state.db, e).await;
+            Json(json!({"project": p.slug, "name": p.name, "token": token})).into_response()
+        }
+        Err(e) => {
+            let e2 = Entry::new(&Actor::Anonymous, Via::Api, Action::Denied, format!("setup code refused: {e:#}")).ip(Some(ip));
+            activity::write(&state.db, e2).await;
+            json_error(StatusCode::FORBIDDEN, format!("{e:#}"))
+        }
+    }
+}
+
+#[derive(Deserialize)]
+struct DoneBody {
+    folder: String,
+    machine: String,
+}
+
+/// `flow project setup` reports where the project now lies.
+async fn set_up(State(state): State<AppState>, Extension(actor): Extension<Actor>, Json(b): Json<DoneBody>) -> Response {
+    let Actor::Project { project_id, .. } = actor else {
+        return json_error(StatusCode::FORBIDDEN, "this needs the project's token");
+    };
+    match state.db.call(move |c| crate::onboard::mark_set_up(c, project_id, &b.folder, &b.machine)).await {
+        Ok(()) => Json(json!({"ok": true})).into_response(),
+        Err(e) => json_error(StatusCode::BAD_REQUEST, format!("{e:#}")),
+    }
 }
 
 /// `flow status`: the server's version, and who the token belongs to.
