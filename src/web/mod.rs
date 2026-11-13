@@ -3,6 +3,7 @@
 
 pub(crate) mod admin_socket;
 mod api;
+pub(crate) mod consultant;
 pub(crate) mod builders;
 mod sync;
 mod approvals;
@@ -155,6 +156,7 @@ pub fn router(state: AppState) -> Router {
         .merge(sync::routes())
         .merge(builders::routes())
         .merge(builders::admin_routes())
+        .merge(consultant::routes())
         .merge(buttons::routes())
         .merge(builds::routes())
         .merge(screenshots::routes())
@@ -212,6 +214,7 @@ pub async fn serve(state: AppState) -> anyhow::Result<()> {
     crate::remote::spawn(state.clone());
     spawn_archiver(state.clone());
     admin_socket::spawn(state.clone());
+    consultant::spawn_watchdog(state.clone());
     admin_socket::first_start_link(&state).await;
     let app = router(state).into_make_service_with_connect_info::<SocketAddr>();
     axum::serve(listener, app).with_graceful_shutdown(shutdown_signal()).await?;
