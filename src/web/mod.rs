@@ -195,7 +195,11 @@ pub async fn serve(state: AppState) -> anyhow::Result<()> {
         tracing::info!("removed {swept} unfinished build upload(s)");
     }
     crate::poller::spawn(state.clone());
-    spawn_usage(state.clone());
+    if state.config.local_transcripts {
+        spawn_usage(state.clone());
+    } else {
+        tracing::info!("conversations come by flow sync (local_transcripts is off)");
+    }
     crate::backup::spawn(state.clone());
     crate::machine::spawn_sampler(state.clone());
     crate::remote::spawn(state.clone());

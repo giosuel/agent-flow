@@ -52,6 +52,10 @@ pub struct Config {
     pub build_free_gb: u64,
     /// Claude Code's transcripts, read for token usage.
     pub transcripts_dir: String,
+    /// Also read every Claude Code transcript on this machine (`transcripts_dir`), as before the
+    /// decoupling (the owner, 2026-11-13). Off: projects' conversations come by `flow sync`, from
+    /// wherever they lie, and nothing else on this machine is read.
+    pub local_transcripts: bool,
     /// When AgentFlow runs as its own user: the agents' home folder, where `~/` in the other
     /// paths points (e.g. "/home/viber"). Empty: this user's own home.
     pub agents_home: String,
@@ -126,6 +130,7 @@ impl Default for Config {
             session_max_days: 30,
             build_free_gb: 10,
             transcripts_dir: "~/.claude/projects".into(),
+            local_transcripts: false,
             agents_home: String::new(),
             hands_socket: String::new(),
             external_token_file: String::new(),

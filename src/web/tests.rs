@@ -701,7 +701,7 @@ async fn prs_merge_in_order_from_the_owners_buttons() {
         assert!(ok, "{r}");
     }
     let (ok, r) =
-        call("add_release", json!({"tag": "v0.0.5-m4", "title": "M4: Keybinds", "waits_for": ["PR-48", "PR-49"]}))
+        call("add_release", json!({"tag": "v0.0.5-m4", "title": "M4: Keybinds", "waits_for": ["PR-48", "PR-49"], "tag_button": false}))
             .await;
     assert!(ok, "{r}");
     call("add_button", json!({"record": "R-1", "label": "Push tag v0.0.5-m4", "kind": "tag", "command": "echo tagged > tagged", "workdir": wd, "requires": ["PR-49"]})).await;
@@ -1677,16 +1677,16 @@ async fn answers_make_scoped_decisions_and_releases_bring_their_tag_button() {
     assert!(!call("update_decision", json!({"id": "D-1", "state": "deleted", "reason": "x"})).await.0);
     assert!(call("update_decision", json!({"id": id, "state": "current", "reason": "owner: keep it after all"})).await.0);
 
-    // A release brings its Push tag button once the project has a folder.
+    // A release brings its Push tag button once the project has a repository: GitHub's API makes
+    // the tag, so no folder is needed (the project may lie on any machine).
     let (ok, r) = call("add_release", json!({"tag": "v0.0.5-m4", "title": "M4: Keybinds"})).await;
     assert!(ok && r["tag_button"].as_str().unwrap_or("").starts_with("none"), "{r}");
-    assert!(call("update_project", json!({"checkout": "~/vinculum"})).await.0);
+    assert!(call("update_project", json!({"repo": "giosuel/vinculum"})).await.0);
     let (ok, r) = call("add_release", json!({"tag": "v0.0.6-m5", "title": "M5"})).await;
     assert!(ok, "{r}");
     let cmd = r["tag_button"]["command"].as_str().unwrap();
-    assert_eq!(cmd, "git fetch origin main && git tag -a v0.0.6-m5 -m v0.0.6-m5 origin/main && git push origin v0.0.6-m5");
-    // It never touches the checkout's own branch (Imaginarium's folder sits on another one).
-    assert!(!cmd.contains("checkout") && !cmd.contains("HEAD") && !cmd.contains("switch") && !cmd.contains("reset"));
+    assert!(cmd.contains("repos/giosuel/vinculum/git/ref/heads/main") && cmd.contains("-f tag=v0.0.6-m5") && cmd.contains("ref=refs/tags/v0.0.6-m5"), "{cmd}");
+    assert!(!cmd.contains("git push") && !cmd.contains("checkout") && !cmd.contains("cd "), "{cmd}");
     // After a context reset: hello brief leaves out the document and milestones.
     let (_, b) = call("hello", json!({"session": "V", "machine": "m", "model": "o", "effort": "h", "brief": true})).await;
     assert!(b.get("doc").is_none() && b.get("milestones").is_none() && b.get("where").is_some(), "{b}");
