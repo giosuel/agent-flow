@@ -954,6 +954,10 @@ async fn gh(token: &str, args: &[&str], body: Option<&str>) -> anyhow::Result<St
 
 impl Poster for GhPoster {
     fn token(&self) -> anyhow::Result<String> {
+        // The one entered in Settings first; the config's file for installs from before.
+        if let Some(t) = crate::secrets::token(crate::secrets::GitHub::External) {
+            return Ok(t);
+        }
         if self.token_file.trim().is_empty() {
             bail!(
                 "sending isn't set up: external_token_file in AgentFlow's config names the token for other people's repositories"

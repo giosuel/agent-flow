@@ -194,6 +194,10 @@ pub async fn serve(state: AppState) -> anyhow::Result<()> {
     if swept > 0 {
         tracing::info!("removed {swept} unfinished build upload(s)");
     }
+    {
+        let data = state.config.data_dir();
+        let _ = state.db.call(move |c| { crate::secrets::load_all(c, &data); Ok(()) }).await;
+    }
     crate::poller::spawn(state.clone());
     if state.config.local_transcripts {
         spawn_usage(state.clone());

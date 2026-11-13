@@ -34,6 +34,7 @@ pub mod push;
 pub mod records;
 pub mod remote;
 pub mod screenshots;
+pub mod secrets;
 pub mod setup;
 pub mod steps;
 pub mod sync;
