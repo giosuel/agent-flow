@@ -2,6 +2,7 @@
 //! (`agentflow-builder`) are thin programs on top of it.
 
 pub mod actions;
+pub mod approvals;
 pub mod activity;
 pub mod auth;
 pub mod backup;
