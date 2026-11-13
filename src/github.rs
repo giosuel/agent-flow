@@ -181,14 +181,30 @@ pub struct GhCli;
 impl GhCli {
     /// As the agents' user, with its `gh` login (see [`crate::hands`]).
     async fn run(args: &[&str]) -> anyhow::Result<Vec<u8>> {
+        // With the server's own token, gh runs here: the token never reaches the agents' user.
+        let env = crate::secrets::gh_env();
+        if !env.is_empty() {
+            let out = tokio::time::timeout(
+                std::time::Duration::from_secs(60),
+                tokio::process::Command::new("gh")
+                    .args(args)
+                    .envs(env)
+                    .env("GH_PROMPT_DISABLED", "1")
+                    .kill_on_drop(true)
+                    .output(),
+            )
+            .await
+            .context("gh took longer than a minute")?
+            .context("running gh (is it installed for the server's user?)")?;
+            if !out.status.success() {
+                bail!("gh {}: {}", args.first().unwrap_or(&""), String::from_utf8_lossy(&out.stderr).trim());
+            }
+            return Ok(out.stdout);
+        }
         let argv = std::iter::once("gh").chain(args.iter().copied()).map(String::from).collect();
-        let out: crate::hands::ExecOut = crate::hands::run_async(crate::hands::Job::Exec {
-            argv,
-            cwd: None,
-            timeout_s: 60,
-            env: crate::secrets::gh_env(),
-        })
-        .await?;
+        let out: crate::hands::ExecOut =
+            crate::hands::run_async(crate::hands::Job::Exec { argv, cwd: None, timeout_s: 60, env: Vec::new() })
+                .await?;
         if out.timed_out {
             bail!("gh took longer than a minute");
         }

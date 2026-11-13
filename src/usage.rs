@@ -205,6 +205,32 @@ pub struct Read {
     cwd: String,
 }
 
+impl Read {
+    /// A round a project sent (`flow sync`): what it stores is the project's own. Its Remote
+    /// Control links count as the project's checkout and folder (so they never show for another
+    /// project), only Claude Code's own links are kept, and nothing is dated in the future.
+    pub fn confine(&mut self, conn: &Connection, project_id: i64) -> anyhow::Result<()> {
+        let now = crate::util::now_ms();
+        let own = Checkouts::load(conn)?.0.into_iter().find(|(_, _, id)| *id == project_id);
+        match own {
+            Some((dir, folder, _)) => {
+                self.folder = folder;
+                let dir = dir.to_string_lossy().into_owned();
+                self.remotes.retain(|r| is_session_url(&r.url));
+                for r in &mut self.remotes {
+                    r.cwd = dir.clone();
+                    r.at = r.at.min(now);
+                }
+            }
+            None => self.remotes.clear(),
+        }
+        for c in &mut self.calls {
+            c.at = c.at.min(now);
+        }
+        Ok(())
+    }
+}
+
 /// Where the last round stopped in this file, and (for a subagent) the time of its first own call.
 pub fn file_state(conn: &Connection, path: &Path) -> anyhow::Result<(u64, Option<i64>)> {
     Ok(conn

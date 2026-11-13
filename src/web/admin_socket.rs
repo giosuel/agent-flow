@@ -1,5 +1,5 @@
 //! The server's local door for `sudo flow server add-passkey` (the owner, 2026-11-13): a Unix
-//! socket only root and the server's own user may use. Whoever can do that has the machine, which
+//! socket only root may use. Whoever can do that has the machine, which
 //! is the proof left when every passkey is lost; agents (another user, no sudo) can't. Each link
 //! is logged and announced with a push notification, so one the owner didn't ask for shows.
 //!
@@ -53,10 +53,13 @@ async fn listen(state: &AppState, path: &Path) -> anyhow::Result<()> {
 
 async fn handle(state: &AppState, mut stream: UnixStream, me: u32) -> anyhow::Result<()> {
     let uid = stream.peer_cred()?.uid();
-    if uid != 0 && uid != me {
+    // Only root: where the server runs as the agents' own user (a single-user install), its uid
+    // is theirs too, so accepting it would hand any agent the owner's way in.
+    let _ = me;
+    if uid != 0 {
         let e = Entry::new(&Actor::Anonymous, Via::Cli, Action::Denied, format!("admin socket: refused uid {uid}"));
         activity::write(&state.db, e).await;
-        stream.write_all(b"{\"error\":\"only root and the server's user may ask (run it with sudo)\"}\n").await?;
+        stream.write_all(b"{\"error\":\"only root may ask: run it with sudo\"}\n").await?;
         return Ok(());
     }
     let (read, mut write) = stream.split();
@@ -100,7 +103,11 @@ pub async fn passkey_link(state: &AppState, by: &str) -> anyhow::Result<String> 
 /// On a server without any passkey yet, the way in: a link in the log.
 pub async fn first_start_link(state: &AppState) {
     let none = state.db.call(|c| Ok(crate::passkey::list(c)?.is_empty())).await.unwrap_or(false);
-    if !none {
+    // Only when the server runs as its own user: otherwise its log is the agents' to read.
+    if !none || state.config.agents_home.is_empty() {
+        if none {
+            tracing::info!("No passkey yet. Add one with a link from: sudo flow server add-passkey");
+        }
         return;
     }
     match passkey_link(state, "the first start").await {

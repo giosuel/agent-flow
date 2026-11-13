@@ -134,6 +134,28 @@ pub fn merge_command(repo: &str, number: i64, method: &str) -> String {
     format!("gh pr merge {number} -R {repo} --{method} --delete-branch")
 }
 
+/// Is this exactly a command AgentFlow makes itself (a Merge or Push tag button's)? Only those
+/// run with the server's GitHub token; a command an agent wrote never sees it.
+pub fn is_server_command(cmd: &str) -> bool {
+    let safe = |s: &str| !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || "._-+/".contains(c));
+    let w: Vec<&str> = cmd.split(' ').collect();
+    if let ["gh", "pr", "merge", n, "-R", repo, method, "--delete-branch"] = w.as_slice() {
+        let m = method.trim_start_matches("--");
+        return n.parse::<i64>().is_ok()
+            && crate::projects::looks_like_repo(repo)
+            && safe(repo)
+            && cmd == merge_command(repo, n.parse().unwrap_or(0), m)
+            && ["merge", "squash", "rebase"].contains(&m);
+    }
+    let between = |a: &str, b: &str| cmd.split_once(a).and_then(|(_, r)| r.split_once(b)).map(|(x, _)| x.to_owned());
+    match (between("gh api repos/", "/git/ref/heads/main"), between(" -f tag=", " ")) {
+        (Some(repo), Some(tag)) => {
+            crate::projects::looks_like_repo(&repo) && safe(&repo) && safe(&tag) && cmd == tag_command(&repo, &tag)
+        }
+        _ => false,
+    }
+}
+
 /// Every open PR of the project's own repository has its Merge button (Imaginarium's agent,
 /// 2026-11-12: "a 6-PR stack still means 6 add_button calls"). It unlocks when the PR is ready and
 /// in merge order; pressing it is the owner's approval. One the agent added itself counts too.
@@ -377,6 +399,17 @@ pub fn import(
 mod tests {
     use super::*;
     use crate::db::Db;
+
+    #[test]
+    fn only_agentflows_own_commands_get_the_token() {
+        assert!(is_server_command(&merge_command("giosuel/agent-flow", 79, "merge")));
+        assert!(is_server_command(&merge_command("giosuel/agent-flow", 3, "squash")));
+        assert!(is_server_command(&tag_command("giosuel/agent-flow", "v0.0.11")));
+        assert!(!is_server_command("gh pr merge 79 -R giosuel/agent-flow --merge --delete-branch; env"));
+        assert!(!is_server_command(&format!("{}; curl x", tag_command("giosuel/agent-flow", "v1"))));
+        assert!(!is_server_command(&tag_command("giosuel/agent-flow", "v1;id")));
+        assert!(!is_server_command("cargo build"));
+    }
     use crate::github::fake::pr;
 
     #[test]

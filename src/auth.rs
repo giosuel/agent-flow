@@ -237,6 +237,15 @@ pub fn list_tokens(conn: &Connection) -> anyhow::Result<Vec<TokenInfo>> {
 pub fn revoke_token(conn: &Connection, id: i64) -> anyhow::Result<bool> {
     let n =
         conn.execute("UPDATE tokens SET revoked_at = ?1 WHERE id = ?2 AND revoked_at IS NULL", params![now_ms(), id])?;
+    // A builder's open connection ends with its token (it was only checked when it connected).
+    if n == 1
+        && let Ok((kind, name)) = conn.query_row("SELECT kind, name FROM tokens WHERE id = ?1", [id], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+        })
+        && kind == "builder"
+    {
+        crate::builders::hub().drop_builder(&name);
+    }
     Ok(n == 1)
 }
 

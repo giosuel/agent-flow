@@ -119,7 +119,7 @@ the install script and the `flow` download.
 - **The owner** signs in in the browser with a passkey (enrolled in Settings). On a new device, or
   if every passkey is lost, run `sudo flow server add-passkey` on the server and open the one-time
   link it prints (valid 15 minutes): it leads straight to adding a passkey. It goes through a local
-  socket only root and the server's user may use, and every link is logged and pushed.
+  socket only root may use, and every link is logged and pushed.
 - **Machines** get `flow` and connect with one command, `curl -fsSL <server>/install.sh | sh`
   (or `flow connect <server>`): the owner approves the machine in the browser, where the page shows
   the same short code as the terminal, and the machine gets a token of its own (read-only).

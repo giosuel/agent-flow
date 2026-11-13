@@ -77,6 +77,17 @@ struct Inner {
     hello: HashMap<String, (String, u64, f64)>,
 }
 
+impl Inner {
+    /// The next id: they start at the time the server started, so a builder's answer to a request
+    /// from before a restart never matches a new one.
+    fn bump(&mut self) {
+        if self.next == 0 {
+            self.next = crate::util::now_ms() as u64 * 1000;
+        }
+        self.next += 1;
+    }
+}
+
 /// The connected builders.
 #[derive(Default, Clone)]
 pub struct Hub(Arc<Mutex<Inner>>);
@@ -103,19 +114,39 @@ impl Hub {
     }
 
     /// A builder connected; requests for it go to `tx` from now on. Returns the connection's
-    /// number, so an older connection that ends later doesn't unregister this one.
-    pub fn connect(&self, name: &str, tx: mpsc::UnboundedSender<Request>) -> u64 {
+    /// number (so an older connection that ends later doesn't unregister this one) and whether
+    /// another connection of this builder was still open (worth a warning: a copied token).
+    pub fn connect(&self, name: &str, tx: mpsc::UnboundedSender<Request>) -> (u64, bool) {
         let mut g = self.lock();
-        g.next += 1;
+        g.bump();
         let n = g.next;
-        g.online.insert(name.to_owned(), (n, tx));
-        n
+        let replaced = g.online.insert(name.to_owned(), (n, tx)).is_some_and(|(_, old)| !old.is_closed());
+        (n, replaced)
     }
 
     pub fn disconnect(&self, name: &str, conn: u64) {
         let mut g = self.lock();
         if g.online.get(name).is_some_and(|(n, _)| *n == conn) {
-            g.online.remove(name);
+            Self::gone(&mut g, name);
+        }
+    }
+
+    /// A builder is offline: one-off requests won't be answered now; a streamed job may still
+    /// finish and report when the builder is back, so those wait (with a deadline, see
+    /// crate::remote).
+    fn gone(g: &mut Inner, name: &str) {
+        g.online.remove(name);
+        g.hello.remove(name);
+        let ids: Vec<u64> = g
+            .waiting
+            .iter()
+            .filter(|(_, (owner, w))| owner == name && matches!(w, Waiter::Whole(_)))
+            .map(|(id, _)| *id)
+            .collect();
+        for id in ids {
+            if let Some((_, Waiter::Whole(tx))) = g.waiting.remove(&id) {
+                let _ = tx.send(Err(anyhow::anyhow!("{name} disconnected")));
+            }
         }
     }
 
@@ -167,7 +198,7 @@ impl Hub {
     fn send(&self, name: &str, make: impl FnOnce(u64) -> Request, waiter: Waiter) -> anyhow::Result<u64> {
         let mut g = self.lock();
         let tx = g.online.get(name).map(|(_, tx)| tx.clone()).with_context(|| format!("{name} isn't connected"))?;
-        g.next += 1;
+        g.bump();
         let id = g.next;
         g.waiting.insert(id, (name.to_owned(), waiter));
         if tx.send(make(id)).is_err() {
@@ -213,7 +244,7 @@ impl Hub {
     /// Closes a builder's connection (it was renamed or removed); it reconnects as what its token
     /// says now, or not at all.
     pub fn drop_builder(&self, name: &str) {
-        self.lock().online.remove(name);
+        Self::gone(&mut self.lock(), name);
     }
 
     /// Forgets a request nobody waits for any more.
@@ -230,7 +261,7 @@ mod tests {
     async fn answers_reach_their_request_and_only_from_its_builder() {
         let hub = Hub::default();
         let (tx, mut rx) = mpsc::unbounded_channel();
-        hub.connect("hq", tx);
+        let _ = hub.connect("hq", tx);
         let h = hub.clone();
         let ask = tokio::spawn(async move {
             h.ask(
@@ -250,7 +281,8 @@ mod tests {
         let _ = rx.recv().await;
         // The connection drops and comes back: the job's output still arrives.
         let (tx2, _rx2) = mpsc::unbounded_channel();
-        hub.connect("hq", tx2);
+        let (_, replaced) = hub.connect("hq", tx2);
+        assert!(replaced, "the old connection was still open");
         hub.receive("hq", Reply::Line { re: id, text: "building".into(), err: false });
         hub.receive("hq", Reply::Done { re: id, code: 0, stdout: String::new(), stderr: String::new() });
         assert!(matches!(events.recv().await, Some(Event::Line(l)) if l == "building"));

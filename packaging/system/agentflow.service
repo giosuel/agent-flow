@@ -19,6 +19,9 @@ UMask=0077
 # It never needs the home folders: the agents' helper does that part.
 ProtectHome=yes
 ProtectSystem=strict
+# /run/agentflow: the admin socket for sudo flow server add-passkey.
+RuntimeDirectory=agentflow
+RuntimeDirectoryMode=0700
 PrivateTmp=yes
 PrivateDevices=yes
 NoNewPrivileges=yes

@@ -20,6 +20,8 @@ use crate::util::{hash_secret, new_secret, now_ms};
 pub const MINUTES: i64 = 10;
 /// At most this many requests wait at once: anyone may ask to connect, so a flood is cut off.
 pub const MAX_PENDING: i64 = 30;
+/// Requests waiting from one address (anonymous) or one connected machine.
+pub const MAX_PENDING_PER_IP: i64 = 5;
 
 /// What can be asked for.
 pub const ACTIONS: &[&str] = &[
@@ -166,8 +168,18 @@ pub fn create(
     ip: Option<&str>,
 ) -> anyhow::Result<(String, String)> {
     expire(c)?;
-    let pending: i64 = c.query_row("SELECT count(*) FROM approvals WHERE state = 'pending'", [], |r| r.get(0))?;
-    if pending >= MAX_PENDING {
+    // Anyone may ask to connect: those requests have their own limits, overall and per address,
+    // so they can't crowd out the owner's own requests (from connected machines, per machine).
+    let count = |sql: &str, p: &dyn rusqlite::ToSql| -> rusqlite::Result<i64> { c.query_row(sql, [p], |r| r.get(0)) };
+    let full = if requested_by.is_empty() {
+        count("SELECT count(*) FROM approvals WHERE state = 'pending' AND requested_by = ?1", &"")? >= MAX_PENDING
+            || count("SELECT count(*) FROM approvals WHERE state = 'pending' AND requested_by = '' AND ip IS ?1", &ip)?
+                >= MAX_PENDING_PER_IP
+    } else {
+        count("SELECT count(*) FROM approvals WHERE state = 'pending' AND requested_by = ?1", &requested_by)?
+            >= MAX_PENDING_PER_IP
+    };
+    if full {
         bail!("too many requests are waiting for approval; try again in a few minutes");
     }
     check_args(c, action, args)?;
@@ -212,7 +224,11 @@ const COLUMNS: &str = "id, code, action, args, machine, requested_by, ip, state,
 pub fn expire(c: &Connection) -> anyhow::Result<()> {
     let now = now_ms();
     c.execute("UPDATE approvals SET state = 'expired' WHERE state = 'pending' AND expires_at <= ?1", [now])?;
-    c.execute("UPDATE approvals SET result = NULL WHERE result IS NOT NULL AND expires_at <= ?1", [now])?;
+    // A result waits 10 minutes from the owner's decision for flow to fetch it, then goes.
+    c.execute(
+        "UPDATE approvals SET result = NULL WHERE result IS NOT NULL AND coalesce(decided_at, expires_at) + ?2 <= ?1",
+        params![now, MINUTES * 60_000],
+    )?;
     Ok(())
 }
 
@@ -238,10 +254,14 @@ pub fn decide(c: &Connection, code: &str, approve: bool) -> anyhow::Result<Appro
         bail!("this request is {} already", a.state);
     }
     let state = if approve { "approved" } else { "denied" };
-    c.execute(
+    // One decision: a second press (a double click) finds it decided and does nothing.
+    let n = c.execute(
         "UPDATE approvals SET state = ?1, decided_at = ?2 WHERE id = ?3 AND state = 'pending'",
         params![state, now_ms(), a.id],
     )?;
+    if n != 1 {
+        bail!("this request was decided a moment ago");
+    }
     Ok(Approval { state: state.into(), ..a })
 }
 
@@ -277,6 +297,8 @@ pub fn poll(c: &Connection, secret: &str) -> anyhow::Result<Option<Value>> {
             let result: Value = serde_json::from_str(&result).unwrap_or(Value::Null);
             Ok(Some(json!({"state": "approved", "result": result})))
         }
+        // Approved, and the server is still doing it: flow keeps waiting.
+        ("approved", None) => Ok(Some(json!({"state": "pending"}))),
         ("done", _) if fetched.is_some() => Ok(Some(json!({"state": "done"}))),
         (state, _) => Ok(Some(json!({"state": state, "error": error}))),
     }
@@ -394,7 +416,9 @@ pub fn describe(a: &Approval) -> String {
         "project_add" => format!("Add the project {} ({})", s("name"), s("slug")),
         "project_create" => format!("Create the project {} ({}) in {}", s("name"), s("slug"), s("folder")),
         "backup" => "Back up the database and export every project".into(),
-        "builder_create" => format!("Add {} as a builder (it runs agents' builds and tests)", a.machine),
+        "builder_create" => {
+            format!("Add the builder {} on {} (it runs agents' builds and tests)", s("name"), a.machine)
+        }
         "builder_remove" => format!("Remove the builder {}", s("name")),
         "import_prs" => format!("Import PRs #{}–#{} into {}", n("from"), n("to"), s("project")),
         other => other.to_owned(),
@@ -415,6 +439,8 @@ mod tests {
             assert_eq!(super::poll(c, &poll)?.unwrap()["state"], "pending");
             assert!(super::poll(c, "af_apv_wrong")?.is_none());
             let a = decide(c, &code.to_lowercase(), true)?;
+            // Approved but not done yet: flow keeps waiting instead of getting nothing.
+            assert_eq!(super::poll(c, &poll)?.unwrap()["state"], "pending");
             let out = execute(c, &a, std::path::Path::new("/nonexistent"));
             finish(c, a.id, &out)?;
             let got = super::poll(c, &poll)?.unwrap();
@@ -447,10 +473,15 @@ mod tests {
             let (_, poll) = create(c, "connect", &json!({}), "viber@pc", "", None)?;
             c.execute("UPDATE approvals SET expires_at = 0 WHERE state = 'pending'", [])?;
             assert_eq!(super::poll(c, &poll)?.unwrap()["state"], "expired");
-            for i in 0..MAX_PENDING {
-                create(c, "connect", &json!({}), &format!("m{i}"), "", None)?;
+            for i in 0..MAX_PENDING_PER_IP {
+                create(c, "connect", &json!({}), &format!("m{i}"), "", Some("10.0.0.1"))?;
             }
-            assert!(create(c, "connect", &json!({}), "one more", "", None).is_err(), "a flood is cut off");
+            assert!(create(c, "connect", &json!({}), "m", "", Some("10.0.0.1")).is_err(), "one address is cut off");
+            for i in MAX_PENDING_PER_IP..MAX_PENDING {
+                create(c, "connect", &json!({}), &format!("m{i}"), "", Some(&format!("10.0.1.{i}")))?;
+            }
+            assert!(create(c, "connect", &json!({}), "m", "", Some("10.0.2.1")).is_err(), "a flood is cut off");
+            assert!(create(c, "backup", &json!({}), "viber@pc", "pc", None).is_ok(), "the owner still gets through");
             Ok(())
         })
         .unwrap();
