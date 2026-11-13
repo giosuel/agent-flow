@@ -58,7 +58,7 @@ struct SettingsForm {
     build_product: String,
     #[serde(default)]
     merge_method: String,
-    /// The build server for `agentflow remote` ("" for none).
+    /// The build server for `flow remote` ("" for none).
     #[serde(default)]
     build_server: String,
 }
@@ -624,7 +624,7 @@ struct AgentCard {
 }
 
 pub struct EditView {
-    /// The build server its `agentflow remote` uses ("" for none), and the ones there are.
+    /// The build server its `flow remote` uses ("" for none), and the ones there are.
     build_server: String,
     servers: Vec<String>,
     name: String,
@@ -1562,7 +1562,7 @@ struct RecordPage {
 /// A build's page: how to start it and what to try.
 struct BuildView {
     run: String,
-    /// "Linux · x86_64"; a build that isn't for flow-run is a download instead.
+    /// "Linux · x86_64"; a build that isn't for flow run is a download instead.
     platform: String,
     download: String,
     needs: Vec<String>,
@@ -1956,7 +1956,7 @@ fn build_view(r: &Record, links: &[records::LinkView], sent: bool) -> BuildView 
         .map(|l| (l.other.title.clone(), l.other.state.clone(), l.other.str("owner_words").to_owned()))
         .collect();
     BuildView {
-        run: format!("flow-run {} {}", r.str("product"), r.number),
+        run: format!("flow run {} {}", r.str("product"), r.number),
         platform: crate::builds::platform_label(platform),
         download: if platform == crate::builds::DEFAULT_PLATFORM { String::new() } else { format!("{}/download", r.url()) },
         needs: r.data.get("needs").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_str).map(str::to_owned).collect()).unwrap_or_default(),

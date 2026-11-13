@@ -1,5 +1,5 @@
-//! Builds over HTTP: agents upload them (`agentflow publish`), the owner's machines download them
-//! (`flow-run`), and the owner gives feedback on a build's page.
+//! Builds over HTTP: agents upload them (`flow publish`), the owner's machines download them
+//! (`flow run`), and the owner gives feedback on a build's page.
 
 use std::path::PathBuf;
 
@@ -33,20 +33,24 @@ pub fn routes() -> Router<AppState> {
         .route("/p/{slug}/{id}/download", get(download))
         .route("/p/{slug}/{id}/feedback", post(feedback))
         .route("/download/agentflow", get(download_self))
+        .route("/download/flow", get(download_self))
 }
 
-/// This very program, for the owner's machines to run test builds with (`flow-run`). Signed-in
-/// only: the owner, or a device's or agent's token.
-async fn download_self(Extension(actor): Extension<Actor>) -> Response {
+/// The `flow` program installed next to this server, for the owner's machines (`flow run`).
+/// Signed-in only: the owner, or a device's or agent's token.
+async fn download_self(State(state): State<AppState>, Extension(actor): Extension<Actor>) -> Response {
     if matches!(actor, Actor::Anonymous) {
         return StatusCode::UNAUTHORIZED.into_response();
     }
-    let Ok(path) = std::env::current_exe() else { return StatusCode::NOT_FOUND.into_response() };
+    let path = state.config.flow_bin();
+    if !path.is_absolute() {
+        return StatusCode::NOT_FOUND.into_response();
+    }
     match tokio::fs::read(&path).await {
         Ok(bytes) => (
             [
                 (axum::http::header::CONTENT_TYPE, "application/octet-stream"),
-                (axum::http::header::CONTENT_DISPOSITION, "attachment; filename=\"agentflow\""),
+                (axum::http::header::CONTENT_DISPOSITION, "attachment; filename=\"flow\""),
             ],
             bytes,
         )
@@ -371,7 +375,7 @@ async fn upload(
         notify_build(&state, &project.name, &r);
     }
     let run = if r.str("platform") == builds::DEFAULT_PLATFORM {
-        format!("flow-run {} {}", r.str("product"), r.number)
+        format!("flow run {} {}", r.str("product"), r.number)
     } else {
         format!("download it from {}{}", state.config.public_url.trim_end_matches('/'), r.url())
     };
@@ -399,7 +403,7 @@ pub fn notify_build(state: &AppState, project_name: &str, r: &Record) {
 }
 
 /// The file that starts the build: given, or the only file when it's a single binary.
-/// The file that starts the build. On Linux it must be executable (flow-run starts it); other
+/// The file that starts the build. On Linux it must be executable (flow run starts it); other
 /// platforms' builds are downloads, where the mode doesn't travel.
 fn pick_entry(m: &Manifest, entry: &str, linux: bool) -> anyhow::Result<String> {
     if entry.is_empty() {
@@ -669,7 +673,7 @@ async fn feedback(
     }
 }
 
-/// A build for the owner to download (one that isn't for flow-run, like a Windows exe): its one
+/// A build for the owner to download (one that isn't for flow run, like a Windows exe): its one
 /// file when it's a single file, else the whole archive.
 async fn download(
     State(state): State<AppState>,
