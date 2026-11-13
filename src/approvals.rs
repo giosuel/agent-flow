@@ -212,7 +212,11 @@ const COLUMNS: &str = "id, code, action, args, machine, requested_by, ip, state,
 pub fn expire(c: &Connection) -> anyhow::Result<()> {
     let now = now_ms();
     c.execute("UPDATE approvals SET state = 'expired' WHERE state = 'pending' AND expires_at <= ?1", [now])?;
-    c.execute("UPDATE approvals SET result = NULL WHERE result IS NOT NULL AND expires_at <= ?1", [now])?;
+    // A result waits 10 minutes from the owner's decision for flow to fetch it, then goes.
+    c.execute(
+        "UPDATE approvals SET result = NULL WHERE result IS NOT NULL AND coalesce(decided_at, expires_at) + ?2 <= ?1",
+        params![now, MINUTES * 60_000],
+    )?;
     Ok(())
 }
 
@@ -238,10 +242,14 @@ pub fn decide(c: &Connection, code: &str, approve: bool) -> anyhow::Result<Appro
         bail!("this request is {} already", a.state);
     }
     let state = if approve { "approved" } else { "denied" };
-    c.execute(
+    // One decision: a second press (a double click) finds it decided and does nothing.
+    let n = c.execute(
         "UPDATE approvals SET state = ?1, decided_at = ?2 WHERE id = ?3 AND state = 'pending'",
         params![state, now_ms(), a.id],
     )?;
+    if n != 1 {
+        bail!("this request was decided a moment ago");
+    }
     Ok(Approval { state: state.into(), ..a })
 }
 
@@ -277,6 +285,8 @@ pub fn poll(c: &Connection, secret: &str) -> anyhow::Result<Option<Value>> {
             let result: Value = serde_json::from_str(&result).unwrap_or(Value::Null);
             Ok(Some(json!({"state": "approved", "result": result})))
         }
+        // Approved, and the server is still doing it: flow keeps waiting.
+        ("approved", None) => Ok(Some(json!({"state": "pending"}))),
         ("done", _) if fetched.is_some() => Ok(Some(json!({"state": "done"}))),
         (state, _) => Ok(Some(json!({"state": state, "error": error}))),
     }
@@ -394,7 +404,9 @@ pub fn describe(a: &Approval) -> String {
         "project_add" => format!("Add the project {} ({})", s("name"), s("slug")),
         "project_create" => format!("Create the project {} ({}) in {}", s("name"), s("slug"), s("folder")),
         "backup" => "Back up the database and export every project".into(),
-        "builder_create" => format!("Add {} as a builder (it runs agents' builds and tests)", a.machine),
+        "builder_create" => {
+            format!("Add the builder {} on {} (it runs agents' builds and tests)", s("name"), a.machine)
+        }
         "builder_remove" => format!("Remove the builder {}", s("name")),
         "import_prs" => format!("Import PRs #{}–#{} into {}", n("from"), n("to"), s("project")),
         other => other.to_owned(),
@@ -415,6 +427,8 @@ mod tests {
             assert_eq!(super::poll(c, &poll)?.unwrap()["state"], "pending");
             assert!(super::poll(c, "af_apv_wrong")?.is_none());
             let a = decide(c, &code.to_lowercase(), true)?;
+            // Approved but not done yet: flow keeps waiting instead of getting nothing.
+            assert_eq!(super::poll(c, &poll)?.unwrap()["state"], "pending");
             let out = execute(c, &a, std::path::Path::new("/nonexistent"));
             finish(c, a.id, &out)?;
             let got = super::poll(c, &poll)?.unwrap();

@@ -88,8 +88,8 @@ pub fn set_resume_first(c: &Connection, session: &str) -> anyhow::Result<()> {
 pub fn new_token(c: &mut Connection) -> anyhow::Result<String> {
     let tx = c.transaction()?;
     tx.execute(
-        "UPDATE tokens SET revoked_at = ?1 WHERE kind = 'admin' AND revoked_at IS NULL",
-        [crate::util::now_ms()],
+        "UPDATE tokens SET revoked_at = ?1 WHERE kind = 'admin' AND name = ?2 AND revoked_at IS NULL",
+        params![crate::util::now_ms(), NAME],
     )?;
     let (_, secret) = auth::create_token(&tx, TokenKind::Admin, NAME, None)?;
     tx.commit()?;
