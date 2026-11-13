@@ -1,28 +1,31 @@
 {# The Settings page's Build servers card. #}
 <section class="card pad stack" aria-labelledby="s-builds" id="s-builds">
   <div class="sec"><h2 id="s-builds">Build servers</h2><span class="sub">machines agents build and test on with <span class="mono">flow remote</span></span></div>
+  <p class="sub">To add one, run this on that machine. It asks whether the builder gets a user of its own (recommended) and its name, then asks for your approval here:</p>
+  <pre class="cmd mono">flow builder add</pre>
   {% if let Some((ok, text)) = notice %}<p class="notice{% if *ok %} ok{% else %} warn{% endif %}" role="status">{{ text }}</p>{% endif %}
   {% for s in servers %}
   <div class="bsrv stack-sm">
-    <div class="bs-head"><span class="dot{% if s.online %} ok{% endif %}" aria-hidden="true"></span><h3>{{ s.name }}</h3><span class="sub mono">{{ s.ssh }}</span></div>
+    <div class="bs-head"><span class="dot{% if s.online %} ok{% endif %}" aria-hidden="true"></span><h3>{{ s.name }}</h3><span class="sub mono">{% if s.daemon %}connects itself{% else %}{{ s.ssh }} (ssh){% endif %}</span></div>
     <p class="sub">{{ s.line }}</p>
-    <ul class="checks">
+    {% if !s.daemon %}<ul class="checks">
       <li><span class="{% if s.cargo.is_empty() %}n{% else %}y{% endif %}" aria-hidden="true">{% if s.cargo.is_empty() %}!{% else %}✓{% endif %}</span><span>{% if !s.checked %}Rust: not checked yet{% else if s.cargo.is_empty() %}Rust: no toolchain for this user{% else %}Rust: {{ s.cargo }}{% endif %}</span></li>
       <li><span class="{% if s.sccache.is_empty() %}n{% else %}y{% endif %}" aria-hidden="true">{% if s.sccache.is_empty() %}!{% else %}✓{% endif %}</span><span>{% if !s.checked %}sccache: not checked yet{% else if s.sccache.is_empty() %}sccache: not installed (optional: compiled dependencies are then shared by every project there){% else %}{{ s.sccache }}: compiled dependencies are shared by every project there{% endif %}</span></li>
-    </ul>
-    {% if !s.setup.is_empty() %}<p class="sub">{% if s.setup_running %}Running: {% endif %}{{ s.setup }}{% if !s.setup_running %} · <a href="/log?q=target:server-{{ s.name }}&amp;range=7d">in the Log</a>{% endif %}</p>{% endif %}
-    <div class="row wrap">
+    </ul>{% else %}<p class="sub">Agents set up the tools their projects need with <span class="mono">flow remote --setup</span>.</p>{% endif %}
+    {% if !s.daemon && !s.setup.is_empty() %}<p class="sub">{% if s.setup_running %}Running: {% endif %}{{ s.setup }}{% if !s.setup_running %} · <a href="/log?q=target:server-{{ s.name }}&amp;range=7d">in the Log</a>{% endif %}</p>{% endif %}
+    {% if !s.daemon %}<div class="row wrap">
       <form method="post" action="/settings/build-servers/{{ s.name }}/check"><button class="btn sm ghost" type="submit">Check</button></form>
       {% if s.checked && s.cargo.is_empty() %}<form method="post" action="/settings/build-servers/{{ s.name }}/setup/rust"><button class="btn sm ghost" type="submit"{% if s.setup_running %} disabled{% endif %} data-confirm="Set up Rust for {{ s.ssh }}? It installs rustup's stable toolchain in that user's home (about 1.5 GB).">Set up Rust</button></form>{% endif %}
       {% if s.checked && s.sccache.is_empty() %}<form method="post" action="/settings/build-servers/{{ s.name }}/setup/sccache"><button class="btn sm ghost" type="submit"{% if s.setup_running %} disabled{% endif %}>Install sccache</button></form>{% endif %}
-    </div>
+    </div>{% endif %}
     {% if let Some(k) = s.key_line %}
     <details class="stack-sm"{% if !s.online %} open{% endif %}><summary class="sub">Its key: add this line on {{ s.ssh }}</summary>
       <p class="sub">AgentFlow made a key for it. On that machine, as the build user, run this once. <span class="mono">restrict</span> lets the key run commands and copy files, but not forward ports or open a terminal:</p>
       <pre class="cmd mono">mkdir -p ~/.ssh && echo '{{ k }}' >> ~/.ssh/authorized_keys</pre>
     </details>
     {% endif %}
-    <details><summary class="sub">Limits</summary>
+    <details><summary class="sub">Name and limits</summary>
+      <form method="post" action="/settings/build-servers/{{ s.name }}/rename" class="row wrap"><label class="vh" for="rn-{{ s.name }}">Name</label><input id="rn-{{ s.name }}" name="name" required maxlength="64" value="{{ s.name }}"><button class="btn sm ghost" type="submit">Rename</button></form>
       <form method="post" action="/settings/build-servers/{{ s.name }}/limits" class="form-grid">
         <label>Start another job while at least … threads are free<input name="min_threads" type="number" min="0" step="1" value="{{ s.min_threads }}"></label>
         <label>… and this much memory (GB)<input name="min_memory_gb" type="number" min="0" step="1" value="{{ s.min_memory }}"></label>

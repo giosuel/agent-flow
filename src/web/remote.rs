@@ -33,6 +33,7 @@ pub fn routes() -> Router<AppState> {
         .route("/settings/build-servers/{name}/check", post(check_server))
         .route("/settings/build-servers/{name}/setup/{step}", post(setup_step))
         .route("/settings/build-servers/{name}/limits", post(save_limits))
+        .route("/settings/build-servers/{name}/rename", post(rename_server))
         .route("/settings/build-servers/{name}/remove", post(remove_server))
 }
 
@@ -570,6 +571,8 @@ async fn job_page(
 pub struct ServerSetting {
     pub name: String,
     pub ssh: String,
+    /// It connects itself (agentflow-builder); else the server reaches it by SSH.
+    pub daemon: bool,
     pub online: bool,
     pub line: String,
     pub cargo: String,
@@ -602,6 +605,7 @@ fn card_notice(code: &str) -> Option<(bool, String)> {
         ),
         "removed" => (true, "Removed. Projects that used it build where their agent is.".into()),
         "saved" => (true, "Limits saved.".into()),
+        "renamed" => (true, "Renamed. It reconnects under the new name.".into()),
         "checking" => (true, "Checking; the result shows here in a few seconds (reload).".into()),
         "started" => (true, "Started. It runs in the background; the result shows here and in the Log.".into()),
         c if c.starts_with("error-") => (
@@ -656,6 +660,7 @@ pub async fn servers_card(state: &AppState, code: Option<&str>) -> anyhow::Resul
             ServerSetting {
                 name: b.name.clone(),
                 ssh: b.ssh.clone(),
+                daemon: b.kind == "daemon",
                 online: p.online,
                 line,
                 cargo: tools.cargo.clone(),
@@ -798,6 +803,34 @@ pub async fn save_limits(
     Ok(back_to_card("saved"))
 }
 
+#[derive(serde::Deserialize)]
+pub struct Rename {
+    name: String,
+}
+
+/// The owner renames a builder on the page (the owner, 2026-11-13: "in the UI i can still rename
+/// and remove builders").
+pub async fn rename_server(
+    State(state): State<AppState>,
+    Extension(actor): Extension<Actor>,
+    Path(name): Path<String>,
+    axum::Form(f): axum::Form<Rename>,
+) -> AppResult<Response> {
+    actor.require_owner()?;
+    let new = f.name.trim().to_owned();
+    if new == name {
+        return Ok(back_to_card("saved"));
+    }
+    let (old, n2) = (name.clone(), new.clone());
+    if state.db.call(move |c| remote::rename_server(c, &old, &n2)).await.is_err() {
+        return Ok(back_to_card("error-name"));
+    }
+    crate::builders::hub().drop_builder(&name);
+    remote::reload(&state).await;
+    activity::write(&state.db, Entry::new(&actor, Via::Page, Action::Write, format!("builder {name} renamed to {new}"))).await;
+    Ok(back_to_card("renamed"))
+}
+
 pub async fn remove_server(
     State(state): State<AppState>,
     Extension(actor): Extension<Actor>,
@@ -813,6 +846,7 @@ pub async fn remove_server(
         let _ = tokio::fs::remove_file(&b.key_file).await;
         let _ = tokio::fs::remove_file(format!("{}.pub", b.key_file)).await;
     }
+    crate::builders::hub().drop_builder(&name);
     remote::reload(&state).await;
     state.remote.lock().unwrap_or_else(|e| e.into_inner()).servers.remove(&name);
     activity::write(&state.db, Entry::new(&actor, Via::Page, Action::Write, format!("removed build server {name}")))
