@@ -1,54 +1,14 @@
-//! AgentFlow: one binary with the server (`agentflow serve`), the owner's admin commands, and the
-//! client commands agents and the owner run against the server.
+//! `agentflow`: the AgentFlow server, a background program started by systemd (`agentflow serve`),
+//! with its setup and the helper that works as the agents' user. People and agents type `flow`.
 
-mod actions;
-mod activity;
-mod auth;
-mod backup;
-mod builds;
-mod cli;
-mod config;
-mod contributions;
-mod db;
-mod demo;
-mod github;
-mod guides;
-mod hands;
-mod hardening;
-mod logview;
-mod machine;
-mod markdown;
-mod mcp;
-mod notes;
-mod onboard;
-mod outgoing;
-mod passkey;
-mod poller;
-mod projectdoc;
-mod projects;
-mod sessionlog;
-mod prs;
-mod push;
-mod records;
-mod remote;
-mod screenshots;
-mod setup;
-mod steps;
-mod times;
-mod tokens;
-mod totest;
-mod tz;
-mod usage;
-mod util;
-mod waiting;
-mod web;
-
+use std::ffi::OsString;
 use std::path::PathBuf;
 
+use agentflow::{cli, config, db, github, hands, push, setup, util, web};
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
-#[command(name = "agentflow", version = env!("APP_VERSION"), about = "Project management for Claude agents and their owner")]
+#[command(name = "agentflow", version = env!("APP_VERSION"), about = "The AgentFlow server (people and agents use `flow`)")]
 struct Args {
     /// The server's config file.
     #[arg(long, global = true, env = "AGENTFLOW_CONFIG")]
@@ -66,78 +26,6 @@ enum Command {
         #[command(subcommand)]
         command: cli::AdminCommand,
     },
-    /// Ask the server who your token belongs to.
-    Whoami(cli::ClientArgs),
-    /// Publish a test build for the owner (agents; like viber-run's publish.sh).
-    Publish(cli::PublishArgs),
-    /// Upload a screenshot to your project's Screenshots (agents): a test build, a mockup, a
-    /// spike test, a bug. Name and category required; a description and a record optional.
-    Screenshot(cli::ScreenshotArgs),
-    /// Draft a PR, issue, comment or new commits for someone else's repository (agents). The
-    /// owner reads it in AgentFlow and sends it, as them; agents never post or push there.
-    Contribute(cli::ContributeArgs),
-    /// Run a build or test on a build server (agents): `agentflow remote -- cargo build --release`.
-    /// Copies only what changed, prints the output as it comes, exits with the command's exit code
-    /// (75: the server is offline, build here instead).
-    Remote(cli::RemoteArgs),
-    /// Run a build or test and log how long it took (agents): `agentflow time --on T-12 -- cargo
-    /// test --workspace`. Measures wall time, CPU and peak memory, prints them, logs them on the
-    /// task, step or PR, and exits with the command's exit code.
-    Time(cli::TimeArgs),
-    /// Hand in a file as a note (agents): a morning report, a plan, an estimate, a benchmark, a
-    /// log. `agentflow note report.md --name "Morning report, 12 Nov" --category "morning report"`.
-    Note(cli::NoteArgs),
-    /// Fetch and start a test build (the owner's machines). Also `flow-run`: the same program
-    /// called by that name runs this. Without a product, lists the products; `run <product>
-    /// list` lists its builds.
-    Run(cli::RunArgs),
-    /// Print the hello tool's reply as text (your project, its document, milestones, where you are,
-    /// questions, notes, news), for a Claude Code SessionStart hook. It reads the hook's input on
-    /// stdin when there is one. News in it is marked read.
-    Hello {
-        #[command(flatten)]
-        client: cli::ClientArgs,
-        /// Your session's name (default: the last one given).
-        #[arg(long, default_value = "")]
-        session: String,
-        /// The machine (default: the last one given).
-        #[arg(long, default_value = "")]
-        machine: String,
-        /// Your model (default: from the hook's input, or the last one given).
-        #[arg(long, default_value = "")]
-        model: String,
-        /// Your effort level (default: the last one given).
-        #[arg(long, default_value = "")]
-        effort: String,
-        /// Only the project document (no side effects): one of the two hooks, since Claude Code
-        /// caps a hook's output at 10,000 characters.
-        #[arg(long, conflicts_with = "no_doc")]
-        doc: bool,
-        /// Everything but the project document, shortened to fit a hook: the other hook.
-        #[arg(long)]
-        no_doc: bool,
-    },
-    /// What's new from the owner and others since the agent last read its news (marked read);
-    /// prints nothing when nothing is. For a Claude Code hook before each prompt.
-    News {
-        #[command(flatten)]
-        client: cli::ClientArgs,
-        /// Show the last stretch again, read or not, e.g. "1h" or "30 min".
-        #[arg(long)]
-        again: Option<String>,
-    },
-    /// Wait until something happens in your project (the owner answers, presses a button…), print
-    /// it and exit. Agents run this in the background, so the session is woken when it ends.
-    Wait {
-        #[command(flatten)]
-        client: cli::ClientArgs,
-        /// Only wake for this record, e.g. Q-12.
-        #[arg(long)]
-        record: Option<String>,
-        /// Give up after this many minutes (exit code 2).
-        #[arg(long, default_value_t = 480)]
-        minutes: u64,
-    },
     /// Make AgentFlow a system service running as its own user (run once with sudo after
     /// installing; `--dry-run` shows the steps).
     Setup(setup::SetupArgs),
@@ -150,35 +38,21 @@ enum Command {
         /// The only user allowed to send jobs: AgentFlow's own.
         #[arg(long, default_value = "agentflow")]
         server_user: String,
-    },
-    /// Print the Authorization header for Claude Code's `headersHelper`, from a token file.
-    McpHeaders {
-        /// File holding the token, e.g. ~/.config/agentflow/tokens/<project>.token
-        #[arg(long)]
-        token_file: PathBuf,
-    },
-}
-
-/// Called as `flow-run` (a link to this program), it's `agentflow run`: the owner's command for
-/// test builds (the owner, 2026-11-11: "lets call the client tool flow-run").
-fn as_flow_run(mut argv: Vec<std::ffi::OsString>) -> Vec<std::ffi::OsString> {
-    let called = argv.first().and_then(|a| std::path::Path::new(a).file_name().map(|n| n.to_owned()));
-    if called.as_deref() == Some(std::ffi::OsStr::new("flow-run")) {
-        argv[0] = "agentflow".into();
-        argv.insert(1, "run".into());
-    }
-    argv
+    },    /// The client commands moved to `flow`. For one release, `flow hello`, `news`,
+    /// `publish` and the others are handed to `flow`, so hooks written before keep working.
+    #[command(external_subcommand)]
+    Moved(Vec<OsString>),
 }
 
 fn main() -> anyhow::Result<()> {
-    let args = Args::parse_from(as_flow_run(std::env::args_os().collect()));
+    let args = Args::parse();
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "agentflow=info,warn".into()),
         )
         .with_writer(std::io::stderr)
         .init();
-    let config_path = args.config.unwrap_or_else(config::Config::default_path);
+    let config_path = args.config.clone().unwrap_or_else(config::Config::default_path);
     match args.command {
         Command::Serve => {
             let config = config::Config::load(&config_path)?;
@@ -189,42 +63,25 @@ fn main() -> anyhow::Result<()> {
             runtime.block_on(web::serve(web::AppState::new(db, config, vapid, std::sync::Arc::new(github::GhCli))))
         }
         Command::Admin { command } => cli::admin(&config_path, command),
-        Command::Whoami(client) => cli::whoami(&config_path, client),
-        Command::Publish(args) => cli::publish(&config_path, args),
-        Command::Screenshot(args) => cli::screenshot(&config_path, args),
-        Command::Contribute(args) => cli::contribute(&config_path, args),
-        Command::Remote(args) => {
-            let code = cli::remote(&config_path, args)?;
-            std::process::exit(code);
-        }
-        Command::Note(args) => cli::note(&config_path, args),
-        Command::Time(args) => {
-            let code = cli::time(&config_path, args)?;
-            std::process::exit(code);
-        }
-        Command::Run(args) => cli::run(&config_path, args),
-        Command::Hello { client, session, machine, model, effort, doc, no_doc } => {
-            let part = if doc { cli::HelloPart::Doc } else if no_doc { cli::HelloPart::NoDoc } else { cli::HelloPart::All };
-            cli::hello(&config_path, client, cli::HelloArgs { session, machine, model, effort, part })
-        }
-        Command::News { client, again } => cli::news(&config_path, client, again),
-        Command::Wait { client, record, minutes } => cli::wait(&config_path, client, record, minutes),
-        Command::McpHeaders { token_file } => cli::mcp_headers(&token_file),
         Command::Setup(a) => setup::setup(a),
         Command::Hands { socket, server_user } => hands::serve(&socket, util::uid_of(&server_user)?),
+        Command::Moved(rest) => moved(args.config, rest),
     }
 }
 
-#[cfg(test)]
-mod flow_run_tests {
-    #[test]
-    fn called_as_flow_run_it_runs_builds() {
-        let args = |v: &[&str]| v.iter().map(std::ffi::OsString::from).collect::<Vec<_>>();
-        assert_eq!(
-            super::as_flow_run(args(&["/home/x/.local/bin/flow-run", "lumen", "2"])),
-            args(&["agentflow", "run", "lumen", "2"])
-        );
-        assert_eq!(super::as_flow_run(args(&["flow-run"])), args(&["agentflow", "run"]));
-        assert_eq!(super::as_flow_run(args(&["agentflow", "serve"])), args(&["agentflow", "serve"]));
+/// Hands a client command that used to be `agentflow <command>` to `flow`, with the same
+/// arguments and environment. Only the commands that moved; anything else is an error as before.
+fn moved(config: Option<PathBuf>, rest: Vec<OsString>) -> anyhow::Result<()> {
+    let name = rest.first().and_then(|n| n.to_str()).unwrap_or("");
+    if !util::MOVED_TO_FLOW.contains(&name) {
+        anyhow::bail!("unknown command {name:?} (see agentflow --help; people and agents use `flow`)");
     }
+    eprintln!("note: `agentflow {name}` is now `flow {name}`; this forwarding goes away in the next release");
+    let mut cmd = std::process::Command::new(util::flow_path());
+    if let Some(c) = config {
+        cmd.arg("--config").arg(c);
+    }
+    use std::os::unix::process::CommandExt;
+    let err = cmd.args(rest).exec();
+    Err(anyhow::anyhow!("starting flow ({}): {err}", util::flow_path().display()))
 }

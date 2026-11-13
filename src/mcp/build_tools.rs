@@ -31,7 +31,7 @@ pub struct UpdateBuild {
 #[tool_router(router = build_tools, vis = "pub(super)")]
 impl FlowMcp {
     #[tool(description = "Your project's test builds, newest first: number, name, what's in it, whether the owner \
-        tried it, and their feedback. Publish new ones with `agentflow publish` (a command, not a tool).")]
+        tried it, and their feedback. Publish new ones with `flow publish` (a command, not a tool).")]
     async fn builds(
         &self,
         Extension(parts): Extension<Parts>,

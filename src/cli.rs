@@ -51,7 +51,7 @@ pub enum TokenCommand {
         /// device, project or admin
         #[arg(long)]
         kind: TokenKind,
-        /// What it's for, e.g. "HEADQUARTERS flow-run" or "Vinculum agent".
+        /// What it's for, e.g. "HEADQUARTERS flow run" or "Vinculum agent".
         #[arg(long)]
         name: String,
         /// The project, for a project token.
@@ -360,7 +360,7 @@ impl Client {
     }
 }
 
-/// `agentflow news`: the agent's unread news, one line each; nothing when there's none.
+/// `flow news`: the agent's unread news, one line each; nothing when there's none.
 pub struct HelloArgs {
     pub session: String,
     pub machine: String,
@@ -736,7 +736,7 @@ pub struct PublishArgs {
     #[arg(long)]
     pub tag: Option<String>,
     /// What it runs on: linux-x86_64 (the default), windows-x86_64, linux-aarch64, … Only Linux
-    /// x86_64 builds are offered to flow-run here; others are a download on their page.
+    /// x86_64 builds are offered to flow run here; others are a download on their page.
     #[arg(long)]
     pub platform: Option<String>,
     /// What it needs, one per flag, e.g. --needs "glibc 2.39 or newer" --needs "Vulkan (lavapipe works)".
@@ -940,7 +940,7 @@ pub fn time(config_path: &Path, a: TimeArgs) -> anyhow::Result<i32> {
     let peak_mb = (peak.load(std::sync::atomic::Ordering::Relaxed) / 1024) as i64;
     let code = status.code().unwrap_or(1);
     eprintln!(
-        "agentflow time: wall {}, CPU {}, peak {} (sampled), exit {code}",
+        "flow time: wall {}, CPU {}, peak {} (sampled), exit {code}",
         crate::times::fmt_wall(wall_ms),
         cpu_ms.map(|c| format!("{:.0} s", c as f64 / 1000.0)).unwrap_or_else(|| "?".into()),
         crate::times::fmt_mb(peak_mb),
@@ -948,8 +948,8 @@ pub fn time(config_path: &Path, a: TimeArgs) -> anyhow::Result<i32> {
     let body = serde_json::json!({"what": what, "wall_ms": wall_ms, "cpu_ms": cpu_ms, "peak_mb": peak_mb,
         "exit_code": code, "on": a.on.clone().unwrap_or_default()});
     match client.post_json("/api/timings", &body) {
-        Ok(r) => eprintln!("agentflow time: logged on {}", r["on"].as_str().unwrap_or("?")),
-        Err(e) => eprintln!("agentflow time: not logged: {e:#}"),
+        Ok(r) => eprintln!("flow time: logged on {}", r["on"].as_str().unwrap_or("?")),
+        Err(e) => eprintln!("flow time: not logged: {e:#}"),
     }
     Ok(code)
 }
@@ -1323,7 +1323,7 @@ pub fn run(config_path: &Path, a: RunArgs) -> anyhow::Result<()> {
             }
             if let Err(e) = std::fs::rename(&staged, &dir) {
                 let _ = std::fs::remove_dir_all(&staged);
-                // Another `flow-run` of the same build may have finished first; that's fine.
+                // Another `flow run` of the same build may have finished first; that's fine.
                 if !dir.join(".verified").exists() {
                     return Err(anyhow::anyhow!("keeping the build in {}: {e}", dir.display()));
                 }

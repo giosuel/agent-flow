@@ -1,4 +1,4 @@
-//! Build servers over HTTP: agents start jobs (`agentflow remote`) and follow their output; the
+//! Build servers over HTTP: agents start jobs (`flow remote`) and follow their output; the
 //! owner watches the Machine page's Build servers section and each job's page, and can pause builds
 //! or cancel a job. See `crate::remote`.
 

@@ -30,6 +30,9 @@ pub struct Config {
     pub handbook_dir: String,
     /// That repository on GitHub, for its pull requests and links.
     pub handbook_repo: String,
+    /// The `flow` program the server hands out for download and writes into hooks; empty: the one
+    /// installed next to the server.
+    pub flow_bin: String,
     /// Who the owner's guide edits are committed as.
     pub git_author: String,
     /// False on a test instance: the Guides page's Merge button refuses instead of merging on GitHub.
@@ -55,7 +58,7 @@ pub struct Config {
     pub external_token_file: String,
     /// Where repositories are fetched from and pushed to (tests use a local folder).
     pub git_host: String,
-    /// Machines agents run builds and tests on (`agentflow remote`), reached with ssh.
+    /// Machines agents run builds and tests on (`flow remote`), reached with ssh.
     pub build_servers: Vec<BuildServer>,
 }
 
@@ -63,7 +66,7 @@ pub struct Config {
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 #[serde(default, deny_unknown_fields)]
 pub struct BuildServer {
-    /// What it's called on the pages and in `agentflow remote --server`.
+    /// What it's called on the pages and in `flow remote --server`.
     pub name: String,
     /// What `ssh` connects to: a Host from ~/.ssh/config, or user@host.
     pub ssh: String,
@@ -109,6 +112,7 @@ impl Default for Config {
             push_contact: "mailto:me@giosuel.ch".into(),
             handbook_dir: "~/ai-handbook".into(),
             handbook_repo: "giosuel/ai-handbook".into(),
+            flow_bin: String::new(),
             git_author: "giosuel <me@giosuel.ch>".into(),
             github_writes: true,
             trusted_proxies: vec!["127.0.0.1".parse().unwrap(), "::1".parse().unwrap()],
@@ -185,6 +189,11 @@ impl Config {
 
     pub fn token_dir(&self) -> PathBuf {
         expand_home(&self.token_dir)
+    }
+
+    /// The `flow` program: as configured, else next to the server.
+    pub fn flow_bin(&self) -> PathBuf {
+        if self.flow_bin.is_empty() { crate::util::flow_path() } else { expand_home(&self.flow_bin) }
     }
 
     pub fn handbook_dir(&self) -> PathBuf {
