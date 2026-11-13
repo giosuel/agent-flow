@@ -63,6 +63,19 @@
   </ul>
 </section>
 
+<section class="card pad stack" aria-labelledby="s-github" id="s-github">
+  <div class="sec"><h2 id="s-github">GitHub</h2><span class="sub">AgentFlow's own tokens, kept encrypted</span></div>
+  <p class="sub">With a token here, AgentFlow talks to GitHub with it, from wherever it runs. Without one, <span class="mono">gh</span> uses the login of the user it runs as. For your repositories: a fine-grained token with read and write access to Contents and Pull requests.</p>
+  {% for (which, label, what, set) in github %}
+  <div class="stack-sm">
+    <h3 class="label">{{ label }}</h3>
+    <p class="sub">For {{ what }}.{% if let Some(s) = set %} Set: <span class="mono">{{ s }}</span>{% endif %}</p>
+    <form method="post" action="/settings/github" class="row wrap"><input type="hidden" name="which" value="{{ which }}"><label class="vh" for="gh-{{ which }}">{{ label }} token</label><input id="gh-{{ which }}" name="token" type="password" autocomplete="off" required placeholder="{% if set.is_some() %}Replace with another token{% else %}github_pat_…{% endif %}"><button class="btn sm" type="submit">{% if set.is_some() %}Replace{% else %}Save{% endif %}</button></form>
+    {% if set.is_some() %}<form method="post" action="/settings/github/remove"><input type="hidden" name="which" value="{{ which }}"><button class="btn sm ghost" type="submit" data-confirm="Remove the token for {{ label|lower }}?">Remove</button></form>{% endif %}
+  </div>
+  {% endfor %}
+</section>
+
 <section class="card pad stack" aria-labelledby="s-agents">
   <div class="sec"><h2 id="s-agents">Agent tokens</h2></div>
   {% if agent_tokens.is_empty() %}<p class="sub">No agent has a token yet. Projects get theirs when they're added.</p>{% else %}

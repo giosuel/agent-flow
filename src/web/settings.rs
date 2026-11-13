@@ -29,6 +29,8 @@ pub fn routes() -> Router<AppState> {
         .route("/settings/push/{id}/remove", post(push_remove))
         .route("/settings/push/test", post(push_test))
         .route("/settings/notify", post(notify_save))
+        .route("/settings/github", post(github_save))
+        .route("/settings/github/remove", post(github_remove))
         .route("/settings/tokens/{id}/revoke", post(token_revoke))
         .route("/settings/tokens/{id}/rotate", post(token_rotate))
         .route("/settings/sessions/{id}/end", post(session_end))
@@ -92,6 +94,8 @@ struct SessionView {
 struct SettingsPage {
     nav: Nav,
     notice: Option<&'static str>,
+    /// The server's GitHub tokens: (which, label, what it's for, set as "…abcd · login").
+    github: Vec<(&'static str, &'static str, &'static str, Option<String>)>,
     /// Requests from `flow` waiting for approval: (code, what, machine).
     approvals: Vec<(String, String, String)>,
     passkeys_available: bool,
@@ -129,6 +133,8 @@ fn notice_for(key: &str) -> Option<&'static str> {
         "revoked" => "Token revoked. Whatever used it can no longer reach AgentFlow.",
         "rotated" => "New token written to its file; the old one is revoked. The agent picks it up when it reconnects.",
         "session-ended" => "That browser is signed out.",
+        "github-saved" => "GitHub token saved. AgentFlow's gh calls use it from now on.",
+        "github-removed" => "GitHub token removed. gh uses the login of the user it runs as again.",
         _ => return None,
     })
 }
@@ -209,6 +215,17 @@ async fn render_page(
     let page = SettingsPage {
         nav: nav(state, actor, "/settings").await,
         notice,
+        github: {
+            use crate::secrets::{GitHub, token};
+            let login = |k: &'static str| async move {
+                state.db.call(move |c| Ok(c.query_row("SELECT value FROM settings WHERE key = ?1", [k], |r| r.get::<_, String>(0)).ok())).await.ok().flatten()
+            };
+            let show = |t: Option<String>, l: Option<String>| t.map(|t| format!("…{}{}", crate::secrets::hint(&t), l.map(|l| format!(" · {l}")).unwrap_or_default()));
+            vec![
+                ("own", "Your repositories", "merging, tags, reading PRs", show(token(GitHub::Own), login("github.login.own").await)),
+                ("external", "Other people's repositories", "sending the contributions you approve", show(token(GitHub::External), login("github.login.external").await)),
+            ]
+        },
         approvals: state
             .db
             .call(|c| crate::approvals::pending(c))
@@ -387,6 +404,74 @@ async fn push_test(State(state): State<AppState>, Extension(actor): Extension<Ac
     // A test goes out even if "urgent" is switched off: it's sent as its own kind of check.
     let delivered = state.push.send_ignoring_settings(&n).await?;
     Ok(Redirect::to(if delivered > 0 { "/settings?done=test-sent" } else { "/settings?done=test-none" }))
+}
+
+#[derive(Deserialize)]
+struct GitHubForm {
+    which: String,
+    #[serde(default)]
+    token: String,
+}
+
+/// Checks a GitHub token by asking GitHub whose it is, then keeps it sealed (see crate::secrets).
+async fn github_save(
+    State(state): State<AppState>,
+    Extension(actor): Extension<Actor>,
+    Extension(ip): Extension<ClientIp>,
+    Form(f): Form<GitHubForm>,
+) -> AppResult<Response> {
+    actor.require_owner()?;
+    let which = crate::secrets::GitHub::parse(&f.which).map_err(|e| AppError::BadRequest(format!("{e:#}")))?;
+    let token = f.token.trim().to_owned();
+    crate::secrets::check_token(&token).map_err(|e| AppError::BadRequest(format!("{e:#}")))?;
+    let login = github_login(&token).await.map_err(|e| AppError::BadRequest(format!("GitHub didn't take that token: {e:#}")))?;
+    let data = state.config.data_dir();
+    let (t, l, w) = (token.clone(), login.clone(), f.which.clone());
+    state
+        .db
+        .call(move |c| {
+            crate::secrets::store(c, &data, which, &t)?;
+            c.execute(
+                "INSERT INTO settings (key, value) VALUES (?1, ?2) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+                rusqlite::params![format!("github.login.{w}"), l],
+            )?;
+            Ok(())
+        })
+        .await?;
+    log(&state, &actor, &ip, Action::Write, format!("GitHub token for {} set (account {login})", f.which)).await;
+    Ok(Redirect::to("/settings?done=github-saved#s-github").into_response())
+}
+
+async fn github_remove(
+    State(state): State<AppState>,
+    Extension(actor): Extension<Actor>,
+    Extension(ip): Extension<ClientIp>,
+    Form(f): Form<GitHubForm>,
+) -> AppResult<Response> {
+    actor.require_owner()?;
+    let which = crate::secrets::GitHub::parse(&f.which).map_err(|e| AppError::BadRequest(format!("{e:#}")))?;
+    state.db.call(move |c| crate::secrets::remove(c, which)).await?;
+    log(&state, &actor, &ip, Action::Write, format!("GitHub token for {} removed", f.which)).await;
+    Ok(Redirect::to("/settings?done=github-removed#s-github").into_response())
+}
+
+/// The account a token belongs to.
+async fn github_login(token: &str) -> anyhow::Result<String> {
+    let out = tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        tokio::process::Command::new("gh")
+            .args(["api", "user", "--jq", ".login"])
+            .env("GH_TOKEN", token)
+            .env("GH_PROMPT_DISABLED", "1")
+            .kill_on_drop(true)
+            .output(),
+    )
+    .await
+    .map_err(|_| anyhow::anyhow!("GitHub didn't answer within 30 seconds"))??;
+    if !out.status.success() {
+        anyhow::bail!("{}", String::from_utf8_lossy(&out.stderr).replace(token, "…").trim().lines().last().unwrap_or("refused"));
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).trim().to_owned())
 }
 
 async fn notify_save(
