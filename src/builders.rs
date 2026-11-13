@@ -203,6 +203,12 @@ impl Hub {
         }
     }
 
+    /// Closes a builder's connection (it was renamed or removed); it reconnects as what its token
+    /// says now, or not at all.
+    pub fn drop_builder(&self, name: &str) {
+        self.lock().online.remove(name);
+    }
+
     /// Forgets a request nobody waits for any more.
     pub fn forget(&self, id: u64) {
         self.lock().waiting.remove(&id);
