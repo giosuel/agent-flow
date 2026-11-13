@@ -136,6 +136,22 @@ pub fn parse_day_or_time(s: &str) -> anyhow::Result<i64> {
     Ok((d.midnight().assume_utc().unix_timestamp_nanos() / 1_000_000) as i64)
 }
 
+/// The commands that were `agentflow <command>` and are `flow <command>` since the split
+/// (2026-11-13). The server forwards them for one release.
+pub const MOVED_TO_FLOW: &[&str] = &[
+    "whoami", "publish", "screenshot", "contribute", "remote", "time", "note", "run", "hello", "news", "wait",
+    "mcp-headers",
+];
+
+/// The `flow` program: next to this one (they're installed together), else the one on PATH.
+pub fn flow_path() -> std::path::PathBuf {
+    std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.join("flow")))
+        .filter(|p| p.is_file())
+        .unwrap_or_else(|| "flow".into())
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
