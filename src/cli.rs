@@ -69,6 +69,11 @@ impl Client {
         Ok(Self { base: base.trim_end_matches('/').to_owned(), token, http })
     }
 
+    /// A client with a token in hand (one `flow project setup` just got).
+    pub fn with_token(base: &str, token: &str) -> Self {
+        Self { token: token.to_owned(), ..Self::anonymous(base) }
+    }
+
     /// A client without a token: asking to connect, polling, downloading `flow`.
     pub fn anonymous(base: &str) -> Self {
         let http = reqwest::blocking::Client::builder()
