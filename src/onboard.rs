@@ -442,7 +442,7 @@ pub fn write_setup(folder: &Path, token_file: &Path, name: &str, public_url: &st
     env.insert("AGENTFLOW_URL".into(), public_url.trim_end_matches('/').into());
     write_json(&path, settings)?;
     did.push(format!(
-        "in {}: the hooks (hello on every start, resume, /clear and compaction; the news before each of your prompts), the server approved, and AGENTFLOW_TOKEN_FILE and AGENTFLOW_URL for its `flow` commands{}",
+        "in {}: the hooks (hello on every start, resume, /clear and compaction; the news before each of your prompts; the conversations sent after each reply), the server approved, and AGENTFLOW_TOKEN_FILE and AGENTFLOW_URL for its `flow` commands{}",
         path.display(),
         keep_out_of_git(folder, ".claude/settings.local.json")?
     ));

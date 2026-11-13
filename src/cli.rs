@@ -12,10 +12,10 @@ use crate::util::expand_home;
 #[derive(Args, Default)]
 pub struct ClientArgs {
     /// The server, e.g. https://flow.giosuel.io (default: the config's public_url).
-    #[arg(long, env = "AGENTFLOW_URL")]
+    #[arg(long, env = "AGENTFLOW_URL", global = true)]
     pub url: Option<String>,
     /// File holding your token (default: ~/.config/agentflow/token).
-    #[arg(long, env = "AGENTFLOW_TOKEN_FILE")]
+    #[arg(long, env = "AGENTFLOW_TOKEN_FILE", global = true)]
     pub token_file: Option<PathBuf>,
 }
 

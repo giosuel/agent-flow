@@ -435,6 +435,16 @@ pub fn project_setup(
         bail!("{} can't be a project's folder; use one of its own, e.g. ~/speculum", folder.display());
     }
     let interactive = std::io::stdin().is_terminal();
+    // Set up before: refresh what's there, with the token it has; nothing new is created.
+    if code.is_none()
+        && let Some((url, token)) = existing_setup(&folder)
+        && let Ok(st) = Client::with_token(&url, &token).get("/api/status")
+        && st["who"]["kind"] == "project"
+    {
+        let slug = s(&st["who"]["name"]);
+        println!("{} is set up already as {slug} on {url}; refreshing its setup.", folder.display());
+        return finish_setup(&folder, &url, &slug, &slug, &token, &machine_name());
+    }
     let code = match code {
         Some(c) => c,
         None if interactive => ask_hidden("Setup code (or press Enter to create a new project)")?,
@@ -471,19 +481,40 @@ pub fn project_setup(
         bail!("the server sent no project or token");
     }
     println!("{project_name} ({slug}) on {url}");
-    let p = crate::onboard::NewProject { name: project_name.clone(), slug: slug.clone(), ..Default::default() };
+    finish_setup(&folder, &url, &slug, &project_name, &token, &machine)
+}
+
+/// The token file and server a folder's setup names (`.claude/settings.local.json`).
+fn existing_setup(folder: &Path) -> Option<(String, String)> {
+    let text = std::fs::read_to_string(folder.join(".claude/settings.local.json")).ok()?;
+    let v: Value = serde_json::from_str(&text).ok()?;
+    let token_file = v["env"]["AGENTFLOW_TOKEN_FILE"].as_str()?;
+    let url = v["env"]["AGENTFLOW_URL"].as_str()?.to_owned();
+    let token = std::fs::read_to_string(token_file).ok()?.trim().to_owned();
+    (!token.is_empty()).then_some((url, token))
+}
+
+/// The local part of a setup: folder, git, token file, first note, Claude Code setup; then where
+/// it lies, and the folder's earlier conversations (only what the server doesn't have yet).
+fn finish_setup(folder: &Path, url: &str, slug: &str, project_name: &str, token: &str, machine: &str) -> anyhow::Result<()> {
+    let p = crate::onboard::NewProject { name: project_name.to_owned(), slug: slug.to_owned(), ..Default::default() };
     let token_dir = expand_home("~/.config/agentflow/tokens");
-    let outcome = crate::onboard::create_files(&p, &folder, &token, &token_dir, &crate::sync::transcripts_root(), &url)?;
+    let outcome = crate::onboard::create_files(&p, folder, token, &token_dir, &crate::sync::transcripts_root(), url)?;
     for step in &outcome.steps {
         println!("  ✓ {step}");
     }
-    let client = Client::with_token(&url, &token);
+    let client = Client::with_token(url, token);
     client.post_json("/api/setup/done", &json!({"folder": folder.display().to_string(), "machine": machine}))?;
-    let (n, _) = crate::sync::session_count(&folder);
+    let (n, _) = crate::sync::session_count(folder);
     if n > 0 {
-        let files = crate::sync::conversations(&folder);
+        let files = crate::sync::conversations(folder);
         let calls = crate::sync::send(&client.with_timeout(Duration::from_secs(300)), &files)?;
-        println!("  ✓ sent the folder's {n} earlier conversations to AgentFlow ({calls} calls it didn't have)");
+        let plural = if n == 1 { "conversation" } else { "conversations" };
+        if calls > 0 {
+            println!("  ✓ sent the folder's {n} earlier {plural} to AgentFlow ({calls} calls it didn't have)");
+        } else {
+            println!("  ✓ AgentFlow has the folder's {n} earlier {plural} already");
+        }
         println!();
         println!("This folder already has {n} Claude Code conversation{}.", if n == 1 { "" } else { "s" });
         println!("If its agent keeps the project's plans, decisions or tasks in its own files,");
