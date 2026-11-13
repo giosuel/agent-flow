@@ -8,6 +8,7 @@ pub mod auth;
 pub mod backup;
 pub mod blobs;
 pub mod builder;
+pub mod builder_cmd;
 pub mod builders;
 pub mod builds;
 pub mod cli;
