@@ -103,6 +103,10 @@ struct UploadQuery {
     built_at: String,
     /// An older build moved over: the number it had, if it's free.
     number: Option<i64>,
+    /// Only check what's asked, without a build: the client asks first, because a refusal in the
+    /// middle of a large upload reaches it only as a dropped connection.
+    #[serde(default)]
+    check: bool,
 }
 
 /// The features, sent as a JSON list of "Title: what to do".
@@ -142,13 +146,10 @@ async fn upload(
     if let Err(e) = builds::check_product(&q.product) {
         return json_error(StatusCode::BAD_REQUEST, format!("{e:#}"));
     }
-    if q.summary.trim().is_empty() {
-        return json_error(StatusCode::BAD_REQUEST, "summary: one line on what's in it");
-    }
     let checks = builds::check_commit(q.commit.trim())
         .and_then(|_| builds::check_label("branch", &q.branch))
         .and_then(|_| builds::check_label("tag", &q.tag))
-        .and_then(|_| builds::check_label("summary", &q.summary))
+        .and_then(|_| builds::check_summary(&q.summary))
         // Stored text is redacted; a branch that looks like a token would no longer match the
         // build's file name.
         .and_then(|_| {
@@ -191,6 +192,9 @@ async fn upload(
             Ok(true) => return json_error(StatusCode::CONFLICT, format!("build #{n} exists already")),
             Err(e) => return json_error(StatusCode::INTERNAL_SERVER_ERROR, format!("{e:#}")),
         }
+    }
+    if q.check {
+        return Json(json!({"ok": true})).into_response();
     }
 
     // One upload at a time: each may take 2 GB of disk until it's checked.

@@ -949,6 +949,20 @@ async fn older_builds_move_over_with_their_number_and_date() {
     let res: Value = post("commit=a1b2c3d&branch=main".into()).await.unwrap().json().await.unwrap();
     assert_eq!(res["number"], 64, "{res}");
 
+    // A long summary (viber-run's #7 had 292 characters) goes through; the client asks first,
+    // and a refusal then comes back as an answer rather than as a dropped upload.
+    let long = "x".repeat(292);
+    let ask = |summary: String| {
+        s.http.post(s.url(&format!("/api/builds?product=imaginarium&summary={summary}&built_at=2026-10-27%2010%3A00&number=7&check=true"))).bearer_auth(&token).send()
+    };
+    let ok: Value = ask(long.clone()).await.unwrap().json().await.unwrap();
+    assert_eq!(ok["ok"], true);
+    assert_eq!(ask("y".repeat(301)).await.unwrap().status(), StatusCode::BAD_REQUEST);
+    let res = s.http.post(s.url("/api/builds?product=imaginarium&summary=x&built_at=2026-10-27%2010%3A00&number=5&check=true")).bearer_auth(&token).send().await.unwrap();
+    assert_eq!(res.status(), StatusCode::CONFLICT, "a taken number is known before the upload");
+    let res: Value = s.http.post(s.url(&format!("/api/builds?product=imaginarium&summary={long}&commit=abcdef1&built_at=2026-10-27%2010%3A00&number=7"))).bearer_auth(&token).body(tar.clone()).send().await.unwrap().json().await.unwrap();
+    assert_eq!(res["number"], 7, "{res}");
+
     // Nothing was put on the To test list for the old ones.
     let tests: i64 = s.state.db.call(|c| Ok(c.query_row("SELECT count(*) FROM records WHERE kind = 'test'", [], |r| r.get(0))?)).await.unwrap();
     assert_eq!(tests, 0);

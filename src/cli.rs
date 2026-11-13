@@ -1188,6 +1188,7 @@ pub fn publish(config_path: &Path, a: PublishArgs) -> anyhow::Result<()> {
         ),
         None => (a.commit.clone().unwrap_or_default(), a.branch.clone().unwrap_or_default()),
     };
+    crate::builds::check_summary(&a.summary)?;
     // Pack next to the user's cache, not in /tmp: builds are big and /tmp is small here.
     let cache = expand_home("~/.cache/agentflow");
     std::fs::create_dir_all(&cache)?;
@@ -1207,6 +1208,9 @@ pub fn publish(config_path: &Path, a: PublishArgs) -> anyhow::Result<()> {
         ("built_at", a.built_at.clone().unwrap_or_default()),
         ("number", a.number.map(|n| n.to_string()).unwrap_or_default()),
     ]);
+    // Everything the server would refuse is asked first: a refusal during the upload arrives
+    // only as a dropped connection.
+    client.post_json(&format!("/api/builds?{query}&check=true"), &serde_json::json!({}))?;
     let res = client.post_file(&format!("/api/builds?{query}"), file)?;
     println!(
         "Published {} as #{} ({}). The owner runs it with: {}",

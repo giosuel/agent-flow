@@ -134,6 +134,18 @@ pub fn check_history(built_at: bool, number: Option<i64>, features: bool) -> any
     Ok(())
 }
 
+/// A build's summary is its record's title: one line, up to 300 characters.
+pub fn check_summary(summary: &str) -> anyhow::Result<()> {
+    let s = summary.trim();
+    if s.is_empty() {
+        bail!("summary: one line on what's in it");
+    }
+    if s.chars().count() > 300 || s.chars().any(char::is_control) {
+        bail!("the summary must be one line of up to 300 characters (this one has {})", s.chars().count());
+    }
+    Ok(())
+}
+
 /// Branches and tags are shown and stored, so keep them short and printable.
 pub fn check_label(what: &str, value: &str) -> anyhow::Result<()> {
     if value.len() > 200 || value.chars().any(char::is_control) {
