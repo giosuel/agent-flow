@@ -231,6 +231,7 @@ pub fn target_project(
             }
             crate::projects::require(conn, project.ok_or_else(|| anyhow::anyhow!("say which project"))?)
         }
+        Actor::Builder { .. } => anyhow::bail!("a builder's token is only for building"),
         Actor::Anonymous => anyhow::bail!("not signed in"),
     }
 }

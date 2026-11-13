@@ -30,6 +30,11 @@ pub enum Actor {
         token_id: i64,
         name: String,
     },
+    /// A builder's daemon (`agentflow-builder`): connects as that builder and nothing else.
+    Builder {
+        token_id: i64,
+        name: String,
+    },
     /// AgentFlow itself: pollers, scheduled jobs, the local CLI working on the database.
     System(&'static str),
     Anonymous,
@@ -42,6 +47,7 @@ impl Actor {
             Actor::Device { .. } => "device",
             Actor::Project { .. } => "project",
             Actor::Admin { .. } => "admin",
+            Actor::Builder { .. } => "builder",
             Actor::System(_) => "system",
             Actor::Anonymous => "anonymous",
         }
@@ -50,7 +56,7 @@ impl Actor {
     pub fn name(&self) -> String {
         match self {
             Actor::Owner { .. } => "owner".into(),
-            Actor::Device { name, .. } | Actor::Admin { name, .. } => name.clone(),
+            Actor::Device { name, .. } | Actor::Admin { name, .. } | Actor::Builder { name, .. } => name.clone(),
             Actor::Project { slug, .. } => slug.clone(),
             Actor::System(what) => (*what).into(),
             Actor::Anonymous => "anonymous".into(),
@@ -60,9 +66,10 @@ impl Actor {
     /// The token behind a device, agent or consultant.
     pub fn token_id(&self) -> Option<i64> {
         match self {
-            Actor::Device { token_id, .. } | Actor::Project { token_id, .. } | Actor::Admin { token_id, .. } => {
-                Some(*token_id)
-            }
+            Actor::Device { token_id, .. }
+            | Actor::Project { token_id, .. }
+            | Actor::Admin { token_id, .. }
+            | Actor::Builder { token_id, .. } => Some(*token_id),
             _ => None,
         }
     }
@@ -91,7 +98,7 @@ impl Actor {
         match self {
             Actor::Admin { .. } | Actor::System(_) => true,
             Actor::Project { project_id: own, .. } => *own == project_id,
-            Actor::Owner { .. } | Actor::Device { .. } | Actor::Anonymous => false,
+            Actor::Owner { .. } | Actor::Device { .. } | Actor::Builder { .. } | Actor::Anonymous => false,
         }
     }
 
@@ -126,6 +133,7 @@ pub enum TokenKind {
     Device,
     Project,
     Admin,
+    Builder,
 }
 
 impl TokenKind {
@@ -134,6 +142,7 @@ impl TokenKind {
             TokenKind::Device => "device",
             TokenKind::Project => "project",
             TokenKind::Admin => "admin",
+            TokenKind::Builder => "builder",
         }
     }
 
@@ -142,6 +151,7 @@ impl TokenKind {
             TokenKind::Device => "af_dev_",
             TokenKind::Project => "af_prj_",
             TokenKind::Admin => "af_adm_",
+            TokenKind::Builder => "af_bld_",
         }
     }
 }
@@ -153,7 +163,8 @@ impl std::str::FromStr for TokenKind {
             "device" => TokenKind::Device,
             "project" => TokenKind::Project,
             "admin" => TokenKind::Admin,
-            _ => bail!("token kind must be device, project or admin"),
+            "builder" => TokenKind::Builder,
+            _ => bail!("token kind must be device, project, admin or builder"),
         })
     }
 }
@@ -262,6 +273,7 @@ pub fn token_lookup(conn: &Connection, secret: &str, from: &str) -> anyhow::Resu
     let actor = match kind.as_str() {
         "device" => Actor::Device { token_id: id, name },
         "admin" => Actor::Admin { token_id: id, name },
+        "builder" => Actor::Builder { token_id: id, name },
         "project" => Actor::Project {
             token_id: id,
             project_id: project_id.context("project token without a project")?,

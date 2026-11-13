@@ -81,6 +81,16 @@ pub async fn run_script(
     script: &str,
     timeout: Duration,
 ) -> anyhow::Result<String> {
+    if server.kind == "daemon" {
+        let script = script.to_owned();
+        let (code, stdout, stderr) = crate::builders::hub()
+            .ask(&server.name, |id| crate::builders::Request::Sh { id, script, stream: false, timeout_s: timeout.as_secs() }, timeout + Duration::from_secs(5))
+            .await?;
+        if code != 0 {
+            bail!("{}", stderr.trim().lines().last().unwrap_or("failed"));
+        }
+        return Ok(stdout);
+    }
     tokio::fs::create_dir_all(data_dir.join("remote")).await.ok();
     let mut cmd = tokio::process::Command::new(&server.ssh_program);
     cmd.args(ssh_base(data_dir, server, 5)).arg(&server.ssh).arg("sh -s");
@@ -434,6 +444,14 @@ pub struct Job {
     pub created_at: i64,
     pub started_at: Option<i64>,
     pub finished_at: Option<i64>,
+    /// A snapshot of the agent's working tree in the server's store (`flow remote`), for builders
+    /// that connect themselves; empty: the server reads `dir` (the SSH path).
+    pub manifest: String,
+    pub bundle: String,
+    /// Runs in the builder's home (`flow remote --setup`): installing tools, no working tree.
+    pub setup: bool,
+    /// What came back, kept on the server for `flow remote` to fetch.
+    pub artifacts: Vec<String>,
 }
 
 impl Job {
@@ -451,7 +469,7 @@ impl Job {
 const JOB_COLUMNS: &str =
     "j.id, j.server, j.project_id, p.slug, j.actor, j.dir, j.subdir, j.command, j.fetch, j.gpu, j.state,
      j.reason, j.exit_code, j.commit_sha, j.dirty, j.threads, j.sent_bytes, j.lines, j.warnings, j.errors, j.created_at,
-     j.started_at, j.finished_at";
+     j.started_at, j.finished_at, j.manifest, j.bundle, j.setup, j.artifacts";
 
 fn job_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<Job> {
     let list = |s: String| serde_json::from_str::<Vec<String>>(&s).unwrap_or_default();
@@ -479,6 +497,10 @@ fn job_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<Job> {
         created_at: r.get(20)?,
         started_at: r.get(21)?,
         finished_at: r.get(22)?,
+        manifest: r.get(23)?,
+        bundle: r.get(24)?,
+        setup: r.get(25)?,
+        artifacts: list(r.get(26)?),
     })
 }
 
@@ -529,6 +551,7 @@ pub fn check_fetch(p: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+#[derive(Default)]
 pub struct NewJob {
     pub server: String,
     pub project_id: i64,
@@ -538,6 +561,9 @@ pub struct NewJob {
     pub command: Vec<String>,
     pub fetch: Vec<String>,
     pub gpu: bool,
+    pub manifest: String,
+    pub bundle: String,
+    pub setup: bool,
 }
 
 pub fn create(conn: &Connection, j: &NewJob) -> anyhow::Result<i64> {
@@ -548,8 +574,9 @@ pub fn create(conn: &Connection, j: &NewJob) -> anyhow::Result<i64> {
         check_fetch(f)?;
     }
     conn.execute(
-        "INSERT INTO remote_jobs (server, project_id, actor, dir, subdir, command, fetch, gpu, state, reason, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'queued', 'waiting for its turn', ?9)",
+        "INSERT INTO remote_jobs (server, project_id, actor, dir, subdir, command, fetch, gpu, state, reason, created_at,
+                                  manifest, bundle, setup)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'queued', 'waiting for its turn', ?9, ?10, ?11, ?12)",
         params![
             j.server,
             j.project_id,
@@ -559,7 +586,10 @@ pub fn create(conn: &Connection, j: &NewJob) -> anyhow::Result<i64> {
             serde_json::to_string(&j.command)?,
             serde_json::to_string(&j.fetch)?,
             j.gpu,
-            now_ms()
+            now_ms(),
+            j.manifest,
+            j.bundle,
+            j.setup
         ],
     )?;
     Ok(conn.last_insert_rowid())
@@ -633,7 +663,7 @@ pub async fn reload(state: &crate::web::AppState) {
 
 pub fn load_servers(conn: &Connection) -> anyhow::Result<Vec<BuildServer>> {
     let mut stmt = conn.prepare(
-        "SELECT name, ssh, key_file, root, min_threads, min_memory_gb, reserve_memory_gb, keep_days
+        "SELECT name, ssh, key_file, root, min_threads, min_memory_gb, reserve_memory_gb, keep_days, kind
          FROM build_servers ORDER BY created_at, name",
     )?;
     let rows = stmt.query_map([], |r| {
@@ -646,6 +676,7 @@ pub fn load_servers(conn: &Connection) -> anyhow::Result<Vec<BuildServer>> {
             min_memory_gb: r.get(5)?,
             reserve_memory_gb: r.get(6)?,
             keep_days: r.get(7)?,
+            kind: r.get(8)?,
             ..Default::default()
         })
     })?;
@@ -683,6 +714,21 @@ pub fn check_server(b: &BuildServer) -> anyhow::Result<()> {
     }
     if !(b.min_threads >= 0.0 && b.min_memory_gb >= 0.0 && b.reserve_memory_gb >= 0.0 && b.keep_days >= 1) {
         bail!("the limits can't be negative, and folders are kept at least a day");
+    }
+    Ok(())
+}
+
+/// A builder that connects itself (`flow builder add`): no SSH target, its own token.
+pub fn add_daemon(conn: &Connection, b: &BuildServer) -> anyhow::Result<()> {
+    let probe = BuildServer { ssh: "daemon".into(), ..b.clone() };
+    check_server(&probe)?;
+    let n = conn.execute(
+        "INSERT OR IGNORE INTO build_servers (name, ssh, key_file, root, min_threads, min_memory_gb, reserve_memory_gb, keep_days, created_at, kind)
+         VALUES (?1, '', '', ?2, ?3, ?4, ?5, ?6, ?7, 'daemon')",
+        params![b.name, b.root, b.min_threads, b.min_memory_gb, b.reserve_memory_gb, b.keep_days, now_ms()],
+    )?;
+    if n == 0 {
+        bail!("a builder called {} exists already; flow builder edit or remove it", b.name);
     }
     Ok(())
 }
@@ -1232,8 +1278,18 @@ async fn run_job(state: crate::web::AppState, server: BuildServer, job: Job, thr
     };
     crate::activity::write(&state.db, started).await;
 
-    out.line(&note(&format!("copying {} to {}", job.dir, server.name))).await;
-    let synced = match sync(&data_dir, &server, &job).await {
+    let daemon = server.kind == "daemon";
+    if !job.setup {
+        out.line(&note(&format!("copying {} to {}", if job.dir.is_empty() { "the snapshot" } else { &job.dir }, server.name))).await;
+    }
+    let synced = if job.setup {
+        Ok(Synced { sha: String::new(), changed: 0, sent: 0 })
+    } else if daemon {
+        daemon_sync(&server, &job).await
+    } else {
+        sync(&data_dir, &server, &job).await
+    };
+    let synced = match synced {
         Ok(s) => s,
         Err(e) => {
             out.line(&note(&format!("couldn't copy the changes: {e:#}"))).await;
@@ -1242,14 +1298,14 @@ async fn run_job(state: crate::web::AppState, server: BuildServer, job: Job, thr
             return;
         }
     };
-    out.line(&note(&format!(
+    if !job.setup { out.line(&note(&format!(
         "at commit {} plus {} changed file{} ({} bytes sent)",
         synced.sha.get(..8).unwrap_or(""),
         synced.changed,
         if synced.changed == 1 { "" } else { "s" },
         synced.sent
     )))
-    .await;
+    .await; }
     let (id, sha, changed, sent) = (job.id, synced.sha.clone(), synced.changed as i64, synced.sent);
     let _ = state
         .db
@@ -1264,7 +1320,14 @@ async fn run_job(state: crate::web::AppState, server: BuildServer, job: Job, thr
 
     // The command, in a unit of its own: low priority, a memory limit that leaves the owner room.
     let base = work_dir(&server, &job.project);
-    let workdir = if job.subdir.is_empty() { format!("{base}/work") } else { format!("{base}/work/{}", job.subdir) };
+    let workdir = if job.setup {
+        // `flow remote --setup`: tools go into the builder's home (the owner, 2026-11-13).
+        ".".to_owned()
+    } else if job.subdir.is_empty() {
+        format!("{base}/work")
+    } else {
+        format!("{base}/work/{}", job.subdir)
+    };
     let mem_high = (probe.mem_free_gb - server.reserve_memory_gb).max(8.0).floor();
     let mem_max = (probe.mem_total_gb - server.reserve_memory_gb).max(mem_high + 2.0).floor();
     let command = job.command_line();
@@ -1290,16 +1353,42 @@ exec systemd-run --user --quiet --wait --pipe --collect --unit=af-job-{id} --wor
     .await;
     flush(&state, &job, &mut out).await;
 
-    let mut cmd = tokio::process::Command::new(&server.ssh_program);
-    cmd.args(ssh_base(&data_dir, &server, 10)).arg(&server.ssh).arg("sh -s");
-    cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
-    let mut child = match cmd.spawn() {
-        Ok(c) => c,
-        Err(e) => {
-            finish(&state, &job, "failed", &format!("running ssh: {e}"), None, Some(&out)).await;
-            return;
+    let code = if daemon {
+        stream_daemon(&state, &server, &job, script, &mut out).await
+    } else {
+        match stream_ssh(&state, &data_dir, &server, &job, script, &mut out).await {
+            Ok(c) => c,
+            Err(e) => {
+                finish(&state, &job, "failed", &format!("running ssh: {e}"), None, Some(&out)).await;
+                return;
+            }
         }
     };
+    state.remote.lock().unwrap_or_else(|e| e.into_inner()).running.remove(&job.id);
+    let id = job.id;
+    if state.db.call(move |c| get(c, id)).await.ok().flatten().is_some_and(|j| j.state == "cancelled") {
+        out.line(&note("cancelled")).await;
+        flush(&state, &job, &mut out).await;
+        log_finish(&state, &job, "cancelled", None, &out).await;
+        return;
+    }
+    after_run(&state, &data_dir, &server, &job, code, &mut out).await;
+}
+
+/// Runs the job's script over ssh, its lines into the output. Returns the exit code (None: the
+/// connection was lost or the job was stopped).
+async fn stream_ssh(
+    state: &crate::web::AppState,
+    data_dir: &Path,
+    server: &BuildServer,
+    job: &Job,
+    script: String,
+    out: &mut Out,
+) -> anyhow::Result<Option<i64>> {
+    let mut cmd = tokio::process::Command::new(&server.ssh_program);
+    cmd.args(ssh_base(data_dir, server, 10)).arg(&server.ssh).arg("sh -s");
+    cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
+    let mut child = cmd.spawn()?;
     if let Some(mut stdin) = child.stdin.take() {
         let _ = stdin.write_all(script.as_bytes()).await;
     }
@@ -1319,28 +1408,61 @@ exec systemd-run --user --quiet --wait --pipe --collect --unit=af-job-{id} --wor
                 Ok(Some(l)) => out.line(&l).await,
                 _ => stderr_open = false,
             },
-            _ = tick.tick() => flush(&state, &job, &mut out).await,
+            _ = tick.tick() => flush(state, job, out).await,
             _ = &mut stop => {
                 let _ = child.kill().await;
                 break None;
             }
         }
     };
-    state.remote.lock().unwrap_or_else(|e| e.into_inner()).running.remove(&job.id);
-    let id = job.id;
-    if state.db.call(move |c| get(c, id)).await.ok().flatten().is_some_and(|j| j.state == "cancelled") {
-        out.line(&note("cancelled")).await;
-        flush(&state, &job, &mut out).await;
-        log_finish(&state, &job, "cancelled", None, &out).await;
-        return;
-    }
-    let code = status.and_then(|s| s.code()).map(i64::from);
+    Ok(status.and_then(|s| s.code()).map(i64::from))
+}
+
+/// Runs the job's script on a builder that connected itself. A dropped connection doesn't end
+/// it: the builder sends the rest when it's back.
+async fn stream_daemon(state: &crate::web::AppState, server: &BuildServer, job: &Job, script: String, out: &mut Out) -> Option<i64> {
+    let (rid, mut events) = match crate::builders::hub().stream(&server.name, script) {
+        Ok(x) => x,
+        Err(e) => {
+            out.line(&note(&format!("{e:#}"))).await;
+            return None;
+        }
+    };
+    let (tx, mut stop) = tokio::sync::oneshot::channel();
+    state.remote.lock().unwrap_or_else(|e| e.into_inner()).running.insert(job.id, tx);
+    let mut tick = tokio::time::interval(Duration::from_secs(1));
+    let code = loop {
+        tokio::select! {
+            ev = events.recv() => match ev {
+                Some(crate::builders::Event::Line(l)) => out.line(&l).await,
+                Some(crate::builders::Event::Exit(c)) => break Some(i64::from(c)),
+                Some(crate::builders::Event::Error(e)) => {
+                    out.line(&note(&e)).await;
+                    break None;
+                }
+                None => break None,
+            },
+            _ = tick.tick() => flush(state, job, out).await,
+            _ = &mut stop => {
+                crate::builders::hub().kill(&server.name, rid);
+                break None;
+            }
+        }
+    };
+    crate::builders::hub().forget(rid);
+    code
+}
+
+/// What follows a run: bring back what was asked for, and finish.
+async fn after_run(state: &crate::web::AppState, data_dir: &Path, server: &BuildServer, job: &Job, code: Option<i64>, out: &mut Out) {
+    let (state, server, job) = (state.clone(), server.clone(), job.clone());
     match code {
         Some(0) => {
             // Bring back what was asked for.
             let mut fetched = Vec::new();
             for f in &job.fetch {
-                match fetch(&data_dir, &server, &job, f).await {
+                let got = if server.kind == "daemon" { daemon_fetch(&state, &server, &job, f).await } else { fetch(data_dir, &server, &job, f).await };
+                match got {
                     Ok(()) => fetched.push(f.clone()),
                     Err(e) => out.line(&note(&format!("couldn't bring back {f}: {e:#}"))).await,
                 }
@@ -1348,7 +1470,7 @@ exec systemd-run --user --quiet --wait --pipe --collect --unit=af-job-{id} --wor
             if !fetched.is_empty() {
                 out.line(&note(&format!("brought back {}", fetched.join(", ")))).await;
             }
-            flush(&state, &job, &mut out).await;
+            flush(&state, &job, out).await;
             let missing = fetched.len() < job.fetch.len();
             finish(
                 &state,
@@ -1356,21 +1478,75 @@ exec systemd-run --user --quiet --wait --pipe --collect --unit=af-job-{id} --wor
                 if missing { "failed" } else { "done" },
                 if missing { "not everything came back" } else { "" },
                 code,
-                Some(&out),
+                Some(&*out),
             )
             .await;
         }
         Some(255) | None => {
             out.line(&note(&format!("lost the connection to {}", server.name))).await;
-            flush(&state, &job, &mut out).await;
-            finish(&state, &job, "failed", &format!("lost the connection to {}", server.name), code, Some(&out)).await;
+            flush(&state, &job, out).await;
+            finish(&state, &job, "failed", &format!("lost the connection to {}", server.name), code, Some(&*out)).await;
         }
         Some(c) => {
             out.line(&note(&format!("exit code {c}"))).await;
-            flush(&state, &job, &mut out).await;
-            finish(&state, &job, "failed", &format!("exit code {c}"), code, Some(&out)).await;
+            flush(&state, &job, out).await;
+            finish(&state, &job, "failed", &format!("exit code {c}"), code, Some(&*out)).await;
         }
     }
+}
+
+/// Brings a builder's work folder to the job's snapshot (see `crate::builders`).
+async fn daemon_sync(server: &BuildServer, job: &Job) -> anyhow::Result<Synced> {
+    let work = format!("{}/work", work_dir(server, &job.project));
+    let (manifest, bundle) = (job.manifest.clone(), job.bundle.clone());
+    let (code, stdout, stderr) = crate::builders::hub()
+        .ask(
+            &server.name,
+            |id| crate::builders::Request::Sync { id, work, manifest, bundle, commit: String::new() },
+            Duration::from_secs(1800),
+        )
+        .await?;
+    if code != 0 {
+        bail!("{}", stderr.trim().lines().last().unwrap_or("the sync failed"));
+    }
+    let v: serde_json::Value = serde_json::from_str(&stdout).context("the builder's sync report")?;
+    Ok(Synced {
+        // Only a commit git there really has: the next bundle starts from it.
+        sha: if v["git"].as_bool().unwrap_or(false) { v["commit"].as_str().unwrap_or("").to_owned() } else { String::new() },
+        changed: v["changed"].as_u64().unwrap_or(0) as usize,
+        sent: v["received"].as_i64().unwrap_or(0),
+    })
+}
+
+/// A builder sends a path of the job back to the server, where `flow remote` fetches it.
+async fn daemon_fetch(state: &crate::web::AppState, server: &BuildServer, job: &Job, path: &str) -> anyhow::Result<()> {
+    check_fetch(path)?;
+    let base = work_dir(server, &job.project);
+    let from = match path.strip_prefix("target/") {
+        Some(rest) => format!("{base}/target/{rest}"),
+        None => format!("{base}/work/{path}"),
+    };
+    let name = crate::web::builders::result_name(path);
+    let (jid, n2) = (job.id, name.clone());
+    let (code, _, stderr) = crate::builders::hub()
+        .ask(&server.name, |id| crate::builders::Request::Upload { id, job: jid, from, name: n2 }, Duration::from_secs(1800))
+        .await?;
+    if code != 0 {
+        bail!("{}", stderr.trim().lines().last().unwrap_or("the upload failed"));
+    }
+    state
+        .db
+        .call(move |c| {
+            let list: String = c.query_row("SELECT artifacts FROM remote_jobs WHERE id = ?1", [jid], |r| r.get(0))?;
+            let mut v: Vec<String> = serde_json::from_str(&list).unwrap_or_default();
+            if !v.contains(&name) {
+                v.push(name);
+            }
+            c.execute("UPDATE remote_jobs SET artifacts = ?2 WHERE id = ?1", params![jid, serde_json::to_string(&v)?])?;
+            Ok(())
+        })
+        .await?;
+    Ok(())
 }
 
 /// Copies a path back from the work folder (or its target folder) into the checkout.
@@ -1600,6 +1776,10 @@ mod tests {
             created_at: 0,
             started_at: None,
             finished_at: None,
+            manifest: String::new(),
+            bundle: String::new(),
+            setup: false,
+            artifacts: Vec::new(),
         };
         let mut live = ServerLive::default();
         assert!(wait_reason(&server, &live, &job(1, 1), &[]).unwrap().contains("offline"));
