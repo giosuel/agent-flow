@@ -161,6 +161,21 @@ async fn login_link_signs_in_once() {
     assert_eq!(again.status(), StatusCode::GONE);
 }
 
+/// `sudo flow server add-passkey` (and the first start) hand out a link that leads straight to
+/// adding a passkey, logged and announced.
+#[tokio::test]
+async fn a_passkey_link_leads_to_adding_a_passkey() {
+    let s = TestServer::start().await;
+    let url = crate::web::admin_socket::passkey_link(&s.state, "root").await.unwrap();
+    let link = url.rsplit('/').next().unwrap().to_owned();
+    let res = s.http.post(s.url(&format!("/login/link/{link}"))).send().await.unwrap();
+    assert_eq!(res.headers()["location"], "/settings?add_passkey=1#passkeys");
+    let cookie = res.headers()[SET_COOKIE].to_str().unwrap().split(';').next().unwrap().to_owned();
+    let page = s.http.get(s.url("/settings?add_passkey=1")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
+    assert!(page.contains("Add a passkey for this device"), "{page}");
+    assert!(s.log_summaries().await.iter().any(|l| l.contains("passkey link made on the server, as root")));
+}
+
 #[tokio::test]
 async fn cookie_posts_need_our_origin() {
     let s = TestServer::start().await;
@@ -270,42 +285,112 @@ async fn settings_are_owner_only() {
     let admin = s.token(TokenKind::Admin, None).await;
     let res = s.http.get(s.url("/settings")).bearer_auth(&admin).send().await.unwrap();
     assert_eq!(res.status(), StatusCode::FORBIDDEN, "not even the consultant");
-    let res = s.http.post(s.url("/settings/devices")).bearer_auth(&admin).form(&[("name", "x")]).send().await.unwrap();
-    assert_eq!(res.status(), StatusCode::FORBIDDEN);
-
     let cookie = s.owner_cookie().await;
     let page = s.http.get(s.url("/settings")).header(COOKIE, &cookie).send().await.unwrap();
     assert_eq!(page.status(), StatusCode::OK);
-    // A device token is shown once, right after it's made, and works.
-    let res = s
+    assert!(page.text().await.unwrap().contains("/install.sh | sh"), "the install command is on the page");
+}
+
+/// The owner, 2026-11-13: `flow connect` signs a machine in like `gh auth login`; the owner
+/// approves in the browser with their passkey; the token reaches flow once and nowhere else.
+#[tokio::test]
+async fn a_machine_connects_after_the_owner_approves() {
+    let s = TestServer::start().await;
+    let cookie = s.owner_cookie().await;
+    let asked: Value = s
         .http
-        .post(s.url("/settings/devices"))
+        .post(s.url("/api/approvals"))
+        .json(&json!({"action": "connect", "machine": "viber@mothman"}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let code = asked["code"].as_str().unwrap().to_owned();
+    let poll = asked["poll"].as_str().unwrap().to_owned();
+    assert!(asked["url"].as_str().unwrap().ends_with(&format!("/approve/{code}")));
+    let polled = |p: String| {
+        let s = &s;
+        async move {
+            s.http.post(s.url("/api/approvals/poll")).json(&json!({"poll": p})).send().await.unwrap().json::<Value>().await.unwrap()
+        }
+    };
+    assert_eq!(polled(poll.clone()).await["state"], "pending");
+
+    // Only the owner's browser sees and decides it; the consultant's token can't.
+    let admin = s.token(TokenKind::Admin, None).await;
+    let res = s.http.get(s.url(&format!("/approve/{code}"))).bearer_auth(&admin).send().await.unwrap();
+    assert_eq!(res.status(), StatusCode::FORBIDDEN);
+    let res = s.http.post(s.url(&format!("/approve/{code}"))).bearer_auth(&admin).form(&[("decision", "approve")]).send().await.unwrap();
+    assert_eq!(res.status(), StatusCode::FORBIDDEN);
+    let page = s.http.get(s.url(&format!("/approve/{code}"))).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
+    assert!(page.contains(&code) && page.contains("viber@mothman") && page.contains("Approve"), "{page}");
+    let settings = s.http.get(s.url("/settings")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
+    assert!(settings.contains("Waiting for your approval") && settings.contains(&code));
+    // Signed out, the link leads to sign-in and back.
+    let fresh = reqwest::Client::builder().redirect(reqwest::redirect::Policy::none()).build().unwrap();
+    let res = fresh.get(s.url(&format!("/approve/{code}"))).header("accept", "text/html").send().await.unwrap();
+    assert_eq!(res.headers()["location"], format!("/login?next=/approve/{code}"));
+
+    let done = s
+        .http
+        .post(s.url(&format!("/approve/{code}")))
         .header(COOKIE, &cookie)
         .header(ORIGIN, &s.base)
-        .form(&[("name", "HEADQUARTERS viber-run")])
+        .form(&[("decision", "approve")])
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(done.contains("Approved and done"), "{done}");
+    let got = polled(poll.clone()).await;
+    assert_eq!(got["state"], "approved");
+    let token = got["result"]["token"].as_str().unwrap().to_owned();
+    let st: Value = s.http.get(s.url("/api/status")).bearer_auth(&token).send().await.unwrap().json().await.unwrap();
+    assert_eq!(st["who"]["kind"], "device");
+    assert_eq!(st["who"]["name"], "viber@mothman");
+    assert_eq!(polled(poll).await["state"], "done", "handed out once");
+    assert!(!s.log_summaries().await.iter().any(|l| l.contains(&token)), "never in the log");
+
+    // A connected machine asks for an admin job; agents' tokens can't even ask.
+    let project = s.token(TokenKind::Project, Some("imaginarium")).await;
+    let res = s.http.post(s.url("/api/approvals")).bearer_auth(&project).json(&json!({"action": "backup", "machine": "x"})).send().await.unwrap();
+    assert_eq!(res.status(), StatusCode::FORBIDDEN);
+    let res = s.http.post(s.url("/api/approvals")).json(&json!({"action": "backup", "machine": "x"})).send().await.unwrap();
+    assert_eq!(res.status(), StatusCode::FORBIDDEN, "admin jobs come from a connected machine");
+    let asked: Value = s
+        .http
+        .post(s.url("/api/approvals"))
+        .bearer_auth(&token)
+        .json(&json!({"action": "token_create", "args": {"kind": "project", "project": "imaginarium"}, "machine": "viber@mothman"}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let code = asked["code"].as_str().unwrap().to_owned();
+    s.http
+        .post(s.url(&format!("/approve/{code}")))
+        .header(COOKIE, &cookie)
+        .header(ORIGIN, &s.base)
+        .form(&[("decision", "deny")])
         .send()
         .await
         .unwrap();
-    let html = res.text().await.unwrap();
-    let start = html.find("af_dev_").expect("token shown");
-    let token: String =
-        html[start..].chars().take_while(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-').collect();
-    let me: Value = s.http.get(s.url("/api/whoami")).bearer_auth(&token).send().await.unwrap().json().await.unwrap();
-    assert_eq!(me["kind"], "device");
-    assert!(
-        !s.http
-            .get(s.url("/settings"))
-            .header(COOKIE, &cookie)
-            .send()
-            .await
-            .unwrap()
-            .text()
-            .await
-            .unwrap()
-            .contains(&token)
-    );
-    // …and never lands in the log.
-    assert!(!s.log_summaries().await.iter().any(|l| l.contains(&token)));
+    assert_eq!(polled(asked["poll"].as_str().unwrap().to_owned()).await["state"], "denied");
+
+    // flow disconnect: the machine revokes its own token.
+    let res = s.http.delete(s.url("/api/tokens/self")).bearer_auth(&token).send().await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(s.http.get(s.url("/api/status")).bearer_auth(&token).send().await.unwrap().status(), StatusCode::UNAUTHORIZED);
+
+    // The install script is public and names this server.
+    let script = s.http.get(s.url("/install.sh")).send().await.unwrap().text().await.unwrap();
+    assert!(script.starts_with("#!/bin/sh") && script.contains(&format!("url='{}'", s.base)) && script.contains("flow\" connect"), "{script}");
 }
 
 #[tokio::test]
