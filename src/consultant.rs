@@ -213,8 +213,9 @@ pub fn has_history(transcripts: &Path, folder: &Path) -> bool {
 /// Its newest claude.ai link (from its own conversations' Remote Control lines).
 pub fn session_link(c: &Connection, folder: &Path) -> anyhow::Result<Option<String>> {
     let f = crate::usage::folder_for(&folder.display().to_string());
-    Ok(c.query_row("SELECT url FROM remote_sessions WHERE folder = ?1 ORDER BY at DESC LIMIT 1", [f], |r| r.get(0))
-        .optional()?)
+    let mut stmt = c.prepare("SELECT url FROM remote_sessions WHERE folder = ?1 ORDER BY at DESC LIMIT 20")?;
+    let urls = stmt.query_map([f], |r| r.get::<_, String>(0))?.collect::<Result<Vec<_>, _>>()?;
+    Ok(urls.into_iter().find(|u| crate::usage::is_session_url(u)))
 }
 
 /// Reads what's new in its conversations (the server reads no other transcripts when
