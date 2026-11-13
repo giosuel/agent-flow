@@ -4,7 +4,7 @@
 use std::ffi::OsString;
 use std::path::PathBuf;
 
-use agentflow::{cli, config, db, github, hands, push, setup, util, web};
+use agentflow::{config, db, github, hands, push, setup, util, web};
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
@@ -21,11 +21,9 @@ struct Args {
 enum Command {
     /// Run the server.
     Serve,
-    /// Work on the server's database directly (run on the server, as its user).
-    Admin {
-        #[command(subcommand)]
-        command: cli::AdminCommand,
-    },
+    /// Print the root command that installs Claude Code managed settings keeping agents' file
+    /// tools away from AgentFlow's tokens and data (the packages will do this themselves).
+    ManagedSettings,
     /// Make AgentFlow a system service running as its own user (run once with sudo after
     /// installing; `--dry-run` shows the steps).
     Setup(setup::SetupArgs),
@@ -62,7 +60,11 @@ fn main() -> anyhow::Result<()> {
             let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().build()?;
             runtime.block_on(web::serve(web::AppState::new(db, config, vapid, std::sync::Arc::new(github::GhCli))))
         }
-        Command::Admin { command } => cli::admin(&config_path, command),
+        Command::ManagedSettings => {
+            let config = config::Config::load(&config_path)?;
+            print!("{}", agentflow::hardening::managed_settings_command(&config)?);
+            Ok(())
+        }
         Command::Setup(a) => setup::setup(a),
         Command::Hands { socket, server_user } => hands::serve(&socket, util::uid_of(&server_user)?),
         Command::Moved(rest) => moved(args.config, rest),

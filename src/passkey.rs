@@ -3,7 +3,7 @@
 //!
 //! Browsers allow passkeys only on https (or http://localhost), on a real domain name. On the
 //! WireGuard address (http://10.0.8.1) they're unavailable and the page says so; the one-time
-//! link from `agentflow admin login-link` works everywhere.
+//! link from `sudo flow server add-passkey` works everywhere.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
