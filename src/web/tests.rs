@@ -323,7 +323,7 @@ async fn settings_are_owner_only() {
     assert_eq!(page.status(), StatusCode::OK);
     // One section at a time; the list names them all.
     let text = page.text().await.unwrap();
-    assert!(text.contains("?s=devices") && text.contains("?s=consultant"), "the list of sections");
+    assert!(text.contains("?s=clients") && text.contains("?s=consultant"), "the list of sections");
     let page = s.http.get(s.url("/settings?s=devices")).header(COOKIE, &cookie).send().await.unwrap();
     assert!(page.text().await.unwrap().contains("/install.sh | sh"), "the install command is under Devices");
 }
@@ -2886,7 +2886,7 @@ async fn builders_are_taken_over_and_picked_per_project() {
     assert_eq!(pick.as_deref(), Some("hq"));
     let page =
         s.http.get(s.url("/settings?s=builders")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
-    assert!(page.contains("Used by Vinculum"));
+    assert!(page.contains(r#"<span class="chip">Vinculum</span>"#), "the project in the builder's Used by");
     // Limits, then removal: its token goes, the project builds locally again.
     assert!(
         post(

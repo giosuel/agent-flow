@@ -87,6 +87,8 @@ struct Inner {
     waiting: HashMap<u64, (String, Waiter)>,
     next: u64,
     hello: HashMap<String, (String, u64, f64)>,
+    /// When each builder connected (Settings: "online for 2 h").
+    since: HashMap<String, i64>,
 }
 
 impl Inner {
@@ -121,6 +123,11 @@ impl Hub {
     }
 
     /// Version, threads and memory a builder reported.
+    /// When a connected builder connected.
+    pub fn since(&self, name: &str) -> Option<i64> {
+        self.lock().since.get(name).copied()
+    }
+
     pub fn hello(&self, name: &str) -> Option<(String, u64, f64)> {
         self.lock().hello.get(name).cloned()
     }
@@ -149,6 +156,7 @@ impl Hub {
     fn gone(g: &mut Inner, name: &str) {
         g.online.remove(name);
         g.hello.remove(name);
+        g.since.remove(name);
         let ids: Vec<u64> = g
             .waiting
             .iter()
@@ -168,6 +176,7 @@ impl Hub {
         match reply {
             Reply::Hello { version, threads, memory_gb, .. } => {
                 g.hello.insert(name.to_owned(), (version, threads, memory_gb));
+                g.since.insert(name.to_owned(), crate::util::now_ms());
             }
             Reply::Line { re, text, err: _ } => {
                 if let Some((owner, Waiter::Stream(tx))) = g.waiting.get(&re)

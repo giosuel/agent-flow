@@ -308,7 +308,7 @@ pub fn recent(conn: &Connection, server: Option<&str>, limit: i64) -> anyhow::Re
     Ok(rows.collect::<Result<_, _>>()?)
 }
 
-fn in_state(conn: &Connection, server: &str, states: &[&str]) -> anyhow::Result<Vec<Job>> {
+pub fn in_state(conn: &Connection, server: &str, states: &[&str]) -> anyhow::Result<Vec<Job>> {
     let mut stmt = conn.prepare(&format!(
         "SELECT {JOB_COLUMNS} FROM remote_jobs j JOIN projects p ON p.id = j.project_id
          WHERE j.server = ?1 AND j.state IN (SELECT value FROM json_each(?2)) ORDER BY j.id"
