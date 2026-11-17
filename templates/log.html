@@ -2,52 +2,33 @@
 {% block title %}Log{% endblock %}
 {% block scripts %}<script src="/static/log.js?v={{ nav.version }}" defer></script>{% endblock %}
 {% block content %}
-<div class="head"><h1>Log</h1></div>
-<form method="get" action="/log" class="logq">
-  <label class="vh" for="q">Query</label>
-  <input id="q" name="q" value="{{ q }}" class="mono" placeholder="severity:warn project:vinculum -action:read merge" autocomplete="off">
-  <input type="hidden" name="range" value="{{ range }}">
-  <div class="ranges" role="group" aria-label="Time range">
-    {% for (k, label, on) in ranges %}<a class="rng{% if *on %} on{% endif %}" href="/log?q={{ q|urlencode }}&amp;range={{ k }}"{% if *on %} aria-current="true"{% endif %}>{{ label }}</a>{% endfor %}
-  </div>
-  <button class="btn sm" type="submit">Run query</button>
-  <button class="btn sm ghost" type="button" id="stream" data-q="{{ q }}" data-after="{{ latest }}" aria-pressed="false">Stream</button>
-</form>
-<p class="sub">Fields: severity, project, actor, kind, action, via, target, ip. Put - before a field to leave it out; other words search the text. Click a value below to filter by it.</p>
-
-<div class="split logs">
-  <aside class="split-side stack" aria-label="Log fields">
-    {% for f in facets %}
-    <section class="facet"><h2 class="label">{{ f.title }}</h2>
-      {% if f.values.is_empty() %}<p class="sub">–</p>{% endif %}
-      <ul class="plain facet-list">{% for (v, n, link, on) in f.values %}<li><a href="{{ link }}"{% if *on %} class="on"{% endif %}><span>{{ v }}</span><span class="mono sub">{{ n }}</span></a></li>{% endfor %}</ul>
-    </section>
-    {% endfor %}
-    {% if !q.is_empty() %}<a class="sub" href="/log?range={{ range }}">Reset the query</a>{% endif %}
-  </aside>
-
-  <section class="split-main stack" aria-labelledby="entries-h">
-    <div class="sec"><h2 id="entries-h">{{ total }} entr{% if total == 1 %}y{% else %}ies{% endif %} · {{ span }}</h2><span class="sub">click a bar to zoom in</span></div>
-    <div class="hist" role="img" aria-label="Entries over time">
-      {% for b in bars %}<a href="{{ b.href }}" data-tip="{{ b.label }}" aria-label="{{ b.label }}"><i style="height: {{ b.height }}%"></i></a>{% endfor %}
-    </div>
-    <div class="axis sub mono">{% for a in axis %}<span>{{ a }}</span>{% endfor %}</div>
-    <p class="sub">Newest first · times in {{ tz }}{% if output_hidden %} · build and test output lines are left out (<a href="/log?q=via:build&amp;range={{ range }}">via:build</a> shows them){% endif %}</p>
-    <ol class="plain entries" id="entries">
-      {% for e in entries %}
-      <li><details class="entry sev-{{ e.severity }}">
-        <summary><span class="mono sub">{{ e.time }}</span><strong>{{ e.actor }}</strong><span class="chip">{{ e.action }}</span><span class="esum">{{ e.summary }}</span>{% if e.archived %}<span class="chip">archived</span>{% endif %}</summary>
-        <div class="edetail">
-          <div class="row wrap">{% if let Some(u) = e.record_url %}<a class="sub" href="{{ u }}">Open the record</a>{% endif %}{% if let Some((job, all)) = e.job %}<a class="sub" href="{{ job }}">The job</a><a class="sub" href="{{ all }}">All its lines</a>{% endif %}<a class="sub" href="{{ e.around }}">Entries around this</a></div>
-          {% if !e.build_lines.is_empty() %}<div class="blog">{% for (cls, line) in e.build_lines %}<div class="{{ cls }}">{{ line }}</div>{% endfor %}</div>{% endif %}
-          <dl class="kv mono">{% for (k, v, link) in e.fields %}<dt>{{ k }}</dt><dd>{% if let Some(l) = link %}<a href="{{ l }}">{{ v }}</a>{% else %}{{ v }}{% endif %}</dd>{% endfor %}</dl>
-        </div>
-      </details></li>
-      {% endfor %}
-    </ol>
-    {% if entries.is_empty() %}<p class="sub">Nothing matches in this range.</p>{% endif %}
-    {% if let Some(o) = older %}<a class="btn sm ghost" href="{{ o }}">Older entries</a>{% endif %}
-    <p class="sub">Reads older than 90 days are in the archive, one compressed file per month{% if !archive.is_empty() %}: {% for (m, n) in archive %}{% if !loop.first %}, {% endif %}{{ m }} ({{ n }} entr{% if *n == 1 %}y{% else %}ies{% endif %}){% endfor %}{% endif %}. Nothing is ever deleted. {% if reaches_archive %}This range reaches the archive, so it's searched too.{% endif %}</p>
-  </section>
+<div class="head log-head"><h1>Log</h1>
+  <div class="row">{% if live %}<button class="btn sm ghost" type="button" id="live" data-q="{{ q }}" data-range="{{ range }}" data-after="{{ latest }}">{{ crate::web::icons::icon("pause")|safe }}<span>Pause</span></button>{% endif %}</div>
 </div>
+
+<nav class="ltabs" aria-label="Categories">
+  {% for t in tabs %}<a href="{{ t.href }}"{% if t.on %} class="on" aria-current="true"{% endif %}>{{ crate::web::icons::icon(t.icon)|safe }}<span>{{ t.label }}</span><span class="mono n">{{ t.count }}</span></a>{% endfor %}
+</nav>
+
+<form method="get" action="/log" class="ltool">
+  <label class="lsearch">{{ crate::web::icons::icon("search")|safe }}<span class="vh">Search</span><input name="q" value="{{ q }}" placeholder="Search the text, or a query like actor:imaginarium -action:read" autocomplete="off"></label>
+  <input type="hidden" name="range" value="{{ range }}">
+  {% for d in drops %}
+  <details class="dd"><summary><span class="sub">{{ d.label }}</span> {% if d.picked.is_empty() %}All{% else %}{{ d.picked }}{% endif %}</summary>
+    <div class="dd-menu"><a href="{{ d.all_href }}"{% if d.picked.is_empty() %} class="on"{% endif %}><span>All</span></a>{% for (v, n, href, on) in d.values %}<a href="{{ href }}"{% if *on %} class="on"{% endif %}><span>{{ v }}</span><span class="mono sub">{{ n }}</span></a>{% endfor %}</div>
+  </details>
+  {% endfor %}
+  <div class="ranges" role="group" aria-label="Time range">{% for (k, label, href, on) in ranges %}<a class="rng{% if *on %} on{% endif %}" href="{{ href }}"{% if *on %} aria-current="true"{% endif %}>{{ label }}</a>{% endfor %}</div>
+  {% if let Some(r) = reset %}<a class="sub" href="{{ r }}">Clear</a>{% endif %}
+</form>
+
+<section class="card lpanel" aria-labelledby="lp-h">
+  <div class="lp-top"><h2 id="lp-h">{{ total }} entr{% if total == 1 %}y{% else %}ies{% endif %} · {{ span }}{% if live %} <span class="livedot" id="livedot">Live</span>{% endif %}</h2><span class="sub">newest first · {{ tz }} · click a bar to zoom in</span></div>
+  <div class="hist" role="img" aria-label="Entries over time">{% for b in bars %}<a href="{{ b.href }}" data-tip="{{ b.label }}" aria-label="{{ b.label }}"><i style="height: {{ b.height }}%"></i></a>{% endfor %}</div>
+  <div class="axis sub mono">{% for a in axis %}<span>{{ a }}</span>{% endfor %}</div>
+  <div class="lhead" aria-hidden="true"><span>Time</span><span>Category</span><span>Actor</span><span>Project</span><span>What</span><span>Severity</span></div>
+  <ol class="plain lrows" id="lrows">{% include "log_rows.html" %}</ol>
+  {% if rows.is_empty() %}<p class="sub lempty">Nothing matches in this range.</p>{% endif %}
+</section>
+<p class="sub">Reads older than 90 days are in the archive, one compressed file per month{% if !archive.is_empty() %}: {% for (m, n) in archive %}{% if !loop.first %}, {% endif %}{{ m }} ({{ n }}){% endfor %}{% endif %}. Nothing is ever deleted.</p>
 {% endblock %}
