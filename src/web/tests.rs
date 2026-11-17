@@ -2840,6 +2840,8 @@ async fn builders_are_taken_over_and_picked_per_project() {
     assert!(page.contains("waiting for flow builder add") && !page.contains("builder@10.0.8.2"), "no SSH left");
     assert!(!page.contains("Add a build server"), "no SSH form");
     s.db.call(|c| {
+        // "HQ" from flow builder add takes over "hq", whatever the case.
+        assert_eq!(crate::remote::same_name(c, "HQ")?.as_deref(), Some("hq"));
         let b = crate::config::BuildServer { name: "hq".into(), ..Default::default() };
         crate::remote::add_daemon(c, &b)?;
         crate::auth::create_token(c, TokenKind::Builder, "hq", None)?;

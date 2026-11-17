@@ -449,6 +449,11 @@ get flow || { say "Couldn't download flow from $url."; exit 1; }
 say "Installed $("$bin/flow" --version) in $bin."
 if get agentflow-builder; then
   say "Installed agentflow-builder (for flow builder add) in $bin."
+  # A builder of this user's that runs: it takes the new program now.
+  [ -n "${XDG_RUNTIME_DIR:-}" ] || { [ -d "/run/user/$(id -u)" ] && export XDG_RUNTIME_DIR="/run/user/$(id -u)"; } || true
+  if systemctl --user is-active --quiet agentflow-builder.service 2>/dev/null; then
+    systemctl --user restart agentflow-builder.service && say "Restarted this user's builder with it."
+  fi
 else
   say "This server doesn't offer agentflow-builder; flow builder add needs it."
 fi
