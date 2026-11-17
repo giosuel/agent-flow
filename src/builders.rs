@@ -227,6 +227,18 @@ impl Hub {
         }
     }
 
+    /// Follows a streamed script started before this server did (a job that ran on while it
+    /// restarted): its lines and its end, kept by the builder, come on the receiver.
+    pub fn adopt(&self, name: &str, id: u64) -> mpsc::UnboundedReceiver<Event> {
+        let (tx, rx) = mpsc::unbounded_channel();
+        let mut g = self.lock();
+        g.waiting.insert(id, (name.to_owned(), Waiter::Stream(tx)));
+        if g.next <= id {
+            g.next = id;
+        }
+        rx
+    }
+
     /// Starts a streamed script; its lines and its end come on the receiver.
     pub fn stream(&self, name: &str, script: String) -> anyhow::Result<(u64, mpsc::UnboundedReceiver<Event>)> {
         let (tx, rx) = mpsc::unbounded_channel();
