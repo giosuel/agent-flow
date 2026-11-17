@@ -341,9 +341,20 @@ impl Pusher {
     }
 
     async fn send_inner(&self, kind: Option<Kind>, n: &Notification) -> anyhow::Result<usize> {
+        // Kept for the bell, whatever the switches say about pushing it (crate::notifications).
+        let (k, t, b, u, tag) = (
+            kind.map(|k| k.key()).unwrap_or("test").to_owned(),
+            crate::activity::clip(&n.title, 200),
+            crate::activity::clip(&n.body, 600),
+            n.url.clone(),
+            n.tag.clone(),
+        );
         let targets = self
             .db
             .call(move |c| {
+                if let Err(e) = crate::notifications::store(c, &k, &t, &b, &u, tag.as_deref()) {
+                    tracing::warn!("keeping a notification: {e:#}");
+                }
                 if let Some(kind) = kind
                     && !is_enabled(c, kind)?
                 {
