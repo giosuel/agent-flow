@@ -723,3 +723,13 @@ document.addEventListener("click", (e) => {
   const board = chip.parentElement.nextElementSibling;
   if (board) [...board.children].forEach((c, n) => c.classList.toggle("on", String(n) === i));
 });
+
+// Settings lists: "Add a builder" / "Add a client" in the header opens the list's last row.
+document.addEventListener("click", (e) => {
+  const b = e.target.closest("[data-open]");
+  if (!b) return;
+  const d = document.getElementById(b.dataset.open);
+  if (!d) return;
+  d.open = true;
+  d.scrollIntoView({ block: "nearest", behavior: "smooth" });
+});

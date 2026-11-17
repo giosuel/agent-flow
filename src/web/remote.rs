@@ -554,7 +554,16 @@ pub struct ServerSetting {
     /// No token yet: waits for `flow builder add` on its machine (a former SSH builder).
     pub waiting: bool,
     pub online: bool,
-    pub line: String,
+    /// Under the name: "online · builder 0.0.0-dev+g92b2be2", "offline · last seen 2 h ago".
+    pub state: String,
+    /// "32 threads · 92 GB · RTX 5090"
+    pub machine: String,
+    pub running: usize,
+    pub queued: usize,
+    /// Expanded: (label, value, detail).
+    pub facts: Vec<(&'static str, String, String)>,
+    /// Its jobs now: (id, "imaginarium · cargo test", state, "running 2m 14s · 14 threads · slot 1").
+    pub jobs: Vec<(i64, String, String, String)>,
     pub min_threads: String,
     pub min_memory: String,
     pub reserve_memory: String,
@@ -602,36 +611,110 @@ pub async fn servers_card(state: &AppState, code: Option<&str>) -> anyhow::Resul
         })
         .await?;
     let now = now_ms();
+    let names: Vec<String> = list.iter().map(|b| b.name.clone()).collect();
+    let jobs: Vec<Vec<Job>> = state
+        .db
+        .call(move |c| names.iter().map(|n| remote::in_state(c, n, &["queued", "running", "paused"])).collect())
+        .await?;
+    let hub = crate::builders::hub();
     let live = state.remote.lock().unwrap_or_else(|e| e.into_inner());
     let servers = list
         .iter()
-        .map(|b| {
+        .zip(jobs)
+        .map(|(b, jobs)| {
             let l = live.servers.get(&b.name);
             let p = l.map(|l| l.probe.clone()).unwrap_or_default();
             let waiting = !with_token.contains(&b.name);
-            let online = crate::builders::hub().is_online(&b.name);
-            let line = match (p.at, online) {
-                _ if waiting => "waiting for flow builder add on its machine".to_owned(),
-                (_, false) => "not connected".to_owned(),
-                (0, true) => "connected".to_owned(),
-                (t, true) => format!(
-                    "online, checked {} · {} · {} threads · {:.0} GB{}",
-                    ago(t, now),
-                    p.model.replace(" 16-Core Processor", ""),
-                    p.threads,
-                    p.mem_total_gb,
-                    if p.gpu_name.is_empty() {
-                        String::new()
-                    } else {
-                        format!(" · {}", p.gpu_name.replace("NVIDIA GeForce ", ""))
-                    }
-                ),
+            let online = hub.is_online(&b.name);
+            let hello = hub.hello(&b.name);
+            let state = if waiting {
+                "former SSH builder".to_owned()
+            } else if online {
+                match &hello {
+                    Some((v, ..)) => format!("online · builder {v}"),
+                    None => "online".to_owned(),
+                }
+            } else if p.at > 0 {
+                format!("offline · last seen {}", ago(p.at, now))
+            } else {
+                "not connected".to_owned()
             };
+            let gpu = p.gpu_name.replace("NVIDIA GeForce ", "");
+            let machine = if p.threads > 0.0 {
+                let mut m = format!("{} threads · {:.0} GB", p.threads, p.mem_total_gb);
+                if !gpu.is_empty() {
+                    m.push_str(&format!(" · {gpu}"));
+                }
+                m
+            } else if waiting {
+                "not connected yet".to_owned()
+            } else {
+                String::new()
+            };
+            let mut facts = Vec::new();
+            if p.threads > 0.0 {
+                facts.push((
+                    "CPU",
+                    format!("{} · {} threads", p.model.replace(" 16-Core Processor", ""), p.threads),
+                    format!(
+                        "{:.0}% busy: you {:.0} threads, builds {:.0}",
+                        100.0 * p.busy / p.threads.max(1.0),
+                        p.yours(),
+                        p.builds
+                    ),
+                ));
+                facts.push((
+                    "Memory",
+                    format!("{:.0} of {:.0} GB used", p.mem_total_gb - p.mem_free_gb, p.mem_total_gb),
+                    format!("builds {:.0} GB", p.mem_builds_gb),
+                ));
+                if !p.gpu_name.is_empty() {
+                    facts.push(("GPU", p.gpu_name.clone(), format!("{:.0}%", p.gpu_util)));
+                }
+                if p.disk_total_gb > 0.0 {
+                    let folders: f64 = l.map(|l| l.sizes.iter().map(|(_, g)| g).sum()).unwrap_or(0.0);
+                    facts.push((
+                        "Disk",
+                        format!("{:.0} of {:.0} GB free", p.disk_free_gb, p.disk_total_gb),
+                        if folders > 0.0 { format!("work folders {folders:.0} GB") } else { String::new() },
+                    ));
+                }
+            }
+            if let Some((v, ..)) = &hello {
+                facts.push(("Builder", v.clone(), String::new()));
+            }
+            if let Some(t) = hub.since(&b.name) {
+                facts.push(("Online", format!("for {}", ago(t, now).trim_end_matches(" ago")), String::new()));
+            }
+            let job_rows = jobs
+                .iter()
+                .map(|j| {
+                    let mut sub = Vec::new();
+                    match (j.state.as_str(), j.started_at) {
+                        ("running", Some(t)) => sub.push(format!("running {}", took_since(t, now))),
+                        _ if !j.reason.is_empty() => sub.push(j.reason.clone()),
+                        _ => sub.push(format!("asked {}", ago(j.created_at, now))),
+                    }
+                    if let Some(t) = j.threads.filter(|_| j.state == "running") {
+                        sub.push(format!("{t} threads"));
+                    }
+                    if b.slots > 1 && j.state == "running" {
+                        sub.push(format!("slot {}", j.slot));
+                    }
+                    let state = if j.state == "queued" { "waiting".to_owned() } else { j.state.clone() };
+                    (j.id, format!("{} · {}", j.project, j.command.join(" ")), state, sub.join(" · "))
+                })
+                .collect();
             ServerSetting {
                 name: b.name.clone(),
                 waiting,
                 online,
-                line,
+                state,
+                machine,
+                running: jobs.iter().filter(|j| j.state != "queued").count(),
+                queued: jobs.iter().filter(|j| j.state == "queued").count(),
+                facts,
+                jobs: job_rows,
                 min_threads: num(b.min_threads),
                 min_memory: num(b.min_memory_gb),
                 reserve_memory: num(b.reserve_memory_gb),
@@ -643,6 +726,12 @@ pub async fn servers_card(state: &AppState, code: Option<&str>) -> anyhow::Resul
         .collect();
     drop(live);
     Ok(ServersCard { servers, notice: code.and_then(card_notice) }.render()?)
+}
+
+/// "2m 14s", "1h 05m" since `t`.
+fn took_since(t: i64, now: i64) -> String {
+    let s = ((now - t) / 1000).max(0);
+    if s >= 3600 { format!("{}h {:02}m", s / 3600, s % 3600 / 60) } else { format!("{}m {:02}s", s / 60, s % 60) }
 }
 
 fn back_to_card(code: &str) -> Response {

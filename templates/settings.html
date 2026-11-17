@@ -68,24 +68,66 @@
     {% endfor %}
   </section>
 
-  {% else if section == "devices" %}
+  {% else if section == "clients" %}
   <section aria-labelledby="h-sec">
-    <h2 id="h-sec">Devices</h2>
-    <p class="sub set-lead">Machines with <span class="mono">flow</span>. They can read; every change needs your approval. The four characters after a name are the token's end (<span class="mono">flow status</span> shows a machine's).</p>
+    <div class="sl-head"><div><h2 id="h-sec">Clients</h2>
+      <p class="sub set-lead">Machines where <span class="mono">flow</span> is connected to this server, and the projects set up on each. They can read; every change needs your approval.</p></div>
+      <button class="btn sm sl-add-btn" type="button" data-open="add-client">{{ crate::web::icons::icon("plus")|safe }} Add a client</button></div>
     {% if !approvals.is_empty() %}
-    <h3 class="label set-sub">Waiting for your approval</h3>
-    {% for (code, what, machine) in approvals %}
-    <div class="set-row"><div class="set-txt"><strong>{{ what }}</strong><span class="sub mono">{{ code }} · {{ machine }}</span></div><a class="btn sm" href="/approve/{{ code }}">Review</a></div>
+    <h3 class="label set-sub warn-text">Waiting for your approval</h3>
+    {% for (code, what, machine, asked) in approvals %}
+    <div class="sl-wait"><span class="dot warn" aria-hidden="true"></span>
+      <a class="sl-name" href="/approve/{{ code }}"><strong>{{ what }}</strong><span class="sub">{% if !machine.is_empty() %}{{ machine }} · {% endif %}asked {{ asked }} · code <span class="mono code-chip">{{ code }}</span></span></a>
+      <form method="post" action="/approve/{{ code }}" class="sl-wait-btns"><input type="hidden" name="back" value="clients">
+        <button class="btn sm ghost" type="submit" name="decision" value="deny">Deny</button><button class="btn sm" type="submit" name="decision" value="approve">Approve</button></form></div>
     {% endfor %}
+    <h3 class="label set-sub">Connected</h3>
     {% endif %}
-    <h3 class="label set-sub">Add a machine</h3>
-    <div class="set-row stack-row"><div class="set-txt"><strong>Run this there, as the user who'll use it</strong><span class="sub">It installs <span class="mono">flow</span> and asks for your approval here. Linux, x86-64, glibc {{ glibc }} or newer. Has <span class="mono">flow</span> already: <span class="mono">flow connect {{ public_url }}</span>.</span></div>
-      <pre class="cmd mono">curl -fsSL {{ public_url }}/install.sh | sh</pre></div>
-    {% if !device_tokens.is_empty() %}<h3 class="label set-sub">Connected</h3>{% endif %}
-    {% for t in device_tokens %}
-    <div class="set-row"><div class="set-txt"><strong>{{ t.holder }}{% if !t.hint.is_empty() %} <span class="mono sub">{{ t.hint }}</span>{% endif %}</strong><span class="sub">added {{ t.added }} · used {{ t.used }}{% if !t.from.is_empty() %} from {{ t.from }}{% endif %}</span></div>
-      <form method="post" action="/settings/tokens/{{ t.id }}/revoke"><button class="btn sm ghost" type="submit" data-confirm="Revoke {{ t.holder }}? flow on that machine stops working until you connect it again.">Revoke</button></form></div>
+    <div class="slist">
+    {% for c in clients %}
+    <details class="sl-item sl-c"{% if clients.len() == 1 %} open{% endif %}>
+      <summary>
+        <span class="dot{% if c.online %} ok{% endif %}" aria-hidden="true"></span>
+        <span class="sl-name"><strong>{{ c.token.holder }}</strong><span class="sub">last used {{ c.token.used }}{% if !c.token.from.is_empty() %} from {{ c.token.from }}{% endif %}</span></span>
+        <span class="sub mono sl-machine">{{ c.token.hint }}</span>
+        <span class="sl-chips">{% for (name, _, _, _) in c.projects %}{% if loop.index0 < 3 %}<span class="chip">{{ name }}</span>{% endif %}{% endfor %}{% if c.projects.len() > 3 %}<span class="chip">+{{ c.projects.len() - 3 }}</span>{% endif %}{% if c.projects.is_empty() %}<span class="sub">no projects</span>{% endif %}</span>
+        <span class="sl-chev" aria-hidden="true">{{ crate::web::icons::icon("chevron")|safe }}</span>
+      </summary>
+      <div class="sl-body">
+        <div class="sl-cols">
+          <div class="sl-col">
+            <h3 class="label">This client</h3>
+            <dl class="sl-facts">
+              <dt>Machine</dt><dd>{{ c.token.holder }}</dd>
+              <dt>Added</dt><dd>{{ c.token.added }}</dd>
+              <dt>Last used</dt><dd>{{ c.token.used }}{% if !c.token.from.is_empty() %} <span class="sub">· from {{ c.token.from }}</span>{% endif %}</dd>
+              {% if !c.token.hint.is_empty() %}<dt>Token</dt><dd><span class="mono">{{ c.token.hint }}</span> <span class="sub">· <span class="mono">flow status</span> shows a machine's</span></dd>{% endif %}
+            </dl>
+          </div>
+          <div class="sl-col">
+            <h3 class="label">Projects here</h3>
+            {% if c.projects.is_empty() %}<p class="sub">None yet. In a project's folder there: <span class="mono">flow project setup</span>.</p>{% endif %}
+            {% for (name, slug, folder, agent) in c.projects %}<a class="sl-job" href="/p/{{ slug }}"><span class="sl-job-t"><span class="ell"><strong>{{ name }}</strong></span><span class="sub mono ell">{{ folder }}</span></span><span class="sub">{{ agent }}</span></a>{% endfor %}
+          </div>
+        </div>
+        <form method="post" action="/settings/tokens/{{ c.token.id }}/revoke" class="sl-danger">
+          <div><strong>Revoke this client</strong><span class="sub">flow on that machine stops working until you connect it again. The projects' own agent tokens stay.</span></div>
+          <button class="btn sm danger" type="submit" data-confirm="Revoke {{ c.token.holder }}? flow on that machine stops working until you connect it again.">Revoke</button>
+        </form>
+      </div>
+    </details>
     {% endfor %}
+    <details class="sl-item sl-add" id="add-client"{% if clients.is_empty() %} open{% endif %}>
+      <summary><span class="sl-plus" aria-hidden="true">{{ crate::web::icons::icon("plus")|safe }}</span><span class="sl-name acc-ink">Add a client</span><span class="sub sl-proj">Linux x86-64, glibc {{ glibc }} or newer</span></summary>
+      <div class="sl-body">
+        <p class="sub">1. On that machine, as the user who'll use it. It installs <span class="mono">flow</span> and asks for your approval here.</p>
+        <pre class="cmd mono">curl -fsSL {{ public_url }}/install.sh | sh</pre>
+        <p class="sub">Has <span class="mono">flow</span> already:</p>
+        <pre class="cmd mono">flow connect {{ public_url }}</pre>
+        <p class="sub">2. Then, in a project's folder: <span class="mono">flow project setup</span>.</p>
+      </div>
+    </details>
+    </div>
   </section>
 
   {% else if section == "builders" %}
