@@ -1,13 +1,14 @@
 {% extends "base.html" %}
 {% block title %}Add project{% endblock %}
 {% block content %}
+<div data-dlg-content>
 <div class="head">
-  <nav class="crumbs" aria-label="Back"><a class="crumb-back" href="/projects">{{ crate::web::icons::icon("back")|safe }}<span>All projects</span></a></nav>
+  <nav class="crumbs dlg-hide" aria-label="Back"><a class="crumb-back" href="/projects">{{ crate::web::icons::icon("back")|safe }}<span>All projects</span></a></nav>
   <h1>Add a project</h1>
   <p class="status-line">On the machine where its agent will run. A new project or one that already exists: the same two steps.</p>
 </div>
 {% if let Some(e) = error %}<p class="notice warn" role="alert">{{ e }}</p>{% endif %}
-<section class="card pad stack approve" aria-labelledby="steps-h">
+<section class="card pad stack flowcard" aria-labelledby="steps-h">
   <h2 id="steps-h" class="vh">Steps</h2>
   <ol class="steps-list stack-sm">
     <li><p class="sub">Install <span class="mono">flow</span>, once per machine. It signs the machine in with your approval here.</p>
@@ -33,4 +34,5 @@
     <div><button class="btn" type="submit">Create it here</button></div>
   </form>
 </details>
+</div>
 {% endblock %}

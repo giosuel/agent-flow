@@ -51,7 +51,7 @@
           {% else %}<p class="sub">In <span class="mono">{{ c.folder }}</span>{% if !c.machine.is_empty() %} on <span class="mono">{{ c.machine }}</span>{% endif %}. Start the agent there:</p>
           <pre class="cmd mono">cd {{ c.folder }} && claude</pre>{% endif %}
           <p class="sub">Setting it up on a machine (or moving it) takes a setup code: <span class="mono">flow project setup</span> in its folder writes the token, the agent's first note and its Claude Code setup.</p>
-          <form method="post" action="/p/{{ slug }}/setup-code"><button class="btn sm" type="submit">{% if c.folder.is_empty() %}Set up on a machine{% else %}Set up on another machine{% endif %}</button></form>
+          <form method="post" action="/p/{{ slug }}/setup-code" data-dlg><button class="btn sm" type="submit">{% if c.folder.is_empty() %}Set up on a machine{% else %}Set up on another machine{% endif %}</button></form>
         </div>
       </details>
       {% endif %}
