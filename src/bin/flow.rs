@@ -250,6 +250,9 @@ enum BuilderCommand {
         /// Delete a project's work folder unused for this many days.
         #[arg(long)]
         keep_days: Option<i64>,
+        /// How many jobs of one project run at once, each in a folder of its own (1–8).
+        #[arg(long)]
+        slots: Option<i64>,
     },
     /// Remove a builder: on the builder itself, its service, token and (if you say so) folders;
     /// from elsewhere, with your approval.
@@ -314,11 +317,13 @@ fn main() -> anyhow::Result<()> {
                     b::add(&config_path, &client, b::AddArgs { name, user, current_user })
                 }
                 BuilderCommand::List => b::list(&config_path, &client),
-                BuilderCommand::Edit { name, rename, min_threads, min_memory, reserve_memory, keep_days } => b::edit(
-                    &config_path,
-                    &client,
-                    b::EditArgs { name, rename, min_threads, min_memory, reserve_memory, keep_days },
-                ),
+                BuilderCommand::Edit { name, rename, min_threads, min_memory, reserve_memory, keep_days, slots } => {
+                    b::edit(
+                        &config_path,
+                        &client,
+                        b::EditArgs { name, rename, min_threads, min_memory, reserve_memory, keep_days, slots },
+                    )
+                }
                 BuilderCommand::Remove { name } => b::remove(&config_path, &client, name),
             }
         }

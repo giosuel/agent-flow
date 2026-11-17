@@ -350,7 +350,7 @@ async fn list(State(state): State<AppState>, Extension(actor): Extension<Actor>)
             json!({
                 "name": b.name, "kind": "daemon", "online": online,
                 "version": hello.as_ref().map(|h| h.0.clone()), "threads": hello.as_ref().map(|h| h.1), "memory_gb": hello.as_ref().map(|h| h.2),
-                "min_threads": b.min_threads, "min_memory_gb": b.min_memory_gb, "reserve_memory_gb": b.reserve_memory_gb, "keep_days": b.keep_days,
+                "min_threads": b.min_threads, "min_memory_gb": b.min_memory_gb, "reserve_memory_gb": b.reserve_memory_gb, "keep_days": b.keep_days, "slots": b.slots,
                 "jobs": jobs.get(&b.name).copied().unwrap_or(0),
             })
         })
@@ -365,6 +365,7 @@ struct Edit {
     min_memory_gb: Option<f64>,
     reserve_memory_gb: Option<f64>,
     keep_days: Option<i64>,
+    slots: Option<i64>,
 }
 
 /// `flow builder edit`: its name and limits, from a connected machine (the owner, 2026-11-13).
@@ -391,6 +392,9 @@ async fn edit(
     }
     if let Some(v) = e.keep_days {
         b.keep_days = v;
+    }
+    if let Some(v) = e.slots {
+        b.slots = v;
     }
     let (n, b2) = (name.clone(), b.clone());
     if let Err(err) = state.db.call(move |c| crate::remote::set_limits(c, &n, &b2)).await {
