@@ -34,6 +34,7 @@ pub fn routes() -> Router<AppState> {
         .route("/p/{slug}/{id}/feedback", post(feedback))
         .route("/download/agentflow", get(download_self))
         .route("/download/flow", get(download_self))
+        .route("/download/agentflow-builder", get(download_builder))
 }
 
 /// The `flow` program installed next to this server: public, like the install script (the
@@ -48,6 +49,31 @@ async fn download_self(State(state): State<AppState>) -> Response {
             [
                 (axum::http::header::CONTENT_TYPE, "application/octet-stream"),
                 (axum::http::header::CONTENT_DISPOSITION, "attachment; filename=\"flow\""),
+            ],
+            bytes,
+        )
+            .into_response(),
+        Err(_) => StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
+/// `agentflow-builder`, from next to the `flow` the server offers (the install command fetches
+/// both until packages take over; the owner, 2026-11-17).
+pub fn builder_bin(state: &AppState) -> PathBuf {
+    let flow = state.config.flow_bin();
+    let next = flow.parent().map(|d| d.join("agentflow-builder"));
+    match next {
+        Some(p) if p.is_file() => p,
+        _ => PathBuf::from("/usr/bin/agentflow-builder"),
+    }
+}
+
+async fn download_builder(State(state): State<AppState>) -> Response {
+    match tokio::fs::read(builder_bin(&state)).await {
+        Ok(bytes) => (
+            [
+                (axum::http::header::CONTENT_TYPE, "application/octet-stream"),
+                (axum::http::header::CONTENT_DISPOSITION, "attachment; filename=\"agentflow-builder\""),
             ],
             bytes,
         )

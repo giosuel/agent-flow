@@ -31,6 +31,7 @@ pub fn routes() -> Router<AppState> {
         .route("/api/setup/redeem", post(redeem))
         .route("/api/setup/done", post(set_up))
         .route("/download/flow.sha256", get(flow_sum))
+        .route("/download/agentflow-builder.sha256", get(builder_sum))
 }
 
 /// Paths anyone may call: asking to connect, polling with the secret only `flow` has, the install
@@ -45,6 +46,8 @@ pub fn is_public(path: &str) -> bool {
             | "/download/flow"
             | "/download/agentflow"
             | "/download/flow.sha256"
+            | "/download/agentflow-builder"
+            | "/download/agentflow-builder.sha256"
     )
 }
 
@@ -378,7 +381,14 @@ async fn revoke_self(
 
 /// The SHA-256 of the `flow` the server hands out, for the install script and `flow update`.
 async fn flow_sum(State(state): State<AppState>) -> Response {
-    let path = state.config.flow_bin();
+    sum_of(state.config.flow_bin()).await
+}
+
+async fn builder_sum(State(state): State<AppState>) -> Response {
+    sum_of(super::builds::builder_bin(&state)).await
+}
+
+async fn sum_of(path: std::path::PathBuf) -> Response {
     match tokio::task::spawn_blocking(move || -> anyhow::Result<String> {
         let f = std::fs::File::open(&path)?;
         Ok(crate::builds::sha256_of(f)?.0)
@@ -399,8 +409,10 @@ async fn install_script(State(state): State<AppState>) -> Response {
 }
 
 const INSTALL_SH: &str = r#"#!/bin/sh
-# Installs flow, AgentFlow's command, into ~/.local/bin and connects it to @URL@.
+# Installs flow, AgentFlow's command, and agentflow-builder (for `flow builder add`) into
+# ~/.local/bin, puts that on the PATH, and connects flow to @URL@.
 # Run it as the user who'll use flow:  curl -fsSL @URL@/install.sh | sh
+# (Until the packages take over.)
 set -eu
 url='@URL@'
 need='@GLIBC@'
@@ -420,20 +432,44 @@ fetch() {
 }
 bin="$HOME/.local/bin"
 mkdir -p "$bin"
-tmp=$(mktemp "$bin/.flow.XXXXXX")
-trap 'rm -f "$tmp" "$tmp.sum"' EXIT
-fetch "$url/download/flow" "$tmp"
-fetch "$url/download/flow.sha256" "$tmp.sum"
-sum=$(cut -d' ' -f1 "$tmp.sum")
-if [ "$(sha256sum "$tmp" | cut -d' ' -f1)" != "$sum" ]; then say "The download doesn't match its checksum; nothing was installed."; exit 1; fi
-chmod 755 "$tmp"
-mv "$tmp" "$bin/flow"
-trap - EXIT
-rm -f "$tmp.sum"
+# One program: downloaded, checked against its checksum, then moved into place.
+get() {
+  tmp=$(mktemp "$bin/.$1.XXXXXX")
+  if ! fetch "$url/download/$1" "$tmp" || ! fetch "$url/download/$1.sha256" "$tmp.sum"; then
+    rm -f "$tmp" "$tmp.sum"; return 1
+  fi
+  if [ "$(sha256sum "$tmp" | cut -d' ' -f1)" != "$(cut -d' ' -f1 "$tmp.sum")" ]; then
+    rm -f "$tmp" "$tmp.sum"; say "$1 doesn't match its checksum; it wasn't installed."; exit 1
+  fi
+  chmod 755 "$tmp"
+  mv "$tmp" "$bin/$1"
+  rm -f "$tmp.sum"
+}
+get flow || { say "Couldn't download flow from $url."; exit 1; }
 say "Installed $("$bin/flow" --version) in $bin."
+if get agentflow-builder; then
+  say "Installed agentflow-builder (for flow builder add) in $bin."
+else
+  say "This server doesn't offer agentflow-builder; flow builder add needs it."
+fi
+# ~/.local/bin on the PATH, for this user's shell, once.
 case ":$PATH:" in
   *":$bin:"*) ;;
-  *) say "~/.local/bin isn't on your PATH yet. fish: fish_add_path ~/.local/bin   bash: echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> ~/.bashrc" ;;
+  *)
+    sh_name=$(basename "${SHELL:-sh}")
+    line='export PATH="$HOME/.local/bin:$PATH"'
+    case "$sh_name" in
+      fish) fish -c 'fish_add_path -U $HOME/.local/bin' && say "Added ~/.local/bin to fish's PATH." ;;
+      bash) rc="$HOME/.bashrc" ;;
+      zsh) rc="$HOME/.zshrc" ;;
+      *) rc="$HOME/.profile" ;;
+    esac
+    if [ "$sh_name" != fish ]; then
+      if ! grep -qs '.local/bin' "$rc"; then printf '\n%s\n' "$line" >> "$rc"; fi
+      say "Added ~/.local/bin to the PATH in $rc."
+    fi
+    say "Open a new terminal for it; until then: $bin/flow"
+    ;;
 esac
 # Piped into sh, stdin is the script: connect reads from the terminal, if there is one.
 if (exec </dev/tty) 2>/dev/null; then

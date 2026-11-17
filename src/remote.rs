@@ -596,7 +596,7 @@ pub fn spawn(state: crate::web::AppState) {
             }
             if now_ms() - last_cleanup > 24 * 3600 * 1000 {
                 last_cleanup = now_ms();
-                for server in servers(&state) {
+                for server in servers(&state).into_iter().filter(|s| crate::builders::hub().is_online(&s.name)) {
                     let st = state.clone();
                     tokio::spawn(async move {
                         if let Err(e) = cleanup(&st, &server).await {

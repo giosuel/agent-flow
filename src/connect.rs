@@ -104,6 +104,11 @@ pub fn connect(url: &str) -> anyhow::Result<()> {
     let tf = token_file();
     if tf.exists() && connection_file().exists() {
         let saved = server_url(Path::new("/nonexistent"), &ClientArgs::default()).unwrap_or_default();
+        // The install command run again: nothing to do.
+        if saved.trim_end_matches('/') == url {
+            eprintln!("This machine is connected to {url} already.");
+            return Ok(());
+        }
         bail!(
             "this machine is connected already ({saved}); see `flow status`, or `flow disconnect` first to connect it anew"
         );
