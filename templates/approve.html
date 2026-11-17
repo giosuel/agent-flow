@@ -1,23 +1,26 @@
 {% extends "base.html" %}
 {% block title %}Approve · {{ a.code }}{% endblock %}
 {% block content %}
-<div class="head"><h1>{{ what }}?</h1></div>
-<section class="card pad stack approve" aria-labelledby="approve-code">
+<div class="approve-wrap">
+<section class="card approve" aria-labelledby="approve-title">
+  <span class="approve-icon" aria-hidden="true">{{ crate::web::icons::icon("machine")|safe }}</span>
+  <h1 id="approve-title">{{ what }}?</h1>
   <p class="sub">A terminal asked for this {{ asked }}. Check that it shows the same code before you approve.</p>
-  <p class="approve-code mono" id="approve-code" aria-label="Code {{ a.code }}">{{ a.code }}</p>
+  <p class="approve-code mono" aria-label="Code {{ a.code }}">{{ a.code }}</p>
   <dl class="kv">
     {% for (k, v) in details %}<dt>{{ k }}</dt><dd class="mono">{{ v }}</dd>{% endfor %}
   </dl>
   {% if let Some((ok, text)) = outcome %}
   <p class="notice{% if *ok %} ok{% else %} warn{% endif %}" role="status">{{ text }}</p>
   {% else if a.state == "pending" %}
-  <form method="post" action="/approve/{{ a.code }}" class="row wrap">
-    <button class="btn" type="submit" name="decision" value="approve">Approve</button>
+  <form method="post" action="/approve/{{ a.code }}" class="approve-btns">
     <button class="btn ghost" type="submit" name="decision" value="deny">Deny</button>
+    <button class="btn" type="submit" name="decision" value="approve">Approve</button>
   </form>
-  <p class="sub">If you didn't start this, deny it.</p>
+  <p class="sub approve-foot">If you didn't start this, deny it.</p>
   {% else %}
   <p class="notice" role="status">This request is {{ a.state }}{% if let Some(e) = a.error %}: {{ e }}{% endif %}.</p>
   {% endif %}
 </section>
+</div>
 {% endblock %}
