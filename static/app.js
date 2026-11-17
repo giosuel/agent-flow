@@ -745,3 +745,18 @@ document.addEventListener("click", (e) => {
   d.open = true;
   d.scrollIntoView({ block: "nearest", behavior: "smooth" });
 });
+
+// Project overview (D-198): its side panels, Merge order and Release are open on the desktop and
+// can't be folded there; on the phone they start folded, as rows that open.
+(() => {
+  const phone = window.matchMedia("(max-width: 700px)");
+  const wire = (root) => {
+    for (const d of root.querySelectorAll("details.ov-fold")) d.open = !phone.matches;
+  };
+  document.addEventListener("DOMContentLoaded", () => wire(document));
+  document.addEventListener("af:content", (e) => e.detail && e.detail.querySelectorAll && wire(e.detail));
+  document.addEventListener("click", (e) => {
+    const s = e.target.closest && e.target.closest("details.ov-fold > summary");
+    if (s && !phone.matches && !e.target.closest("a, button")) e.preventDefault();
+  });
+})();
