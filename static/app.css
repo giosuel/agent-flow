@@ -1337,3 +1337,6 @@ html.no-scroll { overflow: hidden; }
   .sl-wait-btns { width: 100%; padding-left: 24px; }
   .sl-wait-btns .btn { flex: 1; }
 }
+
+/* ‹ › only when there is another record to go to. */
+.rdlg-nav[hidden] { display: none; }

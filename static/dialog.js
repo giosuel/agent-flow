@@ -65,19 +65,21 @@
     document.body.append(box);
   }
 
-  async function show(path) {
+  // `soft`: opened by the page itself (a direct link); if it can't be shown, stay on the page
+  // instead of going to its address (which is this page again).
+  async function show(path, soft) {
     let doc;
     try {
       const r = await fetch(path, { headers: { accept: "text/html" }, credentials: "same-origin" });
       if (!r.ok || r.redirected) throw new Error("not shown");
       doc = new DOMParser().parseFromString(await r.text(), "text/html");
     } catch {
-      location.href = path;
+      if (!soft) location.href = path;
       return false;
     }
     const main = doc.querySelector("main");
     if (!main) {
-      location.href = path;
+      if (!soft) location.href = path;
       return false;
     }
     if (!box) build();
@@ -94,8 +96,8 @@
     return true;
   }
 
-  async function open(path) {
-    if (!(await show(path))) return;
+  async function open(path, soft) {
+    if (!(await show(path, soft))) return;
     if (!box.classList.contains("open")) {
       document.documentElement.classList.add("rdlg-on");
       requestAnimationFrame(() => box.classList.add("open"));
@@ -164,4 +166,14 @@
     }
     open(path);
   });
+
+  // A direct link to a record: the server sent its project's page; the record opens over it, and
+  // Back (or ✕) leaves the project's page.
+  const o = document.body.dataset;
+  if (o.openDlg === "rec" && o.openUrl && o.openFrom) {
+    history.replaceState(null, "", o.openFrom);
+    list = [o.openUrl];
+    at = 0;
+    open(o.openUrl, true);
+  }
 })();
