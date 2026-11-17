@@ -256,8 +256,9 @@ async fn base(
     match found {
         Ok(None) => Json(json!({"commit": "", "server": null})).into_response(),
         Ok(Some((server, sha))) => {
-            let kind = crate::remote::servers(&state).into_iter().find(|b| b.name == server).map(|b| b.kind);
-            let online = kind.as_deref() == Some("daemon") && hub().is_online(&server);
+            let known = crate::remote::servers(&state).into_iter().any(|b| b.name == server);
+            let kind = known.then_some("daemon");
+            let online = known && hub().is_online(&server);
             Json(json!({"commit": sha.unwrap_or_default(), "server": server, "kind": kind, "online": online}))
                 .into_response()
         }
@@ -332,14 +333,6 @@ async fn list(State(state): State<AppState>, Extension(actor): Extension<Actor>)
         return json_error(StatusCode::FORBIDDEN, "for your machines");
     }
     let servers = crate::remote::servers(&state);
-    let live: std::collections::HashMap<String, bool> = state
-        .remote
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .servers
-        .iter()
-        .map(|(k, v)| (k.clone(), v.probe.online))
-        .collect();
     let jobs = state
         .db
         .call(|c| {
@@ -352,10 +345,10 @@ async fn list(State(state): State<AppState>, Extension(actor): Extension<Actor>)
     let rows: Vec<serde_json::Value> = servers
         .iter()
         .map(|b| {
-            let online = if b.kind == "daemon" { hub().is_online(&b.name) } else { live.get(&b.name).copied().unwrap_or(false) };
+            let online = hub().is_online(&b.name);
             let hello = hub().hello(&b.name);
             json!({
-                "name": b.name, "kind": b.kind, "online": online,
+                "name": b.name, "kind": "daemon", "online": online,
                 "version": hello.as_ref().map(|h| h.0.clone()), "threads": hello.as_ref().map(|h| h.1), "memory_gb": hello.as_ref().map(|h| h.2),
                 "min_threads": b.min_threads, "min_memory_gb": b.min_memory_gb, "reserve_memory_gb": b.reserve_memory_gb, "keep_days": b.keep_days,
                 "jobs": jobs.get(&b.name).copied().unwrap_or(0),

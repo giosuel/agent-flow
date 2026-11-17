@@ -215,6 +215,11 @@ pub async fn serve(state: AppState) -> anyhow::Result<()> {
     } else {
         tracing::info!("conversations come by flow sync (local_transcripts is off)");
     }
+    if !state.config.build_servers.is_empty() {
+        tracing::warn!(
+            "config: build_servers (SSH builders) are no longer used; remove them. Builders connect themselves: flow builder add"
+        );
+    }
     crate::backup::spawn(state.clone());
     crate::machine::spawn_sampler(state.clone());
     crate::remote::spawn(state.clone());
