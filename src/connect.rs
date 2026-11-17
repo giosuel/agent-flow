@@ -55,9 +55,13 @@ pub fn approve(client: &Client, action: &str, args: Value) -> anyhow::Result<Val
     let poll = asked["poll"].as_str().context("no poll secret in the answer")?.to_owned();
     let wait = Duration::from_secs(asked["expires_in"].as_u64().unwrap_or(600) + 5);
     let opened = open_browser(&url);
-    eprintln!("Approve this in your browser{}:", if opened { " (opened)" } else { "" });
-    eprintln!("  {url}");
-    eprintln!("The page shows the code {code}; approve only if it matches.");
+    {
+        use crate::ui::{Tone, paint};
+        let on = crate::ui::color(true);
+        eprintln!("Approve this in your browser{}:", if opened { " (opened)" } else { "" });
+        eprintln!("  {}", paint(Tone::Number, &url, on));
+        eprintln!("The page shows the code {}; approve only if it matches.", paint(Tone::Bold, &code, on));
+    }
     let anon = Client::anonymous(&client.base);
     let start = Instant::now();
     loop {
@@ -141,39 +145,50 @@ pub fn disconnect(config_path: &Path) -> anyhow::Result<()> {
 }
 
 pub fn status(config_path: &Path, args: &ClientArgs) -> anyhow::Result<()> {
+    use crate::ui::{Tone, paint, wrap};
+    let on = crate::ui::color(false);
+    let key = |k: &str| paint(Tone::Dim, &format!("{k:<9}"), on);
     let mine = env!("APP_VERSION");
-    println!("flow     {mine}");
+    println!("{}{}", key("flow"), paint(Tone::Bold, mine, on));
     let url = match server_url(config_path, args) {
         Ok(u) => u,
         Err(e) => {
-            println!("server   {e:#}");
+            println!("{}{}", key("server"), paint(Tone::Bad, "not connected", on));
+            println!("{}", wrap(9, Tone::Dim, &format!("{e:#}"), on));
             return Ok(());
         }
     };
-    println!("server   {url}");
+    println!("{}{url}", key("server"));
     let tf = args.token_file.clone().unwrap_or_else(token_file);
-    println!("token    {}", tf.display());
+    println!("{}{}", key("token"), paint(Tone::Dim, &tf.display().to_string(), on));
     let client = match Client::new(config_path, args) {
         Ok(c) => c,
         Err(e) => {
-            println!("         {e:#}");
+            println!("{}", wrap(9, Tone::Bad, &format!("{e:#}"), on));
             return Ok(());
         }
     };
     match client.get("/api/status") {
         Ok(s) => {
             let theirs = s["version"].as_str().unwrap_or("?");
+            if theirs == mine {
+                println!("{}{} {}", key("version"), theirs, paint(Tone::Good, "●", on));
+            } else {
+                println!(
+                    "{}{}  {}",
+                    key("version"),
+                    theirs,
+                    paint(Tone::Commit, "differs from flow's: run flow update", on)
+                );
+            }
             println!(
-                "version  {theirs}{}",
-                if theirs == mine { "" } else { "  (differs from flow's: run flow update)" }
-            );
-            println!(
-                "as       {} ({})",
-                s["who"]["name"].as_str().unwrap_or("?"),
-                s["who"]["kind"].as_str().unwrap_or("?")
+                "{}{} {}",
+                key("as"),
+                paint(Tone::Bold, s["who"]["name"].as_str().unwrap_or("?"), on),
+                paint(Tone::Dim, &format!("({})", s["who"]["kind"].as_str().unwrap_or("?")), on)
             );
         }
-        Err(e) => println!("         unreachable: {e:#}"),
+        Err(e) => println!("{}{}", key(""), paint(Tone::Bad, &format!("unreachable: {e:#}"), on)),
     }
     Ok(())
 }
@@ -513,7 +528,7 @@ pub fn project_setup(
             "project_create",
             json!({"name": project_name, "slug": slug, "folder": folder.display().to_string(), "repo": repo}),
         )?;
-        eprintln!("  ✓ approved");
+        eprintln!("{}", crate::ui::ok("approved"));
         (client.base.clone(), s(&got["project"]), s(&got["name"]), s(&got["token"]))
     };
     if token.is_empty() || slug.is_empty() {
