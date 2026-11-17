@@ -9,6 +9,9 @@ repository = "https://github.com/giosuel/agent-flow"
 publish = false
 
 [dependencies]
+# Only for portable builds (`--features vendored-openssl`, scripts/install.sh on a builder): OpenSSL
+# compiled in, so the programs need no particular openssl or glibc on the machine they run on.
+openssl-sys = { version = "0.9", optional = true }
 aes-gcm = "0.11"
 anyhow = "1"
 askama = "0.16"
@@ -53,6 +56,9 @@ webauthn-rs = { version = "0.6", features = ["danger-allow-state-serialisation"]
 debug = "line-tables-only"
 [profile.dev.package."*"]
 debug = false
+
+[features]
+vendored-openssl = ["dep:openssl-sys", "openssl-sys/vendored"]
 
 [profile.release]
 lto = "thin"
