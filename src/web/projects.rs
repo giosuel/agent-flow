@@ -490,14 +490,41 @@ struct TaskCard {
 
 struct Column {
     title: &'static str,
+    /// Its count (all its tasks, also those folded).
+    count: usize,
     tasks: Vec<TaskCard>,
+    /// Done: older cards behind "Show all".
+    more: Vec<TaskCard>,
 }
 
 struct Board {
     title: String,
     summary: String,
-    steps: Vec<StepView>,
     columns: Vec<Column>,
+    /// The step bar (the owner, 2026-11-17: "find an alternative way to show the steps as there
+    /// can be many"): the step under way (or next), dots for every step, the menu.
+    step_now: Option<StepView>,
+    step_now_sub: String,
+    dots: Vec<&'static str>,
+    steps_done: usize,
+    steps_total: usize,
+    /// What the board shows: "All 12 steps" or a step's name.
+    showing: String,
+    /// The menu: "All", then under way and next, then the newest done, the rest folded.
+    menu_all: (String, String, bool),
+    menu_open: Vec<StepItem>,
+    menu_done: Vec<StepItem>,
+    menu_done_more: Vec<StepItem>,
+    /// The column shown first on the phone.
+    first_col: usize,
+}
+
+struct StepItem {
+    name: String,
+    title: String,
+    sub: String,
+    href: String,
+    on: bool,
 }
 
 /// A milestone on the Tasks tab: its own tasks, then its steps (the owner, 2026-11-12).
@@ -759,6 +786,8 @@ struct TabQuery {
     tested: Option<usize>,
     /// The milestone whose board the overview shows (its name); the current one if left out.
     ms: Option<String>,
+    /// A step of that milestone the board shows alone (its name); the whole milestone if left out.
+    step: Option<String>,
     /// The Notes tab: a section of the project document to edit ("2", or "all"), its history, an
     /// older revision, and how a save went.
     edit: Option<String>,
@@ -830,6 +859,7 @@ async fn project(
     let tab = q.tab.filter(|t| TABS.iter().any(|(k, _)| k == t)).unwrap_or_else(|| "overview".into());
     let now = now_ms();
     let chosen = q.ms.clone();
+    let chosen_step = q.step.clone();
     let t = tab.clone();
     let page = state
         .db
@@ -852,7 +882,10 @@ async fn project(
                 )?);
             }
             let checkout = (p.checkout.trim().to_owned(), p.machine.trim().to_owned());
-            Ok(Some((build_project_page(c, p, ms, all, &t, chosen.as_deref(), now, &tz)?, checkout)))
+            Ok(Some((
+                build_project_page(c, p, ms, all, &t, (chosen.as_deref(), chosen_step.as_deref()), now, &tz)?,
+                checkout,
+            )))
         })
         .await?
         .ok_or(AppError::NotFound)?;
@@ -938,7 +971,7 @@ fn build_project_page(
     ms: Vec<Milestone>,
     all: Vec<Record>,
     tab: &str,
-    chosen: Option<&str>,
+    (chosen, chosen_step): (Option<&str>, Option<&str>),
     now: i64,
     tz: &Tz,
 ) -> anyhow::Result<ProjectPage> {
@@ -1063,48 +1096,127 @@ fn build_project_page(
     let tasks: Vec<&Record> = all.iter().filter(|r| r.kind == Kind::Task).collect();
 
     let board = current.as_ref().map(|cur| {
-        let ids: Vec<i64> = projects::with_steps(&ms, cur.id);
+        let steps: Vec<&Milestone> = ms.iter().filter(|s| s.parent_id == Some(cur.id)).collect();
+        let step = chosen_step.and_then(|n| steps.iter().find(|s| s.name.eq_ignore_ascii_case(n)).copied());
+        let ids: Vec<i64> = match step {
+            Some(s) => vec![s.id],
+            None => projects::with_steps(&ms, cur.id),
+        };
         let mut mine: Vec<&Record> =
             tasks.iter().copied().filter(|t| t.milestone_id.is_some_and(|m| ids.contains(&m))).collect();
         mine.sort_by(|a, b| a.position.partial_cmp(&b.position).unwrap_or(std::cmp::Ordering::Equal));
-        let col = |title: &'static str, states: &[&str]| Column {
-            title,
-            tasks: mine.iter().filter(|t| states.contains(&t.state.as_str())).map(|t| task_card(t)).collect(),
+        let col = |title: &'static str, states: &[&str]| {
+            let mut list: Vec<&Record> = mine.iter().copied().filter(|t| states.contains(&t.state.as_str())).collect();
+            // Done: the newest first, six of them, the rest behind "Show all".
+            let keep = if states == ["done"] {
+                list.sort_by_key(|t| std::cmp::Reverse(t.updated_at));
+                6
+            } else {
+                usize::MAX
+            };
+            let count = list.len();
+            let more = if list.len() > keep { list.split_off(keep) } else { Vec::new() };
+            Column {
+                title,
+                count,
+                tasks: list.into_iter().map(&task_card).collect(),
+                more: more.into_iter().map(&task_card).collect(),
+            }
         };
         let count = |s: &str| mine.iter().filter(|t| t.state == s).count() as i64;
         let mut summary = vec![plural(mine.len() as i64, "task", "tasks")];
-        if count("doing") > 0 {
-            summary.push(format!("{} in progress", count("doing")));
-        }
         if count("done") > 0 {
             summary.push(format!("{} done", count("done")));
         }
-        if count("parked") > 0 {
-            summary.push(format!("{} parked", count("parked")));
-        }
+        // The step under way, else the next planned one, else the last.
+        let now_step = steps
+            .iter()
+            .find(|s| s.state == "active")
+            .or_else(|| steps.iter().find(|s| s.state != "closed"))
+            .or_else(|| steps.last())
+            .copied();
+        let tasks_of = |s: &Milestone| -> Vec<&Record> {
+            tasks.iter().copied().filter(|t| t.milestone_id == Some(s.id)).collect()
+        };
+        let step_sub = |s: &Milestone| {
+            let t = tasks_of(s);
+            let n = |st: &str| t.iter().filter(|x| x.state == st).count();
+            let mut parts = vec![plural(t.len() as i64, "task", "tasks")];
+            if n("todo") > 0 {
+                parts.push(format!("{} to do", n("todo")));
+            }
+            if n("doing") > 0 {
+                parts.push(format!("{} in progress", n("doing")));
+            }
+            if s.state == "closed" {
+                parts = vec!["done".into()];
+            }
+            parts.join(" · ")
+        };
+        let href = |step: Option<&str>| match step {
+            Some(n) => format!("/p/{}?ms={}&step={}#board", p.slug, cur.name, n),
+            None => format!("/p/{}?ms={}#board", p.slug, cur.name),
+        };
+        let item = |s: &&Milestone| StepItem {
+            name: s.name.clone(),
+            title: s.title.clone(),
+            sub: step_sub(s),
+            href: href(Some(&s.name)),
+            on: step.is_some_and(|x| x.id == s.id),
+        };
+        let open: Vec<StepItem> = steps.iter().filter(|s| s.state != "closed").map(item).collect();
+        let mut done: Vec<&&Milestone> = steps.iter().filter(|s| s.state == "closed").collect();
+        done.reverse();
+        let done_items: Vec<StepItem> = done.iter().map(|s| item(s)).collect();
+        let (recent, older) = if done_items.len() > 3 {
+            let mut d = done_items;
+            let older = d.split_off(3);
+            (d, older)
+        } else {
+            (done_items, Vec::new())
+        };
+        let columns = vec![
+            col("To do", &["todo"]),
+            col("In progress", &["doing"]),
+            col("In review", &["review"]),
+            col("Blocked or parked", &["blocked", "parked"]),
+            col("Done", &["done"]),
+        ];
+        // On the phone: the column with work in it first.
+        let first_col = [1, 0, 2, 3, 4].into_iter().find(|&i| columns[i].count > 0).unwrap_or(0);
         Board {
             title: format!("{} · {}", cur.name, cur.title),
             summary: summary.join(" · "),
-            steps: ms
+            step_now_sub: now_step.map(step_sub).unwrap_or_default(),
+            step_now: now_step.map(|s| StepView {
+                name: s.name.clone(),
+                title: s.title.clone(),
+                class: match s.state.as_str() {
+                    "closed" => "done",
+                    "active" => "now",
+                    _ => "next",
+                },
+            }),
+            dots: steps
                 .iter()
-                .filter(|s| s.parent_id == Some(cur.id))
-                .map(|s| StepView {
-                    name: s.name.clone(),
-                    title: s.title.clone(),
-                    class: match s.state.as_str() {
-                        "closed" => "done",
-                        "active" => "now",
-                        _ => "",
-                    },
+                .map(|s| match s.state.as_str() {
+                    "closed" => "done",
+                    "active" => "now",
+                    _ => "",
                 })
                 .collect(),
-            columns: vec![
-                col("To do", &["todo"]),
-                col("In progress", &["doing"]),
-                col("In review", &["review"]),
-                col("Blocked or parked", &["blocked", "parked"]),
-                col("Done", &["done"]),
-            ],
+            steps_done: steps.iter().filter(|s| s.state == "closed").count(),
+            steps_total: steps.len(),
+            showing: match step {
+                Some(s) => format!("{} {}", s.name, s.title),
+                None => format!("All {} steps", steps.len()),
+            },
+            menu_all: (format!("All {} steps", steps.len()), href(None), step.is_none()),
+            menu_open: open,
+            menu_done: recent,
+            menu_done_more: older,
+            columns,
+            first_col,
         }
     });
 

@@ -709,3 +709,17 @@ document.addEventListener("change", (e) => {
     show(form.action, { method: "POST", body: new URLSearchParams(new FormData(form, e.submitter)), headers: { "Content-Type": "application/x-www-form-urlencoded" } });
   });
 })();
+
+// The board on the phone: one column at a time, picked with the chips above it.
+document.addEventListener("click", (e) => {
+  const chip = e.target.closest(".bchips button[data-col]");
+  if (!chip) return;
+  const i = chip.dataset.col;
+  for (const b of chip.parentElement.querySelectorAll("button")) {
+    const on = b === chip;
+    b.classList.toggle("on", on);
+    b.setAttribute("aria-selected", on ? "true" : "false");
+  }
+  const board = chip.parentElement.nextElementSibling;
+  if (board) [...board.children].forEach((c, n) => c.classList.toggle("on", String(n) === i));
+});

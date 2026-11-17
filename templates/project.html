@@ -72,13 +72,37 @@
     {% if let Some(b) = board %}
     <section class="stack" aria-labelledby="board-h" id="board">
       <div class="sec"><h2 id="board-h">{{ b.title }}</h2><span class="sub">{{ b.summary }}</span></div>
-      {% if !b.steps.is_empty() %}<ol class="steps">{% for s in b.steps %}<li class="step {{ s.class }}"><span class="mono">{{ s.name }}</span> {{ s.title }}{% if s.class == "done" %} · done{% endif %}{% if s.class == "now" %} · now{% endif %}</li>{% endfor %}</ol>{% endif %}
-      <div class="board">
+      {% if b.steps_total > 0 %}
+      <div class="stepbar card">
+        {% if let Some(st) = b.step_now %}<span class="label">Step</span><span class="chip mono">{{ st.name }}</span><strong class="sb-t">{{ st.title }}</strong><span class="chip {% if st.class == "now" %}accent{% endif %}">{% if st.class == "now" %}under way{% else if st.class == "done" %}done{% else %}next{% endif %}</span><span class="sub sb-sub">{{ b.step_now_sub }}</span>{% endif %}
+        <span class="grow"></span>
+        <span class="sb-dots" aria-label="{{ b.steps_done }} of {{ b.steps_total }} steps done">{% for d in b.dots %}<i class="{{ d }}"></i>{% endfor %}</span>
+        <span class="sub sb-n">{{ b.steps_done }} of {{ b.steps_total }} done</span>
+        <details class="dd sb-menu"><summary><span class="sub">Show</span> {{ b.showing }}</summary>
+          <div class="dd-menu">
+            <a href="{{ b.menu_all.1 }}"{% if b.menu_all.2 %} class="on"{% endif %}><span>{{ b.menu_all.0 }}</span></a>
+            {% if !b.menu_open.is_empty() %}<p class="label dd-g">Under way and next</p>{% endif %}
+            {% for s in b.menu_open %}<a href="{{ s.href }}"{% if s.on %} class="on"{% endif %}><span><span class="mono">{{ s.name }}</span> {{ s.title }}</span><span class="sub">{{ s.sub }}</span></a>{% endfor %}
+            {% if !b.menu_done.is_empty() %}<p class="label dd-g">Done</p>{% endif %}
+            {% for s in b.menu_done %}<a href="{{ s.href }}"{% if s.on %} class="on"{% endif %}><span><span class="mono">{{ s.name }}</span> {{ s.title }}</span><span class="sub">done</span></a>{% endfor %}
+            {% if !b.menu_done_more.is_empty() %}<details class="dd-more"><summary class="sub">{{ b.menu_done_more.len() }} more done step{% if b.menu_done_more.len() != 1 %}s{% endif %}</summary>
+              {% for s in b.menu_done_more %}<a href="{{ s.href }}"{% if s.on %} class="on"{% endif %}><span><span class="mono">{{ s.name }}</span> {{ s.title }}</span><span class="sub">done</span></a>{% endfor %}</details>{% endif %}
+          </div>
+        </details>
+      </div>
+      {% endif %}
+      <div class="bchips" role="tablist" aria-label="Columns">{% for col in b.columns %}<button type="button" role="tab" data-col="{{ loop.index0 }}"{% if loop.index0 == b.first_col %} aria-selected="true" class="on"{% endif %}>{{ col.title }} <span class="mono">{{ col.count }}</span></button>{% endfor %}</div>
+      <div class="board fixed" data-show="{{ b.first_col }}">
         {% for col in b.columns %}
-        <div class="col"><div class="col-h"><span class="label">{{ col.title }}</span><span class="mono sub">{{ col.tasks.len() }}</span></div>
+        <div class="col{% if loop.index0 == b.first_col %} on{% endif %}"><div class="col-h"><span class="label">{{ col.title }}</span><span class="mono sub">{{ col.count }}</span></div>
+          <div class="col-b">
           {% for t in col.tasks %}
           <a class="task" href="{{ t.url }}"><span class="sub mono">{% if !t.step.is_empty() %}{{ t.step }} · {% endif %}{{ t.short }}</span><span class="task-t">{{ t.title }}</span>{% for (u, q) in t.blocked_by %}<span class="warn-text sub">blocked by {{ q }}</span>{% endfor %}{% if !t.sub.is_empty() %}<span class="sub">{{ t.sub }}</span>{% endif %}</a>
           {% endfor %}
+          {% if !col.more.is_empty() %}<details class="more-done"><summary>Show all {{ col.count }} done</summary>
+            {% for t in col.more %}<a class="task" href="{{ t.url }}"><span class="sub mono">{% if !t.step.is_empty() %}{{ t.step }} · {% endif %}{{ t.short }}</span><span class="task-t">{{ t.title }}</span>{% if !t.sub.is_empty() %}<span class="sub">{{ t.sub }}</span>{% endif %}</a>{% endfor %}</details>{% endif %}
+          {% if col.count == 0 %}<p class="sub col-empty">Nothing here.</p>{% endif %}
+          </div>
         </div>
         {% endfor %}
       </div>
