@@ -368,11 +368,30 @@ pub fn store(
             }
         };
         let k = key(&[&thread, &norm(&from), m.body.trim()]);
-        n += conn.execute(
+        let added = conn.execute(
             "INSERT OR IGNORE INTO session_messages (key, at, thread, from_name, to_name, body, folder, cwd, session, project_id)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             params![k, m.at, thread, from, to, m.body, folder, cwd, own_session, project_id],
         )?;
+        n += added;
+        // In the Log too, under Conversations (the owner, 2026-11-17), once.
+        if added == 1 {
+            let project: Option<String> = project_id
+                .and_then(|id| conn.query_row("SELECT slug FROM projects WHERE id = ?1", [id], |r| r.get(0)).ok());
+            let kind = if thread.starts_with("sub:") { "subagent" } else { "message" };
+            conn.execute(
+                "INSERT INTO log (at, actor_kind, actor, project, via, action, summary, target, severity)
+                 VALUES (?1, 'session', ?2, ?3, 'session', ?4, ?5, ?6, 'info')",
+                params![
+                    m.at,
+                    crate::activity::clip(&from, 80),
+                    project,
+                    kind,
+                    crate::activity::clip(&format!("{from} → {to}: {}", m.body.trim()), 300),
+                    thread
+                ],
+            )?;
+        }
         if let Some(id) = thread.strip_prefix("sub:") {
             conn.execute(
                 "UPDATE subagent_threads SET last_at = max(last_at, ?1) WHERE agent_id = ?2",

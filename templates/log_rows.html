@@ -1,0 +1,26 @@
+{# Log rows: the page's, the next ones as you scroll, and live ones. #}
+{% for r in rows %}
+<li class="lrow sev-{{ r.severity }}" data-seq="{{ r.seq }}"><details>
+  <summary>
+    <span class="lt mono">{{ r.time }}</span>
+    <span class="lc"><span class="lcat c-{{ r.cat }}">{{ crate::web::icons::icon(r.cat_icon)|safe }}<span>{{ r.cat_label }}</span></span></span>
+    <span class="la">{{ r.actor }}</span>
+    <span class="lp">{% if r.project.is_empty() %}<span class="dim">–</span>{% else %}{{ r.project }}{% endif %}</span>
+    <span class="lw"><span class="lsum">{{ r.summary }}</span>{% if r.count > 1 %}<span class="lx" title="{{ r.count }} identical entries in this second">×{{ r.count }}</span>{% endif %}{% if let Some(o) = r.job_outcome %}<span class="ljob{% if r.job_ok %} ok{% else %} bad{% endif %}">{{ o }}</span>{% endif %}{% if r.archived %}<span class="lx">archived</span>{% endif %}</span>
+    <span class="ls">{% if r.severity != "info" %}<span class="sevdot {{ r.severity }}" aria-hidden="true"></span>{{ r.severity }}{% endif %}</span>
+  </summary>
+  <div class="ldetail">
+    <div class="ldl">
+      {% if !r.lines.is_empty() %}<div class="blog">{% for (cls, line) in r.lines %}<div class="{{ cls }}">{{ line }}</div>{% endfor %}{% if r.more_lines > 0 %}<div class="d">… {{ r.more_lines }} more line{% if r.more_lines != 1 %}s{% endif %}</div>{% endif %}</div>{% endif %}
+      {% if r.count > 1 %}<p class="sub">{{ r.count }} identical entries in this second.</p>{% endif %}
+      <dl class="kv">{% for (k, v) in r.fields %}<dt>{{ k }}</dt><dd class="mono">{{ v }}</dd>{% endfor %}</dl>
+    </div>
+    <div class="lact"><p class="label">Filter and open</p>
+      {% for (label, href, icon) in r.actions %}<a href="{{ href }}">{{ crate::web::icons::icon(icon)|safe }}<span>{{ label }}</span></a>{% endfor %}
+      <button type="button" data-copy="{{ r.query }}">{{ crate::web::icons::icon("copy")|safe }}<span>Copy as query</span></button>
+    </div>
+  </div>
+</details></li>
+{% endfor %}
+{% if let Some(n) = next %}<li class="lmore" data-next="{{ n }}"><span class="spin" aria-hidden="true"></span>Loading older entries…</li>{% endif %}
+{% if let Some((span, longer)) = end %}<li class="lend sub">That's everything in {{ span }}{% if let Some((label, href)) = longer %} · <a href="{{ href }}">{{ label }}</a>{% endif %}</li>{% endif %}

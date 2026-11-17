@@ -369,7 +369,13 @@ fn is_public(path: &str) -> bool {
 /// Pages and API calls that don't get a row of their own in the activity log. MCP tool calls log
 /// themselves, with the tool name and record, which says more than "POST /mcp".
 fn is_unlogged(path: &str) -> bool {
-    assets::is_asset(path) || pwa::is_public(path) || path == "/mcp" || path.starts_with("/mcp/")
+    assets::is_asset(path)
+        || pwa::is_public(path)
+        || path == "/mcp"
+        || path.starts_with("/mcp/")
+        // The Log reading itself (scrolling, the live stream) would fill the Log.
+        || path == "/log/rows"
+        || path == "/log/stream"
 }
 
 fn client_ip(config: &Config, peer: Option<IpAddr>, headers: &HeaderMap) -> String {
