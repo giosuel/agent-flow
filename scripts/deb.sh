@@ -88,7 +88,7 @@ Version: $version
 Architecture: $arch
 Maintainer: giosuel <me@giosuel.ch>
 Depends: $(deps_of "$rel/agentflow"), agentflow-client (= $version), systemd, git
-Recommends: gh
+Recommends: gh, tmux
 Section: devel
 Priority: optional
 Homepage: https://github.com/giosuel/agent-flow
@@ -108,6 +108,8 @@ if [ "$1" = configure ]; then
   fi
   echo "Next: sudo agentflow setup --public-url https://… --agents-user <user>"
   echo "Then your first passkey: sudo flow server add-passkey (or the link in journalctl -u agentflow)"
+  echo "For the consultant: install Claude Code and tmux for the agentflow user and sign it in once:"
+  echo "  sudo -u agentflow claude auth login"
 fi
 POSTINST
 chmod 755 "$server/DEBIAN/postinst"

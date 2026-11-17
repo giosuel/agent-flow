@@ -49,7 +49,8 @@ package_agentflow-client() {
 
 package_agentflow() {
   depends=('gcc-libs' 'glibc' 'openssl' 'zlib' 'zstd' 'git' 'systemd' "agentflow-client=$pkgver")
-  optdepends=('github-cli: the merge and release buttons, pull request status')
+  optdepends=('github-cli: the merge and release buttons, pull request status'
+              'tmux: the consultant (with Claude Code for the agentflow user)')
   install=agentflow.install
   cd "agent-flow-$pkgver"
   install -Dm755 target/release/agentflow "$pkgdir/usr/bin/agentflow"
