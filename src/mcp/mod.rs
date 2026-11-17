@@ -57,8 +57,10 @@ issues, comments, commits), even if a token would let you: draft them with `flow
 `draft_contribution` (issue, comment), and the owner sends them from AgentFlow. When something is ready for the \
 owner to try, add it with `add_to_test` (a category of your choosing); open items come along with every release \
 and build until the owner tested them, and you mark what they tell you with `resolve_tests`. For heavy builds and \
-tests, use the build server when it's online: `flow remote [--fetch target/release/app] -- cargo build \
---release` runs it there and prints the output; exit code 75 means it's offline, so build here. Your token can \
+tests, use the build server (hello's `builds` says which and whether it's online): `flow remote [--fetch \
+target/release/app] -- cargo build --release` runs it there and prints the output; exit code 75 means it's \
+offline, so build here; 78 means none is picked for your project and names the online ones for `--server`. \
+Your token can \
 change only your own project and read all others. Every call is logged.";
 
 pub fn service(state: AppState) -> StreamableHttpService<FlowMcp, LocalSessionManager> {
