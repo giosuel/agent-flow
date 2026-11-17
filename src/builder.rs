@@ -412,8 +412,19 @@ fn sync(me: &Builder, work: &str, manifest: &str, bundle: &str) -> anyhow::Resul
     }
     for path in before.keys() {
         if !now.contains_key(path) {
-            let _ = std::fs::remove_file(dir.join(path));
+            let file = dir.join(path);
+            let _ = std::fs::remove_file(&file);
             changed += 1;
+            // Its folders too, once empty: a crate deleted in this snapshot must not stay behind as
+            // an empty folder that `members = ["crates/*"]` picks up (Imaginarium, 2026-11-17).
+            // A folder with anything else in it (a build's own files) stays.
+            let mut up = file.parent();
+            while let Some(d) = up {
+                if d == dir || !d.starts_with(&dir) || std::fs::remove_dir(d).is_err() {
+                    break;
+                }
+                up = d.parent();
+            }
         }
     }
     std::fs::write(&state_file, serde_json::to_vec(&now)?)?;
