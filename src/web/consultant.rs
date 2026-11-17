@@ -30,6 +30,8 @@ pub struct View {
     pub link: Option<String>,
     pub attach: String,
     pub error: Option<String>,
+    /// Its token's last characters (the Settings page fills it in).
+    pub token_hint: Option<String>,
 }
 
 pub async fn view(state: &AppState) -> View {
@@ -52,6 +54,7 @@ pub async fn view(state: &AppState) -> View {
         link,
         attach: consultant::attach_command(&state.config.data_dir()),
         error,
+        token_hint: None,
     }
 }
 
@@ -107,7 +110,7 @@ async fn on(
     actor.require_owner()?;
     if let Err(e) = consultant::login_ok().await {
         note_error(&state, &format!("{e:#}")).await;
-        return Ok(Redirect::to("/settings#s-consultant").into_response());
+        return Ok(Redirect::to("/settings?s=consultant").into_response());
     }
     state.db.call(|c| consultant::set_on(c, true)).await?;
     if !consultant::running(&state.config.data_dir()).await
@@ -117,7 +120,7 @@ async fn on(
     }
     activity::write(&state.db, Entry::new(&actor, Via::Page, Action::Write, "consultant switched on").ip(Some(ip.0)))
         .await;
-    Ok(Redirect::to("/settings#s-consultant").into_response())
+    Ok(Redirect::to("/settings?s=consultant").into_response())
 }
 
 async fn off(
@@ -130,7 +133,7 @@ async fn off(
     let _ = consultant::stop(&state.config.data_dir()).await;
     activity::write(&state.db, Entry::new(&actor, Via::Page, Action::Write, "consultant switched off").ip(Some(ip.0)))
         .await;
-    Ok(Redirect::to("/settings#s-consultant").into_response())
+    Ok(Redirect::to("/settings?s=consultant").into_response())
 }
 
 /// Every minute while it's on: restart it if it's gone (it continues its conversation), and read
