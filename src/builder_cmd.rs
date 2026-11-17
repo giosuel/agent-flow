@@ -201,7 +201,7 @@ pub fn add(config_path: &Path, args: &ClientArgs, a: AddArgs) -> anyhow::Result<
         json!({"name": name, "threads": threads, "memory_gb": memory_gb, "user": user}),
     )?;
     let token = result["token"].as_str().context("the server sent no token")?.to_owned();
-    eprintln!("  ✓ approved: builder {name}");
+    eprintln!("{}", crate::ui::ok(&format!("approved: builder {name}")));
     let toml_text =
         format!("url = {}\nname = {}\n", toml::Value::String(client.base.clone()), toml::Value::String(name.clone()));
     if new_user {
@@ -264,7 +264,7 @@ fn set_up_here(program: &Path, toml_text: &str, token: &str) -> anyhow::Result<(
     }
     run_shown(&["systemctl", "--user", "daemon-reload"], None)?;
     run_shown(&["systemctl", "--user", "enable", "--now", UNIT], None)?;
-    eprintln!("  ✓ config and token in ~/.config/agentflow, service {UNIT} running");
+    eprintln!("{}", crate::ui::ok(&format!("config and token in ~/.config/agentflow, service {UNIT} running")));
     Ok(())
 }
 
@@ -274,7 +274,7 @@ fn set_up_other_user(user: &str, program: &Path, toml_text: &str, token: &str) -
     if home_of(user).is_none() {
         run_shown(&["sudo", "useradd", "--create-home", "--shell", "/usr/sbin/nologin", user], None)?;
     } else {
-        eprintln!("  ✓ the user {user} exists already");
+        eprintln!("{}", crate::ui::ok(&format!("the user {user} exists already")));
     }
     run_shown(&["sudo", "loginctl", "enable-linger", user], None)?;
     let home = home_of(user).context("the new user has no home")?;
@@ -350,7 +350,7 @@ fn set_up_other_user(user: &str, program: &Path, toml_text: &str, token: &str) -
     let machine = format!("{user}@");
     run_shown(&["sudo", "systemctl", "--user", "-M", &machine, "daemon-reload"], None)?;
     run_shown(&["sudo", "systemctl", "--user", "-M", &machine, "enable", "--now", UNIT], None)?;
-    eprintln!("  ✓ user {user} with linger, its config, token and service running");
+    eprintln!("{}", crate::ui::ok(&format!("user {user} with linger, its config, token and service running")));
     Ok(())
 }
 
@@ -362,21 +362,45 @@ pub fn list(config_path: &Path, args: &ClientArgs) -> anyhow::Result<()> {
         println!("No builders yet: flow builder add, on the machine.");
         return Ok(());
     }
+    use crate::ui::{Tone, fit, paint, wrap};
+    let on = crate::ui::color(false);
     for b in rows {
+        let online = b["online"].as_bool().unwrap_or(false);
+        let jobs = b["jobs"].as_i64().unwrap_or(0);
+        let machine = b["threads"].as_u64().map(|t| format!("{t} threads · {} GB", b["memory_gb"])).unwrap_or_default();
         println!(
-            "{:<16} {:<7} {:<8} {:>3} jobs   start at {} threads + {} GB free; pause below {} GB; {} per project at once; folders kept {} days{}",
-            b["name"].as_str().unwrap_or(""),
-            b["kind"].as_str().unwrap_or(""),
-            if b["online"].as_bool().unwrap_or(false) { "online" } else { "offline" },
-            b["jobs"],
-            b["min_threads"],
-            b["min_memory_gb"],
-            b["reserve_memory_gb"],
-            b["slots"].as_i64().unwrap_or(1),
-            b["keep_days"],
-            b["threads"].as_u64().map(|t| format!("   ({t} threads, {} GB)", b["memory_gb"])).unwrap_or_default()
+            "{}",
+            fit(
+                "",
+                4,
+                &[
+                    (if online { Tone::Good } else { Tone::Dim }, if online { "●" } else { "○" }),
+                    (Tone::Bold, b["name"].as_str().unwrap_or("")),
+                    (if online { Tone::Good } else { Tone::Dim }, if online { "online" } else { "offline" }),
+                    (Tone::Number, &format!("{jobs} job{}", if jobs == 1 { "" } else { "s" })),
+                    (Tone::Dim, &machine),
+                ],
+                on
+            )
+        );
+        println!(
+            "{}",
+            wrap(
+                4,
+                Tone::Dim,
+                &format!(
+                    "starts a job at {} threads and {} GB free; pauses below {} GB; {} per project at once; folders kept {} days",
+                    b["min_threads"],
+                    b["min_memory_gb"],
+                    b["reserve_memory_gb"],
+                    b["slots"].as_i64().unwrap_or(1),
+                    b["keep_days"]
+                ),
+                on
+            )
         );
     }
+    println!("\n{}  follows one live", paint(Tone::Bold, "flow builder status <name>", on));
     Ok(())
 }
 

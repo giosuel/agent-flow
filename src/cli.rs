@@ -888,7 +888,10 @@ pub fn remote(config_path: &Path, a: RemoteArgs) -> anyhow::Result<i32> {
     let status = res.status();
     let v: serde_json::Value = res.json().unwrap_or(serde_json::Value::Null);
     if status == reqwest::StatusCode::SERVICE_UNAVAILABLE {
-        eprintln!("{}", v["error"].as_str().unwrap_or("the build server is offline"));
+        eprintln!(
+            "{}",
+            crate::ui::note(&format!("· {}", v["error"].as_str().unwrap_or("the build server is offline")))
+        );
         // 78: nothing picked (a builder may be online: --server names it); 75: offline.
         return Ok(if v["none_picked"].as_bool() == Some(true) { 78 } else { 75 });
     }
@@ -896,7 +899,16 @@ pub fn remote(config_path: &Path, a: RemoteArgs) -> anyhow::Result<i32> {
         bail!("{status}: {}", v["error"].as_str().unwrap_or("couldn't start the job"));
     }
     let id = v["id"].as_i64().context("no job id")?;
-    eprintln!("Job #{id} on {}: {}", v["server"].as_str().unwrap_or(""), v["url"].as_str().unwrap_or(""));
+    {
+        use crate::ui::{Tone, paint};
+        let on = crate::ui::color(true);
+        eprintln!(
+            "{} on {}  {}",
+            paint(Tone::Number, &format!("Job #{id}"), on),
+            paint(Tone::Bold, v["server"].as_str().unwrap_or(""), on),
+            paint(Tone::Dim, v["url"].as_str().unwrap_or(""), on)
+        );
+    }
     // Ctrl-C cancels the job there too.
     let (cancel_base, cancel_token) = (client.base.clone(), client.token.clone());
     std::thread::spawn(move || {
@@ -920,13 +932,16 @@ pub fn remote(config_path: &Path, a: RemoteArgs) -> anyhow::Result<i32> {
         let o = match client.get(&format!("/api/remote/jobs/{id}/output?after={after}")) {
             Ok(o) => {
                 if unreachable_since.take().is_some() {
-                    eprintln!("· AgentFlow is back");
+                    eprintln!("{}", crate::ui::note("· AgentFlow is back"));
                 }
                 o
             }
             Err(e) => {
                 let since = unreachable_since.get_or_insert_with(|| {
-                    eprintln!("· AgentFlow isn't answering ({e:#}); the job runs on, waiting");
+                    eprintln!(
+                        "{}",
+                        crate::ui::note(&format!("· AgentFlow isn't answering ({e:#}); the job runs on, waiting"))
+                    );
                     std::time::Instant::now()
                 });
                 if since.elapsed() > std::time::Duration::from_secs(120) {
@@ -938,14 +953,29 @@ pub fn remote(config_path: &Path, a: RemoteArgs) -> anyhow::Result<i32> {
         };
         let text = o["text"].as_str().unwrap_or("");
         if !text.is_empty() {
-            print!("{text}");
+            // The job's lines: AgentFlow's notes dimmed, warnings yellow, errors red (as on its page
+            // and in `flow builder status`).
+            let on = crate::ui::color(false);
+            for line in text.split_inclusive('\n') {
+                let bare = line.trim_end_matches('\n');
+                let tone = if bare.starts_with("· ") {
+                    crate::ui::Tone::Dim
+                } else {
+                    match crate::remote::line_severity(bare) {
+                        "error" => crate::ui::Tone::Bad,
+                        "warn" => crate::ui::Tone::Commit,
+                        _ => crate::ui::Tone::Plain,
+                    }
+                };
+                print!("{}{}", crate::ui::paint(tone, bare, on), &line[bare.len()..]);
+            }
             std::io::Write::flush(&mut std::io::stdout())?;
         }
         after = o["next"].as_u64().unwrap_or(after);
         let state = o["state"].as_str().unwrap_or("");
         let reason = o["reason"].as_str().unwrap_or("").to_owned();
         if matches!(state, "queued" | "paused") && reason != last_reason && !reason.is_empty() {
-            eprintln!("· {state}: {reason}");
+            eprintln!("{}", crate::ui::note(&format!("· {state}: {reason}")));
         }
         last_reason = reason;
         if o["finished"].as_bool().unwrap_or(false) && text.is_empty() {
@@ -957,7 +987,9 @@ pub fn remote(config_path: &Path, a: RemoteArgs) -> anyhow::Result<i32> {
                 let long =
                     Client::with_token(&client.base, &client.token).with_timeout(std::time::Duration::from_secs(1800));
                 match crate::snapshot::fetch_results(&long, id, &top, &a.fetch, &results) {
-                    Ok(got) if !got.is_empty() => eprintln!("· brought back {}", got.join(", ")),
+                    Ok(got) if !got.is_empty() => {
+                        eprintln!("{}", crate::ui::note(&format!("· brought back {}", got.join(", "))))
+                    }
                     Ok(_) => {}
                     Err(e) => {
                         eprintln!("· couldn't bring the results back: {e:#}");
@@ -1196,19 +1228,61 @@ pub struct RunArgs {
     pub args: Vec<String>,
 }
 
+/// A build's line, as viber-run printed it: number, date, topic (branch), commit.
+fn build_fields(b: &serde_json::Value) -> (String, String, String, String) {
+    let number = format!("#{}", b["number"]);
+    // "2026-11-12T10:28:00Z" → "2026-11-12 10:28"
+    let date = b["published"].as_str().unwrap_or("").replace('T', " ").chars().take(16).collect::<String>();
+    let topic = b["branch"].as_str().unwrap_or("").to_owned();
+    let commit = b["commit"].as_str().unwrap_or("").chars().take(7).collect::<String>();
+    (number, date, topic, commit)
+}
+
 pub fn run(config_path: &Path, a: RunArgs) -> anyhow::Result<()> {
+    use crate::ui::{Tone, fit, paint, wrap};
+    let on = crate::ui::color(false);
     let client = Client::new(config_path, &a.client)?.with_timeout(std::time::Duration::from_secs(30 * 60));
     let Some(product) = a.product else {
         let list = client.get("/api/builds")?;
-        for p in list["products"].as_array().cloned().unwrap_or_default() {
-            println!(
-                "{:<16} {:>3} builds   newest #{} {}",
-                p["product"].as_str().unwrap_or(""),
-                p["builds"],
-                p["latest"]["number"],
-                p["latest"]["summary"].as_str().unwrap_or("")
-            );
+        let products = list["products"].as_array().cloned().unwrap_or_default();
+        if products.is_empty() {
+            println!("No builds on {} yet.", client.base);
+            return Ok(());
         }
+        let host = client.base.trim_start_matches("https://").trim_start_matches("http://");
+        println!("{}\n", paint(Tone::Bold, &format!("Products on {host}"), on));
+        for p in products {
+            let name = format!("{:<13}", p["product"].as_str().unwrap_or(""));
+            let n = p["builds"].as_i64().unwrap_or(0);
+            let count = format!("{n:>2} build{}", if n == 1 { " " } else { "s" });
+            let (number, date, topic, commit) = build_fields(&p["latest"]);
+            println!(
+                "{}",
+                fit(
+                    "  ",
+                    16,
+                    &[
+                        (Tone::Bold, &name),
+                        (Tone::Dim, &count),
+                        (Tone::Plain, "newest"),
+                        (Tone::Number, &number),
+                        (Tone::Dim, &date),
+                        (Tone::Topic, &topic),
+                        (Tone::Commit, &commit)
+                    ],
+                    on
+                )
+            );
+            let summary = p["latest"]["summary"].as_str().unwrap_or("");
+            if !summary.is_empty() {
+                println!("{}", wrap(16, Tone::Dim, summary, on));
+            }
+        }
+        println!(
+            "\n{}        starts the newest\n{}   shows its builds",
+            paint(Tone::Bold, "flow run <product>", on),
+            paint(Tone::Bold, "flow run <product> list", on)
+        );
         return Ok(());
     };
     crate::builds::check_product(&product)?;
@@ -1236,11 +1310,45 @@ pub fn run(config_path: &Path, a: RunArgs) -> anyhow::Result<()> {
     }
     let cache_root = expand_home("~/.local/share/agentflow/builds").join(&product);
     if a.build.as_deref() == Some("list") {
+        let last = std::fs::read_to_string(cache_root.join(".last")).unwrap_or_default();
+        println!("{}\n", paint(Tone::Bold, &format!("{product} builds, newest first"), on));
         for b in &builds {
             let name = b["name"].as_str().unwrap_or("");
-            let here = if cache_root.join(name).join(".verified").exists() { "✓" } else { " " };
-            println!("{here} #{:<4} {}  {}", b["number"], name, b["summary"].as_str().unwrap_or(""));
+            let (mark, tone) = if name == last.trim() {
+                (" ●", Tone::Good)
+            } else if cache_root.join(name).join(".verified").exists() {
+                (" ✓", Tone::Dim)
+            } else {
+                ("  ", Tone::Plain)
+            };
+            let (number, date, topic, commit) = build_fields(b);
+            let number = format!("{number:>5}");
+            println!(
+                "{}",
+                fit(
+                    "",
+                    10,
+                    &[
+                        (tone, mark),
+                        (Tone::Number, &number),
+                        (Tone::Dim, &date),
+                        (Tone::Topic, &topic),
+                        (Tone::Commit, &commit)
+                    ],
+                    on
+                )
+            );
+            let summary = b["summary"].as_str().unwrap_or("");
+            if !summary.is_empty() {
+                println!("{}", wrap(10, Tone::Dim, summary, on));
+            }
         }
+        println!(
+            "\n{} started last   {} already here\n{} starts one",
+            paint(Tone::Good, "●", on),
+            paint(Tone::Dim, "✓", on),
+            paint(Tone::Bold, &format!("flow run {product} <number>"), on)
+        );
         return Ok(());
     }
     let pick = match a.build.as_deref() {
@@ -1263,7 +1371,13 @@ pub fn run(config_path: &Path, a: RunArgs) -> anyhow::Result<()> {
     let manifest = match cached {
         Some(m) => m,
         None => {
-            eprintln!("Fetching {product} #{number} ({name})…");
+            let on_err = crate::ui::color(true);
+            eprintln!(
+                "{} Fetching {} {}",
+                paint(Tone::Number, "↓", on_err),
+                paint(Tone::Bold, &product, on_err),
+                paint(Tone::Number, &format!("#{number}"), on_err)
+            );
             let detail = client.get(&format!("/api/builds/{product}/{number}"))?;
             let manifest = crate::builds::Manifest {
                 files: serde_json::from_value(detail["files"].clone()).context("the build's file list")?,
@@ -1293,7 +1407,30 @@ pub fn run(config_path: &Path, a: RunArgs) -> anyhow::Result<()> {
         }
     };
     let path = crate::builds::entry_path(&dir, &manifest, pick["entry"].as_str().unwrap_or(""))?;
-    eprintln!("Starting {product} #{number}: {}", pick["summary"].as_str().unwrap_or(""));
+    let on_err = crate::ui::color(true);
+    let (num, date, topic, commit) = build_fields(pick);
+    eprintln!(
+        "{}",
+        fit(
+            "",
+            2,
+            &[
+                (Tone::Good, "▶"),
+                (Tone::Bold, &product),
+                (Tone::Number, &num),
+                (Tone::Dim, &date),
+                (Tone::Topic, &topic),
+                (Tone::Commit, &commit)
+            ],
+            on_err
+        )
+    );
+    let summary = pick["summary"].as_str().unwrap_or("");
+    if !summary.is_empty() {
+        eprintln!("{}", wrap(2, Tone::Plain, summary, on_err));
+    }
+    // The one started last, marked ● in the list.
+    let _ = std::fs::write(cache_root.join(".last"), &name);
     use std::os::unix::process::CommandExt;
     let err = std::process::Command::new(&path).args(&a.args).current_dir(&dir).exec();
     Err(anyhow::anyhow!("starting {}: {err}", path.display()))
