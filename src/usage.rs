@@ -371,7 +371,10 @@ pub fn store(conn: &mut Connection, read: &Read) -> anyhow::Result<usize> {
 pub fn store_as(conn: &mut Connection, read: &Read, project: Option<i64>) -> anyhow::Result<usize> {
     let checkouts = Checkouts::load(conn)?;
     let mut touches: HashMap<i64, Vec<(i64, i64)>> = HashMap::new();
-    let tx = conn.transaction()?;
+    // The write lock at once: a transaction that starts reading and writes later fails outright
+    // ("database is locked", SQLITE_BUSY_SNAPSHOT) when another write lands in between, which
+    // busy_timeout can't wait out; flow sync --all next to agents' hooks did (2026-11-17).
+    let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
     let mut calls = 0;
     let mut first_at = read.first_at;
     for c in &read.calls {
