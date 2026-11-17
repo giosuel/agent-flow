@@ -21,7 +21,7 @@ use crate::util::{ago, now_ms};
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/api/remote/jobs", post(start))
-        .route("/api/remote/jobs/{id}/output", get(output))
+        .route("/api/remote/jobs/{id}/output", get(output_api))
         .route("/api/remote/jobs/{id}/cancel", post(cancel_api))
         .route("/machine/builds", get(section))
         .route("/machine/jobs/{id}", get(job_page))
@@ -162,6 +162,17 @@ struct After {
 }
 
 /// The output from `after` (bytes) on, and how the job stands.
+/// `flow remote` following its job: it's still wanted (see remote::ORPHANED_AFTER_MS).
+async fn output_api(
+    State(state): State<AppState>,
+    Extension(actor): Extension<Actor>,
+    Path(id): Path<i64>,
+    q: Query<After>,
+) -> Response {
+    state.remote.lock().unwrap_or_else(|e| e.into_inner()).followed.insert(id, now_ms());
+    output(State(state), Extension(actor), Path(id), q).await
+}
+
 async fn output(
     State(state): State<AppState>,
     Extension(actor): Extension<Actor>,

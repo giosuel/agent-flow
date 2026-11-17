@@ -683,8 +683,13 @@ pub struct RemoteArgs {
     /// (rustup, Go, Node…): `flow remote --setup -- sh -c '…'`. Logged on both sides.
     #[arg(long)]
     pub setup: bool,
+    /// Cancel jobs of this project instead (by number, e.g. `flow remote --cancel 338`): they stop
+    /// on the builder with all their processes. A job goes on when its `flow remote` is killed;
+    /// Ctrl-C or this ends it.
+    #[arg(long, value_name = "JOB", num_args = 1.., conflicts_with_all = ["fetch", "gpu", "setup", "server"])]
+    pub cancel: Vec<i64>,
     /// The command, after `--`, e.g. `-- cargo build --release`.
-    #[arg(last = true, required = true)]
+    #[arg(last = true, required_unless_present = "cancel")]
     pub command: Vec<String>,
 }
 
@@ -848,6 +853,19 @@ pub fn time(config_path: &Path, a: TimeArgs) -> anyhow::Result<i32> {
 
 pub fn remote(config_path: &Path, a: RemoteArgs) -> anyhow::Result<i32> {
     let client = Client::new(config_path, &a.client)?.with_timeout(std::time::Duration::from_secs(60));
+    if !a.cancel.is_empty() {
+        let mut failed = 0;
+        for id in &a.cancel {
+            match client.post_json(&format!("/api/remote/jobs/{id}/cancel"), &serde_json::json!({})) {
+                Ok(_) => eprintln!("{}", crate::ui::ok(&format!("cancelled job #{id}"))),
+                Err(e) => {
+                    failed += 1;
+                    eprintln!("{}", crate::ui::error(&e.context(format!("job #{id}"))));
+                }
+            }
+        }
+        return Ok(if failed == 0 { 0 } else { 1 });
+    }
     let dir = std::fs::canonicalize(&a.dir).with_context(|| format!("{} doesn't exist", a.dir.display()))?;
     // A snapshot of the checkout (only what the server lacks travels), for builders that connect
     // themselves; an SSH builder reads the checkout on the server's machine as before.
