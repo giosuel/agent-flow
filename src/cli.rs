@@ -913,8 +913,29 @@ pub fn remote(config_path: &Path, a: RemoteArgs) -> anyhow::Result<i32> {
     });
     let mut after = 0u64;
     let mut last_reason = String::new();
+    // AgentFlow restarting (an install) is a pause, not the end: the job runs on and AgentFlow
+    // follows it again; keep asking for up to two minutes.
+    let mut unreachable_since: Option<std::time::Instant> = None;
     loop {
-        let o = client.get(&format!("/api/remote/jobs/{id}/output?after={after}"))?;
+        let o = match client.get(&format!("/api/remote/jobs/{id}/output?after={after}")) {
+            Ok(o) => {
+                if unreachable_since.take().is_some() {
+                    eprintln!("· AgentFlow is back");
+                }
+                o
+            }
+            Err(e) => {
+                let since = unreachable_since.get_or_insert_with(|| {
+                    eprintln!("· AgentFlow isn't answering ({e:#}); the job runs on, waiting");
+                    std::time::Instant::now()
+                });
+                if since.elapsed() > std::time::Duration::from_secs(120) {
+                    return Err(e.context("AgentFlow didn't answer for two minutes"));
+                }
+                std::thread::sleep(std::time::Duration::from_secs(2));
+                continue;
+            }
+        };
         let text = o["text"].as_str().unwrap_or("");
         if !text.is_empty() {
             print!("{text}");
