@@ -364,7 +364,7 @@ pub fn list(config_path: &Path, args: &ClientArgs) -> anyhow::Result<()> {
     }
     for b in rows {
         println!(
-            "{:<16} {:<7} {:<8} {:>3} jobs   start at {} threads + {} GB free; pause below {} GB; folders kept {} days{}",
+            "{:<16} {:<7} {:<8} {:>3} jobs   start at {} threads + {} GB free; pause below {} GB; {} per project at once; folders kept {} days{}",
             b["name"].as_str().unwrap_or(""),
             b["kind"].as_str().unwrap_or(""),
             if b["online"].as_bool().unwrap_or(false) { "online" } else { "offline" },
@@ -372,6 +372,7 @@ pub fn list(config_path: &Path, args: &ClientArgs) -> anyhow::Result<()> {
             b["min_threads"],
             b["min_memory_gb"],
             b["reserve_memory_gb"],
+            b["slots"].as_i64().unwrap_or(1),
             b["keep_days"],
             b["threads"].as_u64().map(|t| format!("   ({t} threads, {} GB)", b["memory_gb"])).unwrap_or_default()
         );
@@ -394,6 +395,7 @@ pub struct EditArgs {
     pub min_memory: Option<f64>,
     pub reserve_memory: Option<f64>,
     pub keep_days: Option<i64>,
+    pub slots: Option<i64>,
 }
 
 pub fn edit(config_path: &Path, args: &ClientArgs, e: EditArgs) -> anyhow::Result<()> {
@@ -402,7 +404,7 @@ pub fn edit(config_path: &Path, args: &ClientArgs, e: EditArgs) -> anyhow::Resul
         Some(n) => n,
         None => bail!("which builder? flow builder edit <name> (flow builder list shows them)"),
     };
-    let body = json!({"name": e.rename, "min_threads": e.min_threads, "min_memory_gb": e.min_memory, "reserve_memory_gb": e.reserve_memory, "keep_days": e.keep_days});
+    let body = json!({"name": e.rename, "min_threads": e.min_threads, "min_memory_gb": e.min_memory, "reserve_memory_gb": e.reserve_memory, "keep_days": e.keep_days, "slots": e.slots});
     let res = client.request_json(reqwest::Method::PATCH, &format!("/api/builders/edit/{name}"), &body)?;
     let now = res["name"].as_str().unwrap_or(&name).to_owned();
     // The builder here was renamed: its config follows.

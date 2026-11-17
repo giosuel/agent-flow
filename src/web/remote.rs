@@ -553,6 +553,7 @@ pub struct ServerSetting {
     pub min_memory: String,
     pub reserve_memory: String,
     pub keep_days: i64,
+    pub slots: i64,
     pub projects: Vec<String>,
 }
 
@@ -629,6 +630,7 @@ pub async fn servers_card(state: &AppState, code: Option<&str>) -> anyhow::Resul
                 min_memory: num(b.min_memory_gb),
                 reserve_memory: num(b.reserve_memory_gb),
                 keep_days: b.keep_days,
+                slots: b.slots,
                 projects: picks.iter().filter(|(s, _)| s == &b.name).map(|(_, n)| n.clone()).collect(),
             }
         })
@@ -651,6 +653,12 @@ pub struct Limits {
     min_memory_gb: f64,
     reserve_memory_gb: f64,
     keep_days: i64,
+    #[serde(default = "one")]
+    slots: i64,
+}
+
+fn one() -> i64 {
+    1
 }
 
 pub async fn save_limits(
@@ -661,8 +669,8 @@ pub async fn save_limits(
 ) -> AppResult<Response> {
     actor.require_owner()?;
     let mut b = find_server(&state, &name)?;
-    (b.min_threads, b.min_memory_gb, b.reserve_memory_gb, b.keep_days) =
-        (f.min_threads, f.min_memory_gb, f.reserve_memory_gb, f.keep_days);
+    (b.min_threads, b.min_memory_gb, b.reserve_memory_gb, b.keep_days, b.slots) =
+        (f.min_threads, f.min_memory_gb, f.reserve_memory_gb, f.keep_days, f.slots);
     let n = name.clone();
     if state.db.call(move |c| remote::set_limits(c, &n, &b)).await.is_err() {
         return Ok(back_to_card("error-limits"));

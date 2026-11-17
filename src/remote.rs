@@ -233,6 +233,8 @@ pub struct Job {
     pub setup: bool,
     /// What came back, kept on the server for `flow remote` to fetch.
     pub artifacts: Vec<String>,
+    /// Its work folder and target on the builder: 0 is the project's first.
+    pub slot: i64,
 }
 
 impl Job {
@@ -250,7 +252,7 @@ impl Job {
 const JOB_COLUMNS: &str =
     "j.id, j.server, j.project_id, p.slug, j.actor, j.dir, j.subdir, j.command, j.fetch, j.gpu, j.state,
      j.reason, j.exit_code, j.commit_sha, j.dirty, j.threads, j.sent_bytes, j.lines, j.warnings, j.errors, j.created_at,
-     j.started_at, j.finished_at, j.manifest, j.bundle, j.setup, j.artifacts";
+     j.started_at, j.finished_at, j.manifest, j.bundle, j.setup, j.artifacts, j.slot";
 
 fn job_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<Job> {
     let list = |s: String| serde_json::from_str::<Vec<String>>(&s).unwrap_or_default();
@@ -282,6 +284,7 @@ fn job_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<Job> {
         bundle: r.get(24)?,
         setup: r.get(25)?,
         artifacts: list(r.get(26)?),
+        slot: r.get(27)?,
     })
 }
 
@@ -416,8 +419,13 @@ pub fn wait_reason(server: &BuildServer, live: &ServerLive, job: &Job, running: 
     if live.paused {
         return Some("builds are paused".into());
     }
-    if running.iter().any(|r| r.project_id == job.project_id) {
-        return Some("another job of this project is running".into());
+    let mine = running.iter().filter(|r| r.project_id == job.project_id).count() as i64;
+    if mine >= server.slots.max(1) {
+        return Some(if server.slots <= 1 {
+            "another job of this project is running".into()
+        } else {
+            format!("{mine} jobs of this project are running (at most {} at once)", server.slots)
+        });
     }
     if p.free_threads() < server.min_threads {
         return Some(format!("waiting for {} free threads", server.min_threads));
@@ -449,7 +457,7 @@ pub async fn reload(state: &crate::web::AppState) {
 
 pub fn load_servers(conn: &Connection) -> anyhow::Result<Vec<BuildServer>> {
     let mut stmt = conn.prepare(
-        "SELECT name, root, min_threads, min_memory_gb, reserve_memory_gb, keep_days
+        "SELECT name, root, min_threads, min_memory_gb, reserve_memory_gb, keep_days, slots
          FROM build_servers ORDER BY created_at, name",
     )?;
     let rows = stmt.query_map([], |r| {
@@ -460,6 +468,7 @@ pub fn load_servers(conn: &Connection) -> anyhow::Result<Vec<BuildServer>> {
             min_memory_gb: r.get(3)?,
             reserve_memory_gb: r.get(4)?,
             keep_days: r.get(5)?,
+            slots: r.get(6)?,
         })
     })?;
     Ok(rows.collect::<Result<_, _>>()?)
@@ -477,6 +486,9 @@ pub fn check_server(b: &BuildServer) -> anyhow::Result<()> {
     }
     if !(b.min_threads >= 0.0 && b.min_memory_gb >= 0.0 && b.reserve_memory_gb >= 0.0 && b.keep_days >= 1) {
         bail!("the limits can't be negative, and folders are kept at least a day");
+    }
+    if !(1..=8).contains(&b.slots) {
+        bail!("jobs of one project at once: 1 to 8");
     }
     Ok(())
 }
@@ -508,8 +520,8 @@ pub fn add_daemon(conn: &Connection, b: &BuildServer) -> anyhow::Result<()> {
 pub fn set_limits(conn: &Connection, name: &str, b: &BuildServer) -> anyhow::Result<()> {
     check_server(b)?;
     conn.execute(
-        "UPDATE build_servers SET min_threads = ?2, min_memory_gb = ?3, reserve_memory_gb = ?4, keep_days = ?5 WHERE name = ?1",
-        params![name, b.min_threads, b.min_memory_gb, b.reserve_memory_gb, b.keep_days],
+        "UPDATE build_servers SET min_threads = ?2, min_memory_gb = ?3, reserve_memory_gb = ?4, keep_days = ?5, slots = ?6 WHERE name = ?1",
+        params![name, b.min_threads, b.min_memory_gb, b.reserve_memory_gb, b.keep_days, b.slots],
     )?;
     Ok(())
 }
@@ -622,8 +634,21 @@ pub fn set_project_server(conn: &Connection, project_id: i64, server: &str) -> a
 }
 
 /// The work folder of a project there, relative to its home.
-fn work_dir(server: &BuildServer, slug: &str) -> String {
-    format!("{}/{}", server.root.trim_end_matches('/'), slug)
+fn work_dir(server: &BuildServer, slug: &str, slot: i64) -> String {
+    let root = server.root.trim_end_matches('/');
+    // The first slot keeps the folder jobs always had.
+    if slot <= 0 { format!("{root}/{slug}") } else { format!("{root}/{slug}.{slot}") }
+}
+
+/// A project's git objects on a builder, shared by its slots: a new slot needs no history of its
+/// own, and a bundle's base is always there.
+fn shared_git(server: &BuildServer, slug: &str) -> String {
+    format!("{}/.git-{slug}", server.root.trim_end_matches('/'))
+}
+
+/// The first slot that no running job of the project holds.
+fn free_slot(running: &[Job], job: &Job, slots: i64) -> i64 {
+    (0..slots.max(1)).find(|s| !running.iter().any(|r| r.project_id == job.project_id && r.slot == *s)).unwrap_or(0)
 }
 
 /// Runs the scheduler: probes the servers, starts what fits, pauses and resumes for memory.
@@ -779,17 +804,20 @@ async fn round(
             None => {
                 let threads = live_probe.free_threads().floor().max(2.0) as i64;
                 let id = job.id;
+                let slot = free_slot(&busy, job, server.slots);
                 state
                     .db
                     .call(move |c| {
                         c.execute(
-                            "UPDATE remote_jobs SET state = 'running', reason = 'copying the changes', started_at = ?2, threads = ?3 WHERE id = ?1",
-                            params![id, now_ms(), threads],
+                            "UPDATE remote_jobs SET state = 'running', reason = 'copying the changes', started_at = ?2, threads = ?3, slot = ?4 WHERE id = ?1",
+                            params![id, now_ms(), threads, slot],
                         )?;
                         Ok(())
                     })
                     .await?;
-                let (st, srv, job, probe) = (state.clone(), server.clone(), job.clone(), live_probe.clone());
+                let mut job = job.clone();
+                job.slot = slot;
+                let (st, srv, probe) = (state.clone(), server.clone(), live_probe.clone());
                 tokio::spawn(async move { run_job(st, srv, job, threads, probe).await });
                 return Ok(());
             }
@@ -1041,7 +1069,7 @@ async fn run_job(state: crate::web::AppState, server: BuildServer, job: Job, thr
         .await;
 
     // The command, in a unit of its own: low priority, a memory limit that leaves the owner room.
-    let base = work_dir(&server, &job.project);
+    let base = work_dir(&server, &job.project, job.slot);
     let workdir = if job.setup {
         // `flow remote --setup`: tools go into the builder's home (the owner, 2026-11-13).
         ".".to_owned()
@@ -1241,12 +1269,14 @@ async fn after_run(state: &crate::web::AppState, server: &BuildServer, job: &Job
 
 /// Brings a builder's work folder to the job's snapshot (see `crate::builders`).
 async fn daemon_sync(server: &BuildServer, job: &Job) -> anyhow::Result<Synced> {
-    let work = format!("{}/work", work_dir(server, &job.project));
+    let work = format!("{}/work", work_dir(server, &job.project, job.slot));
+    let shared = shared_git(server, &job.project);
+    let seed = format!("{}/work", work_dir(server, &job.project, 0));
     let (manifest, bundle) = (job.manifest.clone(), job.bundle.clone());
     let (code, stdout, stderr) = crate::builders::hub()
         .ask(
             &server.name,
-            |id| crate::builders::Request::Sync { id, work, manifest, bundle, commit: String::new() },
+            |id| crate::builders::Request::Sync { id, work, manifest, bundle, commit: String::new(), shared, seed },
             Duration::from_secs(1800),
         )
         .await?;
@@ -1269,7 +1299,7 @@ async fn daemon_sync(server: &BuildServer, job: &Job) -> anyhow::Result<Synced> 
 /// A builder sends a path of the job back to the server, where `flow remote` fetches it.
 async fn daemon_fetch(state: &crate::web::AppState, server: &BuildServer, job: &Job, path: &str) -> anyhow::Result<()> {
     check_fetch(path)?;
-    let base = work_dir(server, &job.project);
+    let base = work_dir(server, &job.project, job.slot);
     let from = match path.strip_prefix("target/") {
         Some(rest) => format!("{base}/target/{rest}"),
         None => format!("{base}/work/{path}"),
@@ -1509,6 +1539,7 @@ mod tests {
             bundle: String::new(),
             setup: false,
             artifacts: Vec::new(),
+            slot: 0,
         };
         let mut live = ServerLive::default();
         assert!(wait_reason(&server, &live, &job(1, 1), &[]).unwrap().contains("offline"));
@@ -1529,6 +1560,19 @@ mod tests {
         live.probe.mem_free_gb = 12.0;
         assert!(wait_reason(&server, &live, &job(2, 2), &[]).unwrap().contains("memory"));
         live.probe.mem_free_gb = 50.0;
+        // With slots, several of one project run at once, each in a slot of its own.
+        let wide = BuildServer { slots: 3, ..server.clone() };
+        let mut first = job(1, 1);
+        first.slot = 0;
+        let mut second = job(2, 1);
+        second.slot = 2;
+        assert_eq!(wait_reason(&wide, &live, &job(3, 1), &[first.clone(), second.clone()]), None);
+        assert_eq!(free_slot(&[first.clone(), second.clone()], &job(3, 1), 3), 1);
+        let mut third = job(3, 1);
+        third.slot = 1;
+        assert!(wait_reason(&wide, &live, &job(4, 1), &[first, second, third]).unwrap().contains("at most 3"));
+        assert_eq!(work_dir(&wide, "p", 0), "agentflow/p");
+        assert_eq!(work_dir(&wide, "p", 2), "agentflow/p.2");
         live.paused = true;
         assert!(wait_reason(&server, &live, &job(2, 2), &[]).unwrap().contains("paused"));
     }

@@ -87,6 +87,8 @@ pub struct BuildServer {
     pub reserve_memory_gb: f64,
     /// A project's work folder unused for this many days is deleted.
     pub keep_days: i64,
+    /// How many jobs of one project run at once, each in a work folder (slot) of its own.
+    pub slots: i64,
 }
 
 impl Default for BuildServer {
@@ -98,6 +100,7 @@ impl Default for BuildServer {
             min_memory_gb: 16.0,
             reserve_memory_gb: 8.0,
             keep_days: 14,
+            slots: 1,
         }
     }
 }
