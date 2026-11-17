@@ -1079,7 +1079,9 @@ ol.lrows { padding: 0; margin: 0; list-style: none; gap: 0; }
 .lrow > details > summary::-webkit-details-marker { display: none; }
 .lrow > details > summary:hover { background: #0D0D10; }
 .lrow > details[open] > summary { background: #120F1C; box-shadow: inset 3px 0 0 var(--accent); }
-.lrow.fresh > details > summary { background: var(--soft); }
+/* New live rows fade in, without looking selected. */
+.lrow.fresh > details > summary { animation: lfresh 1.6s ease-out; }
+@keyframes lfresh { from { background: rgba(167, 139, 250, .10); } to { background: transparent; } }
 .lt { color: var(--muted); font-size: 13px; }
 .la { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lp { color: var(--ink2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

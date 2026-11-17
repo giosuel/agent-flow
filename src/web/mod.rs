@@ -376,6 +376,9 @@ fn is_unlogged(path: &str) -> bool {
         // The Log reading itself (scrolling, the live stream) would fill the Log.
         || path == "/log/rows"
         || path == "/log/stream"
+        // A job's output, asked for every second by each waiting `flow remote` and the job's page:
+        // the job is in the Log already, with its outcome and lines (the owner, 2026-11-17).
+        || (path.ends_with("/output") && (path.starts_with("/api/remote/jobs/") || path.starts_with("/machine/jobs/")))
 }
 
 fn client_ip(config: &Config, peer: Option<IpAddr>, headers: &HeaderMap) -> String {
