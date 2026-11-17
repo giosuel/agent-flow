@@ -2603,6 +2603,8 @@ async fn jobs_run_on_a_builder_and_bring_back_what_was_asked() {
     git_in(&work, &["tag", "v0.1.0"]);
     std::fs::write(work.join("a.txt"), "changed, not committed\n").unwrap();
     std::fs::write(work.join("new.txt"), "new\n").unwrap();
+    std::fs::create_dir_all(work.join("crates/gone/src")).unwrap();
+    std::fs::write(work.join("crates/gone/src/lib.rs"), "// a crate deleted later\n").unwrap();
     std::fs::create_dir_all(work.join("target")).unwrap();
     std::fs::write(work.join("target/junk"), "never sent").unwrap();
 
@@ -2725,8 +2727,10 @@ async fn jobs_run_on_a_builder_and_bring_back_what_was_asked() {
     let there = s.state.config.data_dir().join("hq-home/agentflow/imaginarium/work");
     let mtime = |f: &str| std::fs::metadata(there.join(f)).unwrap().modified().unwrap();
     let before = (mtime("a.txt"), mtime("crate/c.txt"), mtime("new.txt"));
-    // And a file deleted here goes there too.
+    // And a file deleted here goes there too, with folders it leaves empty.
     std::fs::remove_file(work.join("new.txt")).unwrap();
+    std::fs::remove_dir_all(work.join("crates")).unwrap();
+    assert!(there.join("crates/gone/src/lib.rs").exists());
     let res = start(work.clone(), agent.clone()).await;
     let id2 = res.json::<Value>().await.unwrap()["id"].as_i64().unwrap();
     for _ in 0..200 {
@@ -2739,6 +2743,7 @@ async fn jobs_run_on_a_builder_and_bring_back_what_was_asked() {
                 "unchanged files keep their times"
             );
             assert!(!there.join("new.txt").exists(), "deleted here, deleted there");
+            assert!(!there.join("crates").exists(), "no empty folders left behind");
             break;
         }
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
