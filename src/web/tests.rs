@@ -289,6 +289,30 @@ async fn mcp_needs_a_token_and_logs_tool_calls() {
 }
 
 #[tokio::test]
+async fn the_bell_keeps_notifications_and_opening_it_reads_them() {
+    let s = TestServer::start().await;
+    let cookie = s.owner_cookie().await;
+    s.db.call(|c| crate::notifications::store(c, "question", "Vinculum asks: one icon?", "", "/p/vinculum/Q-1", None))
+        .await
+        .unwrap();
+    let get = |path: &'static str| {
+        let (s, cookie) = (&s, cookie.clone());
+        async move { s.http.get(s.url(path)).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap() }
+    };
+    assert!(get("/").await.contains("bell-badge"), "a badge while one is unread");
+    let panel = get("/notifications/panel").await;
+    assert!(panel.contains("Vinculum asks: one icon?") && panel.contains(">New<"), "{panel}");
+    let res =
+        s.http.post(s.url("/notifications/read")).header(COOKIE, &cookie).header(ORIGIN, &s.base).send().await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    assert!(!get("/").await.contains("bell-badge"), "the badge is gone once it's opened");
+    assert!(get("/notifications/panel").await.contains(">Earlier<"));
+    let agent = s.token(TokenKind::Project, Some("vinculum")).await;
+    let res = s.http.get(s.url("/notifications/panel")).bearer_auth(&agent).send().await.unwrap();
+    assert_eq!(res.status(), StatusCode::FORBIDDEN, "the owner's alone");
+}
+
+#[tokio::test]
 async fn settings_are_owner_only() {
     let s = TestServer::start().await;
     let admin = s.token(TokenKind::Admin, None).await;
@@ -297,7 +321,11 @@ async fn settings_are_owner_only() {
     let cookie = s.owner_cookie().await;
     let page = s.http.get(s.url("/settings")).header(COOKIE, &cookie).send().await.unwrap();
     assert_eq!(page.status(), StatusCode::OK);
-    assert!(page.text().await.unwrap().contains("/install.sh | sh"), "the install command is on the page");
+    // One section at a time; the list names them all.
+    let text = page.text().await.unwrap();
+    assert!(text.contains("?s=devices") && text.contains("?s=consultant"), "the list of sections");
+    let page = s.http.get(s.url("/settings?s=devices")).header(COOKIE, &cookie).send().await.unwrap();
+    assert!(page.text().await.unwrap().contains("/install.sh | sh"), "the install command is under Devices");
 }
 
 /// The owner, 2026-11-13: `flow connect` signs a machine in like `gh auth login`; the owner
@@ -360,6 +388,9 @@ async fn a_machine_connects_after_the_owner_approves() {
         .unwrap();
     assert!(page.contains(&code) && page.contains("viber@mothman") && page.contains("Approve"), "{page}");
     let settings = s.http.get(s.url("/settings")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
+    assert!(settings.contains("1 waiting"), "the Devices section says one waits");
+    let settings =
+        s.http.get(s.url("/settings?s=devices")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
     assert!(settings.contains("Waiting for your approval") && settings.contains(&code));
     // Signed out, the link leads to sign-in and back.
     let fresh = reqwest::Client::builder().redirect(reqwest::redirect::Policy::none()).build().unwrap();
@@ -2798,7 +2829,8 @@ async fn builders_are_taken_over_and_picked_per_project() {
     .await
     .unwrap();
     crate::remote::reload(&s.state).await;
-    let page = s.http.get(s.url("/settings")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
+    let page =
+        s.http.get(s.url("/settings?s=builders")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
     assert!(page.contains("waiting for flow builder add") && !page.contains("builder@10.0.8.2"), "no SSH left");
     assert!(!page.contains("Add a build server"), "no SSH form");
     s.db.call(|c| {
@@ -2844,7 +2876,8 @@ async fn builders_are_taken_over_and_picked_per_project() {
             .await
             .unwrap();
     assert_eq!(pick.as_deref(), Some("hq"));
-    let page = s.http.get(s.url("/settings")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
+    let page =
+        s.http.get(s.url("/settings?s=builders")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
     assert!(page.contains("Used by Vinculum"));
     // Limits, then removal: its token goes, the project builds locally again.
     assert!(

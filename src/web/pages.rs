@@ -79,6 +79,8 @@ pub struct Nav {
     pub label: String,
     pub version: &'static str,
     pub waiting: i64,
+    /// Notifications not read yet (the bell's badge).
+    pub unread: i64,
 }
 
 /// The navigation with the live "waiting on you" count, for every page.
@@ -87,6 +89,7 @@ pub async fn nav(state: &AppState, actor: &Actor, active: &str) -> Nav {
     if actor.is_owner() {
         let guides = crate::util::lock(&state.guide_prs).open.len() as i64;
         n.waiting = state.db.call(|c| crate::waiting::count(c)).await.unwrap_or(0) as i64 + guides;
+        n.unread = state.db.call(|c| crate::notifications::unread(c)).await.unwrap_or(0);
     }
     n
 }
@@ -109,6 +112,7 @@ impl Nav {
             label: actor.label(),
             version: VERSION,
             waiting: 0,
+            unread: 0,
         }
     }
 }

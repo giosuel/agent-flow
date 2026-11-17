@@ -94,6 +94,12 @@ struct SessionView {
 struct SettingsPage {
     nav: Nav,
     notice: Option<&'static str>,
+    /// The sections, in groups, for the list on the left.
+    groups: Vec<(&'static str, Vec<SectionLink>)>,
+    /// The one shown.
+    section: &'static str,
+    /// Picked explicitly (on the phone: the section's own screen instead of the list).
+    chosen: bool,
     /// The server's GitHub tokens: (which, label, what it's for, set as "…abcd · login").
     github: Vec<(&'static str, &'static str, &'static str, Option<String>)>,
     /// The consultant, run by the server.
@@ -115,8 +121,46 @@ struct SettingsPage {
     build_servers: String,
 }
 
+struct SectionLink {
+    key: &'static str,
+    label: &'static str,
+    icon: &'static str,
+    badge: Option<String>,
+}
+
+/// The sections: (group, [(key, label, icon)]) (the owner, 2026-11-17, from the mockups).
+/// A section: (key, label, icon).
+type Section = (&'static str, &'static str, &'static str);
+
+const SECTIONS: &[(&str, &[Section])] = &[
+    ("Account", &[("passkeys", "Passkeys", "key"), ("browsers", "Signed-in browsers", "window")]),
+    ("", &[("notifications", "Notifications", "bell")]),
+    ("Machines", &[("devices", "Devices", "laptop"), ("builders", "Build servers", "server")]),
+    ("Agents", &[("agents", "Agent tokens", "robot"), ("consultant", "Consultant", "message")]),
+    ("Connections", &[("github", "GitHub", "git")]),
+];
+
+/// The section a key names, or None.
+fn section_key(k: &str) -> Option<&'static str> {
+    SECTIONS.iter().flat_map(|(_, l)| l.iter()).find(|(key, _, _)| *key == k).map(|(key, _, _)| *key)
+}
+
+/// Which section a notice belongs to (after a form post).
+fn section_of_notice(done: &str) -> &'static str {
+    match done {
+        "passkey-removed" => "passkeys",
+        "session-ended" => "browsers",
+        "revoked" => "devices",
+        "rotated" => "agents",
+        "github-saved" | "github-removed" => "github",
+        _ => "notifications",
+    }
+}
+
 #[derive(Deserialize)]
 struct PageQuery {
+    /// The section to show.
+    s: Option<String>,
     done: Option<String>,
     /// What happened on the Build servers card.
     bs: Option<String>,
@@ -152,7 +196,17 @@ async fn page(
     } else {
         q.done.as_deref().and_then(notice_for)
     };
-    render_page(&state, &actor, notice, q.bs.as_deref()).await
+    // The one asked for; after a form, the one it came from; else Notifications.
+    let explicit = q.s.as_deref().and_then(section_key).or_else(|| {
+        if q.add_passkey.is_some() {
+            Some("passkeys")
+        } else if q.bs.is_some() {
+            Some("builders")
+        } else {
+            q.done.as_deref().filter(|d| notice_for(d).is_some()).map(section_of_notice)
+        }
+    });
+    render_page(&state, &actor, notice, q.bs.as_deref(), explicit).await
 }
 
 async fn render_page(
@@ -160,6 +214,7 @@ async fn render_page(
     actor: &Actor,
     notice: Option<&'static str>,
     bs: Option<&str>,
+    explicit: Option<&'static str>,
 ) -> AppResult<Response> {
     let current = match actor {
         Actor::Owner { session_id, .. } => *session_id,
@@ -214,9 +269,44 @@ async fn render_page(
         })
         .partition(|t| t.kind == "device");
 
+    let approvals: Vec<(String, String, String)> = state
+        .db
+        .call(|c| crate::approvals::pending(c))
+        .await?
+        .iter()
+        .map(|a| (a.code.clone(), crate::approvals::describe(a), a.machine.clone()))
+        .collect();
+    let section = explicit.unwrap_or("notifications");
+    let groups = SECTIONS
+        .iter()
+        .map(|(g, links)| {
+            let links = links
+                .iter()
+                .map(|&(key, label, icon)| SectionLink {
+                    key,
+                    label,
+                    icon,
+                    badge: (key == "devices" && !approvals.is_empty()).then(|| format!("{} waiting", approvals.len())),
+                })
+                .collect();
+            (*g, links)
+        })
+        .collect();
+    let mut nav = nav(state, actor, "/settings").await;
+    // On the phone a section is its own screen: back to the list.
+    if explicit.is_some() {
+        nav.back = Some(("/settings".into(), "Settings".into()));
+    }
+    let consultant_hint = agent_tokens
+        .iter()
+        .find(|t| t.kind == "admin" && t.holder == crate::consultant::NAME && !t.hint.is_empty())
+        .map(|t| t.hint.clone());
     let page = SettingsPage {
-        nav: nav(state, actor, "/settings").await,
+        nav,
         notice,
+        groups,
+        section,
+        chosen: explicit.is_some(),
         github: {
             use crate::secrets::{GitHub, token};
             let login = |k: &'static str| async move {
@@ -248,14 +338,8 @@ async fn render_page(
                 ),
             ]
         },
-        consultant: super::consultant::view(state).await,
-        approvals: state
-            .db
-            .call(|c| crate::approvals::pending(c))
-            .await?
-            .iter()
-            .map(|a| (a.code.clone(), crate::approvals::describe(a), a.machine.clone()))
-            .collect(),
+        consultant: super::consultant::View { token_hint: consultant_hint, ..super::consultant::view(state).await },
+        approvals,
         build_servers: super::remote::servers_card(state, bs).await?,
         passkeys_available: state.passkeys.available(),
         public_url: state.config.public_url.clone(),
@@ -464,7 +548,7 @@ async fn github_save(
         })
         .await?;
     log(&state, &actor, &ip, Action::Write, format!("GitHub token for {} set (account {login})", f.which)).await;
-    Ok(Redirect::to("/settings?done=github-saved#s-github").into_response())
+    Ok(Redirect::to("/settings?done=github-saved").into_response())
 }
 
 async fn github_remove(
@@ -477,7 +561,7 @@ async fn github_remove(
     let which = crate::secrets::GitHub::parse(&f.which).map_err(|e| AppError::BadRequest(format!("{e:#}")))?;
     state.db.call(move |c| crate::secrets::remove(c, which)).await?;
     log(&state, &actor, &ip, Action::Write, format!("GitHub token for {} removed", f.which)).await;
-    Ok(Redirect::to("/settings?done=github-removed#s-github").into_response())
+    Ok(Redirect::to("/settings?done=github-removed").into_response())
 }
 
 /// The account a token belongs to.
