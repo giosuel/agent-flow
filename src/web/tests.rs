@@ -2536,51 +2536,60 @@ async fn drafts_for_other_repositories_go_out_only_when_the_owner_sends_them() {
 }
 
 #[tokio::test]
-async fn jobs_run_on_a_build_server_and_bring_back_what_was_asked() {
+async fn jobs_run_on_a_builder_and_bring_back_what_was_asked() {
     use std::os::unix::fs::PermissionsExt;
-    // A stand-in for ssh: runs the command here, in a home of its own, with systemd-run and
-    // systemctl that just run the command / do nothing.
-    let s = TestServer::start_with(|c, data| {
-        let (home, bin) = (data.join("hq-home"), data.join("hq-bin"));
-        std::fs::create_dir_all(&home).unwrap();
-        std::fs::create_dir_all(&bin).unwrap();
-        let write = |name: &str, text: String| {
-            let p = bin.join(name);
-            std::fs::write(&p, text).unwrap();
-            std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
-        };
-        write(
-            "ssh",
-            format!(
-                "#!/bin/sh\nwhile [ $# -gt 0 ]; do case \"$1\" in -o|-F) shift 2;; -*) shift;; *) break;; esac; done\nshift\ncd {h} || exit 255\nexport HOME={h} PATH={b}:$PATH\nexec sh -c \"$*\"\n",
-                h = home.display(),
-                b = bin.display()
-            ),
-        );
-        write("systemd-run", "#!/bin/sh\nwhile [ \"$1\" != \"--\" ]; do shift; done\nshift\nexec \"$@\"\n".into());
-        write("systemctl", "#!/bin/sh\nexit 0\n".into());
-        write("nvidia-smi", "#!/bin/sh\nexit 1\n".into());
-        c.build_servers = vec![crate::config::BuildServer {
-            name: "hq".into(),
-            ssh: "hq".into(),
-            ssh_program: bin.join("ssh").display().to_string(),
-            min_threads: 0.0,
-            min_memory_gb: 0.0,
-            reserve_memory_gb: 0.0,
-            ..Default::default()
-        }];
-    })
-    .await;
+    let s = TestServer::start().await;
     crate::remote::spawn(s.state.clone());
     let agent = s.token(TokenKind::Project, Some("imaginarium")).await;
     let other = s.token(TokenKind::Project, Some("vinculum")).await;
-    // The server from the config is in the list once the scheduler has started.
+    // A real builder, in this process, in a home of its own; systemd-run and systemctl there just
+    // run the command / do nothing. Its name is this test's alone: the hub is the process's.
+    let name = "hq-jobs";
+    let home = s.state.config.data_dir().join("hq-home");
+    let bin = home.join(".local/bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let write = |file: &str, text: &str| {
+        let p = bin.join(file);
+        std::fs::write(&p, text).unwrap();
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+    };
+    write("systemd-run", "#!/bin/sh\nwhile [ \"$1\" != \"--\" ]; do shift; done\nshift\nexec \"$@\"\n");
+    write("systemctl", "#!/bin/sh\nexit 0\n");
+    write("nvidia-smi", "#!/bin/sh\nexit 1\n");
+    let secret =
+        s.db.call(move |c| {
+            let tx = c.transaction()?;
+            let b = crate::config::BuildServer {
+                name: name.into(),
+                min_threads: 0.0,
+                min_memory_gb: 0.0,
+                reserve_memory_gb: 0.0,
+                ..Default::default()
+            };
+            crate::remote::add_daemon(&tx, &b)?;
+            let (_, secret) = crate::auth::create_token(&tx, TokenKind::Builder, name, None)?;
+            tx.commit()?;
+            Ok(secret)
+        })
+        .await
+        .unwrap();
+    crate::remote::reload(&s.state).await;
+    let token_file = home.join("builder.token");
+    std::fs::write(&token_file, &secret).unwrap();
+    let cfg = crate::builder::Config {
+        url: s.base.clone(),
+        name: name.into(),
+        token_file: token_file.display().to_string(),
+        home: Some(home.clone()),
+    };
+    let builder = tokio::spawn(crate::builder::run(cfg));
     for _ in 0..100 {
-        if !crate::remote::servers(&s.state).is_empty() {
+        if crate::builders::hub().is_online(name) {
             break;
         }
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     }
+    assert!(crate::builders::hub().is_online(name), "the builder connected");
 
     // The agent's checkout: a commit, then a change and a new file not committed yet.
     let work = s.state.config.data_dir().join("checkout");
@@ -2598,13 +2607,29 @@ async fn jobs_run_on_a_build_server_and_bring_back_what_was_asked() {
     std::fs::write(work.join("target/junk"), "never sent").unwrap();
 
     let cmd = "cat ../a.txt ../new.txt; git describe --tags; echo 'warning: careful'; ls ../target 2>&1 | head -1; mkdir -p ../../target/release && echo built > ../../target/release/app";
+    // What flow remote does: upload the snapshot (only what the server lacks), then start.
     let start = |dir: std::path::PathBuf, token: String| {
         let s = &s;
         async move {
+            let (base, t2) = (s.base.clone(), token.clone());
+            let d2 = dir.clone();
+            let (top, sub, up) = tokio::task::spawn_blocking(move || {
+                let client = crate::cli::Client::with_token(&base, &t2);
+                let (top, sub) = crate::snapshot::top_of(&d2).unwrap();
+                let up = match crate::snapshot::target(&client, None) {
+                    Some((_, true, base)) => Some(crate::snapshot::upload(&client, &top, &base).unwrap()),
+                    _ => None,
+                };
+                (top, sub, up)
+            })
+            .await
+            .unwrap();
             s.http
                 .post(s.url("/api/remote/jobs"))
                 .bearer_auth(token)
-                .json(&json!({"dir": dir, "command": ["sh", "-c", cmd], "fetch": ["target/release/app"]}))
+                .json(&json!({"dir": top, "subdir": sub, "command": ["sh", "-c", cmd], "fetch": ["target/release/app"],
+                    "manifest": up.as_ref().map(|u| u.manifest.clone()).unwrap_or_default(),
+                    "bundle": up.as_ref().map(|u| u.bundle.clone()).unwrap_or_default()}))
                 .send()
                 .await
                 .unwrap()
@@ -2615,7 +2640,7 @@ async fn jobs_run_on_a_build_server_and_bring_back_what_was_asked() {
     assert_eq!(res.status(), StatusCode::SERVICE_UNAVAILABLE);
     s.db.call(|c| {
         let p = crate::projects::get(c, "imaginarium")?.unwrap();
-        crate::remote::set_project_server(c, p.id, "hq")
+        crate::remote::set_project_server(c, p.id, name)
     })
     .await
     .unwrap();
@@ -2656,6 +2681,15 @@ async fn jobs_run_on_a_build_server_and_bring_back_what_was_asked() {
     );
     assert!(text.contains("v0.1.0"), "tags went over:\n{text}");
     assert!(text.contains("No such file") || !text.contains("junk"), "ignored files stay here:\n{text}");
+    // flow remote fetches what came back.
+    let job = s.db.call(move |c| crate::remote::get(c, id)).await.unwrap().unwrap();
+    let (base, t2, w2) = (s.base.clone(), agent.clone(), work.clone());
+    tokio::task::spawn_blocking(move || {
+        let client = crate::cli::Client::with_token(&base, &t2);
+        crate::snapshot::fetch_results(&client, id, &w2, &job.fetch, &job.artifacts).unwrap()
+    })
+    .await
+    .unwrap();
     assert_eq!(std::fs::read_to_string(work.join("target/release/app")).unwrap(), "built\n", "brought back");
     assert_eq!(last["warnings"], 1);
 
@@ -2711,13 +2745,19 @@ async fn jobs_run_on_a_build_server_and_bring_back_what_was_asked() {
     }
 
     // Offline: refused at once, so the agent builds here.
-    s.state.remote.lock().unwrap().servers.get_mut("hq").unwrap().probe.online = false;
+    builder.abort();
+    for _ in 0..100 {
+        if !crate::builders::hub().is_online(name) {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
     let res = start(work.clone(), agent.clone()).await;
     assert_eq!(res.status(), StatusCode::SERVICE_UNAVAILABLE);
 }
 
 #[tokio::test]
-async fn build_servers_are_added_in_settings_and_picked_per_project() {
+async fn builders_are_taken_over_and_picked_per_project() {
     let s = TestServer::start().await;
     crate::remote::spawn(s.state.clone());
     let cookie = s.owner_cookie().await;
@@ -2739,30 +2779,32 @@ async fn build_servers_are_added_in_settings_and_picked_per_project() {
             res.headers()[LOCATION].to_str().unwrap().to_owned()
         }
     };
-    // Bad names and targets are refused.
-    assert!(
-        post("/settings/build-servers", vec![("name", "a b".into()), ("ssh", "builder@10.0.8.2".into())])
-            .await
-            .contains("error-name")
-    );
-    assert!(
-        post("/settings/build-servers", vec![("name", "hq".into()), ("ssh", "-oProxyCommand=x".into())])
-            .await
-            .contains("error-target")
-    );
-    // Added with a key AgentFlow makes: the card shows the line to add over there.
-    let to = post(
-        "/settings/build-servers",
-        vec![("name", "hq".into()), ("ssh", "builder@10.0.8.2".into()), ("make_key", "1".into())],
-    )
-    .await;
-    assert!(to.contains("bs=added"), "{to}");
-    let key = s.state.config.data_dir().join("remote/keys/hq");
-    assert!(key.exists() && key.with_extension("pub").exists());
-    let page =
-        s.http.get(s.url("/settings?bs=added")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
-    assert!(page.contains("restrict ssh-ed25519") && page.contains("builder@10.0.8.2"), "the key line");
-    assert_eq!(crate::remote::servers(&s.state)[0].key_file, key.display().to_string());
+    // A former SSH builder: no token yet, so the card says to run flow builder add on it, and
+    // flow builder add takes it over; one with a token can't be taken.
+    s.db.call(|c| {
+        c.execute(
+            "INSERT INTO build_servers (name, ssh, key_file, root, min_threads, min_memory_gb, reserve_memory_gb, keep_days, created_at, kind)
+             VALUES ('hq', 'builder@10.0.8.2', '', 'agentflow', 8, 16, 8, 14, 1, 'ssh')",
+            [],
+        )?;
+        c.execute_batch(include_str!("../../migrations/024_no_ssh_builders.sql"))?;
+        Ok(())
+    })
+    .await
+    .unwrap();
+    crate::remote::reload(&s.state).await;
+    let page = s.http.get(s.url("/settings")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
+    assert!(page.contains("waiting for flow builder add") && !page.contains("builder@10.0.8.2"), "no SSH left");
+    assert!(!page.contains("Add a build server"), "no SSH form");
+    s.db.call(|c| {
+        let b = crate::config::BuildServer { name: "hq".into(), ..Default::default() };
+        crate::remote::add_daemon(c, &b)?;
+        crate::auth::create_token(c, TokenKind::Builder, "hq", None)?;
+        assert!(crate::remote::add_daemon(c, &b).is_err(), "taken once it has a token");
+        Ok(())
+    })
+    .await
+    .unwrap();
     // A project picks it in its Settings; the Settings card lists the project.
     let page = s
         .http
@@ -2799,7 +2841,7 @@ async fn build_servers_are_added_in_settings_and_picked_per_project() {
     assert_eq!(pick.as_deref(), Some("hq"));
     let page = s.http.get(s.url("/settings")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
     assert!(page.contains("Used by Vinculum"));
-    // Limits, then removal: the key goes, the project builds locally again.
+    // Limits, then removal: its token goes, the project builds locally again.
     assert!(
         post(
             "/settings/build-servers/hq/limits",
@@ -2815,7 +2857,8 @@ async fn build_servers_are_added_in_settings_and_picked_per_project() {
     );
     assert_eq!(crate::remote::servers(&s.state)[0].min_threads, 4.0);
     assert!(post("/settings/build-servers/hq/remove", vec![]).await.contains("bs=removed"));
-    assert!(crate::remote::servers(&s.state).is_empty() && !key.exists());
+    assert!(crate::remote::servers(&s.state).is_empty());
+    assert!(!s.db.call(|c| crate::remote::has_token(c, "hq")).await.unwrap(), "its token is revoked");
     let pick =
         s.db.call(|c| crate::remote::project_server(c, crate::projects::get(c, "vinculum")?.unwrap().id))
             .await
