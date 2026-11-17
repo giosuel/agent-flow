@@ -181,6 +181,9 @@ async fn page(
 #[derive(Deserialize)]
 struct DecideForm {
     decision: String,
+    /// "clients": decided in the Settings list, back there afterwards.
+    #[serde(default)]
+    back: String,
 }
 
 async fn decide(
@@ -223,6 +226,14 @@ async fn decide(
         .ip(Some(ip));
     activity::write(&state.db, e).await;
     let now = crate::util::now_ms();
+    if f.back == "clients" {
+        let done = match (approve, outcome.0) {
+            (false, _) => "denied",
+            (true, true) => "approved",
+            (true, false) => "approve-failed",
+        };
+        return Ok(axum::response::Redirect::to(&format!("/settings?s=clients&done={done}")).into_response());
+    }
     let a2 = state.db.call(move |c| approvals::by_code(c, &code)).await?.ok_or(AppError::NotFound)?;
     render(ApprovePage {
         nav: nav(&state, &actor, "/settings").await,
