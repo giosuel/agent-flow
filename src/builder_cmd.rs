@@ -194,6 +194,30 @@ pub fn add(config_path: &Path, args: &ClientArgs, a: AddArgs) -> anyhow::Result<
         );
     }
     let program = builder_program()?;
+    // As this user: its systemd must be reachable, and keep running after logout (linger), before
+    // anything is created (the owner, 2026-11-17, from a shell entered with su: "Failed to connect
+    // to user scope bus … $XDG_RUNTIME_DIR not defined").
+    if !new_user {
+        let runtime = PathBuf::from(format!("/run/user/{}", rustix::process::getuid().as_raw()));
+        if std::env::var_os("XDG_RUNTIME_DIR").is_none() {
+            if runtime.is_dir() {
+                // SAFETY: still single-threaded here; the systemctl calls below read it.
+                unsafe { std::env::set_var("XDG_RUNTIME_DIR", &runtime) };
+            } else {
+                bail!(
+                    "{user}'s systemd isn't running (no {}). Turn linger on once, then run this again:\n  sudo loginctl enable-linger {user}",
+                    runtime.display()
+                );
+            }
+        }
+        if !linger_on(&user) {
+            eprintln!("{user}'s builder would stop when {user} logs out. To keep it running, once:");
+            eprintln!("  sudo loginctl enable-linger {user}");
+            if interactive && !yes("Go on without it?", false)? {
+                return Ok(());
+            }
+        }
+    }
     let (threads, memory_gb) = machine();
     let result = crate::connect::approve(
         &client,
@@ -201,6 +225,8 @@ pub fn add(config_path: &Path, args: &ClientArgs, a: AddArgs) -> anyhow::Result<
         json!({"name": name, "threads": threads, "memory_gb": memory_gb, "user": user}),
     )?;
     let token = result["token"].as_str().context("the server sent no token")?.to_owned();
+    // Taking over an existing builder: its name as the server writes it.
+    let name = result["name"].as_str().map(str::to_owned).unwrap_or(name);
     eprintln!("{}", crate::ui::ok(&format!("approved: builder {name}")));
     let toml_text =
         format!("url = {}\nname = {}\n", toml::Value::String(client.base.clone()), toml::Value::String(name.clone()));
@@ -208,10 +234,6 @@ pub fn add(config_path: &Path, args: &ClientArgs, a: AddArgs) -> anyhow::Result<
         set_up_other_user(&user, &program, &toml_text, &token)?;
     } else {
         set_up_here(&program, &toml_text, &token)?;
-        if !linger_on(&user) {
-            eprintln!("Its service stops when you log out. To keep it running, once:");
-            eprintln!("  sudo loginctl enable-linger {user}");
-        }
     }
     eprintln!(
         "  ✓ limits to start with: another job while {} threads and {} GB are free; jobs pause below {} GB",

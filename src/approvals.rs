@@ -127,7 +127,9 @@ pub fn check_args(c: &Connection, action: &str, args: &Value) -> anyhow::Result<
             let name = s("name");
             let b = crate::config::BuildServer { name: name.clone(), ..Default::default() };
             crate::remote::check_server(&b)?;
-            // One waiting for its machine (a former SSH builder) is taken over.
+            // One waiting for its machine (a former SSH builder) is taken over, whatever the case
+            // of its name ("HEADQUARTERS" takes over "headquarters").
+            let name = crate::remote::same_name(c, &name)?.unwrap_or(name);
             if crate::remote::has_token(c, &name)? {
                 bail!("a builder called {name} exists already");
             }
@@ -370,8 +372,9 @@ pub fn execute(c: &mut Connection, a: &Approval, data_dir: &std::path::Path) -> 
             let tx = c.transaction()?;
             let threads = a.args.get("threads").and_then(Value::as_f64).unwrap_or(8.0);
             let memory = a.args.get("memory_gb").and_then(Value::as_f64).unwrap_or(16.0);
+            let name = s("name");
             let b = crate::config::BuildServer {
-                name: s("name"),
+                name: crate::remote::same_name(&tx, &name)?.unwrap_or(name),
                 // Starting limits from the machine: a quarter of its threads and memory free
                 // before another job starts, an eighth of its memory kept for its user.
                 min_threads: (threads / 4.0).round().max(1.0),
