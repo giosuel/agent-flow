@@ -39,9 +39,33 @@ pub fn attach_command(data_dir: &Path) -> String {
     format!("tmux -S {} attach -t {TMUX}", tmux_socket(data_dir).display())
 }
 
+/// The server's own home: the consultant runs as the server's user, whose home isn't the agents'
+/// (`crate::util::home_dir` is the agents' when `agents_home` is set).
+pub fn own_home() -> PathBuf {
+    std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/"))
+}
+
+/// Where Claude Code keeps the server's user's config: `CLAUDE_CONFIG_DIR`, else the home.
+fn claude_config_dir() -> Option<PathBuf> {
+    std::env::var_os("CLAUDE_CONFIG_DIR").filter(|v| !v.is_empty()).map(PathBuf::from)
+}
+
+/// The consultant's conversations live with the server's user's Claude Code.
+pub fn transcripts_root() -> PathBuf {
+    claude_config_dir().unwrap_or_else(|| own_home().join(".claude")).join("projects")
+}
+
+/// Claude Code's own state file of the server's user (it keeps folder trust there).
+pub fn claude_json() -> PathBuf {
+    match claude_config_dir() {
+        Some(d) => d.join(".claude.json"),
+        None => own_home().join(".claude.json"),
+    }
+}
+
 /// Claude Code: on PATH, else where its installer puts it (a service's PATH is short).
 pub fn claude_program() -> PathBuf {
-    let home = crate::util::home_dir();
+    let home = own_home();
     let on_path = std::env::var_os("PATH")
         .map(|p| std::env::split_paths(&p).map(|d| d.join("claude")).find(|c| c.is_file()))
         .unwrap_or_default();
@@ -139,6 +163,83 @@ pub fn write_folder(data_dir: &Path, token: &str, public_url: &str, flow: &Path)
     });
     std::fs::write(d.join(".claude/settings.local.json"), serde_json::to_string_pretty(&settings)? + "\n")?;
     Ok(d)
+}
+
+/// Trusts the consultant's folder for Claude Code, so its first start doesn't wait at the trust
+/// question (the owner, 2026-11-17). Claude Code has no setting for this; its documentation says
+/// to set `projects["<folder>"].hasTrustDialogAccepted` in `~/.claude.json`. Only when the server
+/// runs as a user of its own: then the only Claude Code writing that file is the consultant, and
+/// this runs before it starts and only while no Claude Code of this user runs. Only that one key
+/// changes; a file it can't read is left alone. Returns whether it wrote.
+pub fn trust_folder(folder: &Path) -> anyhow::Result<bool> {
+    if claude_running() {
+        bail!("a Claude Code of the server's user is running; trust the folder in tmux instead");
+    }
+    trust_in(&claude_json(), folder)
+}
+
+fn trust_in(file: &Path, folder: &Path) -> anyhow::Result<bool> {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+    let mut v: serde_json::Value = match std::fs::read(file) {
+        Ok(b) => serde_json::from_slice(&b).with_context(|| format!("{} isn't JSON; left as it is", file.display()))?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => json!({}),
+        Err(e) => return Err(e).with_context(|| format!("reading {}", file.display())),
+    };
+    let key = folder.display().to_string();
+    if v["projects"][&key]["hasTrustDialogAccepted"].as_bool() == Some(true) {
+        return Ok(false);
+    }
+    let root = v.as_object_mut().context("~/.claude.json isn't an object; left as it is")?;
+    let projects = root.entry("projects").or_insert_with(|| json!({}));
+    let entry =
+        projects.as_object_mut().context("its projects aren't an object")?.entry(key).or_insert_with(|| json!({}));
+    entry
+        .as_object_mut()
+        .context("the folder's entry isn't an object")?
+        .insert("hasTrustDialogAccepted".into(), json!(true));
+    let dir = file.parent().context("a folder for it")?;
+    std::fs::create_dir_all(dir)?;
+    let tmp = dir.join(format!(".claude.json.agentflow-{}", std::process::id()));
+    let _ = std::fs::remove_file(&tmp);
+    let mut f = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&tmp)?;
+    f.write_all(serde_json::to_string_pretty(&v)?.as_bytes())?;
+    f.sync_all()?;
+    std::fs::rename(&tmp, file)?;
+    Ok(true)
+}
+
+/// Is a Claude Code of this user running (it rewrites ~/.claude.json)?
+fn claude_running() -> bool {
+    let me = own_uid();
+    let Ok(rd) = std::fs::read_dir("/proc") else { return true };
+    rd.flatten().any(|e| {
+        let p = e.path();
+        let mine = std::fs::read_to_string(p.join("status")).ok().is_some_and(|s| {
+            s.lines()
+                .find(|l| l.starts_with("Uid:"))
+                .and_then(|l| l.split_whitespace().nth(1))
+                .and_then(|u| u.parse::<u32>().ok())
+                == Some(me)
+        });
+        mine && std::fs::read_to_string(p.join("comm")).is_ok_and(|c| c.trim() == "claude")
+    })
+}
+
+fn own_uid() -> u32 {
+    std::fs::metadata("/proc/self").map(|m| std::os::unix::fs::MetadataExt::uid(&m)).unwrap_or(u32::MAX)
+}
+
+/// Is it waiting at Claude Code's trust question (its first start in a folder not yet trusted)?
+pub async fn waiting_for_trust(data_dir: &Path) -> bool {
+    let out = tokio::process::Command::new("tmux")
+        .arg("-S")
+        .arg(tmux_socket(data_dir))
+        .args(["capture-pane", "-p", "-t", TMUX])
+        .stderr(std::process::Stdio::null())
+        .output()
+        .await;
+    out.is_ok_and(|o| o.status.success() && String::from_utf8_lossy(&o.stdout).contains("I trust this folder"))
 }
 
 pub async fn running(data_dir: &Path) -> bool {
@@ -257,5 +358,26 @@ mod tests {
             Ok(())
         })
         .unwrap();
+    }
+
+    #[test]
+    fn trust_sets_one_key_and_keeps_the_rest() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join(".claude.json");
+        let folder = Path::new("/var/lib/agentflow/consultant");
+        // No file yet: made with just the trust.
+        assert!(trust_in(&file, folder).unwrap());
+        assert!(!trust_in(&file, folder).unwrap(), "already trusted: nothing written");
+        std::fs::write(&file, r#"{"oauthAccount": {"x": 1}, "projects": {"/other": {"allowedTools": []}}}"#).unwrap();
+        assert!(trust_in(&file, folder).unwrap());
+        let v: serde_json::Value = serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+        assert_eq!(v["oauthAccount"]["x"], 1);
+        assert!(v["projects"]["/other"]["allowedTools"].is_array());
+        assert_eq!(v["projects"]["/var/lib/agentflow/consultant"]["hasTrustDialogAccepted"], true);
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(std::fs::metadata(&file).unwrap().permissions().mode() & 0o777, 0o600);
+        std::fs::write(&file, "{ broken").unwrap();
+        assert!(trust_in(&file, folder).is_err(), "a file it can't read stays as it is");
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "{ broken");
     }
 }
