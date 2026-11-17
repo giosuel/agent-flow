@@ -63,6 +63,19 @@ pub struct Client {
 }
 
 impl Client {
+    /// For commands that only make sense as a project (`flow sync`): without a token given, the
+    /// project's own when run in its folder (as its hooks do; the owner ran `flow sync --all` there
+    /// by hand), else as [`Client::new`].
+    pub fn for_project(config_path: &Path, args: &ClientArgs, dir: &Path) -> anyhow::Result<Self> {
+        if args.token_file.is_none()
+            && let Some((url, token)) = dir.ancestors().find_map(crate::connect::existing_setup)
+        {
+            let base = args.url.clone().unwrap_or(url);
+            return Ok(Self::with_token(&base, &token));
+        }
+        Self::new(config_path, args)
+    }
+
     pub fn new(config_path: &Path, args: &ClientArgs) -> anyhow::Result<Self> {
         let base = server_url(config_path, args)?;
         let token_file = args.token_file.clone().unwrap_or_else(|| expand_home("~/.config/agentflow/token"));

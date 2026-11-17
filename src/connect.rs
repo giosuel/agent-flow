@@ -524,11 +524,18 @@ pub fn project_setup(
 }
 
 /// The token file and server a folder's setup names (`.claude/settings.local.json`).
-fn existing_setup(folder: &Path) -> Option<(String, String)> {
+pub(crate) fn existing_setup(folder: &Path) -> Option<(String, String)> {
     let text = std::fs::read_to_string(folder.join(".claude/settings.local.json")).ok()?;
     let v: Value = serde_json::from_str(&text).ok()?;
     let token_file = v["env"]["AGENTFLOW_TOKEN_FILE"].as_str()?;
-    let url = v["env"]["AGENTFLOW_URL"].as_str()?.to_owned();
+    // Set up before AGENTFLOW_URL was written there: the MCP server's address says it.
+    let url = match v["env"]["AGENTFLOW_URL"].as_str() {
+        Some(u) => u.to_owned(),
+        None => {
+            let mcp: Value = serde_json::from_str(&std::fs::read_to_string(folder.join(".mcp.json")).ok()?).ok()?;
+            mcp["mcpServers"]["agentflow"]["url"].as_str()?.trim_end_matches('/').trim_end_matches("/mcp").to_owned()
+        }
+    };
     let token = std::fs::read_to_string(token_file).ok()?.trim().to_owned();
     (!token.is_empty()).then_some((url, token))
 }
