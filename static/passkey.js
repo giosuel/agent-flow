@@ -96,15 +96,16 @@ async function enrol(button, nameInput, status) {
   }
 }
 
-document.addEventListener("DOMContentLoaded", () => {
+// Delegated, so the buttons work in the Settings dialog too (its content arrives later).
+document.addEventListener("click", (e) => {
   const status = document.getElementById("passkey-status");
-  const signin = document.getElementById("passkey-signin");
-  if (signin) signin.addEventListener("click", () => signIn(signin, status));
-  const add = document.getElementById("passkey-add");
-  if (add) add.addEventListener("click", () => enrol(add, document.getElementById("passkey-name"), status));
-  if ((signin || add) && !window.PublicKeyCredential) {
+  const signin = e.target.closest("#passkey-signin");
+  const add = e.target.closest("#passkey-add");
+  if (!signin && !add) return;
+  if (!window.PublicKeyCredential) {
     say(status, "This browser doesn't support passkeys.", "warn");
-    if (signin) signin.disabled = true;
-    if (add) add.disabled = true;
+    return;
   }
+  if (signin) signIn(signin, status);
+  else enrol(add, document.getElementById("passkey-name"), status);
 });

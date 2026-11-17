@@ -529,7 +529,7 @@ document.addEventListener("change", (e) => {
     panel = document.createElement("div");
     panel.className = "ntf-back";
     panel.innerHTML = `<div class="ntf-panel" role="dialog" aria-modal="false" aria-label="Notifications">
-      <div class="ntf-head"><strong>Notifications</strong><span class="grow"></span><a class="icon-only" href="/settings?s=notifications" aria-label="Notification settings"></a><button type="button" class="icon-only ntf-x" aria-label="Close">×</button></div>
+      <div class="ntf-head"><strong>Notifications</strong><span class="grow"></span><a class="icon-only" href="/settings?s=notifications" aria-label="Notification settings" data-settings></a><button type="button" class="icon-only ntf-x" aria-label="Close">×</button></div>
       <div class="ntf-list"></div></div>`;
     panel.querySelector(".ntf-list").innerHTML = html;
     panel.querySelector('a.icon-only').innerHTML = document.querySelector('a[href="/settings"].icon-btn')?.innerHTML || "⚙";
@@ -550,5 +550,92 @@ document.addEventListener("change", (e) => {
     if (!bell || e.metaKey || e.ctrlKey || e.shiftKey || e.button) return;
     e.preventDefault();
     if (panel) close(); else open(bell);
+  });
+})();
+
+// Settings as a dialog over the page (the owner, 2026-11-17: "the settings panel should be a
+// dialog, not its own window"): the cog (and every link marked data-settings) opens it; sections,
+// switches and forms work inside it; ✕, Esc or a click beside it closes it, and the page stays as
+// it was. It shows the /settings page's own content, so it never differs from it; without scripts
+// the cog is a link to that page.
+(() => {
+  let back = null;
+  let opener = null;
+  const shellOf = (html) => {
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    return doc.querySelector(".set-shell");
+  };
+  const show = (shell) => {
+    const body = back.querySelector(".sdlg-body");
+    body.replaceChildren(shell);
+    shell.querySelector(".set-pane")?.scrollTo(0, 0);
+    document.dispatchEvent(new CustomEvent("af:content", { detail: shell }));
+  };
+  const load = async (url, init) => {
+    back.classList.add("busy");
+    try {
+      const res = await fetch(url, { credentials: "same-origin", ...init });
+      const shell = shellOf(await res.text());
+      if (!shell) throw new Error("no settings in the answer");
+      show(shell);
+    } catch (_) {
+      location.href = typeof url === "string" ? url : "/settings";
+    } finally {
+      back && back.classList.remove("busy");
+    }
+  };
+  const close = () => {
+    if (!back) return;
+    back.classList.remove("open");
+    const b = back;
+    back = null;
+    document.removeEventListener("keydown", onKey, true);
+    document.documentElement.classList.remove("no-scroll");
+    setTimeout(() => b.remove(), 160);
+    if (opener && opener.focus) opener.focus();
+  };
+  const onKey = (e) => {
+    if (e.key === "Escape" && !document.querySelector(".cdlg-back")) { e.preventDefault(); close(); }
+  };
+  const open = (url) => {
+    opener = document.activeElement;
+    back = document.createElement("div");
+    back.className = "sdlg-back";
+    back.innerHTML = `<div class="sdlg" role="dialog" aria-modal="true" aria-label="Settings">
+      <div class="sdlg-head"><h2>Settings</h2><button type="button" class="icon-only sdlg-x" aria-label="Close">×</button></div>
+      <div class="sdlg-body"><p class="sub sdlg-wait">Loading…</p></div></div>`;
+    back.querySelector(".sdlg-x").addEventListener("click", close);
+    back.addEventListener("mousedown", (e) => { if (e.target === back) close(); });
+    // Inside: section links load in place; forms post and show the section they come back to.
+    back.addEventListener("click", (e) => {
+      const a = e.target.closest("a[href]");
+      if (!a || e.defaultPrevented || e.metaKey || e.ctrlKey) return;
+      const u = new URL(a.href, location.href);
+      if (u.origin === location.origin && u.pathname === "/settings") { e.preventDefault(); load(u.pathname + u.search); }
+      else if (u.origin === location.origin && !a.target) close();
+    });
+    back.addEventListener("submit", (e) => {
+      const form = e.target;
+      if (!form.matches("form[method=post], form[method=POST]")) return;
+      e.preventDefault();
+      load(form.action, { method: "POST", body: new URLSearchParams(new FormData(form, e.submitter)), headers: { "Content-Type": "application/x-www-form-urlencoded" } });
+    });
+    document.addEventListener("keydown", onKey, true);
+    document.body.append(back);
+    document.documentElement.classList.add("no-scroll");
+    requestAnimationFrame(() => back && back.classList.add("open"));
+    back.querySelector(".sdlg-x").focus();
+    load(url);
+  };
+  document.addEventListener("click", (e) => {
+    const a = e.target.closest("a[data-settings]");
+    if (!a || e.metaKey || e.ctrlKey || e.shiftKey || e.button) return;
+    // Already on the settings page: it is the settings.
+    if (location.pathname === "/settings") return;
+    e.preventDefault();
+    // From the bell's panel: that closes first.
+    document.querySelector(".ntf-back .ntf-x")?.click();
+    const u = new URL(a.href, location.href);
+    if (back) load(u.pathname + u.search); else open(u.pathname + u.search);
   });
 })();

@@ -1,7 +1,5 @@
 {% extends "base.html" %}
 {% block title %}Settings{% endblock %}
-{% block scripts %}<script src="/static/passkey.js?v={{ nav.version }}" defer></script>
-<script src="/static/settings.js?v={{ nav.version }}" defer></script>{% endblock %}
 {% block content %}
 {# A classic settings dialog (the owner, 2026-11-17: "I don't like the settings page right now with
    all the floating islands with the uneven heights"): the sections on the left, one at a time on
@@ -15,6 +13,7 @@
     {% endfor %}
   </nav>
   <div class="set-pane">
+  <a class="set-back" href="/settings">{{ crate::web::icons::icon("back")|safe }}<span>Settings</span></a>
   {% if let Some(notice) = notice %}<p class="notice ok" role="status">{{ notice }}</p>{% endif %}
 
   {% if section == "passkeys" %}
