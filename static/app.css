@@ -1152,3 +1152,28 @@ ol.lrows { padding: 0; margin: 0; list-style: none; gap: 0; }
   .ldetail { grid-template-columns: 1fr; padding: 12px 16px 16px 50px; gap: 12px; }
   .lact { border-left: 0; padding-left: 0; border-top: 1px solid var(--line); padding-top: 10px; }
 }
+
+/* Settings as a dialog over the page (static/app.js): the settings shell in a large card; on the
+   phone a full-screen sheet with the list first and "‹ Settings" in a section. */
+html.no-scroll { overflow: hidden; }
+.sdlg-back { position: fixed; inset: 0; z-index: 75; background: rgba(0, 0, 0, .66); display: grid; place-items: center; padding: 32px; opacity: 0; transition: opacity .16s ease; }
+.sdlg-back.open { opacity: 1; }
+.sdlg { width: min(1240px, 100%); height: min(860px, calc(100dvh - 64px)); display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--border); border-radius: 16px; box-shadow: 0 30px 90px rgba(0, 0, 0, .7); overflow: hidden; transform: translateY(10px) scale(.985); transition: transform .16s ease; }
+.sdlg-back.open .sdlg { transform: none; }
+.sdlg-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 16px 14px 24px; border-bottom: 1px solid var(--line); }
+.sdlg-head h2 { margin: 0; font-size: 18px; }
+.sdlg-x { border: 0; background: none; font-size: 26px; line-height: 1; cursor: pointer; }
+.sdlg-body { flex: 1; min-height: 0; display: flex; }
+.sdlg-wait { margin: auto; }
+.sdlg-back.busy .set-pane { opacity: .55; transition: opacity .1s; }
+.sdlg .set-shell { flex: 1; min-height: 0; border: 0; border-radius: 0; background: none; }
+.sdlg .set-nav, .sdlg .set-pane { overflow-y: auto; overscroll-behavior: contain; }
+.set-back { display: none; }
+@media (max-width: 700px) {
+  .sdlg-back { padding: 0; }
+  .sdlg { width: 100%; height: 100dvh; border-radius: 0; border: 0; padding-top: env(safe-area-inset-top); }
+  .sdlg .set-shell { display: block; overflow-y: auto; padding: 8px 16px 24px; }
+  .sdlg .set-nav, .sdlg .set-pane { overflow: visible; }
+  .sdlg .set-shell.chosen .set-back { display: inline-flex; align-items: center; gap: 2px; margin: 10px 0 4px -6px; color: var(--accent); font-size: 17px; text-decoration: none; }
+  .sdlg .set-back .i { width: 24px; height: 24px; }
+}
