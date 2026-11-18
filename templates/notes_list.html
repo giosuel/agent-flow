@@ -25,8 +25,10 @@
   <div class="lp-top"><h2 id="notes-h"><span class="label">Notes</span> <span class="sub">{{ nv.summary }}</span></h2><span class="sub hide-phone">files and short notes the agent hands in</span></div>
   {% if nv.none %}<p class="sub lempty">No notes yet. Agents add files with <span class="mono">flow note &lt;file&gt;</span> and short notes with <span class="mono">add_note</span>.</p>
   {% else %}
-  {% if !nv.rows.is_empty() %}<div class="nhead" aria-hidden="true"><span></span><span>Title</span><span>Category</span><span>Comes back to the agent</span><span>Type</span><span>Added</span><span></span></div>{% endif %}
-  <ul class="plain nrows">{% for n in nv.rows %}{% include "note_row.html" %}{% endfor %}</ul>
+  <div class="ntable" role="table" aria-label="Notes">
+  {% if !nv.rows.is_empty() %}<div class="nhead" role="row"><span role="columnheader"><span class="vh">Type</span></span>{% for (label, href, sort) in nv.heads %}<span role="columnheader"{% if !sort.is_empty() %} aria-sort="{{ sort }}"{% endif %}><a href="{{ href }}" class="nh{% if !sort.is_empty() %} on{% endif %}">{{ label }}<span class="sort-i" aria-hidden="true">{% if *sort == "ascending" %}↑{% else if *sort == "descending" %}↓{% else %}↕{% endif %}</span></a></span>{% endfor %}<span role="columnheader"><span class="vh">Download</span></span></div>{% endif %}
+  <div class="nrows" role="rowgroup">{% for n in nv.rows %}{% include "note_row.html" %}{% endfor %}</div>
+  </div>
   {% endif %}
   {% if !nv.foot.is_empty() %}<p class="sub nfoot">{{ nv.foot }}</p>{% endif %}
 </section>
