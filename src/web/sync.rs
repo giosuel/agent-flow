@@ -97,7 +97,11 @@ struct SplitBody {
 
 /// Cache writes by duration and fast mode for calls AgentFlow stored before it kept them (M13):
 /// flow sends them once per folder; only the project's own calls change.
-async fn split(State(state): State<AppState>, Extension(actor): Extension<Actor>, Json(b): Json<SplitBody>) -> Response {
+async fn split(
+    State(state): State<AppState>,
+    Extension(actor): Extension<Actor>,
+    Json(b): Json<SplitBody>,
+) -> Response {
     let Some((project_id, _)) = project_of(&actor) else {
         return json_error(StatusCode::FORBIDDEN, "flow sync runs with a project's token");
     };

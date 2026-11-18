@@ -24,7 +24,9 @@ pub struct Limits {
 
 impl Limits {
     fn sane(w: Option<Window>) -> Option<Window> {
-        w.filter(|w| (0.0..=1000.0).contains(&w.used_percentage) && w.resets_at > 1_600_000_000 && w.resets_at < 4_000_000_000)
+        w.filter(|w| {
+            (0.0..=1000.0).contains(&w.used_percentage) && w.resets_at > 1_600_000_000 && w.resets_at < 4_000_000_000
+        })
     }
 
     pub fn checked(self) -> Self {
@@ -144,7 +146,8 @@ pub struct Past {
 
 /// The last `n` windows that ended before `now`, newest first: the 5-hour ones, or the weeks.
 pub fn past(conn: &Connection, five: bool, now: i64, n: usize) -> anyhow::Result<Vec<Past>> {
-    let (pct, reset, len) = if five { ("five_pct", "five_reset", FIVE_HOURS) } else { ("week_pct", "week_reset", WEEK) };
+    let (pct, reset, len) =
+        if five { ("five_pct", "five_reset", FIVE_HOURS) } else { ("week_pct", "week_reset", WEEK) };
     // Resets can come a second apart between samples of one window: grouped by the minute.
     let mut stmt = conn.prepare(&format!(
         "SELECT {reset} / 60000 * 60000 AS r, max({pct}), min(CASE WHEN {pct} >= 100 THEN at END)
