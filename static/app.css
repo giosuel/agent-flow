@@ -1691,3 +1691,15 @@ html.no-scroll { overflow: hidden; }
   .set-pane > .notice.flash { top: 0; margin: -8px -16px 20px; padding: 12px 16px; }
   .pdlg-body .notice.flash { top: -16px; margin: -16px -16px 16px; padding: 12px 16px; }
 }
+
+/* Conversations: the panes fill the window and scroll on their own (the owner, 2026-11-18: "make
+   it so the panels scroll so they aren't as long"); the conversation's header and ‹ › stay. */
+@media (min-width: 701px) {
+  .split.cv2 { height: calc(100dvh - 300px); min-height: 520px; align-items: stretch; }
+  .split.cv2 .split-side { display: flex; flex-direction: column; }
+  .split.cv2 .cv-lh { flex: none; }
+  .split.cv2 .cv-rows { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+  .split.cv2 .split-main { min-height: 0; }
+  .split.cv2 .cv-head, .split.cv2 .cv-pager, .split.cv2 .cv-strip, .split.cv2 .cv-foot { flex: none; }
+  .split.cv2 .cv-body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+}
