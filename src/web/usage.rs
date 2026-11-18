@@ -530,13 +530,6 @@ fn until(t: i64, now: i64) -> String {
 
 /// The plan card's two meters and "How big a window is", from the samples.
 fn plan_view(p: &PlanData, now: i64, tz: &Tz) -> (Vec<Meter>, Vec<EstRow>, (String, String)) {
-    let per_pct = |past: &[(crate::plan::Past, Tokens)]| -> (Option<f64>, Option<f64>, usize) {
-        let ok: Vec<&(crate::plan::Past, Tokens)> =
-            past.iter().filter(|(w, t)| w.peak >= 10.0 && t.calls > 0).collect();
-        let usd = crate::plan::median(ok.iter().map(|(w, t)| t.usd() / w.peak).collect());
-        let tok = crate::plan::median(ok.iter().map(|(w, t)| t.new_tokens() as f64 / w.peak).collect());
-        (usd, tok, ok.len())
-    };
     let mut meters = Vec::new();
     if let Some(s) = p.latest {
         for (label, pct, reset, so_far, past, five) in [
@@ -547,19 +540,7 @@ fn plan_view(p: &PlanData, now: i64, tz: &Tz) -> (Vec<Meter>, Vec<EstRow>, (Stri
             let over = reset <= now;
             let pct = if over { 0.0 } else { pct };
             let when = if five { tz.hm(reset) } else { tz.short(reset) };
-            let (m_usd, m_tok, n) = per_pct(past);
-            // The finished windows' median, else this window so far (from 5% on).
-            let (usd1, tok1, basis) = match (m_usd, m_tok) {
-                (Some(u), Some(t)) => {
-                    (Some(u), Some(t), format!("median of {n} window{}", if n == 1 { "" } else { "s" }))
-                }
-                _ if pct >= 5.0 && so_far.calls > 0 => (
-                    Some(so_far.usd() / pct),
-                    Some(so_far.new_tokens() as f64 / pct),
-                    if five { "this window so far".into() } else { "this week so far".into() },
-                ),
-                _ => (None, None, String::new()),
-            };
+            let est = crate::usage_report::estimate(past, so_far, pct, five);
             meters.push(Meter {
                 label,
                 pct: format!("{pct:.0}%"),
@@ -572,15 +553,13 @@ fn plan_view(p: &PlanData, now: i64, tz: &Tz) -> (Vec<Meter>, Vec<EstRow>, (Stri
                 } else {
                     format!("{} new tokens · {} cache reads", short(so_far.new_tokens()), short(so_far.cache_read))
                 },
-                estimate: match (usd1, tok1) {
-                    (Some(u), Some(t)) => format!(
-                        "100% ≈ {} at API prices ≈ {} new tokens",
-                        crate::prices::dollars(u * 100.0),
-                        short((t * 100.0) as i64)
-                    ),
-                    _ => "100%: known once the window is 5% used".into(),
+                estimate: match &est {
+                    Some((u, t, _)) => {
+                        format!("100% ≈ {} at API prices ≈ {} new tokens", crate::prices::dollars(*u), short(*t as i64))
+                    }
+                    None => "100%: known once the window is 5% used".into(),
                 },
-                basis,
+                basis: est.map(|e| e.2).unwrap_or_default(),
             });
         }
     }
@@ -599,10 +578,9 @@ fn plan_view(p: &PlanData, now: i64, tz: &Tz) -> (Vec<Meter>, Vec<EstRow>, (Stri
             tokens_per_pct: short((t.new_tokens() as f64 / w.peak.max(1.0)) as i64),
         })
         .collect();
-    let (m_usd, m_tok, _) = per_pct(&p.five_past);
-    let median = match (m_usd, m_tok) {
-        (Some(u), Some(t)) => (crate::prices::dollars(u), short(t as i64)),
-        _ => (String::new(), String::new()),
+    let median = match crate::usage_report::estimate(&p.five_past, &Tokens::default(), 0.0, true) {
+        Some((u, t, _)) => (crate::prices::dollars(u / 100.0), short((t / 100.0) as i64)),
+        None => (String::new(), String::new()),
     };
     (meters, rows, median)
 }

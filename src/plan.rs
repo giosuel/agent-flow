@@ -52,16 +52,47 @@ pub struct Sample {
 pub const FIVE_HOURS: i64 = 5 * 3_600_000;
 pub const WEEK: i64 = 7 * 86_400_000;
 
-/// Keeps a sample unless one came in the last 50 seconds; returns whether it was kept.
-pub fn store(conn: &Connection, l: &Limits, at: i64, project_id: Option<i64>, machine: &str) -> anyhow::Result<bool> {
+/// A window that just passed 80% (the owner, 2026-11-17: a push, once per window, D-195).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Crossed {
+    pub five: bool,
+    pub pct: f64,
+    pub reset: i64,
+}
+
+/// What [`store`] did: whether it kept the sample, and the windows it saw pass 80%.
+#[derive(Debug, Default, PartialEq)]
+pub struct Stored {
+    pub kept: bool,
+    pub crossed: Vec<Crossed>,
+}
+
+/// Keeps a sample unless one came in the last 50 seconds.
+pub fn store(conn: &Connection, l: &Limits, at: i64, project_id: Option<i64>, machine: &str) -> anyhow::Result<Stored> {
     let l = l.checked();
     if l.is_empty() {
-        return Ok(false);
+        return Ok(Stored::default());
     }
     let recent: bool =
         conn.query_row("SELECT EXISTS (SELECT 1 FROM plan_samples WHERE at > ?1)", [at - 50_000], |r| r.get(0))?;
     if recent {
-        return Ok(false);
+        return Ok(Stored::default());
+    }
+    // A window at 80% or more that no earlier sample saw there: once per window.
+    let mut crossed = Vec::new();
+    for (five, w, pct, reset) in
+        [(true, l.five_hour, "five_pct", "five_reset"), (false, l.seven_day, "week_pct", "week_reset")]
+    {
+        let Some(w) = w.filter(|w| w.used_percentage >= 80.0) else { continue };
+        let ms = w.resets_at * 1000;
+        let seen: bool = conn.query_row(
+            &format!("SELECT EXISTS (SELECT 1 FROM plan_samples WHERE {pct} >= 80 AND abs({reset} - ?1) < 120000)"),
+            [ms],
+            |r| r.get(0),
+        )?;
+        if !seen {
+            crossed.push(Crossed { five, pct: w.used_percentage, reset: ms });
+        }
     }
     conn.execute(
         "INSERT INTO plan_samples (at, five_pct, five_reset, week_pct, week_reset, project_id, machine)
@@ -76,7 +107,7 @@ pub fn store(conn: &Connection, l: &Limits, at: i64, project_id: Option<i64>, ma
             machine.chars().take(64).collect::<String>(),
         ],
     )?;
-    Ok(true)
+    Ok(Stored { kept: true, crossed })
 }
 
 fn sample(r: &rusqlite::Row) -> rusqlite::Result<Sample> {
@@ -152,11 +183,13 @@ mod tests {
             let l: Limits = serde_json::from_str(
                 r#"{"five_hour":{"used_percentage":42,"resets_at":1763419800},"seven_day":{"used_percentage":71.5,"resets_at":1763420400}}"#,
             )?;
-            assert!(store(c, &l, 1_000_000, None, "viber")?);
-            assert!(!store(c, &l, 1_030_000, None, "viber")?, "within the minute");
+            let first = store(c, &l, 1_000_000, None, "viber")?;
+            assert!(first.kept);
+            assert_eq!(first.crossed, vec![], "71% isn't past 80%");
+            assert!(!store(c, &l, 1_030_000, None, "viber")?.kept, "within the minute");
             let odd = Limits { five_hour: Some(Window { used_percentage: -3.0, resets_at: 1763419800 }), seven_day: None };
-            assert!(!store(c, &odd, 1_200_000, None, "viber")?);
-            assert!(store(c, &l, 1_100_000, None, "viber")?);
+            assert!(!store(c, &odd, 1_200_000, None, "viber")?.kept);
+            assert!(store(c, &l, 1_100_000, None, "viber")?.kept);
             let s = latest(c)?.unwrap();
             assert_eq!((s.at, s.five_pct, s.five_reset, s.week_pct), (1_100_000, Some(42.0), Some(1_763_419_800_000), Some(71.5)));
             assert_eq!(between(c, 0, 2_000_000)?.len(), 2);
@@ -164,7 +197,10 @@ mod tests {
             let w = |pct: f64, reset: i64| Limits { five_hour: Some(Window { used_percentage: pct, resets_at: reset }), seven_day: None };
             let (r1, r2) = (1_763_400_000_i64, 1_763_418_000_i64);
             for (k, (pct, reset)) in [(30.0, r1), (96.0, r1), (40.0, r2), (100.0, r2), (5.0, r2 + 18_000)].iter().enumerate() {
-                assert!(store(c, &w(*pct, *reset), 2_000_000 + k as i64 * 60_000, None, "")?);
+                let s = store(c, &w(*pct, *reset), 2_000_000 + k as i64 * 60_000, None, "")?;
+                assert!(s.kept);
+                // 96% crosses in the first window, 100% in the second; never twice in one.
+                assert_eq!(!s.crossed.is_empty(), k == 1 || k == 3, "{k}: {s:?}");
             }
             let p = past(c, true, r2 * 1000 + 1, 10)?;
             assert_eq!(p.len(), 2, "the one still running isn't over");

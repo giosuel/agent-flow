@@ -35,10 +35,12 @@ pub enum Kind {
     Build,
     Review,
     Urgent,
+    /// The plan's 5-hour window or week passed 80% (M13).
+    Usage,
 }
 
 impl Kind {
-    pub const ALL: [Kind; 4] = [Kind::Question, Kind::Build, Kind::Review, Kind::Urgent];
+    pub const ALL: [Kind; 5] = [Kind::Question, Kind::Build, Kind::Review, Kind::Urgent, Kind::Usage];
 
     pub fn key(self) -> &'static str {
         match self {
@@ -46,6 +48,7 @@ impl Kind {
             Kind::Build => "build",
             Kind::Review => "review",
             Kind::Urgent => "urgent",
+            Kind::Usage => "usage",
         }
     }
 
@@ -55,6 +58,7 @@ impl Kind {
             Kind::Build => "Build ready to try",
             Kind::Review => "Something to review: a PR, a tag, a guide",
             Kind::Urgent => "Urgent calls from an agent",
+            Kind::Usage => "The plan's usage passed 80%",
         }
     }
 

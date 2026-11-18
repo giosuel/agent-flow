@@ -667,6 +667,25 @@ async fn the_usage_page_shows_the_plan_and_the_cost() {
     let page = get("/usage?metric=cost").await;
     assert!(page.contains("Cost per day") && page.contains(r#"aria-current="true">Cost<"#), "{page}");
     assert!(get("/usage?metric=total").await.contains("Total tokens per day"));
+    // Agents ask too: flow usage's API and the usage tool.
+    let v: serde_json::Value =
+        s.http.get(s.url("/api/usage")).bearer_auth(&token).send().await.unwrap().json().await.unwrap();
+    assert_eq!(v["plan"]["five_hour"]["used"], 42.0, "{v}");
+    assert!(v["plan"]["week"]["resets_at"].as_str().is_some(), "{v}");
+    let sess = mcp_session(&s, &token).await;
+    let (ok, v) = mcp_tool(&s, &token, &sess, "usage", json!({"all": true})).await;
+    assert!(ok && v["plan"]["week"]["used"] == 81.0, "{v}");
+    // The week was past 80% with its first sample: one push, in the bell.
+    let mut usage_pushes = 0;
+    for _ in 0..50 {
+        let bell = s.db.call(|c| crate::notifications::list(c, 10)).await.unwrap();
+        usage_pushes = bell.iter().filter(|n| n.kind == "usage").count();
+        if usage_pushes > 0 {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    assert_eq!(usage_pushes, 1);
 }
 
 #[tokio::test]

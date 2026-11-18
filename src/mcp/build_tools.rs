@@ -28,8 +28,42 @@ pub struct UpdateBuild {
     pub withdraw: bool,
 }
 
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct UsageArgs {
+    /// Every project with tokens in the last 7 days, not only yours.
+    #[serde(default)]
+    pub all: bool,
+}
+
 #[tool_router(router = build_tools, vis = "pub(super)")]
 impl FlowMcp {
+    #[tool(description = "The owner's plan usage and what tokens cost (the owner, 2026-11-17: agents can query the \
+        usage). The plan's 5-hour and weekly windows: % used, when they reset, how big 100% is in dollars at API \
+        prices and in new tokens, and what's left. Your project's tokens and their cost today, in the current \
+        5-hour window and over 7 days, with its costliest tasks; all: every project. Look before a big job or \
+        many subagents. `flow usage` in a terminal shows the same.")]
+    async fn usage(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(p): Parameters<UsageArgs>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let actor = actor_of(&parts);
+        let a = actor.clone();
+        let outcome = self
+            .state
+            .db
+            .call(move |c| {
+                let project = match &a {
+                    crate::auth::Actor::Project { project_id, .. } if !p.all => Some(*project_id),
+                    _ => None,
+                };
+                let v = crate::usage_report::report(c, project, crate::util::now_ms(), &crate::tz::Tz::default())?;
+                Ok(Outcome::new(v).summary("usage"))
+            })
+            .await;
+        self.finish(&actor, "usage", Action::Read, outcome).await
+    }
+
     #[tool(description = "Your project's test builds, newest first: number, name, what's in it, whether the owner \
         tried it, and their feedback. Publish new ones with `flow publish` (a command, not a tool).")]
     async fn builds(
