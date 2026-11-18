@@ -1913,47 +1913,68 @@ async fn the_project_document_is_the_agents_and_the_owners() {
     assert!(text.contains("## How to work on it") && text.contains("## Roadmap"), "{text}");
     assert!(hello["project"].get("stack").is_none(), "the stack lives in the document now");
 
-    // The owner sees it like a guide and edits a section; an edit on an old version is refused.
+    // The owner reads it in a dialog from the overview (the owner, 2026-11-18) and edits it whole.
     let cookie = s.owner_cookie().await;
-    let page =
-        s.http.get(s.url("/p/vinculum?tab=notes")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
+    let get = |path: String| {
+        let (s, cookie) = (&s, cookie.clone());
+        async move { s.http.get(s.url(&path)).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap() }
+    };
+    let ov = get("/p/vinculum".into()).await;
+    assert!(ov.contains(r#"href="/p/vinculum/doc" data-dlg"#) && ov.contains("rev 2 · "), "{ov}");
+    assert!(!get("/p/vinculum?tab=notes".into()).await.contains("Conventional Commits"), "not on the Notes tab");
+    let page = get("/p/vinculum/doc".into()).await;
     assert!(
-        page.contains("Project document") && page.contains("Conventional Commits") && page.contains("rev 2"),
+        page.contains("data-dlg-content") && page.contains("Conventional Commits") && page.contains("pd-toc"),
         "{page}"
     );
-    let version = page.split("name=\"version\" value=\"").nth(1).map(|x| x.split('"').next().unwrap().to_owned());
-    assert!(version.is_none(), "no form until a pencil is pressed");
-    let page = s
-        .http
-        .get(s.url("/p/vinculum?tab=notes&edit=1"))
-        .header(COOKIE, &cookie)
-        .send()
-        .await
-        .unwrap()
-        .text()
-        .await
-        .unwrap();
-    let version = page.split("name=\"version\" value=\"").nth(1).unwrap().split('"').next().unwrap().to_owned();
-    let post = |v: String, text: &'static str| {
+    assert!(!page.contains("name=\"base_rev\""), "no editor until Edit");
+    let page = get("/p/vinculum/doc?edit=1".into()).await;
+    assert!(page.contains(r#"name="base_rev" value="2""#) && page.contains("## Roadmap"), "{page}");
+    let direct = s.http.get(s.url("/p/vinculum/doc")).header(COOKIE, &cookie).header("sec-fetch-mode", "navigate");
+    let direct = direct.send().await.unwrap().text().await.unwrap();
+    assert!(direct.contains(r#"data-open-dlg="dlg" data-open-url="/p/vinculum/doc" data-open-from="/p/vinculum""#));
+    let post = |base: i64, text: String| {
         let (s, cookie) = (&s, cookie.clone());
         async move {
             s.http
                 .post(s.url("/p/vinculum/doc"))
                 .header(COOKIE, &cookie)
                 .header(ORIGIN, &s.base)
-                .form(&[("version", v.as_str()), ("section", "1"), ("text", text)])
+                .form(&[("base_rev", base.to_string()), ("text", text)])
                 .send()
                 .await
                 .unwrap()
         }
     };
-    let res = post("stale0".into(), "## Roadmap\n\n- nope").await;
-    assert!(res.headers()[LOCATION].to_str().unwrap().contains("doc=stale"));
-    let res = post(version, "## Roadmap\n\n- M4 Keybinds\n- M5 Themes").await;
-    assert!(res.headers()[LOCATION].to_str().unwrap().contains("doc=saved"));
+    let how = "## How to work on it\n\n- Conventional Commits\n- DCO sign-off\n\n";
+    let res = post(2, format!("{how}## Roadmap\n\n- M4 Keybinds\n- M5 Themes\n")).await;
+    assert_eq!(res.headers()[LOCATION], "/p/vinculum/doc?done=saved");
     let (_, info) = call("project_info", json!({})).await;
     assert!(info["doc"]["text"].as_str().unwrap().contains("M5 Themes"), "{info}");
     assert_eq!(info["doc"]["rev"], 3);
+    // The agent hears which section the owner changed (D-202).
+    let (_, news) = call("since_last_check", json!({})).await;
+    assert!(news.to_string().contains("Project document: edited Roadmap"), "{news}");
+    // The agent saves meanwhile: the owner's save, started from rev 3, takes its section too.
+    assert!(call("edit_project_doc", json!({"section": "How to work on it", "text": "- Conventional Commits\n- DCO sign-off\n- Rebase, never merge"})).await.0);
+    let res = post(3, format!("{how}## Roadmap\n\n- M4 Keybinds\n- M5 Themes\n- M6 Plugins\n")).await;
+    assert_eq!(res.headers()[LOCATION], "/p/vinculum/doc?done=saved&taken=How+to+work+on+it");
+    let (_, info) = call("project_info", json!({})).await;
+    let text = info["doc"]["text"].as_str().unwrap();
+    assert!(text.contains("Rebase, never merge") && text.contains("M6 Plugins"), "{text}");
+    // Both changed one section: nothing is saved; the editor shows its version to pick.
+    let page = post(3, "## How to work on it\n\n- Squash\n\n## Roadmap\n\n- M4 Keybinds\n".to_owned())
+        .await
+        .text()
+        .await
+        .unwrap();
+    assert!(
+        page.contains("Use its version") && page.contains("- Squash") && page.contains(r#"name="base_rev" value="5""#),
+        "{page}"
+    );
+    assert_eq!(call("project_info", json!({})).await.1["doc"]["rev"], 5);
+    let rev = get("/p/vinculum/doc/rev?since=3".into()).await;
+    assert!(rev.contains(r#""rev":5"#) && rev.contains("How to work on it"), "{rev}");
 }
 
 #[tokio::test]

@@ -745,8 +745,9 @@ struct ProjectPage {
     /// The To test checklist (its tab), and how many are open (the tab's count).
     to_test: Option<super::totest::View>,
     to_test_open: i64,
-    /// The Notes tab: the project document, and the notes.
-    doc: Option<super::projectdoc::DocView>,
+    /// The project document's revision and age, for the overview's link to it ("rev 14 · yesterday").
+    doc_line: String,
+    /// The Notes tab.
     notes: Option<super::notes::NotesView>,
     /// External PRs and issues: open ones and drafts, and the finished ones.
     external: Vec<ExtRow>,
@@ -824,12 +825,6 @@ struct TabQuery {
     ms: Option<String>,
     /// A step of that milestone the board shows alone (its name); the whole milestone if left out.
     step: Option<String>,
-    /// The Notes tab: a section of the project document to edit ("2", or "all"), its history, an
-    /// older revision, and how a save went.
-    edit: Option<String>,
-    history: Option<u8>,
-    rev: Option<i64>,
-    doc: Option<String>,
     /// The Notes tab's search and filters (see `super::notes::Filter`).
     nq: Option<String>,
     ncat: Option<String>,
@@ -905,7 +900,6 @@ async fn project(
     tz: Tz,
 ) -> AppResult<Response> {
     let (notice, notice_bad) = press_notice(&q);
-    let tz_doc = tz.clone();
     let tab = q.tab.filter(|t| TABS.iter().any(|(k, _)| k == t)).unwrap_or_else(|| "overview".into());
     let now = now_ms();
     let chosen = q.ms.clone();
@@ -966,25 +960,6 @@ async fn project(
         page.connect = Some(Connect { folder: checkout.clone() });
     }
     if tab == "notes" {
-        let (slug, edit, rev, outcome) = (page.slug.clone(), q.edit.clone(), q.rev, q.doc.clone());
-        let history = q.history == Some(1);
-        let owner = actor.is_owner();
-        let tz2 = tz_doc;
-        page.doc = Some(
-            state
-                .db
-                .call(move |c| {
-                    let p = projects::require(c, &slug)?;
-                    let ask = super::projectdoc::Ask {
-                        edit: edit.as_deref().filter(|_| owner),
-                        history,
-                        rev,
-                        outcome: outcome.as_deref(),
-                    };
-                    super::projectdoc::view(c, p.id, &ask, &tz2, now)
-                })
-                .await?,
-        );
         let slug = page.slug.clone();
         let filter = super::notes::Filter::new(
             q.nq.as_deref(),
@@ -1660,7 +1635,7 @@ fn build_project_page(
     };
     Ok(ProjectPage {
         to_test_open: crate::totest::open_count(c, p.id)?,
-        doc: None,
+        doc_line: super::projectdoc::short_line(&crate::projectdoc::get(c, p.id)?, now_ms()),
         notes: None,
         to_test,
         external,

@@ -150,6 +150,7 @@
           <dt>Tokens, 7 days</dt><dd><span class="strip" role="img" aria-label="new tokens per day, the last 7 days">{% for (h, t) in agent.strip %}<span style="height: {{ h }}%" data-tip="{{ t }}"></span>{% endfor %}</span><span class="mono">{{ agent.tokens_week }}</span> <a class="sub" href="/usage">Usage</a></dd>
         </dl>
         <div class="info-links">
+          <a href="/p/{{ slug }}/doc" data-dlg class="pd-link">{{ crate::web::icons::icon("doc")|safe }}<span>Project document</span>{% if !doc_line.is_empty() %}<span class="sub pd-rev">{{ doc_line }}</span>{% endif %}</a>
           {% if let Some(u) = session_url %}<a href="{{ u }}" target="_blank" rel="noopener">{{ crate::web::icons::icon("session")|safe }}<span>Open the agent's session</span>{{ crate::web::icons::icon("out")|safe }}</a>{% endif %}
           {% if let Some(c) = connect %}<form method="post" action="/p/{{ slug }}/setup-code" data-dlg><button class="linkish" type="submit">{{ crate::web::icons::icon("laptop")|safe }}<span>{% if c.folder.is_empty() %}Set up on a machine{% else %}Set up on another machine{% endif %}</span></button></form>{% endif %}
           <a href="/p/{{ slug }}?tab=settings">{{ crate::web::icons::icon("gear")|safe }}<span>Project settings</span></a>
@@ -200,7 +201,7 @@
 {% endfor %}
 {% endif %}
 
-{% if tab == "notes" %}{% if let Some(d) = doc %}{% include "project_doc.html" %}{% endif %}{% if let Some(nv) = notes %}{% include "notes_list.html" %}{% endif %}{% endif %}
+{% if tab == "notes" %}{% if let Some(nv) = notes %}{% include "notes_list.html" %}{% endif %}{% endif %}
 
 {% if tab == "settings" %}
 {% if let Some(e) = edit %}
@@ -223,7 +224,7 @@
       <option value=""{% if e.build_server.is_empty() %} selected{% endif %}>None: builds where the agent is</option>
       {% for b in e.servers %}<option value="{{ b }}"{% if *b == e.build_server %} selected{% endif %}>{{ b }}</option>{% endfor %}
     </select><span class="sub">Where <span class="mono">flow remote</span> runs its builds and tests. Add machines in <a href="/settings?s=builders">Settings</a>.</span></label>
-    <p class="sub span-all">Tech stack, platform, git and project rules are in the <a href="/p/{{ slug }}?tab=notes">project document</a> now.</p>
+    <p class="sub span-all">Tech stack, platform, git and project rules are in the <a href="/p/{{ slug }}/doc" data-dlg>project document</a>.</p>
     <label class="span-all">Ports<textarea name="ports" rows="2" placeholder="One per line, e.g. 5173 vite">{{ e.ports }}</textarea></label>
   </div>
   <datalist id="models"><option value="Claude Opus 5.5"><option value="Claude Sonnet 5.5"><option value="Claude Fable 5.1"></datalist>
