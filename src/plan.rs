@@ -115,7 +115,8 @@ pub struct Past {
 
 /// The last `n` windows that ended before `now`, newest first: the 5-hour ones, or the weeks.
 pub fn past(conn: &Connection, five: bool, now: i64, n: usize) -> anyhow::Result<Vec<Past>> {
-    let (pct, reset, len) = if five { ("five_pct", "five_reset", FIVE_HOURS) } else { ("week_pct", "week_reset", WEEK) };
+    let (pct, reset, len) =
+        if five { ("five_pct", "five_reset", FIVE_HOURS) } else { ("week_pct", "week_reset", WEEK) };
     // Resets can come a second apart between samples of one window: grouped by the minute.
     let mut stmt = conn.prepare(&format!(
         "SELECT {reset} / 60000 * 60000 AS r, max({pct}), min(CASE WHEN {pct} >= 100 THEN at END)

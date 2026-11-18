@@ -650,7 +650,15 @@ async fn the_usage_page_shows_the_plan_and_the_cost() {
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
-    let res = s.http.post(s.url("/api/usage/plan")).header(COOKIE, &cookie).header(ORIGIN, &s.base).json(&json!({"rate_limits": {}})).send().await.unwrap();
+    let res = s
+        .http
+        .post(s.url("/api/usage/plan"))
+        .header(COOKIE, &cookie)
+        .header(ORIGIN, &s.base)
+        .json(&json!({"rate_limits": {}}))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(res.status(), StatusCode::FORBIDDEN, "only a project's status line sends them");
     let page = get("/usage").await;
     assert!(page.contains("42%") && page.contains("81%") && page.contains("mp-bar"), "{page}");

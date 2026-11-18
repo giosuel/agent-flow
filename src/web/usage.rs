@@ -361,7 +361,8 @@ async fn page(
     };
     // An opened day gets its own figures; the 14-day view shows today and the fortnight.
     let wk = sum(&week);
-    let tokens_hint = |t: &Tokens| format!("{} new tokens · {} cache reads", short(t.new_tokens()), short(t.cache_read));
+    let tokens_hint =
+        |t: &Tokens| format!("{} new tokens · {} cache reads", short(t.new_tokens()), short(t.cache_read));
     let tiles = match day {
         Some(d) => vec![
             Tile { label: format!("Cost on {}", tz.date(d)), value: cost_of(&window), hint: tokens_hint(&window) },
@@ -370,7 +371,11 @@ async fn page(
         None => vec![
             Tile { label: "Today".into(), value: cost_of(&td), hint: tokens_hint(&td) },
             Tile { label: "Last 7 days".into(), value: cost_of(&wk), hint: calls(&wk) },
-            Tile { label: "Last 14 days".into(), value: cost_of(&fn_), hint: format!("≈ {} a day", crate::prices::dollars(fn_.usd() / 14.0)) },
+            Tile {
+                label: "Last 14 days".into(),
+                value: cost_of(&fn_),
+                hint: format!("≈ {} a day", crate::prices::dollars(fn_.usd() / 14.0)),
+            },
             Tile { label: "Cache reads, 14 days".into(), value: short(fn_.cache_read), hint: ratio(&fn_) },
         ],
     };
@@ -452,7 +457,11 @@ async fn page(
             .map(|m| (m.key(), m.name(), *m == metric_kind))
             .collect(),
         plan_seen: plan.latest.map(|s| crate::util::ago(s.at, now)).unwrap_or_default(),
-        strip_title: if day.is_some() { "5 hours · % used".into() } else { "Week · % used at the end of the day".into() },
+        strip_title: if day.is_some() {
+            "5 hours · % used".into()
+        } else {
+            "Week · % used at the end of the day".into()
+        },
         strip: if plan.samples.is_empty() {
             String::new()
         } else {
@@ -522,7 +531,8 @@ fn until(t: i64, now: i64) -> String {
 /// The plan card's two meters and "How big a window is", from the samples.
 fn plan_view(p: &PlanData, now: i64, tz: &Tz) -> (Vec<Meter>, Vec<EstRow>, (String, String)) {
     let per_pct = |past: &[(crate::plan::Past, Tokens)]| -> (Option<f64>, Option<f64>, usize) {
-        let ok: Vec<&(crate::plan::Past, Tokens)> = past.iter().filter(|(w, t)| w.peak >= 10.0 && t.calls > 0).collect();
+        let ok: Vec<&(crate::plan::Past, Tokens)> =
+            past.iter().filter(|(w, t)| w.peak >= 10.0 && t.calls > 0).collect();
         let usd = crate::plan::median(ok.iter().map(|(w, t)| t.usd() / w.peak).collect());
         let tok = crate::plan::median(ok.iter().map(|(w, t)| t.new_tokens() as f64 / w.peak).collect());
         (usd, tok, ok.len())
@@ -540,7 +550,9 @@ fn plan_view(p: &PlanData, now: i64, tz: &Tz) -> (Vec<Meter>, Vec<EstRow>, (Stri
             let (m_usd, m_tok, n) = per_pct(past);
             // The finished windows' median, else this window so far (from 5% on).
             let (usd1, tok1, basis) = match (m_usd, m_tok) {
-                (Some(u), Some(t)) => (Some(u), Some(t), format!("median of {n} window{}", if n == 1 { "" } else { "s" })),
+                (Some(u), Some(t)) => {
+                    (Some(u), Some(t), format!("median of {n} window{}", if n == 1 { "" } else { "s" }))
+                }
                 _ if pct >= 5.0 && so_far.calls > 0 => (
                     Some(so_far.usd() / pct),
                     Some(so_far.new_tokens() as f64 / pct),
