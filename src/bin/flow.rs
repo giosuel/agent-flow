@@ -165,6 +165,15 @@ enum Command {
         #[arg(long = "file", hide = true)]
         files: Vec<PathBuf>,
     },
+    /// Claude Code's status line for a project's sessions: the plan's 5-hour and weekly windows,
+    /// sent to AgentFlow at most once a minute. Project setup sets it up.
+    Statusline {
+        #[command(flatten)]
+        client: cli::ClientArgs,
+        /// The sample to send (the detached copy).
+        #[arg(long, hide = true)]
+        send: Option<String>,
+    },
     /// Print the Authorization header for Claude Code's `headersHelper`, from a token file.
     McpHeaders {
         /// File holding the token, e.g. ~/.config/agentflow/tokens/<project>.token
@@ -386,5 +395,6 @@ fn real_main() -> anyhow::Result<()> {
         Command::Wait { client, record, minutes } => cli::wait(&config_path, client, record, minutes),
         Command::McpHeaders { token_file } => cli::mcp_headers(&token_file),
         Command::Sync { client, all, files } => agentflow::sync::run(&config_path, &client, all, files),
+        Command::Statusline { client, send } => agentflow::statusline::run(&config_path, &client, send),
     }
 }

@@ -25,6 +25,27 @@ pub fn routes() -> Router<AppState> {
         .route("/api/sync/state", post(state_of))
         .route("/api/sync", post(upload).layer(DefaultBodyLimit::max(MAX_UPLOAD)))
         .route("/api/sync/split", post(split).layer(DefaultBodyLimit::max(MAX_UPLOAD)))
+        .route("/api/usage/plan", post(plan))
+}
+
+#[derive(Deserialize)]
+struct PlanBody {
+    rate_limits: crate::plan::Limits,
+    #[serde(default)]
+    machine: String,
+}
+
+/// The plan's windows from a session's status line (`flow statusline`, M13); at most one a minute
+/// is kept, whichever project sends it.
+async fn plan(State(state): State<AppState>, Extension(actor): Extension<Actor>, Json(b): Json<PlanBody>) -> Response {
+    let Some((project_id, _)) = project_of(&actor) else {
+        return json_error(StatusCode::FORBIDDEN, "flow statusline runs with a project's token");
+    };
+    let now = crate::util::now_ms();
+    match state.db.call(move |c| crate::plan::store(c, &b.rate_limits, now, Some(project_id), &b.machine)).await {
+        Ok(kept) => Json(json!({"kept": kept})).into_response(),
+        Err(e) => json_error(StatusCode::BAD_REQUEST, format!("{e:#}")),
+    }
 }
 
 #[derive(Deserialize)]
