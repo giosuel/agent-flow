@@ -81,6 +81,8 @@ struct DashboardPage {
     merge_count: usize,
     activity: Vec<Activity>,
     projects: Vec<ProjectLine>,
+    /// The overview tiles on top (D-212).
+    overview: super::overview::Overview,
 }
 
 #[derive(Deserialize)]
@@ -345,10 +347,12 @@ async fn dashboard(
                 },
                 None => None,
             };
-            Ok((featured, groups, merge_count, activity, lines, agents, online, warnings, notice))
+            let overview = super::overview::load(c, now, &tz, online, agents)?;
+            Ok((featured, groups, merge_count, activity, lines, agents, online, warnings, notice, overview))
         })
         .await?;
-    let (featured, groups, merge_count, activity, projects, agents, online, warnings, notice) = data;
+    let (featured, groups, merge_count, activity, projects, agents, online, warnings, notice, overview) = data;
+    let overview = super::overview::with_machine(overview);
     render(DashboardPage {
         nav: nav(&state, &actor, "/").await,
         online,
@@ -362,6 +366,7 @@ async fn dashboard(
         merge_count,
         activity,
         projects,
+        overview,
     })
 }
 

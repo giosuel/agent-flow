@@ -1649,6 +1649,39 @@ async fn the_owner_and_the_consultant_edit_the_handbook_and_agents_read_it() {
 }
 
 #[tokio::test]
+async fn the_dashboard_has_an_overview_of_the_plan_today_the_machine_and_builds() {
+    let s = TestServer::start().await;
+    let cookie = s.owner_cookie().await;
+    let html = s.http.get(s.url("/")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
+    for part in [
+        "ov-plan",
+        "No status line has sent the plan",
+        "ov-today",
+        "$0.00",
+        "ov-machine",
+        "Memory",
+        "/tmp",
+        "agents online",
+    ] {
+        assert!(html.contains(part), "{part}: {html}");
+    }
+    // With a plan sample, the windows show with the mark of their time.
+    let now = crate::util::now_ms();
+    s.db.call(move |c| {
+        let l = crate::plan::Limits {
+            five_hour: Some(crate::plan::Window { used_percentage: 42.0, resets_at: now / 1000 + 3_600 }),
+            seven_day: Some(crate::plan::Window { used_percentage: 71.0, resets_at: now / 1000 + 2 * 86_400 }),
+        };
+        crate::plan::store(c, &l, now, None, "m")?;
+        Ok(())
+    })
+    .await
+    .unwrap();
+    let html = s.http.get(s.url("/")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
+    assert!(html.contains("42% · ") && html.contains("71% · ") && html.contains("<b style=\"left: 80%\">"), "{html}");
+}
+
+#[tokio::test]
 async fn the_log_page_filters_and_streams() {
     let s = TestServer::start().await;
     let token = s.token(TokenKind::Project, Some("vinculum")).await;
