@@ -783,6 +783,9 @@ form.tt-active .tt-send { position: sticky; }
 .rdlg-body { overflow: auto; padding: 20px 24px 24px; overscroll-behavior: contain; }
 .rdlg-body > .head { margin-bottom: 16px; }
 .rdlg-body .split { grid-template-columns: 1fr; }
+/* In a dialog, text uses the dialog's whole width: it is narrow enough to read (the owner,
+   2026-11-18: "the file dialog's content isn't full width"). */
+.rdlg-body .prose, .pdlg-body .prose { max-width: none; }
 html.rdlg-on { overflow: hidden; }
 @media (max-width: 700px) {
   .rdlg-back { padding: 0; place-items: end stretch; }
