@@ -321,6 +321,22 @@ pub fn hook_commands(token_file: &Path, name: &str, public_url: &str) -> Vec<(&'
     ]
 }
 
+/// The status line's command: `flow statusline` with the project's token and server.
+pub fn statusline_command(token_file: &Path, public_url: &str) -> String {
+    format!(
+        "{} statusline --token-file {} --url {}",
+        bin(),
+        token_file.display(),
+        shell_word(public_url.trim_end_matches('/'))
+    )
+}
+
+fn is_ours_statusline(command: &str) -> bool {
+    let program = command.split_whitespace().next().unwrap_or("");
+    let name = Path::new(program).file_name().and_then(|n| n.to_str()).unwrap_or("");
+    name == "flow" && command.contains(" statusline")
+}
+
 /// The `flow` program the hooks and the MCP sign-in call: installed next to the server.
 fn bin() -> String {
     crate::util::flow_path().display().to_string()
@@ -456,6 +472,16 @@ pub fn write_setup(folder: &Path, token_file: &Path, name: &str, public_url: &st
     if !approved.iter().any(|v| v == "agentflow") {
         approved.push("agentflow".into());
     }
+    // The status line: the plan's windows, sent to AgentFlow (M13). One the owner set stays.
+    let status = statusline_command(token_file, public_url);
+    let theirs = settings
+        .get("statusLine")
+        .and_then(|v| v.get("command"))
+        .and_then(Value::as_str)
+        .is_some_and(|c| !is_ours_statusline(c));
+    if !theirs {
+        settings.insert("statusLine".into(), json!({"type": "command", "command": status, "padding": 0}));
+    }
     let env = settings.entry("env").or_insert_with(|| json!({}));
     let Some(env) = env.as_object_mut() else {
         bail!("\"env\" in {} isn't an object, so it was left alone", path.display())
@@ -464,7 +490,7 @@ pub fn write_setup(folder: &Path, token_file: &Path, name: &str, public_url: &st
     env.insert("AGENTFLOW_URL".into(), public_url.trim_end_matches('/').into());
     write_json(&path, settings)?;
     did.push(format!(
-        "in {}: the hooks (hello on every start, resume, /clear and compaction; the news before each of your prompts; the conversations sent after each reply), the server approved, and AGENTFLOW_TOKEN_FILE and AGENTFLOW_URL for its `flow` commands{}",
+        "in {}: the hooks (hello on every start, resume, /clear and compaction; the news before each of your prompts; the conversations sent after each reply), the status line (the plan's usage), the server approved, and AGENTFLOW_TOKEN_FILE and AGENTFLOW_URL for its `flow` commands{}",
         path.display(),
         keep_out_of_git(folder, ".claude/settings.local.json")?
     ));
@@ -486,7 +512,8 @@ pub fn setup_present(folder: &Path, token_file: &Path, name: &str, public_url: &
         .ok()
         .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
         .is_some_and(|m| m["mcpServers"]["agentflow"] == mcp_server(token_file, public_url));
-    hooks && approved && env && mcp
+    let status = settings["statusLine"]["command"].as_str().is_some();
+    hooks && approved && env && mcp && status
 }
 
 /// Whether git tracks this file in the folder's repository.
@@ -661,6 +688,14 @@ mod tests {
         assert_eq!(v["enabledMcpjsonServers"], serde_json::json!(["agentflow"]), "approved once: {text}");
         assert_eq!(v["env"]["AGENTFLOW_TOKEN_FILE"], token.display().to_string());
         assert_eq!(v["env"]["AGENTFLOW_URL"], url.trim_end_matches('/'));
+        // The status line (M13); one of the owner's own stays.
+        assert!(v["statusLine"]["command"].as_str().unwrap().contains(" statusline --token-file "), "{text}");
+        let mut own = v.clone();
+        own["statusLine"] = serde_json::json!({"type": "command", "command": "~/bin/my-line"});
+        std::fs::write(&settings, own.to_string()).unwrap();
+        write_setup(&folder, &token, "Imaginarium", url).unwrap();
+        let v2: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&settings).unwrap()).unwrap();
+        assert_eq!(v2["statusLine"]["command"], "~/bin/my-line");
         for f in [".claude/settings.local.json", ".mcp.json"] {
             let ignored = std::process::Command::new("git")
                 .arg("-C")
