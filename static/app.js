@@ -964,8 +964,29 @@ document.addEventListener("click", (e) => {
   document.addEventListener("keydown", (e) => {
     if (!document.querySelector(".cv-pager") || e.altKey || e.ctrlKey || e.metaKey) return;
     if (e.target.closest && e.target.closest("input, textarea, select, [contenteditable]")) return;
-    if (e.key === "ArrowLeft") go("a[data-newer]");
-    if (e.key === "ArrowRight") go("a[data-older]");
+    if (e.key === "ArrowLeft" || e.key === "ArrowUp") { e.preventDefault(); go("a[data-newer]"); }
+    if (e.key === "ArrowRight" || e.key === "ArrowDown") { e.preventDefault(); go("a[data-older]"); }
+  });
+  // The middle list: the selected conversation in view, and "Find in these conversations".
+  const sel = document.querySelector(".cv-item.on");
+  if (sel) { const box = sel.closest(".cv-days"); box.scrollTop = sel.offsetTop - box.clientHeight / 2; }
+  document.addEventListener("input", (e) => {
+    const f = e.target.closest && e.target.closest("[data-cv-find]");
+    if (!f) return;
+    const q = f.value.trim().toLowerCase();
+    const days = document.querySelector("[data-cv-days]");
+    let any = false;
+    for (const day of days.querySelectorAll(".cv-day")) {
+      let n = 0;
+      for (const a of day.querySelectorAll(".cv-item")) {
+        const show = q === "" || a.dataset.find.includes(q);
+        a.hidden = !show;
+        if (show) n++;
+      }
+      day.hidden = n === 0;
+      if (n) any = true;
+    }
+    days.querySelector("[data-cv-none]").hidden = any;
   });
   let x0 = null, y0 = null;
   document.addEventListener("touchstart", (e) => {
