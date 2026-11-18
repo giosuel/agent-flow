@@ -361,7 +361,8 @@ async fn page(
     };
     // An opened day gets its own figures; the 14-day view shows today and the fortnight.
     let wk = sum(&week);
-    let tokens_hint = |t: &Tokens| format!("{} new tokens · {} cache reads", short(t.new_tokens()), short(t.cache_read));
+    let tokens_hint =
+        |t: &Tokens| format!("{} new tokens · {} cache reads", short(t.new_tokens()), short(t.cache_read));
     let tiles = match day {
         Some(d) => vec![
             Tile { label: format!("Cost on {}", tz.date(d)), value: cost_of(&window), hint: tokens_hint(&window) },
@@ -370,7 +371,11 @@ async fn page(
         None => vec![
             Tile { label: "Today".into(), value: cost_of(&td), hint: tokens_hint(&td) },
             Tile { label: "Last 7 days".into(), value: cost_of(&wk), hint: calls(&wk) },
-            Tile { label: "Last 14 days".into(), value: cost_of(&fn_), hint: format!("≈ {} a day", crate::prices::dollars(fn_.usd() / 14.0)) },
+            Tile {
+                label: "Last 14 days".into(),
+                value: cost_of(&fn_),
+                hint: format!("≈ {} a day", crate::prices::dollars(fn_.usd() / 14.0)),
+            },
             Tile { label: "Cache reads, 14 days".into(), value: short(fn_.cache_read), hint: ratio(&fn_) },
         ],
     };
@@ -452,7 +457,11 @@ async fn page(
             .map(|m| (m.key(), m.name(), *m == metric_kind))
             .collect(),
         plan_seen: plan.latest.map(|s| crate::util::ago(s.at, now)).unwrap_or_default(),
-        strip_title: if day.is_some() { "5 hours · % used".into() } else { "Week · % used at the end of the day".into() },
+        strip_title: if day.is_some() {
+            "5 hours · % used".into()
+        } else {
+            "Week · % used at the end of the day".into()
+        },
         strip: if plan.samples.is_empty() {
             String::new()
         } else {

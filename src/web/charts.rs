@@ -212,8 +212,17 @@ pub fn percent_line(label: &str, labels: &[String], values: &[Option<f64>]) -> S
         esc(&serde_json::Value::from(tips).to_string())
     );
     let y = |v: f64| H - v.clamp(0.0, 100.0) / 100.0 * H;
-    let _ = write!(out, r#"<line class="grid" x1="0" x2="{W}" y1="{:.1}" y2="{:.1}" vector-effect="non-scaling-stroke"/>"#, y(50.0), y(50.0));
-    let _ = write!(out, r#"<line class="limit warn" x1="0" x2="{W}" y1="{0:.1}" y2="{0:.1}" vector-effect="non-scaling-stroke"/>"#, y(80.0));
+    let _ = write!(
+        out,
+        r#"<line class="grid" x1="0" x2="{W}" y1="{:.1}" y2="{:.1}" vector-effect="non-scaling-stroke"/>"#,
+        y(50.0),
+        y(50.0)
+    );
+    let _ = write!(
+        out,
+        r#"<line class="limit warn" x1="0" x2="{W}" y1="{0:.1}" y2="{0:.1}" vector-effect="non-scaling-stroke"/>"#,
+        y(80.0)
+    );
     // Runs of consecutive samples, each an area under a line.
     let mut run: Vec<(f64, f64)> = Vec::new();
     let flush = |run: &mut Vec<(f64, f64)>, out: &mut String| {

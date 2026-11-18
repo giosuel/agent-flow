@@ -54,7 +54,8 @@ pub fn run(config_path: &Path, args: &ClientArgs, send: Option<String>) -> anyho
         let here = std::env::current_dir().unwrap_or_default();
         let client = Client::for_project(config_path, args, &here)?.with_timeout(Duration::from_secs(10));
         let limits: Value = serde_json::from_str(&sample)?;
-        client.post_json("/api/usage/plan", &json!({"rate_limits": limits, "machine": crate::connect::machine_name()}))?;
+        client
+            .post_json("/api/usage/plan", &json!({"rate_limits": limits, "machine": crate::connect::machine_name()}))?;
         return Ok(());
     }
     let mut text = String::new();
