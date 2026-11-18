@@ -33,6 +33,7 @@ pub mod onboard;
 pub mod outgoing;
 pub mod passkey;
 pub mod poller;
+pub mod prices;
 pub mod projectdoc;
 pub mod projects;
 pub mod prs;

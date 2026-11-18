@@ -85,6 +85,31 @@ struct Usage {
     cache_creation_input_tokens: i64,
     #[serde(default)]
     cache_read_input_tokens: i64,
+    /// Cache writes by how long they're kept (Claude Code's transcripts have it since 2026).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    cache_creation: Option<CacheCreation>,
+    /// "fast" for fast mode, which costs twice as much.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    speed: Option<String>,
+}
+
+#[derive(Deserialize, Serialize, Default, Clone, Copy)]
+struct CacheCreation {
+    #[serde(default)]
+    ephemeral_5m_input_tokens: i64,
+    #[serde(default)]
+    ephemeral_1h_input_tokens: i64,
+}
+
+impl Usage {
+    /// Cache writes kept for an hour; None when the transcript doesn't say.
+    fn write_1h(&self) -> Option<i64> {
+        self.cache_creation.map(|c| c.ephemeral_1h_input_tokens.clamp(0, self.cache_creation_input_tokens.max(0)))
+    }
+
+    fn fast(&self) -> bool {
+        self.speed.as_deref() == Some("fast")
+    }
 }
 
 /// The transcript folder Claude Code uses for a directory: every character that isn't a letter
@@ -366,6 +391,46 @@ pub fn read_new(root: &Path, path: &Path, offset: u64, first_at: Option<i64>) ->
     Ok(Some(out))
 }
 
+/// What a transcript says of its calls' cache writes and speed (M13): (message id, written for an
+/// hour, fast). For calls stored before AgentFlow kept them; see [`fill_split`].
+pub fn splits(path: &Path) -> anyhow::Result<Vec<(String, i64, bool)>> {
+    let mut out = Vec::new();
+    let f = BufReader::new(std::fs::File::open(path)?);
+    for line in f.split(b'\n') {
+        let buf = line?;
+        if !contains(&buf, b"\"cache_creation\"") || !contains(&buf, b"\"assistant\"") {
+            continue;
+        }
+        let Ok(line) = serde_json::from_slice::<Line>(&buf) else { continue };
+        let Some(msg) = line.message else { continue };
+        let (Some(id), Some(u)) = (msg.id, msg.usage) else { continue };
+        if let Some(w1) = u.write_1h()
+            && id.len() <= 200
+        {
+            out.push((id, w1, u.fast()));
+        }
+    }
+    Ok(out)
+}
+
+/// Fills in what [`splits`] found for calls of `project_id` that don't have it yet; returns how
+/// many it filled.
+pub fn fill_split(conn: &mut Connection, project_id: i64, calls: &[(String, i64, bool)]) -> anyhow::Result<usize> {
+    let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    let mut n = 0;
+    {
+        let mut stmt = tx.prepare(
+            "UPDATE usage SET cache_write_1h = min(max(?2, 0), cache_write), fast = ?3
+             WHERE message_id = ?1 AND project_id = ?4 AND cache_write_1h IS NULL",
+        )?;
+        for (id, w1, fast) in calls {
+            n += stmt.execute(params![id, w1, fast, project_id])?;
+        }
+    }
+    tx.commit()?;
+    Ok(n)
+}
+
 /// Stores what was read and moves the file's offset; returns how many calls were new.
 pub fn store(conn: &mut Connection, read: &Read) -> anyhow::Result<usize> {
     store_as(conn, read, None)
@@ -406,8 +471,8 @@ pub fn store_as(conn: &mut Connection, read: &Read, project: Option<i64>) -> any
         };
         calls += tx.execute(
             "INSERT OR IGNORE INTO usage (message_id, at, folder, cwd, session, subagent, model, project_id, task_id,
-                                          input, output, cache_write, cache_read)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+                                          input, output, cache_write, cache_read, cache_write_1h, fast)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
             params![
                 c.id,
                 c.at,
@@ -421,7 +486,9 @@ pub fn store_as(conn: &mut Connection, read: &Read, project: Option<i64>) -> any
                 c.usage.input_tokens,
                 c.usage.output_tokens,
                 c.usage.cache_creation_input_tokens,
-                c.usage.cache_read_input_tokens
+                c.usage.cache_read_input_tokens,
+                c.usage.write_1h(),
+                c.usage.fast()
             ],
         )?;
     }
@@ -555,6 +622,9 @@ pub struct Tokens {
     pub cache_write: i64,
     pub output: i64,
     pub cache_read: i64,
+    /// Their cost at API prices in millionths of a dollar, and how many calls have no price.
+    pub cost_micro: i64,
+    pub unpriced: i64,
 }
 
 impl Tokens {
@@ -568,6 +638,17 @@ impl Tokens {
         self.cache_write += o.cache_write;
         self.output += o.output;
         self.cache_read += o.cache_read;
+        self.cost_micro += o.cost_micro;
+        self.unpriced += o.unpriced;
+    }
+
+    pub fn total(&self) -> i64 {
+        self.new_tokens() + self.cache_read
+    }
+
+    /// Dollars at API prices.
+    pub fn usd(&self) -> f64 {
+        self.cost_micro as f64 / 1e6
     }
 }
 
@@ -578,10 +659,15 @@ fn tokens_row(r: &rusqlite::Row, from: usize) -> rusqlite::Result<Tokens> {
         cache_write: r.get(from + 2)?,
         output: r.get(from + 3)?,
         cache_read: r.get(from + 4)?,
+        cost_micro: r.get::<_, Option<i64>>(from + 5)?.unwrap_or(0),
+        unpriced: r.get::<_, Option<i64>>(from + 6)?.unwrap_or(0),
     })
 }
 
-const SUMS: &str = "count(*), sum(input), sum(cache_write), sum(output), sum(cache_read)";
+/// The sums [`tokens_row`] reads, in its order.
+const SUMS: &str = "count(*), sum(input), sum(cache_write), sum(output), sum(cache_read), \
+                    sum(price_micro(model, input, output, cache_read, cache_write, cache_write_1h, fast)), \
+                    sum(price_micro(model, input, output, cache_read, cache_write, cache_write_1h, fast) IS NULL)";
 
 /// Counted in quarter hours, which every time zone's hours and days are made of.
 const QUARTER: i64 = 15 * 60_000;
@@ -772,6 +858,53 @@ mod tests {
         .unwrap();
     }
 
+    /// M13: cache writes by how long they're kept, and fast mode, make a call's cost; a line
+    /// without them counts its writes at the hour's price; a model without a price has no cost.
+    #[test]
+    fn calls_have_a_cost_at_api_prices() {
+        let root = tempfile::tempdir().unwrap();
+        let folder = root.path().join("-home-viber-office");
+        std::fs::create_dir_all(&folder).unwrap();
+        let split = call("m1", "2026-11-11T01:00:00Z", "s1", 1000).replace(
+            "\"cache_read_input_tokens\":1000}",
+            "\"cache_read_input_tokens\":1000,\"cache_creation\":{\"ephemeral_5m_input_tokens\":100,\"ephemeral_1h_input_tokens\":0},\"speed\":\"fast\"}",
+        );
+        let plain = call("m2", "2026-11-11T02:00:00Z", "s1", 1000);
+        let odd = call("m3", "2026-11-11T03:00:00Z", "s1", 1000).replace("claude-opus-5-5", "someone-else-1");
+        std::fs::write(folder.join("s1.jsonl"), [split, plain, odd].concat()).unwrap();
+        let db = Db::open_memory();
+        db.call_blocking(|c| {
+            for path in transcripts(root.path()) {
+                if let Some(read) = read_new(root.path(), &path, 0, None)? {
+                    store(c, &read)?;
+                }
+            }
+            fn row(c: &Connection, id: &str) -> (Option<i64>, bool) {
+                c.query_row("SELECT cache_write_1h, fast FROM usage WHERE message_id = ?1", [id], |r| {
+                    Ok((r.get(0)?, r.get(1)?))
+                })
+                .unwrap()
+            }
+            assert_eq!(row(c, "m1"), (Some(0), true));
+            assert_eq!(row(c, "m2"), (None, false));
+            let rows = per_project(c, 0, i64::MAX)?;
+            let t = rows[0].2;
+            // m1: (1000×4 + 10×20 + 1000×0.2 + 100×5) × 2 = 9800; m2: 4000 + 200 + 200 + 100×8 = 5200.
+            assert_eq!((t.cost_micro, t.unpriced, t.calls), (9800 + 5200, 1, 3));
+            // flow fills in what older rows lack, once, and only for its own project's calls.
+            let p = crate::projects::create(c, "office", "Office", "t")?;
+            c.execute("UPDATE usage SET project_id = ?1", [p.id])?;
+            let found = splits(&root.path().join("-home-viber-office/s1.jsonl"))?;
+            assert_eq!(found, vec![("m1".to_owned(), 0, true)]);
+            assert_eq!(fill_split(c, p.id + 1, &[("m2".into(), 40, false)])?, 0, "not another project's");
+            assert_eq!(fill_split(c, p.id, &[("m2".into(), 40, false), ("m1".into(), 99, false)])?, 1);
+            assert_eq!(row(c, "m2"), (Some(40), false));
+            assert_eq!(row(c, "m1"), (Some(0), true), "what it had stays");
+            Ok(())
+        })
+        .unwrap();
+    }
+
     #[test]
     fn transcripts_are_read_once_and_attributed() {
         let root = tempfile::tempdir().unwrap();
@@ -848,7 +981,19 @@ mod tests {
             let rows = per_project(c, 0, i64::MAX)?;
             assert_eq!(
                 rows,
-                vec![(Some(p.id), 1, Tokens { calls: 3, input: 21, cache_write: 300, output: 30, cache_read: 3000 })]
+                vec![(
+                    Some(p.id),
+                    1,
+                    Tokens {
+                        calls: 3,
+                        input: 21,
+                        cache_write: 300,
+                        output: 30,
+                        cache_read: 3000,
+                        cost_micro: 3684,
+                        unpriced: 0
+                    }
+                )]
             );
 
             // A session started in the home folder works in the checkout: the directory decides.

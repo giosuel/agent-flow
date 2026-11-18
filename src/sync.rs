@@ -121,6 +121,30 @@ fn send_file(client: &Client, root: &Path, file: &str, path: &Path) -> anyhow::R
     Ok(calls)
 }
 
+/// Once per folder (a marker file says it's done): what the folder's conversations say of their
+/// calls' cache writes and speed, for the calls AgentFlow stored before it kept them (M13).
+fn fill_split(client: &Client, project_dir: &Path) -> anyhow::Result<usize> {
+    let marker =
+        expand_home("~/.local/state/agentflow/split-done").join(folder_for(&project_dir.display().to_string()));
+    if marker.exists() {
+        return Ok(0);
+    }
+    let mut calls = Vec::new();
+    for f in conversations(project_dir) {
+        calls.extend(crate::usage::splits(&f).unwrap_or_default());
+    }
+    let mut filled = 0;
+    for chunk in calls.chunks(20_000) {
+        let got = client.post_json("/api/sync/split", &json!({"calls": chunk}))?;
+        filled += got["filled"].as_u64().unwrap_or(0) as usize;
+    }
+    if let Some(d) = marker.parent() {
+        std::fs::create_dir_all(d)?;
+    }
+    std::fs::write(&marker, format!("{filled}\n"))?;
+    Ok(filled)
+}
+
 fn read_json(read: &Read) -> anyhow::Result<Value> {
     Ok(serde_json::to_value(read)?)
 }
@@ -187,6 +211,9 @@ pub fn run(config_path: &Path, args: &ClientArgs, all: bool, files: Vec<PathBuf>
         let client = Client::for_project(config_path, args, &dir)?.with_timeout(Duration::from_secs(300));
         let calls = send(&client, &files)?;
         println!("Sent {} conversation files ({calls} calls new to AgentFlow).", files.len());
+        if let Err(e) = fill_split(&client, &dir) {
+            eprintln!("flow sync: cache writes of earlier calls: {e:#}");
+        }
         return Ok(());
     }
     if !files.is_empty() {
@@ -201,6 +228,9 @@ pub fn run(config_path: &Path, args: &ClientArgs, all: bool, files: Vec<PathBuf>
         };
         if let Err(e) = send(&client, &files) {
             note(&format!("{}: {e:#}", files[0].display()));
+        }
+        if let Err(e) = fill_split(&client, &project_dir_from(&here)) {
+            note(&format!("cache writes of earlier calls: {e:#}"));
         }
         return Ok(());
     }
