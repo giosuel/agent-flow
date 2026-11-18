@@ -888,9 +888,8 @@ struct TabQuery {
     /// After a button: its id and whether it worked.
     ran: Option<i64>,
     ok: Option<u8>,
-    /// After "Merge up to here": how many merged, and up to which PR.
-    merged: Option<usize>,
-    upto: Option<i64>,
+    /// After "Merge #a–#b": "a-b".
+    merging: Option<String>,
     /// The Screenshots tab's category filter.
     cat: Option<String>,
     /// The Settings tab's outcome: saved, or why not.
@@ -925,14 +924,22 @@ fn press_notice(q: &TabQuery) -> (Option<String>, bool) {
     if let Some(n) = q.tested {
         return (Some(tested_notice(n)), false);
     }
-    match (q.ran, q.ok, q.merged, q.upto) {
-        (Some(_), Some(1), _, _) => (Some("Done. The agent has been told.".into()), false),
-        (Some(_), Some(_), _, _) => {
+    let merging = q
+        .merging
+        .as_deref()
+        .and_then(|m| m.split_once('-'))
+        .and_then(|(a, b)| Some((a.parse::<i64>().ok()?, b.parse::<i64>().ok()?)));
+    match (q.ran, q.ok, merging) {
+        (Some(_), Some(1), _) => (Some("Done. The agent has been told.".into()), false),
+        (Some(_), Some(_), _) => {
             (Some("The command failed; its output is under the button. The agent has been told.".into()), true)
         }
-        (_, _, Some(n), Some(to)) => {
-            (Some(format!("{n} PR{} merged, up to #{to}.", if n == 1 { "" } else { "s" })), false)
-        }
+        (_, _, Some((a, b))) => (
+            Some(format!(
+                "Merging #{a}–#{b}, one after the other from the bottom. Each PR leaves this list once it's merged; it stops at the first that fails, with the output under its button. Reload to follow."
+            )),
+            false,
+        ),
         _ => (None, false),
     }
 }

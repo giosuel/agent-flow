@@ -207,6 +207,17 @@ fn link_by_branch(conn: &Connection, project_id: i64, pr: &Record, head: &str, a
 
 /// Why a PR's own Merge button is disabled, or Ok when it can be pressed.
 pub fn merge_ready(pr: &Record) -> Result<(), String> {
+    ready_with(pr, true)
+}
+
+/// Ready to merge as a step inside "Merge #a–#b" (the owner, 2026-11-18, D-215): failing or
+/// running CI doesn't hold a PR in the middle of a stack, as long as the PR the chain ends at
+/// passes, so main ends up green.
+pub fn chain_ready(pr: &Record) -> Result<(), String> {
+    ready_with(pr, false)
+}
+
+fn ready_with(pr: &Record, ci_matters: bool) -> Result<(), String> {
     if pr.state != "open" {
         return Err(format!("already {}", pr.state));
     }
@@ -214,7 +225,7 @@ pub fn merge_ready(pr: &Record) -> Result<(), String> {
     if pr.data.get("draft").and_then(Value::as_bool).unwrap_or(false) {
         return Err("still a draft".into());
     }
-    if pr.str("ci") == "failing" {
+    if ci_matters && pr.str("ci") == "failing" {
         return Err("CI failing".into());
     }
     if pr.str("mergeable") == "conflicting" {
@@ -225,7 +236,7 @@ pub fn merge_ready(pr: &Record) -> Result<(), String> {
     if pr.data.get("ready").and_then(Value::as_bool) == Some(false) {
         return Err("the agent marked it not ready".into());
     }
-    if pr.str("ci") == "pending" {
+    if ci_matters && pr.str("ci") == "pending" {
         return Err("CI still running".into());
     }
     Ok(())
@@ -309,6 +320,59 @@ pub fn merge_order(conn: &Connection, project_id: i64) -> anyhow::Result<Vec<Ord
         o.base_ok = base_ok(&o.record);
     }
     Ok(out)
+}
+
+/// One step of "Merge #a–#b": a PR and its merge button.
+pub struct ChainStep {
+    pub number: i64,
+    pub action: crate::actions::ActionRow,
+}
+
+/// What "Merge #a–#b" merges to bring stacked PR `number` onto main: every PR from the bottom of
+/// its stack up to it, bottom first, each with its merge button; or why it can't (the owner,
+/// 2026-11-18, D-214: "i dont really want the user being able to mess up anything"). A stacked
+/// PR merges only this way. The PRs below need to be ready apart from CI; the PR it ends at needs
+/// passing CI too, so main ends up green (D-215).
+pub fn chain_to(conn: &Connection, order: &[Ordered], number: i64) -> anyhow::Result<Result<Vec<ChainStep>, String>> {
+    let by_number: HashMap<i64, &Ordered> = order.iter().map(|o| (o.record.number, o)).collect();
+    let Some(&top) = by_number.get(&number) else { return Ok(Err(format!("#{number} isn't open"))) };
+    if top.after.is_none() {
+        return Ok(Err("it isn't stacked: it has its own Merge".into()));
+    }
+    let mut stack = vec![top];
+    while let Some(after) = stack[stack.len() - 1].after {
+        let Some(&below) = by_number.get(&after) else { return Ok(Err(format!("#{after} isn't open"))) };
+        if stack.len() > order.len() {
+            return Ok(Err("its stack goes round in a circle".into()));
+        }
+        stack.push(below);
+    }
+    stack.reverse();
+    if let Err(why) = merge_ready(&top.record) {
+        return Ok(Err(why));
+    }
+    let bottom = &stack[0].record;
+    if !stack[0].base_ok {
+        return Ok(Err(format!(
+            "#{}: based on {}, which isn't main and has no open PR",
+            bottom.number,
+            bottom.str("base")
+        )));
+    }
+    let mut steps = Vec::new();
+    for o in stack {
+        let n = o.record.number;
+        let mine = |why: String| if n == number { why } else { format!("#{n}: {why}") };
+        let button = crate::actions::for_record(conn, o.record.id)?
+            .into_iter()
+            .find(|a| a.is_merge() && matches!(a.state.as_str(), "waiting" | "failed"));
+        let Some(a) = button else { return Ok(Err(mine("no Merge button yet".into()))) };
+        if let Err(why) = crate::actions::enabled_in_chain(conn, &a)? {
+            return Ok(Err(mine(why)));
+        }
+        steps.push(ChainStep { number: n, action: a });
+    }
+    Ok(Ok(steps))
 }
 
 /// The agent marks its PR ready for the owner (or not), optionally saying which tasks it carries out.

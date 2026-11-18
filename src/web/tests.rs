@@ -919,6 +919,7 @@ async fn prs_merge_in_order_from_the_owners_buttons() {
     let html =
         s.http.get(s.url("/p/vinculum?tab=prs")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
     assert!(html.contains("Merge #48–#49"), "stack button");
+    assert_eq!(html.matches(">Merge</button>").count(), 1, "#49 has no Merge of its own, only #48 does");
     let start = html.find(r#"name="actions" value=""#).unwrap() + r#"name="actions" value=""#.len();
     let ids = html[start..].split('"').next().unwrap().to_owned();
 
@@ -944,7 +945,9 @@ async fn prs_merge_in_order_from_the_owners_buttons() {
         .send()
         .await
         .unwrap();
-    assert_eq!(res.headers()[LOCATION], "/p/vinculum?tab=prs&merged=2&upto=49");
+    assert_eq!(res.headers()[LOCATION], "/p/vinculum?tab=prs&merging=48-49");
+    // It runs on its own, after the redirect.
+    wait_for_records(&s, "vinculum", &[48, 49], "merged").await;
     assert!(dir.path().join("merged-48").exists() && dir.path().join("merged-49").exists());
 
     // The release unlocked; its tag button runs and marks it tagged; the agent hears about all of it.
@@ -971,6 +974,103 @@ async fn prs_merge_in_order_from_the_owners_buttons() {
     let (_, news) = call("since_last_check", json!({})).await;
     let what = news.to_string();
     assert!(what.contains("#48 merged") && what.contains("Push tag v0.0.5-m4") && what.contains("done"), "{what}");
+}
+
+/// Waits (up to 10 s) until each PR's record is in `state`, for work that runs after a redirect.
+async fn wait_for_records(s: &TestServer, slug: &str, numbers: &[i64], state: &str) {
+    for _ in 0..200 {
+        let (slug, numbers, want) = (slug.to_owned(), numbers.to_vec(), state.to_owned());
+        let all = s
+            .state
+            .db
+            .call(move |c| {
+                let p = crate::projects::require(c, &slug)?;
+                let mut all = true;
+                for n in numbers {
+                    let st: String = c.query_row(
+                        "SELECT state FROM records WHERE project_id = ?1 AND kind = 'pr' AND number = ?2",
+                        rusqlite::params![p.id, n],
+                        |r| r.get(0),
+                    )?;
+                    all &= st == want;
+                }
+                anyhow::Ok(all)
+            })
+            .await
+            .unwrap();
+        if all {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    panic!("PRs {numbers:?} of {slug} never became {state}");
+}
+
+/// The owner, 2026-11-18 (D-214, D-215): a stacked PR merges only with the PRs below it, and red
+/// CI in the middle doesn't hold the stack when the PR it ends at is green.
+#[tokio::test]
+async fn a_stack_merges_past_red_ci_in_the_middle_only_up_to_a_green_pr() {
+    use crate::github::fake::pr;
+    let s = TestServer::start().await;
+    let token = s.token(TokenKind::Project, Some("vinculum")).await;
+    let sess = mcp_session(&s, &token).await;
+    let call = |name: &'static str, args: Value| {
+        let (s, token, sess) = (&s, token.clone(), sess.clone());
+        async move { mcp_tool(s, &token, &sess, name, args).await }
+    };
+    call("update_project", json!({"repo": "giosuel/vinculum"})).await;
+    // #61 on main, #62 (red) on #61, #63 (green) on #62, #64 (red) on #63.
+    let mut red62 = pr(62, "b61", "b62");
+    red62.ci = "failing".into();
+    let mut red64 = pr(64, "b63", "b64");
+    red64.ci = "failing".into();
+    for p in [pr(61, "main", "b61"), red62, pr(63, "b62", "b63"), red64] {
+        s.github.set("giosuel/vinculum", p);
+    }
+    crate::poller::poll_once(&s.state).await.unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let wd = dir.path().display().to_string();
+    for n in [61, 62, 63, 64] {
+        let (ok, r) = call("add_button", json!({"record": format!("PR-{n}"), "label": "Merge", "kind": "merge", "command": format!("echo merged {n} > merged-{n}"), "workdir": wd})).await;
+        assert!(ok, "{r}");
+    }
+
+    let cookie = s.owner_cookie().await;
+    let html =
+        s.http.get(s.url("/p/vinculum?tab=prs")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
+    assert!(html.contains("Merge #61–#63"), "past #62's red CI to the green #63");
+    assert!(!html.contains("Merge #61–#62") && !html.contains("Merge #61–#64"), "never ending at a red PR");
+    assert!(html.contains("<span class=\"sub\">CI failing</span>"), "#64 says why");
+
+    // A page that showed another stack is turned away; so is a chain ending at a red PR.
+    let start = html.find(r#"name="actions" value=""#).unwrap() + r#"name="actions" value=""#.len();
+    let ids = html[start..].split('"').next().unwrap().to_owned();
+    let post = |to: i64, ids: String| {
+        let (s, cookie) = (&s, cookie.clone());
+        async move {
+            s.http
+                .post(s.url(&format!("/p/vinculum/merge-up-to/{to}")))
+                .header(COOKIE, &cookie)
+                .header(ORIGIN, &s.base)
+                .form(&[("actions", ids.as_str())])
+                .send()
+                .await
+                .unwrap()
+        }
+    };
+    let stale = ids.rsplit_once(',').unwrap().0.to_owned();
+    assert_eq!(post(63, stale).await.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(post(64, ids.clone()).await.status(), StatusCode::BAD_REQUEST);
+    assert!(!dir.path().join("merged-61").exists(), "nothing ran");
+
+    s.github.merge_on_fetch.lock().unwrap().extend([61, 62, 63]);
+    let res = post(63, ids).await;
+    assert_eq!(res.headers()[LOCATION], "/p/vinculum?tab=prs&merging=61-63");
+    wait_for_records(&s, "vinculum", &[61, 62, 63], "merged").await;
+    for n in [61, 62, 63] {
+        assert!(dir.path().join(format!("merged-{n}")).exists(), "#{n} ran");
+    }
+    assert!(!dir.path().join("merged-64").exists());
 }
 
 #[test]
