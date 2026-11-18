@@ -170,7 +170,7 @@ pub fn scan(buf: &[u8], sub: Option<&SubagentInfo>, found: &mut Found) {
     let kind = line.get("type").and_then(Value::as_str).unwrap_or("");
     let at = line.get("timestamp").and_then(Value::as_str).and_then(parse_time);
     if kind == "custom-title" {
-        if let Some(t) = line.get("customTitle").and_then(Value::as_str).map(str::trim).filter(|t| !t.is_empty()) {
+        if let Some(t) = line.get("customTitle").and_then(Value::as_str).map(str::trim).filter(|t| is_name(t)) {
             found.title = Some(t.chars().take(100).collect());
         }
         return;
@@ -255,6 +255,97 @@ pub fn scan(buf: &[u8], sub: Option<&SubagentInfo>, found: &mut Found) {
     }
 }
 
+/// A title that can name a session: one with a letter or a digit. A stray `/rename \` gave
+/// Imaginarium's session the name "\" (the owner, 2026-11-18: "who is '/'?"); such titles are
+/// left out, and the name before stays.
+pub fn is_name(t: &str) -> bool {
+    t.chars().any(char::is_alphanumeric)
+}
+
+/// Repairs sessions named by such a title before it was left out: each gets back the name its own
+/// transcript used most (else its project's or its folder's), and its conversations join that
+/// name's (a message seen from both sides is kept once). Runs at start; does nothing once clean.
+pub fn repair_names(conn: &Connection) -> anyhow::Result<usize> {
+    let bad: Vec<(String, String, String)> = {
+        let mut st = conn.prepare("SELECT session, name, folder FROM session_names")?;
+        let rows =
+            st.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?)))?;
+        rows.collect::<Result<Vec<_>, _>>()?.into_iter().filter(|(_, n, _)| !is_name(n)).collect()
+    };
+    let mut fixed = 0;
+    for (session, bad_name, folder) in bad {
+        // The name in most of this session's own messages, from before the stray title.
+        let mut st = conn.prepare(
+            "SELECT name, count(*) AS n FROM (SELECT from_name AS name FROM session_messages WHERE session = ?1
+               UNION ALL SELECT to_name FROM session_messages WHERE session = ?1)
+             WHERE name != ?2 GROUP BY name ORDER BY n DESC",
+        )?;
+        let names: Vec<String> = st
+            .query_map(params![session, bad_name], |r| r.get::<_, String>(0))?
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
+            .filter(|n| is_name(n))
+            .collect();
+        let project: Option<String> = conn
+            .query_row(
+                "SELECT p.name FROM session_messages m JOIN projects p ON p.id = m.project_id WHERE m.session = ?1 LIMIT 1",
+                [&session],
+                |r| r.get(0),
+            )
+            .ok();
+        // Its own name among them: the one its project has, else the most used that no other
+        // session goes by (the others are the sessions it talked to).
+        let others: Vec<String> = {
+            let mut st = conn.prepare("SELECT name FROM session_names WHERE session != ?1")?;
+            let rows = st.query_map([&session], |r| r.get::<_, String>(0))?.collect::<Result<Vec<_>, _>>()?;
+            rows.iter().map(|n| norm(n)).collect()
+        };
+        let own = project
+            .as_ref()
+            .and_then(|p| names.iter().find(|n| norm(n) == norm(p)))
+            .or_else(|| names.iter().find(|n| !others.contains(&norm(n))));
+        let good =
+            own.cloned().or(project).unwrap_or_else(|| folder.rsplit('-').next().unwrap_or("session").to_owned());
+        conn.execute("UPDATE session_names SET name = ?1 WHERE session = ?2", params![good, session])?;
+        // Its messages under the stray name: renamed, re-keyed, and moved to the right pair.
+        let mut st = conn.prepare(
+            "SELECT id, thread, from_name, to_name, body FROM session_messages WHERE from_name = ?1 OR to_name = ?1",
+        )?;
+        let rows: Vec<(i64, String, String, String, String)> = st
+            .query_map([&bad_name], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)))?
+            .collect::<Result<_, _>>()?;
+        for (id, thread, from, to, body) in rows {
+            let from = if from == bad_name { good.clone() } else { from };
+            let to = if to == bad_name { good.clone() } else { to };
+            let thread = if thread.starts_with("pair:") {
+                let mut pair = [norm(&from), norm(&to)];
+                pair.sort();
+                format!("pair:{}|{}", pair[0], pair[1])
+            } else {
+                thread
+            };
+            let k = key(&[&thread, &norm(&from), body.trim()]);
+            // Seen from the other side already: keep that one.
+            let dup: bool = conn.query_row(
+                "SELECT count(*) FROM session_messages WHERE key = ?1 AND id != ?2",
+                params![k, id],
+                |r| r.get::<_, i64>(0),
+            )? > 0;
+            if dup {
+                conn.execute("DELETE FROM session_messages WHERE id = ?1", [id])?;
+            } else {
+                conn.execute(
+                    "UPDATE session_messages SET key = ?1, thread = ?2, from_name = ?3, to_name = ?4 WHERE id = ?5",
+                    params![k, thread, from, to, id],
+                )?;
+            }
+        }
+        conn.execute("UPDATE session_addresses SET name = ?1 WHERE name = ?2", params![good, bad_name])?;
+        fixed += 1;
+    }
+    Ok(fixed)
+}
+
 /// A subagent's id as SendMessage names it: "a" and 16 hex digits.
 fn is_agent_id(s: &str) -> bool {
     s.len() >= 9 && s.starts_with('a') && s[1..].bytes().all(|b| b.is_ascii_hexdigit())
@@ -305,6 +396,7 @@ pub fn store(
     let now = crate::util::now_ms();
     if let Some(t) = &found.title
         && !session.is_empty()
+        && is_name(t)
     {
         conn.execute(
             "INSERT INTO session_names (session, name, folder, at) VALUES (?1, ?2, ?3, ?4)
@@ -608,5 +700,42 @@ mod tests {
         let bodies: Vec<&str> = f.msgs.iter().map(|m| m.body.as_str()).collect();
         assert_eq!(bodies, ["Review the diff", "Two findings"]);
         assert_eq!((&f.msgs[0].from, &f.msgs[1].to), (&Who::Parent, &Who::Parent));
+    }
+
+    #[test]
+    fn a_stray_title_is_left_out_and_repaired() {
+        assert!(!is_name("\\") && !is_name(" / ") && is_name("Imaginarium") && is_name("v2"));
+        let db = crate::db::Db::open_memory();
+        db.call_blocking(|c| {
+            let ins = |k: &str, thread: &str, from: &str, to: &str, body: &str, session: &str| {
+                c.execute(
+                    "INSERT INTO session_messages (key, at, thread, from_name, to_name, body, session) VALUES (?1, 1, ?2, ?3, ?4, ?5, ?6)",
+                    params![k, thread, from, to, body, session],
+                )
+                .unwrap();
+            };
+            // Imaginarium's own transcript, before and after the stray title; agent-flow's has one of them too.
+            ins(&key(&["pair:agent-flow|imaginarium", "imaginarium", "hello"]), "pair:agent-flow|imaginarium", "Imaginarium", "agent-flow", "hello", "s2");
+            ins(&key(&["pair:agent-flow|imaginarium", "agent-flow", "hi"]), "pair:agent-flow|imaginarium", "agent-flow", "Imaginarium", "hi", "s2");
+            ins("k3", "pair:\\|agent-flow", "\\", "agent-flow", "later", "s2");
+            ins("k4", "pair:\\|agent-flow", "agent-flow", "\\", "seen twice", "s2");
+            ins(&key(&["pair:agent-flow|imaginarium", "agent-flow", "seen twice"]), "pair:agent-flow|imaginarium", "agent-flow", "Imaginarium", "seen twice", "s1");
+            c.execute("INSERT INTO session_names (session, name, folder, at) VALUES ('s2', '\\', '-home-viber-office', 1)", []).unwrap();
+            c.execute(
+                "INSERT INTO session_names (session, name, folder, at) VALUES ('s1', 'agent-flow', '-home-viber-agent-flow', 1)",
+                [],
+            )
+            .unwrap();
+            assert_eq!(repair_names(c).unwrap(), 1);
+            let n: String = c.query_row("SELECT name FROM session_names WHERE session = 's2'", [], |r| r.get(0)).unwrap();
+            assert_eq!(n, "Imaginarium");
+            let left: i64 = c.query_row("SELECT count(*) FROM session_messages WHERE thread != 'pair:agent-flow|imaginarium'", [], |r| r.get(0)).unwrap();
+            assert_eq!(left, 0, "one pair");
+            let all: i64 = c.query_row("SELECT count(*) FROM session_messages", [], |r| r.get(0)).unwrap();
+            assert_eq!(all, 4, "the message seen from both sides is kept once");
+            assert_eq!(repair_names(c).unwrap(), 0, "clean now");
+            Ok(())
+        })
+        .unwrap();
     }
 }

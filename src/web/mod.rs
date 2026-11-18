@@ -277,6 +277,12 @@ pub async fn serve(state: AppState) -> anyhow::Result<()> {
         state.config.public_url
     );
     let recovered = state.db.call(|c| crate::actions::recover_interrupted(c)).await?;
+    // Sessions a stray title had named "\\" get their name back (see crate::sessionlog::is_name).
+    match state.db.call(|c| crate::sessionlog::repair_names(c)).await {
+        Ok(0) => {}
+        Ok(n) => tracing::info!("session log: {n} session name(s) repaired"),
+        Err(e) => tracing::warn!("session log: repairing names failed: {e:#}"),
+    }
     if recovered > 0 {
         tracing::warn!("{recovered} button(s) were running when AgentFlow stopped; marked failed");
     }

@@ -35,6 +35,7 @@
 <div class="split conv cv2{% if picked %} picked{% endif %}">
   <nav class="split-side card cv-list" aria-label="Conversations">
     <div class="cv-lh"><span class="label">{{ list_label }}</span><span class="sub">{{ list_meta }}</span></div>
+    <div class="cv-rows">
     {% for r in rows %}
     <a class="cv-row{% if r.on %} on{% endif %}" href="{{ r.href }}"{% if r.on %} aria-current="true"{% endif %}>
       <span class="avs" aria-hidden="true">{% for a in r.avatars %}<span class="av t-{{ a.tint }}">{{ a.initials }}</span>{% endfor %}{% if r.fork %}<span class="av fork">{{ crate::web::icons::icon("fork")|safe }}</span>{% endif %}</span>
@@ -43,6 +44,7 @@
     </a>
     {% endfor %}
     {% if rows.is_empty() %}<p class="sub cv-none">Nothing matches.</p>{% endif %}
+    </div>
   </nav>
   <section class="split-main card cv-main" aria-labelledby="thread-h">
     {% if let Some(s) = selected %}
@@ -88,11 +90,5 @@
     {% endif %}
   </section>
 </div>
-{% endif %}
-{% if !contributions.is_empty() %}
-<section class="stack" aria-labelledby="contrib-h">
-  <div class="sec"><h2 id="contrib-h">Contributions to other repositories</h2><span class="sub">watched every 30 minutes</span></div>
-  <ul class="rows card pad">{% for c in contributions %}<li class="item-row"><div class="ttl"><a href="{{ c.url }}">{{ c.title }}</a><span class="sub">for {{ c.project }}</span></div><span class="chip">{{ c.state }}</span></li>{% endfor %}</ul>
-</section>
 {% endif %}
 {% endblock %}
