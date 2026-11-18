@@ -59,6 +59,8 @@ struct StepPage {
     project_slug: String,
     name: String,
     milestone: String,
+    /// Back to the overview, with this step on the board (the Tasks tab went, D-218).
+    back: String,
     title: String,
     state: &'static str,
     when: String,
@@ -224,7 +226,10 @@ async fn step(
                 miss = Some((diff, format!("{}, {} {word}", t.short_id(), crate::times::fmt_ms(diff.abs()))));
             }
             let added = if t.data.get("added").and_then(serde_json::Value::as_bool).unwrap_or(false) {
-                format!("added · {}", super::projects::source_label(t.str("source")))
+                match t.str("source_ref") {
+                    "" => format!("added · {}", super::projects::source_label(t.str("source"))),
+                    from => format!("added · {} · from {from}", super::projects::source_label(t.str("source"))),
+                }
             } else {
                 String::new()
             };
@@ -245,8 +250,14 @@ async fn step(
         })
         .collect();
     let added_count = rows.iter().filter(|r| !r.added.is_empty()).count();
+    let back = if parent.is_empty() {
+        format!("/p/{}", p.slug)
+    } else {
+        format!("/p/{}?ms={}&step={}#board", p.slug, parent, m.name)
+    };
     render(StepPage {
-        nav: nav(&state, &actor, "/projects").await.back_to(format!("/p/{}?tab=tasks", p.slug), &p.name),
+        nav: nav(&state, &actor, "/projects").await.back_to(back.clone(), &p.name),
+        back,
         project_name: p.name.clone(),
         project_slug: p.slug.clone(),
         name: m.name.clone(),

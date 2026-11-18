@@ -26,6 +26,7 @@ mod machine;
 mod new_project;
 mod notes;
 mod notifications;
+mod overview;
 mod pages;
 mod projectdoc;
 mod projects;

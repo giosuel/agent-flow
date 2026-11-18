@@ -86,11 +86,9 @@ pub struct PrRow {
 pub fn pr_rows(c: &Connection, project_id: i64, now: i64) -> anyhow::Result<Vec<PrRow>> {
     let order = prs::merge_order(c, project_id)?;
     let mut rows: Vec<PrRow> = Vec::new();
-    // The run of mergeable PRs, from a stack's bottom, that "Merge up to here" would merge.
-    let mut chain: Vec<(i64, i64, String, String)> = Vec::new();
     for o in &order {
         let r = &o.record;
-        let buttons = views(c, r.id, now)?;
+        let mut buttons = views(c, r.id, now)?;
         let ready = prs::ready_in_order(o);
         let (chip, chip_class) = match (&ready, o.after) {
             (Ok(()), None) => ("ready".to_owned(), "ok"),
@@ -106,30 +104,41 @@ pub fn pr_rows(c: &Connection, project_id: i64, now: i64) -> anyhow::Result<Vec<
             None if r.str("base").is_empty() => String::new(),
             None => format!("based on {}", r.str("base")),
         };
-        let merge_button = actions::for_record(c, r.id)?.into_iter().find(|a| a.is_merge() && a.state == "waiting");
-        // A chain continues while each PR is based on the previous one, ready, and has a merge button.
-        let continues = o.after.is_some_and(|after| chain.last().is_some_and(|(n, ..)| *n == after));
-        if !continues {
-            chain.clear();
-        }
-        let up_to = match (&ready, &merge_button) {
-            (Ok(()), Some(a)) if o.after.is_none() || continues => {
-                chain.push((r.number, a.id, a.hash(), a.command.clone()));
-                (chain.len() > 1).then(|| {
-                    let label = format!("Merge #{}–#{}", chain[0].0, r.number);
-                    let ids = chain.iter().map(|(_, id, h, _)| format!("{id}:{h}")).collect::<Vec<_>>().join(",");
+        // A stacked PR merges only with the PRs below it, from the bottom (D-214): one button,
+        // "Merge #a–#b", instead of its own Merge; a locked Merge says what holds the stack.
+        let mut up_to = None;
+        if o.after.is_some() {
+            let merge_ids: Vec<i64> =
+                actions::for_record(c, r.id)?.iter().filter(|a| a.is_merge()).map(|a| a.id).collect();
+            match prs::chain_to(c, &order, r.number)? {
+                Ok(steps) => {
+                    let label = format!("Merge #{}–#{}", steps[0].number, r.number);
+                    let ids = chain_ids(&steps);
                     let confirm = format!(
-                        "{label}? These run in order and stop at the first failure:\n\n{}",
-                        chain.iter().map(|(n, _, _, cmd)| format!("#{n}: {cmd}")).collect::<Vec<_>>().join("\n")
+                        "{label}? They merge one after the other, from the bottom, and stop at the first that fails:\n\n{}",
+                        steps
+                            .iter()
+                            .map(|s| format!("#{}: {}", s.number, s.action.command))
+                            .collect::<Vec<_>>()
+                            .join("\n")
                     );
-                    (label, ids, confirm)
-                })
+                    up_to = Some((label, ids, confirm));
+                    // A failed one stays, for its output.
+                    buttons.retain(|b| !merge_ids.contains(&b.id) || b.state == "failed");
+                    for b in buttons.iter_mut().filter(|b| merge_ids.contains(&b.id)) {
+                        b.enabled = false;
+                        b.why = "merges with the button next to it".into();
+                    }
+                }
+                Err(why) => {
+                    for b in buttons.iter_mut().filter(|b| merge_ids.contains(&b.id) && !b.why.is_empty()) {
+                        if matches!(b.state.as_str(), "waiting" | "failed") {
+                            b.why = why.clone();
+                        }
+                    }
+                }
             }
-            _ => {
-                chain.clear();
-                None
-            }
-        };
+        }
         rows.push(PrRow {
             position: o.position,
             number: r.number,
@@ -144,6 +153,11 @@ pub fn pr_rows(c: &Connection, project_id: i64, now: i64) -> anyhow::Result<Vec<
         });
     }
     Ok(rows)
+}
+
+/// "id:hash,id:hash": a chain's merge buttons as the page shows them, bottom first.
+fn chain_ids(steps: &[prs::ChainStep]) -> String {
+    steps.iter().map(|s| format!("{}:{}", s.action.id, s.action.hash())).collect::<Vec<_>>().join(",")
 }
 
 /// A release card.
@@ -215,18 +229,26 @@ async fn run_one(
     Form(form): Form<RunForm>,
 ) -> AppResult<Response> {
     actor.require_owner()?;
-    let (record, ok) = press(&state, &actor, &ip, id, &form.hash).await?;
+    let (record, ok) = press(&state, &actor, &ip, id, &form.hash, false).await?;
     let next = safe_next(form.next, record.url());
     let sep = if next.contains('?') { '&' } else { '?' };
     Ok(Redirect::to(&format!("{next}{sep}ran={id}&ok={}", u8::from(ok))).into_response())
 }
 
-/// Claims, runs and records one button; refreshes a merged PR right away.
-async fn press(state: &AppState, actor: &Actor, ip: &ClientIp, id: i64, hash: &str) -> AppResult<(Record, bool)> {
+/// Claims, runs and records one button; refreshes a merged PR right away. `in_chain`: a step of
+/// "Merge #a–#b", whose order and CI [`prs::chain_to`] checked.
+async fn press(
+    state: &AppState,
+    actor: &Actor,
+    ip: &ClientIp,
+    id: i64,
+    hash: &str,
+    in_chain: bool,
+) -> AppResult<(Record, bool)> {
     let hash = hash.to_owned();
     let claimed = state
         .db
-        .call(move |c| actions::claim(c, id, &hash))
+        .call(move |c| if in_chain { actions::claim_in_chain(c, id, &hash) } else { actions::claim(c, id, &hash) })
         .await
         .map_err(|e| AppError::BadRequest(format!("{e:#}")))?;
     // The run lives in its own task: if the phone drops the connection, the merge still finishes
@@ -285,7 +307,9 @@ struct UpToForm {
     actions: String,
 }
 
-/// "Merge #48–#50": presses each PR's merge button in order, stopping at the first failure.
+/// "Merge #48–#50": the server works the stack out again and, if it's what the page showed,
+/// presses each PR's merge button from the bottom, stopping at the first failure. It runs on its
+/// own, so a long stack finishes even when the page is closed; each PR leaves the list once merged.
 async fn merge_up_to(
     State(state): State<AppState>,
     Extension(actor): Extension<Actor>,
@@ -297,24 +321,47 @@ async fn merge_up_to(
     if crate::projects::check_slug(&slug).is_err() {
         return Err(AppError::NotFound);
     }
-    let mut steps = Vec::new();
-    for part in form.actions.split(',').filter(|p| !p.is_empty()) {
-        let (id, hash) = part.split_once(':').ok_or_else(|| AppError::BadRequest("malformed button list".into()))?;
-        steps.push((
-            id.parse::<i64>().map_err(|_| AppError::BadRequest("malformed button list".into()))?,
-            hash.to_owned(),
+    let s2 = slug.clone();
+    let steps = state
+        .db
+        .call(move |c| {
+            let p = projects::require(c, &s2)?;
+            let order = prs::merge_order(c, p.id)?;
+            prs::chain_to(c, &order, number)
+        })
+        .await?
+        .map_err(|why| AppError::BadRequest(format!("Can't merge up to #{number}: {why}.")))?;
+    if chain_ids(&steps) != form.actions {
+        return Err(AppError::BadRequest(
+            "The stack changed since the page was loaded; reload it and look again.".into(),
         ));
     }
-    if steps.is_empty() {
-        return Err(AppError::BadRequest("nothing to merge".into()));
-    }
-    let mut merged = 0;
-    for (id, hash) in steps {
-        let (_, ok) = press(&state, &actor, &ip, id, &hash).await?;
-        if !ok {
-            break;
+    let (first, total) = (steps[0].number, steps.len());
+    let (state2, actor2, ip2, slug2) = (state.clone(), actor.clone(), ip.clone(), slug.clone());
+    tokio::spawn(async move {
+        let started = std::time::Instant::now();
+        let mut merged = 0;
+        for s in &steps {
+            match press(&state2, &actor2, &ip2, s.action.id, &s.action.hash(), true).await {
+                Ok((_, true)) => merged += 1,
+                Ok((_, false)) => break,
+                Err(e) => {
+                    tracing::warn!("Merge #{first}–#{number}: #{} didn't start: {e:?}", s.number);
+                    break;
+                }
+            }
         }
-        merged += 1;
-    }
-    Ok(Redirect::to(&format!("/p/{slug}?tab=prs&merged={merged}&upto={number}")).into_response())
+        let e = Entry::new(
+            &actor2,
+            Via::Button,
+            Action::Run,
+            format!("Merge #{first}–#{number}: {merged} of {total} merged"),
+        )
+        .project(slug2)
+        .duration_ms(started.elapsed().as_millis() as i64)
+        .ip(Some(ip2.0.clone()))
+        .severity(if merged == total { "info" } else { "warn" });
+        activity::write(&state2.db, e).await;
+    });
+    Ok(Redirect::to(&format!("/p/{slug}?tab=prs&merging={first}-{number}")).into_response())
 }
