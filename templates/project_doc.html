@@ -4,6 +4,7 @@
 {# The project document as a dialog over the overview (the owner, 2026-11-18), edited whole. #}
 <div data-dlg-content class="pdoc-dlg">
 <div class="head"><h1>Project document</h1></div>
+{% if let Some((ok, text)) = notice %}<p class="notice flash{% if *ok %} ok{% else %} warn{% endif %}" role="status">{% if *ok %}{{ crate::web::icons::icon("check")|safe }}{% endif %}<span>{{ text }}</span></p>{% endif %}
 <div class="pd-bar">
   <span class="sub">{% if rev > 0 %}{{ line }} · {{ bytes }}{% else %}kept by the agent, read at the start of every session{% endif %}</span>
   <span class="grow"></span>
@@ -12,7 +13,7 @@
   {% if rev > 0 %}<a class="btn sm ghost" href="/p/{{ slug }}/doc?history=1" data-dlg>{{ crate::web::icons::icon("history")|safe }}<span>History</span></a>{% endif %}
   {% else %}<span class="dirty" data-dirty hidden><i aria-hidden="true"></i>Not saved</span>{% endif %}
 </div>
-{% if let Some((ok, text)) = notice %}<p class="notice{% if *ok %} ok{% else %} warn{% endif %}" role="status">{{ text }}</p>{% endif %}
+
 
 {% if let Some(e) = editor %}
 <form method="post" action="/p/{{ slug }}/doc" class="pd-edit" data-doc-editor data-slug="{{ slug }}" data-base="{{ e.base_rev }}">
