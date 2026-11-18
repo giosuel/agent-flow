@@ -109,34 +109,30 @@
     {% endif %}
 
 
-    {% if !prs.is_empty() || !releases.is_empty() %}
-    <div class="ov-duo">
-      {% if !prs.is_empty() %}
-      <details class="ov-fold" open aria-labelledby="mo-h">
-        <summary class="ph"><span class="ofi">{{ crate::web::icons::icon("merge")|safe }}</span><h2 class="label" id="mo-h">Merge order</h2><span class="sub of-phone">{{ prs_total }} open</span><span class="grow"></span>{% if prs_total > prs.len() %}<a class="sub of-desk" href="/p/{{ slug }}?tab=prs">All {{ prs_total }} open PRs</a>{% endif %}<span class="of-chev">{{ crate::web::icons::icon("chevron")|safe }}</span></summary>
-        <div class="of-body stack">
-          <p class="sub">PRs based on main can merge in any order once ready; a PR based on another merges after it.{% if has_stack_button %} "Merge #a–#b" merges every PR up to that one, in order.{% endif %}</p>
-          {% include "pr_list.html" %}
-          {% if prs_total > prs.len() %}<a class="sub" href="/p/{{ slug }}?tab=prs">All {{ prs_total }} open PRs</a>{% endif %}
-        </div>
-      </details>
-      {% endif %}
-      {% for rel in releases %}
-      <details class="ov-fold" open>
-        <summary class="ph"><span class="ofi">{{ crate::web::icons::icon("tag")|safe }}</span><h2 class="label">Release</h2><span class="sub of-phone mono">{{ rel.tag }}</span><span class="grow"></span><a class="sub of-desk" href="{{ rel.url }}">details</a><span class="of-chev">{{ crate::web::icons::icon("chevron")|safe }}</span></summary>
-        <div class="of-body stack">
-          <p><span class="mono">{{ rel.tag }}</span> · {{ rel.title }}</p>
-          <p class="sub">{{ rel.waits }}{% for (n, u) in rel.open_prs %} <a class="mono" href="{{ u }}">{{ n }}</a>{% endfor %}</p>
-          {% for b in rel.buttons %}{% include "button.html" %}{% endfor %}
-          {% if rel.buttons.is_empty() %}<p class="sub">The agent hasn't added the tag button yet.</p>{% endif %}
-        </div>
-      </details>
-      {% endfor %}
-    </div>
+    {% if !prs.is_empty() %}
+    <details class="ov-fold" open aria-labelledby="mo-h">
+      <summary class="ph"><span class="ofi">{{ crate::web::icons::icon("merge")|safe }}</span><h2 class="label" id="mo-h">Merge order</h2><span class="sub of-phone">{{ prs_total }} open</span><span class="grow"></span>{% if prs_total > prs.len() %}<a class="sub of-desk" href="/p/{{ slug }}?tab=prs">All {{ prs_total }} open PRs</a>{% endif %}<span class="of-chev">{{ crate::web::icons::icon("chevron")|safe }}</span></summary>
+      <div class="of-body stack">
+        <p class="sub">PRs based on main can merge in any order once ready; a PR based on another merges after it.{% if has_stack_button %} "Merge #a–#b" merges every PR up to that one, in order.{% endif %}</p>
+        {% include "pr_list.html" %}
+        {% if prs_total > prs.len() %}<a class="sub" href="/p/{{ slug }}?tab=prs">All {{ prs_total }} open PRs</a>{% endif %}
+      </div>
+    </details>
     {% endif %}
   </div>
 
   <aside class="ov-side" aria-label="About the project">
+    {% for rel in releases %}
+    <details class="ov-fold" open>
+      <summary class="ph"><span class="ofi">{{ crate::web::icons::icon("tag")|safe }}</span><h2 class="label">Release</h2><span class="sub of-phone mono">{{ rel.tag }}</span><span class="grow"></span><a class="sub of-desk" href="{{ rel.url }}">details</a><span class="of-chev">{{ crate::web::icons::icon("chevron")|safe }}</span></summary>
+      <div class="of-body stack">
+        <p><span class="mono">{{ rel.tag }}</span> · {{ rel.title }}</p>
+        <p class="sub">{{ rel.waits }}{% for (n, u) in rel.open_prs %} <a class="mono" href="{{ u }}">{{ n }}</a>{% endfor %}</p>
+        {% for b in rel.buttons %}{% include "button.html" %}{% endfor %}
+        {% if rel.buttons.is_empty() %}<p class="sub">The agent hasn't added the tag button yet.</p>{% endif %}
+      </div>
+    </details>
+    {% endfor %}
     <details class="ov-fold" open>
       <summary class="ph"><span class="ofi">{{ crate::web::icons::icon("folder")|safe }}</span><h2 class="label">Project<span class="of-phone">&nbsp;info</span></h2><span class="sub of-phone">{% if !repo.is_empty() %}{{ repo }}{% else %}{{ agent.machine }}{% endif %}</span><span class="grow"></span><a class="sub of-desk" href="/p/{{ slug }}/settings" data-dlg>Edit</a><span class="of-chev">{{ crate::web::icons::icon("chevron")|safe }}</span></summary>
       <div class="of-body info">

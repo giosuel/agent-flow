@@ -1515,8 +1515,6 @@ html.no-scroll { overflow: hidden; }
 .ms-fold[open] > summary .of-chev { transform: rotate(-90deg); }
 .ms-scroll { max-height: 236px; overflow-y: auto; border-top: 1px solid var(--line2); }
 .ms-scroll .msr:first-child { border-top: 0; }
-.ov-duo { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 22px; align-items: start; }
-.ov-duo > :only-child { grid-column: 1 / -1; }
 .ov-fold > summary { list-style: none; cursor: default; }
 .ofi { display: none; color: var(--accent); }
 .of-phone { display: none; }
@@ -1541,7 +1539,6 @@ html.no-scroll { overflow: hidden; }
 .dec-row .sub { font-size: 12px; }
 @media (max-width: 1100px) {
   .ov-lay { grid-template-columns: 1fr; }
-  .ov-duo { grid-template-columns: 1fr; }
 }
 @media (max-width: 700px) {
   .qsec { padding: 14px; }
