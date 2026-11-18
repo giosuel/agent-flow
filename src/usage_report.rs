@@ -148,6 +148,15 @@ pub fn report(c: &Connection, project: Option<i64>, now: i64, tz: &crate::tz::Tz
     }))
 }
 
+/// `text` cut to `n` characters, with "…" when it was longer.
+fn clip(text: &str, n: usize) -> String {
+    if text.chars().count() <= n {
+        text.to_owned()
+    } else {
+        format!("{}…", text.chars().take(n.saturating_sub(1)).collect::<String>())
+    }
+}
+
 /// `flow usage`, in flow's style (crate::ui): the plan, then each project, then its tasks.
 pub fn print(v: &Value, all: bool) -> String {
     use crate::ui::{Tone, fit, paint};
@@ -225,7 +234,7 @@ pub fn print(v: &Value, all: bool) -> String {
                     &[
                         (Tone::Topic, &format!("{:<6}", t["id"].as_str().filter(|s| !s.is_empty()).unwrap_or("–"))),
                         (Tone::Number, &format!("{:>8}", usd(&t["usd"]))),
-                        (Tone::Plain, t["title"].as_str().unwrap_or("")),
+                        (Tone::Plain, &clip(t["title"].as_str().unwrap_or(""), crate::ui::width().saturating_sub(24))),
                     ],
                     on,
                 ));
