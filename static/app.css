@@ -1448,3 +1448,39 @@ html.no-scroll { overflow: hidden; }
   .ov-fold .ph .label { font-size: 15px; text-transform: none; letter-spacing: 0; color: var(--ink); font-weight: 500; }
   .of-phone.sub { max-width: 45%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 }
+
+/* Usage: the plan's windows (the owner, 2026-11-17, M13, the "Usage: plan and cost" mockups). */
+.plan-card { overflow: hidden; }
+.plan-h { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 14px 20px; border-bottom: 1px solid var(--line2); }
+.plan-h h2 { margin: 0; font-size: 17px; }
+.plan-empty { margin: 0; padding: 16px 20px; }
+.meters { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 380px), 1fr)); }
+.meter-p { padding: 18px 20px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.meter-p + .meter-p { border-left: 1px solid var(--line2); }
+.mp-top { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.mp-top .ink { color: var(--ink); }
+.mp-pct { display: flex; align-items: flex-end; gap: 10px; }
+.mp-pct strong { font-size: 32px; font-weight: 500; line-height: 1; }
+.mp-bar { position: relative; height: 12px; border-radius: 6px; background: var(--chip); }
+.mp-bar i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 6px; background: var(--accent); }
+.mp-bar i.warn { background: var(--warn-ink); }
+.mp-80 { position: absolute; left: 80%; top: -4px; bottom: -4px; width: 2px; border-radius: 1px; background: var(--warn-ink); }
+.mp-sofar { margin: 4px 0 0; font-size: 14px; }
+.mp-est { margin: 0; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 12px; border-radius: 10px; background: #140F24; border: 1px solid #2E2450; font-size: 14px; }
+.mp-est .i { width: 18px; height: 18px; color: var(--hover); flex: none; }
+.mp-est .sub { margin-left: auto; }
+.pct-strip { margin-top: 14px; }
+.pct-strip .pct-title { display: block; margin-bottom: 4px; }
+.pct-strip .y-max { display: none; }
+.pct-strip .y-80 { position: absolute; right: 0; top: 22px; font-size: 11px; color: var(--warn-ink); }
+.pct-marks { height: 90px; }
+.pct-marks .pct-area { fill: var(--accent); fill-opacity: .16; }
+.pct-marks .pct-line { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linejoin: round; }
+.chart-marks .limit.warn { stroke: var(--warn-ink); stroke-opacity: .75; }
+.bad-text { color: var(--bad); }
+@media (max-width: 700px) {
+  .meter-p + .meter-p { border-left: 0; border-top: 1px solid var(--line2); }
+  .mp-pct strong { font-size: 28px; }
+}
+.ranges { max-width: 100%; overflow-x: auto; }
+.rng { white-space: nowrap; }

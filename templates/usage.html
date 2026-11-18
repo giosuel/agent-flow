@@ -3,7 +3,7 @@
 {% block content %}
 <div class="head">
   <h1>Usage</h1>
-  <p class="status-line">API token counts from the Claude Code transcripts on this machine, subagents included. These are not your plan's usage limits. Newest call {{ newest }}.</p>
+  <p class="status-line">Tokens and their cost at API prices, from the Claude Code transcripts, subagents included; the plan's usage from the agents' status lines. Newest call {{ newest }}.</p>
   <form method="post" action="/transcripts/read" class="row wrap reload-form"><input type="hidden" name="next" value="/usage">
     <button class="btn ghost sm" type="submit"{% if reading %} disabled{% endif %}>{% if reading %}Reading the transcripts…{% else %}Reload{% endif %}</button>
     <span class="sub">Read every five minutes; Reload reads them now, for tokens and conversations.</span></form>
@@ -14,6 +14,25 @@
 </nav>
 
 {% if tab == "overview" %}
+<section class="card plan-card" aria-labelledby="plan-h">
+  <div class="plan-h"><h2 id="plan-h">Plan</h2>{% if !plan_seen.is_empty() %}<span class="sub">from a status line {{ plan_seen }}</span>{% endif %}<span class="grow"></span>{% if !est_rows.is_empty() %}<a class="sub" href="#est-h">How big a window is</a>{% endif %}</div>
+  {% if meters.is_empty() %}
+  <p class="sub plan-empty">The plan's 5-hour and weekly usage comes from Claude Code's status line in the agents' sessions. Run <span class="mono">flow project setup</span> again in a project's folder to add it there; the next reply of a session there sends it.</p>
+  {% else %}
+  <div class="meters">
+    {% for m in meters %}
+    <div class="meter-p">
+      <div class="mp-top"><span class="label">{{ m.label }}</span><span class="sub">resets <span class="ink">{{ m.reset }}</span></span></div>
+      <div class="mp-pct"><strong class="mono{% if m.warn %} warn-text{% endif %}">{{ m.pct }}</strong><span class="sub">used</span></div>
+      <div class="mp-bar" role="meter" aria-valuenow="{{ m.width }}" aria-valuemin="0" aria-valuemax="100" aria-label="{{ m.label }}: {{ m.pct }} used"><i style="width: {{ m.width }}%"{% if m.warn %} class="warn"{% endif %}></i><span class="mp-80" title="80%: a push"></span></div>
+      <p class="mp-sofar"><span class="sub">So far</span> <span class="mono">{{ m.so_far }}</span> <span class="sub">· {{ m.so_far_sub }}</span></p>
+      <p class="mp-est">{{ crate::web::icons::icon("info")|safe }}<span>{{ m.estimate }}</span>{% if !m.basis.is_empty() %}<span class="sub">{{ m.basis }}</span>{% endif %}</p>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+</section>
+
 <div class="tiles">
   {% for t in tiles %}<div class="card pad tile"><span class="label">{{ t.label }}</span><strong class="tile-v mono">{{ t.value }}</strong><span class="sub">{{ t.hint }}</span></div>{% endfor %}
 </div>
@@ -21,10 +40,9 @@
 <section class="card pad stack" aria-labelledby="chart-h">
   <div class="sec wrap"><div class="stack-sm"><h2 id="chart-h">{{ chart_title }}</h2><span class="sub">{% if zoomed %}{{ chart_sub }}{% else %}<span class="hide-phone">Open a day for its hours</span><span class="only-phone">Tap a day for its hours</span>{% endif %}</span></div>
     <span class="row wrap">
-      {% if zoomed %}<a class="sub" href="/usage{% if cache %}?metric=cache{% endif %}">← Back to 14 days</a>{% endif %}
+      {% if zoomed %}<a class="sub" href="/usage{% for (k, _, on) in metrics %}{% if *on && !k.is_empty() %}?metric={{ k }}{% endif %}{% endfor %}">← Back to 14 days</a>{% endif %}
       <span class="ranges" role="group" aria-label="What to count">
-        <a class="rng{% if !cache %} on{% endif %}" href="/usage?{{ day_q }}"{% if !cache %} aria-current="true"{% endif %}>New tokens</a>
-        <a class="rng{% if cache %} on{% endif %}" href="/usage?{{ day_q }}metric=cache"{% if cache %} aria-current="true"{% endif %}>Cache reads</a>
+        {% for (k, name, on) in metrics %}<a class="rng{% if *on %} on{% endif %}" href="/usage?{{ day_q }}{% if !k.is_empty() %}metric={{ k }}{% endif %}"{% if *on %} aria-current="true"{% endif %}>{{ name }}</a>{% endfor %}
       </span>
     </span>
   </div>
@@ -36,6 +54,13 @@
     <div class="x-labels mono sub" aria-hidden="true">{% for l in x_labels %}<span>{{ l }}</span>{% endfor %}</div>
   </div>
   {% endif %}
+  {% if !strip.is_empty() %}
+  <div class="chart pct-strip">
+    <span class="label pct-title">{{ strip_title }}</span><span class="y-max mono sub">100%</span><span class="y-80 mono">80%</span>
+    {{ strip|safe }}
+  </div>
+  {% endif %}
+  {% if unpriced > 0 %}<p class="sub">{{ unpriced }} call{% if unpriced != 1 %}s{% endif %} of models without a known price aren't in the cost.</p>{% endif %}
 </section>
 
 {% if !empty %}
@@ -54,11 +79,24 @@
   <div class="sec"><h2 id="proj-h">Per project</h2><span class="sub">{{ range }}</span></div>
   {% if projects.is_empty() %}<p class="sub">Nothing yet.</p>{% else %}
   <div class="table-wrap"><table class="table nums">
-    <thead><tr><th scope="col">Project</th><th scope="col" class="hide-phone">Sessions</th><th scope="col" class="hide-phone">Calls</th><th scope="col" class="hide-phone">Input</th><th scope="col" class="hide-phone">Cache write</th><th scope="col" class="hide-phone">Output</th><th scope="col">New tokens</th><th scope="col">Cache reads</th></tr></thead>
-    <tbody>{% for p in projects %}<tr><th scope="row"><span class="swatch" style="--c: {{ p.color }}"></span>{{ p.name }}</th><td class="hide-phone">{{ p.sessions }}</td><td class="hide-phone">{{ p.t.calls }}</td><td class="hide-phone">{{ p.t.input }}</td><td class="hide-phone">{{ p.t.cache_write }}</td><td class="hide-phone">{{ p.t.output }}</td><td><strong>{{ p.t.new_tokens }}</strong></td><td>{{ p.t.cache_read }}</td></tr>{% endfor %}</tbody>
+    <thead><tr><th scope="col">Project</th><th scope="col" class="hide-phone">Sessions</th><th scope="col" class="hide-phone">Calls</th><th scope="col" class="hide-phone">Input</th><th scope="col" class="hide-phone">Cache write</th><th scope="col" class="hide-phone">Output</th><th scope="col">New tokens</th><th scope="col">Cache reads</th><th scope="col">Cost</th></tr></thead>
+    <tbody>{% for p in projects %}<tr><th scope="row"><span class="swatch" style="--c: {{ p.color }}"></span>{{ p.name }}</th><td class="hide-phone">{{ p.sessions }}</td><td class="hide-phone">{{ p.t.calls }}</td><td class="hide-phone">{{ p.t.input }}</td><td class="hide-phone">{{ p.t.cache_write }}</td><td class="hide-phone">{{ p.t.output }}</td><td><strong>{{ p.t.new_tokens }}</strong></td><td>{{ p.t.cache_read }}</td><td><strong>{{ p.t.cost }}</strong></td></tr>{% endfor %}</tbody>
   </table></div>
   {% endif %}
 </section>
+
+{% if !est_rows.is_empty() %}
+<section class="card pad stack" aria-labelledby="est-h">
+  <div class="sec"><h2 id="est-h">How big a window is</h2><span class="sub">finished 5-hour windows, newest first</span></div>
+  <div class="table-wrap"><table class="table nums">
+    <thead><tr><th scope="col">Window</th><th scope="col">Used</th><th scope="col" class="hide-phone">Cost</th><th scope="col">Per 1%</th><th scope="col" class="hide-phone">New tokens per 1%</th></tr></thead>
+    <tbody>{% for r in est_rows %}<tr><th scope="row">{{ r.day }} <span class="sub mono">{{ r.span }}</span></th><td>{{ r.used }}{% if !r.limit.is_empty() %} <span class="bad-text">· {{ r.limit }}</span>{% endif %}</td><td class="hide-phone">{{ r.cost }}</td><td><strong>{{ r.per_pct }}</strong></td><td class="hide-phone">{{ r.tokens_per_pct }}</td></tr>{% endfor %}
+    {% if !est_median.0.is_empty() %}<tr><th scope="row"><strong>Median</strong></th><td></td><td class="hide-phone"></td><td><strong>{{ est_median.0 }}</strong></td><td class="hide-phone"><strong>{{ est_median.1 }}</strong></td></tr>{% endif %}</tbody>
+  </table></div>
+  <p class="sub">A window's cost ÷ its %. The plan weighs tokens by what they cost, so the dollar figure stays steadier than the token one, which moves with how much is cached and which model runs. Windows under 10% don't count toward the median.</p>
+  <p class="sub">Claude on your other devices (claude.ai, a laptop) uses the same plan but isn't counted here: while you use it, a window looks smaller than it is.</p>
+</section>
+{% endif %}
 {% else %}
 <section class="card pad stack" aria-labelledby="tasks-h">
   <div class="sec wrap"><div class="stack-sm"><h2 id="tasks-h">Tasks by tokens</h2><span class="sub">{{ tasks.len() }} with tokens in the last {{ days }} days, most first</span></div>
@@ -70,11 +108,11 @@
   {% if !any_task %}<p class="notice">No tokens are counted against a task yet: they are once an agent creates or updates its tasks through AgentFlow while it works. Until then everything is under "Not in a task".</p>{% endif %}
   {% if !tasks.is_empty() %}
   <div class="table-wrap"><table class="table nums tasks-usage">
-    <thead><tr><th scope="col">Task</th>{% if show_status %}<th scope="col" class="hide-phone">Status</th>{% endif %}<th scope="col" class="hide-phone">Worked</th><th scope="col" class="hide-phone">Calls</th><th scope="col" class="hide-phone">Input</th><th scope="col" class="hide-phone">Cache write</th><th scope="col" class="hide-phone">Output</th><th scope="col">New tokens</th><th scope="col">Cache reads</th>{% if show_estimate %}<th scope="col" class="hide-phone">Estimate</th>{% endif %}</tr></thead>
+    <thead><tr><th scope="col">Task</th>{% if show_status %}<th scope="col" class="hide-phone">Status</th>{% endif %}<th scope="col" class="hide-phone">Worked</th><th scope="col" class="hide-phone">Calls</th><th scope="col" class="hide-phone">Input</th><th scope="col" class="hide-phone">Cache write</th><th scope="col" class="hide-phone">Output</th><th scope="col">New tokens</th><th scope="col">Cache reads</th><th scope="col">Cost</th>{% if show_estimate %}<th scope="col" class="hide-phone">Estimate</th>{% endif %}</tr></thead>
     <tbody>{% for t in tasks %}
       <tr><th scope="row"><details><summary><span class="swatch" style="--c: {{ t.color }}"></span>{% if !t.url.is_empty() %}<a href="{{ t.url }}"><span class="mono sub">{{ t.id }}</span> {{ t.title }}</a>{% else %}{{ t.title }} <span class="sub">· {{ t.project }}</span>{% endif %}</summary>
         <p class="sub">Main session {{ t.main }} · subagents {{ t.subagents }}</p><p class="sub only-phone">{{ t.worked }} · {{ t.t.calls }} calls</p></details></th>
-        {% if show_status %}<td class="hide-phone">{{ t.status }}</td>{% endif %}<td class="sub hide-phone">{{ t.worked }}</td><td class="hide-phone">{{ t.t.calls }}</td><td class="hide-phone">{{ t.t.input }}</td><td class="hide-phone">{{ t.t.cache_write }}</td><td class="hide-phone">{{ t.t.output }}</td><td><strong>{{ t.t.new_tokens }}</strong></td><td>{{ t.t.cache_read }}</td>{% if show_estimate %}<td class="sub hide-phone">{{ t.estimate }}</td>{% endif %}</tr>
+        {% if show_status %}<td class="hide-phone">{{ t.status }}</td>{% endif %}<td class="sub hide-phone">{{ t.worked }}</td><td class="hide-phone">{{ t.t.calls }}</td><td class="hide-phone">{{ t.t.input }}</td><td class="hide-phone">{{ t.t.cache_write }}</td><td class="hide-phone">{{ t.t.output }}</td><td><strong>{{ t.t.new_tokens }}</strong></td><td>{{ t.t.cache_read }}</td><td><strong>{{ t.t.cost }}</strong></td>{% if show_estimate %}<td class="sub hide-phone">{{ t.estimate }}</td>{% endif %}</tr>
     {% endfor %}</tbody>
   </table></div>
   {% endif %}
