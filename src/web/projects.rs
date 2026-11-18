@@ -30,7 +30,7 @@ pub fn routes() -> Router<AppState> {
         .route("/p/{slug}/{id}/scope", post(set_scope))
         .route("/p/{slug}/status", post(set_status))
         .route("/p/{slug}/setup-code", post(setup_code))
-        .route("/p/{slug}/settings", post(save_settings))
+        .route("/p/{slug}/settings", get(settings_page).post(save_settings))
 }
 
 fn tested_notice(n: usize) -> String {
@@ -71,7 +71,7 @@ async fn save_settings(
 ) -> AppResult<Response> {
     actor.require_owner()?;
     let back = |code: &str| -> AppResult<Response> {
-        Ok(Redirect::to(&format!("/p/{slug}?tab=settings&settings={code}")).into_response())
+        Ok(Redirect::to(&format!("/p/{slug}/settings?settings={code}")).into_response())
     };
     if f.name.trim().is_empty() {
         return back("name");
@@ -157,7 +157,84 @@ async fn set_status(
         .project(slug.clone())
         .ip(Some(ip.0));
     activity::write(&state.db, e).await;
-    Ok(Redirect::to(&format!("/p/{slug}?tab=settings")).into_response())
+    Ok(Redirect::to(&format!("/p/{slug}")).into_response())
+}
+
+/// Project settings as a dialog over the project page (the owner, 2026-11-18, D-205): the details
+/// form and archiving. Opened directly, it's the project page with the dialog over it.
+#[derive(Template)]
+#[template(path = "project_settings.html")]
+struct SettingsPage {
+    nav: Nav,
+    slug: String,
+    name: String,
+    status: String,
+    edit: EditView,
+    notice: Option<String>,
+    notice_bad: bool,
+}
+
+#[derive(Deserialize, Default)]
+struct SettingsQuery {
+    settings: Option<String>,
+}
+
+async fn settings_page(
+    State(state): State<AppState>,
+    Extension(actor): Extension<Actor>,
+    Path(slug): Path<String>,
+    Query(q): Query<SettingsQuery>,
+) -> AppResult<Response> {
+    actor.require_owner()?;
+    let (p, edit) = state
+        .db
+        .call(move |c| {
+            let p = projects::require(c, &slug)?;
+            let edit = edit_view(c, &p)?;
+            Ok((p, edit))
+        })
+        .await?;
+    let (notice, notice_bad) = settings_notice(q.settings.as_deref()).map_or((None, false), |(t, bad)| (Some(t), bad));
+    render(SettingsPage {
+        nav: nav(&state, &actor, "/projects").await,
+        slug: p.slug,
+        name: p.name,
+        status: p.status,
+        edit,
+        notice,
+        notice_bad,
+    })
+}
+
+fn edit_view(c: &Connection, p: &Project) -> anyhow::Result<EditView> {
+    Ok(EditView {
+        build_server: crate::remote::project_server(c, p.id)?.unwrap_or_default(),
+        servers: crate::remote::load_servers(c)?.into_iter().map(|b| b.name).collect(),
+        name: p.name.clone(),
+        description: p.description.clone(),
+        repo: p.repo.clone(),
+        checkout: p.checkout.clone(),
+        machine: p.machine.clone(),
+        model: p.model.clone(),
+        effort: p.effort.clone(),
+        ports: p.ports.join("\n"),
+        build_product: p.build_product.clone(),
+        merge_method: p.merge_method.clone(),
+    })
+}
+
+/// How a settings save went: only fixed messages come from the address. (text, bad)
+fn settings_notice(code: Option<&str>) -> Option<(String, bool)> {
+    Some(match code? {
+        "saved" => ("Saved. The project's agent sees the change the next time it checks.".into(), false),
+        "name" => ("The name can't be empty. Nothing was saved.".into(), true),
+        "repo" => ("The repository is owner/name, e.g. giosuel/vinculum. Nothing was saved.".into(), true),
+        "product" => (
+            "That build product isn't free or isn't a valid name (lowercase letters, digits and dashes). Nothing was saved.".into(),
+            true,
+        ),
+        _ => ("That didn't work; nothing was saved. See the log.".into(), true),
+    })
 }
 
 /// Sets the project's agent up in its folder, or brings that up to date (the owner, 2026-11-12:
@@ -790,7 +867,6 @@ struct ProjectPage {
     /// The Builds tab: every build, newest first.
     builds: Vec<RecordRow>,
     /// The Settings tab's form, filled with the project's details.
-    edit: Option<EditView>,
     /// The Screenshots tab: the shown ones (newest first), all of them, and the category filter.
     shots: Vec<ShotCard>,
     shots_all: usize,
@@ -848,24 +924,6 @@ fn press_notice(q: &TabQuery) -> (Option<String>, bool) {
     if let Some(n) = q.tested {
         return (Some(tested_notice(n)), false);
     }
-    // The Settings tab's outcome: only fixed messages come from the address.
-    match q.settings.as_deref() {
-        Some("saved") => {
-            return (Some("Saved. The project's agent sees the change the next time it checks.".into()), false);
-        }
-        Some("name") => return (Some("The name can't be empty. Nothing was saved.".into()), true),
-        Some("repo") => {
-            return (Some("The repository is owner/name, e.g. giosuel/vinculum. Nothing was saved.".into()), true);
-        }
-        Some("product") => {
-            return (
-                Some("That build product isn't free or isn't a valid name (lowercase letters, digits and dashes). Nothing was saved.".into()),
-                true,
-            );
-        }
-        Some(_) => return (Some("That didn't work; nothing was saved. See the log.".into()), true),
-        None => {}
-    }
     match (q.ran, q.ok, q.merged, q.upto) {
         (Some(_), Some(1), _, _) => (Some("Done. The agent has been told.".into()), false),
         (Some(_), Some(_), _, _) => {
@@ -900,6 +958,10 @@ async fn project(
     tz: Tz,
 ) -> AppResult<Response> {
     let (notice, notice_bad) = press_notice(&q);
+    if q.tab.as_deref() == Some("settings") {
+        let code = q.settings.as_deref().map(|c| format!("?settings={}", super::log::enc(c))).unwrap_or_default();
+        return Ok(Redirect::to(&format!("/p/{slug}/settings{code}")).into_response());
+    }
     let tab = q.tab.filter(|t| TABS.iter().any(|(k, _)| k == t)).unwrap_or_else(|| "overview".into());
     let now = now_ms();
     let chosen = q.ms.clone();
@@ -1410,28 +1472,6 @@ fn build_project_page(
     } else {
         HashMap::new()
     };
-    let (build_server, servers) = if tab == "settings" {
-        (
-            crate::remote::project_server(c, p.id)?.unwrap_or_default(),
-            crate::remote::load_servers(c)?.into_iter().map(|b| b.name).collect(),
-        )
-    } else {
-        (String::new(), Vec::new())
-    };
-    let edit = (tab == "settings").then(|| EditView {
-        build_server,
-        servers,
-        name: p.name.clone(),
-        description: p.description.clone(),
-        repo: p.repo.clone(),
-        checkout: p.checkout.clone(),
-        machine: p.machine.clone(),
-        model: p.model.clone(),
-        effort: p.effort.clone(),
-        ports: p.ports.join("\n"),
-        build_product: p.build_product.clone(),
-        merge_method: p.merge_method.clone(),
-    });
     let shots: Vec<ShotCard> = if tab == "screenshots" {
         let mut list: Vec<&Record> =
             all.iter().filter(|r| r.kind == Kind::Screenshot && r.state != "withdrawn").collect();
@@ -1710,7 +1750,6 @@ fn build_project_page(
         groups,
         questions,
         builds,
-        edit,
         shots_all: shots.len(),
         shots,
         shot_cats: Vec::new(),

@@ -1,14 +1,13 @@
-//! The bell (see `crate::notifications`): a panel under it (a sheet on the phone), and a page of
-//! its own for browsers without scripts. Opening it marks everything read; what was new keeps its
-//! dot while it's open.
+//! The bell (see `crate::notifications`): a panel under it (a sheet on the phone). Opening it marks
+//! everything read; what was new keeps its dot while it's open.
 
 use askama::Template;
 use axum::extract::State;
-use axum::response::{IntoResponse, Response};
+use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use axum::{Extension, Json, Router};
 
-use super::pages::{Nav, nav, render};
+use super::pages::render;
 use super::{AppResult, AppState};
 use crate::auth::Actor;
 use crate::util::{ago, now_ms};
@@ -62,14 +61,6 @@ struct Panel {
     earlier: Vec<Row>,
 }
 
-#[derive(Template)]
-#[template(path = "notifications.html")]
-struct Page {
-    nav: Nav,
-    fresh: Vec<Row>,
-    earlier: Vec<Row>,
-}
-
 async fn load(state: &AppState) -> anyhow::Result<(Vec<Row>, Vec<Row>)> {
     let items = state.db.call(|c| crate::notifications::list(c, 100)).await?;
     Ok(rows(items).into_iter().partition(|r| r.unread))
@@ -82,14 +73,11 @@ async fn panel(State(state): State<AppState>, Extension(actor): Extension<Actor>
     render(Panel { fresh, earlier })
 }
 
-/// The page, for browsers without scripts: shows them, then they're read.
-async fn page(State(state): State<AppState>, Extension(actor): Extension<Actor>) -> AppResult<Response> {
-    actor.require_owner()?;
-    let (fresh, earlier) = load(&state).await?;
-    state.db.call(|c| crate::notifications::mark_all_read(c)).await?;
-    let mut nav = nav(&state, &actor, "/notifications").await;
-    nav.unread = 0;
-    render(Page { nav, fresh, earlier })
+/// Notifications are the bell's panel only (the owner, 2026-11-18, D-204): a browser going to
+/// this address gets the dashboard with the panel open (see `dialogs_over_pages`); anything else
+/// is sent there.
+async fn page() -> Response {
+    Redirect::to("/").into_response()
 }
 
 async fn read(State(state): State<AppState>, Extension(actor): Extension<Actor>) -> AppResult<Response> {

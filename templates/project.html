@@ -8,7 +8,7 @@
 </div>
 <nav class="tabs proj-tabs" aria-label="Project">
   {% for (key, name) in tabs %}
-  <a href="/p/{{ slug }}{% if *key != "overview" %}?tab={{ key }}{% endif %}"{% if tab == *key %} class="on" aria-current="page"{% endif %}>{% if *key == "prs" %}<span class="hide-phone">{{ name }}</span><span class="only-phone">PRs</span>{% else if *key == "screenshots" %}<span class="hide-phone">{{ name }}</span><span class="only-phone">Shots</span>{% else if *key == "to-test" %}<span class="hide-phone">{{ name }}</span><span class="only-phone">Test</span>{% else %}{{ name }}{% endif %}{% if *key == "questions" && !open_questions.is_empty() %} <span class="mono count">{{ open_questions.len() }}</span>{% endif %}{% if *key == "prs" && prs_total > 0 %} <span class="mono sub">{{ prs_total }}</span>{% endif %}{% if *key == "to-test" && to_test_open > 0 %} <span class="mono count">{{ to_test_open }}</span>{% endif %}</a>
+  <a href="/p/{{ slug }}{% if *key == "settings" %}/settings" data-dlg{% else %}{% if *key != "overview" %}?tab={{ key }}{% endif %}"{% endif %}{% if tab == *key %} class="on" aria-current="page"{% endif %}>{% if *key == "prs" %}<span class="hide-phone">{{ name }}</span><span class="only-phone">PRs</span>{% else if *key == "screenshots" %}<span class="hide-phone">{{ name }}</span><span class="only-phone">Shots</span>{% else if *key == "to-test" %}<span class="hide-phone">{{ name }}</span><span class="only-phone">Test</span>{% else %}{{ name }}{% endif %}{% if *key == "questions" && !open_questions.is_empty() %} <span class="mono count">{{ open_questions.len() }}</span>{% endif %}{% if *key == "prs" && prs_total > 0 %} <span class="mono sub">{{ prs_total }}</span>{% endif %}{% if *key == "to-test" && to_test_open > 0 %} <span class="mono count">{{ to_test_open }}</span>{% endif %}</a>
   {% endfor %}
 </nav>
 {% if let Some(n) = notice %}<p class="notice{% if notice_bad %} warn{% else %} ok{% endif %}" role="status">{{ n }}</p>{% endif %}
@@ -18,7 +18,7 @@
    milestones right away in one bounded list, the board, merge order and release; the project, its
    decisions and external PRs in a side card. On the phone the side comes last and the panels fold. #}
 <div class="ov ov2">
-{% if status == "archived" %}<p class="notice">Archived: it's out of the Dashboard and the project list. <a href="/p/{{ slug }}?tab=settings">Restore it in Settings</a>.</p>{% endif %}
+{% if status == "archived" %}<p class="notice">Archived: it's out of the Dashboard and the project list. <a href="/p/{{ slug }}/settings" data-dlg>Restore it in Settings</a>.</p>{% endif %}
 {% if !qcards.is_empty() %}
 <section class="qsec" aria-labelledby="q-h">
   <div class="qsec-h"><span class="qsec-ico">{{ crate::web::icons::icon("question")|safe }}</span><h2 id="q-h">Waiting on you</h2><span class="chip warn">{{ qcards.len() }} question{% if qcards.len() != 1 %}s{% endif %}</span><span class="grow"></span><a class="sub" href="/p/{{ slug }}?tab=questions">All questions</a></div>
@@ -138,7 +138,7 @@
 
   <aside class="ov-side" aria-label="About the project">
     <details class="ov-fold" open>
-      <summary class="ph"><span class="ofi">{{ crate::web::icons::icon("folder")|safe }}</span><h2 class="label">Project<span class="of-phone">&nbsp;info</span></h2><span class="sub of-phone">{% if !repo.is_empty() %}{{ repo }}{% else %}{{ agent.machine }}{% endif %}</span><span class="grow"></span><a class="sub of-desk" href="/p/{{ slug }}?tab=settings">Edit</a><span class="of-chev">{{ crate::web::icons::icon("chevron")|safe }}</span></summary>
+      <summary class="ph"><span class="ofi">{{ crate::web::icons::icon("folder")|safe }}</span><h2 class="label">Project<span class="of-phone">&nbsp;info</span></h2><span class="sub of-phone">{% if !repo.is_empty() %}{{ repo }}{% else %}{{ agent.machine }}{% endif %}</span><span class="grow"></span><a class="sub of-desk" href="/p/{{ slug }}/settings" data-dlg>Edit</a><span class="of-chev">{{ crate::web::icons::icon("chevron")|safe }}</span></summary>
       <div class="of-body info">
         {% for m in about %}{% if m.label == "About" %}<p class="info-about">{{ m.value }}</p>{% endif %}{% endfor %}
         <dl class="info-dl">
@@ -153,7 +153,7 @@
           <a href="/p/{{ slug }}/doc" data-dlg class="pd-link">{{ crate::web::icons::icon("doc")|safe }}<span>Project document</span>{% if !doc_line.is_empty() %}<span class="sub pd-rev">{{ doc_line }}</span>{% endif %}</a>
           {% if let Some(u) = session_url %}<a href="{{ u }}" target="_blank" rel="noopener">{{ crate::web::icons::icon("session")|safe }}<span>Open the agent's session</span>{{ crate::web::icons::icon("out")|safe }}</a>{% endif %}
           {% if let Some(c) = connect %}<form method="post" action="/p/{{ slug }}/setup-code" data-dlg><button class="linkish" type="submit">{{ crate::web::icons::icon("laptop")|safe }}<span>{% if c.folder.is_empty() %}Set up on a machine{% else %}Set up on another machine{% endif %}</span></button></form>{% endif %}
-          <a href="/p/{{ slug }}?tab=settings">{{ crate::web::icons::icon("gear")|safe }}<span>Project settings</span></a>
+          <a href="/p/{{ slug }}/settings" data-dlg>{{ crate::web::icons::icon("gear")|safe }}<span>Project settings</span></a>
         </div>
         {% if session_url.is_none() %}<p class="sub">The link to its Claude Code session shows up once the agent runs with <span class="mono">/remote-control</span>.</p>{% endif %}
       </div>
@@ -202,47 +202,6 @@
 {% endif %}
 
 {% if tab == "notes" %}{% if let Some(nv) = notes %}{% include "notes_list.html" %}{% endif %}{% endif %}
-
-{% if tab == "settings" %}
-{% if let Some(e) = edit %}
-<form method="post" action="/p/{{ slug }}/settings" class="card pad stack" aria-labelledby="set-h">
-  <h2 id="set-h">Details</h2>
-  <p class="sub">The same details the project's agent sets with <span class="mono">update_project</span>; it sees your changes the next time it checks. The project's id, <span class="mono">{{ slug }}</span>, stays as it is: every record and link uses it.</p>
-  <div class="form-grid">
-    <label>Name<input name="name" required maxlength="60" value="{{ e.name }}"></label>
-    <label>GitHub repository<input name="repo" value="{{ e.repo }}" placeholder="owner/name, e.g. giosuel/vinculum"><span class="sub">Its pull requests show here once set.</span></label>
-    <label class="span-all">What it is<input name="description" maxlength="300" value="{{ e.description }}"></label>
-    <label>Folder<input name="checkout" value="{{ e.checkout }}" placeholder="e.g. ~/vinculum"></label>
-    <label>Machine<input name="machine" value="{{ e.machine }}" placeholder="e.g. giosuel.ch"></label>
-    <label>Model<input name="model" value="{{ e.model }}" placeholder="e.g. Claude Opus 5.5" list="models"></label>
-    <label>Effort<input name="effort" value="{{ e.effort }}" placeholder="e.g. high" list="efforts"></label>
-    <label>Build product<input name="build_product" value="{{ e.build_product }}" placeholder="{{ slug }}"><span class="sub">The name test builds go under; empty means the id.</span></label>
-    <label>How PRs merge<select name="merge_method">
-      {% for (v, t) in [("merge", "A merge commit"), ("squash", "Squash"), ("rebase", "Rebase")] %}<option value="{{ v }}"{% if e.merge_method == *v %} selected{% endif %}>{{ t }}</option>{% endfor %}
-    </select><span class="sub">Every PR of the repository gets a Merge button that merges this way and deletes the branch.</span></label>
-    <label>Build server<select name="build_server">
-      <option value=""{% if e.build_server.is_empty() %} selected{% endif %}>None: builds where the agent is</option>
-      {% for b in e.servers %}<option value="{{ b }}"{% if *b == e.build_server %} selected{% endif %}>{{ b }}</option>{% endfor %}
-    </select><span class="sub">Where <span class="mono">flow remote</span> runs its builds and tests. Add machines in <a href="/settings?s=builders">Settings</a>.</span></label>
-    <p class="sub span-all">Tech stack, platform, git and project rules are in the <a href="/p/{{ slug }}/doc" data-dlg>project document</a>.</p>
-    <label class="span-all">Ports<textarea name="ports" rows="2" placeholder="One per line, e.g. 5173 vite">{{ e.ports }}</textarea></label>
-  </div>
-  <datalist id="models"><option value="Claude Opus 5.5"><option value="Claude Sonnet 5.5"><option value="Claude Fable 5.1"></datalist>
-  <datalist id="efforts"><option value="high"><option value="medium"><option value="low"></datalist>
-  <div><button class="btn" type="submit">Save</button></div>
-</form>
-{% endif %}
-<section class="card pad stack-sm" aria-labelledby="arch-h">
-  <h2 id="arch-h">{% if status == "archived" %}Archived{% else %}Archive{% endif %}</h2>
-  {% if status == "archived" %}
-  <p class="sub">It's out of the Dashboard, the waiting count and the project list. Its page and records stay.</p>
-  <form method="post" action="/p/{{ slug }}/status"><input type="hidden" name="status" value="active"><button class="btn sm ghost" type="submit">Restore the project</button></form>
-  {% else %}
-  <p class="sub">Done with it? Archiving takes it out of the Dashboard, the waiting count and the project list. Nothing is deleted, and you can restore it here.</p>
-  <form method="post" action="/p/{{ slug }}/status"><input type="hidden" name="status" value="archived"><button class="btn sm ghost" type="submit" data-confirm="Archive {{ name }}? It leaves the Dashboard and the project list. Nothing is deleted, and you can restore it here.">Archive the project</button></form>
-  {% endif %}
-</section>
-{% endif %}
 
 {% if let Some(tt) = to_test %}{% include "to_test.html" %}{% endif %}
 
