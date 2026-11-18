@@ -24,7 +24,9 @@ pub struct Limits {
 
 impl Limits {
     fn sane(w: Option<Window>) -> Option<Window> {
-        w.filter(|w| (0.0..=1000.0).contains(&w.used_percentage) && w.resets_at > 1_600_000_000 && w.resets_at < 4_000_000_000)
+        w.filter(|w| {
+            (0.0..=1000.0).contains(&w.used_percentage) && w.resets_at > 1_600_000_000 && w.resets_at < 4_000_000_000
+        })
     }
 
     pub fn checked(self) -> Self {
