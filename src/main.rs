@@ -35,7 +35,7 @@ enum Command {
     /// installing; `--dry-run` shows the steps).
     Setup(setup::SetupArgs),
     /// Do the server's jobs as the agents' user (run as that user, when AgentFlow runs as its own):
-    /// the owner's buttons, gh, guide edits, token files, new projects' folders, transcripts.
+    /// the owner's buttons, gh, token files, new projects' folders, transcripts.
     Hands {
         /// Where to listen.
         #[arg(long, default_value = "/run/agentflow-hands/hands.sock")]

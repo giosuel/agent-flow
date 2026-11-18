@@ -1,8 +1,8 @@
 //! Keeps AgentFlow in step with GitHub. Every three minutes: each active project's open PRs and
-//! every PR AgentFlow still thinks is open, releases whose PRs are all merged, and the guides'
-//! PRs. Every 30 minutes: contributions on other people's repositories. Merges, closes, CI
-//! failures and contribution news become events for the project's agent; a PR, release or guide
-//! PR that becomes ready is a "something to review" notification.
+//! every PR AgentFlow still thinks is open, and releases whose PRs are all merged. Every 30
+//! minutes: contributions on other people's repositories. Merges, closes, CI
+//! failures and contribution news become events for the project's agent; a PR or release
+//! that becomes ready is a "something to review" notification.
 
 use std::time::Duration;
 
@@ -27,9 +27,6 @@ pub fn spawn(state: AppState) {
             tick.tick().await;
             if let Err(e) = poll_once(&state).await {
                 tracing::warn!("GitHub poll: {e:#}");
-            }
-            if let Err(e) = refresh_guide_prs(&state).await {
-                tracing::warn!("guides' PRs: {e:#}");
             }
             // Other people's repositories change slowly: every tenth round (30 minutes).
             if round.is_multiple_of(10)
@@ -187,35 +184,6 @@ pub async fn poll_contributions(state: &AppState) -> anyhow::Result<()> {
         if let Err(e) = result {
             warn(state, &project, format!("watching {repo}#{number} failed: {e:#}")).await;
         }
-    }
-    Ok(())
-}
-
-/// The guides repository's open and recently merged PRs; a new one is something to review.
-pub async fn refresh_guide_prs(state: &AppState) -> anyhow::Result<()> {
-    let repo = state.config.handbook_repo.clone();
-    let open = state.github.repo_prs(&repo, false).await?;
-    let merged = state.github.repo_prs(&repo, true).await?;
-    let new: Vec<crate::github::RepoPr> = {
-        let mut cache = crate::util::lock(&state.guide_prs);
-        let new = if cache.fetched {
-            open.iter().filter(|p| !cache.open.iter().any(|o| o.number == p.number)).cloned().collect()
-        } else {
-            Vec::new()
-        };
-        *cache = crate::web::GuidePrs { open, merged, fetched: true };
-        new
-    };
-    for pr in new {
-        state.push.spawn(
-            push::Kind::Review,
-            Notification {
-                title: format!("Guides: #{} to review", pr.number),
-                body: format!("{} ({})", pr.title, pr.files.join(", ")),
-                url: "/guides".into(),
-                tag: Some(format!("guides-{}", pr.number)),
-            },
-        );
     }
     Ok(())
 }

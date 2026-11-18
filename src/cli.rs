@@ -252,8 +252,19 @@ pub fn hello(config_path: &Path, args: ClientArgs, mut a: HelloArgs) -> anyhow::
     }
     let part = if a.part == HelloPart::Doc { "doc" } else { "" };
     let body = serde_json::json!({"session": a.session, "machine": a.machine, "model": a.model, "effort": a.effort, "source": source, "part": part});
-    match Client::new(config_path, &args).and_then(|c| c.post_json("/api/hello", &body)) {
-        Ok(reply) => print!("{}", hello_text(&reply, &source, a.part)),
+    let client = Client::new(config_path, &args);
+    match client.as_ref().map_err(|e| anyhow::anyhow!("{e:#}")).and_then(|c| c.post_json("/api/hello", &body)) {
+        Ok(reply) => {
+            print!("{}", hello_text(&reply, &source, a.part));
+            // Once per session start: the handbook's copy on this machine (D-209). Quietly: a
+            // failure leaves the copy as it was.
+            if a.part != HelloPart::Doc
+                && let Ok(c) = &client
+                && let Err(e) = sync_handbook(c)
+            {
+                eprintln!("flow: the handbook's copy wasn't updated: {e:#}");
+            }
+        }
         // The doc part says it once for both.
         Err(e) if a.part != HelloPart::NoDoc => {
             println!("{}", unreachable_text(&e, "your project's document, where you are and the news"))
@@ -261,6 +272,43 @@ pub fn hello(config_path: &Path, args: ClientArgs, mut a: HelloArgs) -> anyhow::
         Err(_) => {}
     }
     Ok(())
+}
+
+/// Where this machine keeps its copy of the handbook.
+pub fn handbook_dir() -> PathBuf {
+    crate::util::expand_home("~/.local/share/agentflow/handbook")
+}
+
+/// Brings this machine's copy of the handbook up to date. Some(files) when it changed, None when
+/// it was current.
+pub fn sync_handbook(client: &Client) -> anyhow::Result<Option<usize>> {
+    let dir = handbook_dir();
+    let have = std::fs::read_to_string(dir.join(".version")).unwrap_or_default();
+    let reply = client.get(&format!("/api/handbook?have={}", have.trim()))?;
+    if reply.get("unchanged").and_then(serde_json::Value::as_bool) == Some(true) {
+        return Ok(None);
+    }
+    let version = reply.get("version").and_then(serde_json::Value::as_str).unwrap_or("").to_owned();
+    use base64::Engine;
+    let files: Vec<(String, Vec<u8>)> = reply
+        .get("files")
+        .and_then(serde_json::Value::as_array)
+        .map(|a| {
+            a.iter()
+                .filter_map(|f| {
+                    let path = f.get("path")?.as_str()?.to_owned();
+                    let bytes = match (f.get("text").and_then(|t| t.as_str()), f.get("b64").and_then(|t| t.as_str())) {
+                        (Some(t), _) => t.as_bytes().to_vec(),
+                        (None, Some(b)) => base64::engine::general_purpose::STANDARD.decode(b).ok()?,
+                        _ => return None,
+                    };
+                    Some((path, bytes))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    crate::handbook::write_out(&dir, &version, &files)?;
+    Ok(Some(files.len()))
 }
 
 /// What a hook prints when AgentFlow can't be reached, for the agent to tell the owner (the

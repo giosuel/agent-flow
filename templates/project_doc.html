@@ -15,51 +15,8 @@
 </div>
 
 
-{% if let Some(e) = editor %}
-<form method="post" action="/p/{{ slug }}/doc" class="pd-edit" data-doc-editor data-slug="{{ slug }}" data-base="{{ e.base_rev }}">
-  <input type="hidden" name="base_rev" value="{{ e.base_rev }}">
-  {% if !e.conflicts.is_empty() %}
-  <div class="pd-warn" role="alert">
-    <span class="pd-warn-i">{{ crate::web::icons::icon("info")|safe }}</span>
-    <div class="stack-sm grow">
-      <p>{{ e.other }} saved rev {{ e.base_rev }} while you were editing, and changed {% for c in e.conflicts %}{% if !loop.first %}{% if loop.last %} and {% else %}, {% endif %}{% endif %}<b>{{ c.title }}</b>{% endfor %}, which you changed too. Your version is in the editor; its other changes are merged in. Pick its version below, or Save to keep yours.</p>
-      {% for c in e.conflicts %}
-      <details class="pd-theirs">
-        <summary>Its version of <b>{{ c.title }}</b>{% if !c.mine_kept %} (you removed it){% endif %}</summary>
-        <div class="prose">{{ c.theirs_html|safe }}</div>
-        <textarea hidden data-theirs="{{ c.title }}">{{ c.theirs }}</textarea>
-        <button type="button" class="btn sm ghost" data-use-theirs="{{ c.title }}">Use its version</button>
-      </details>
-      {% endfor %}
-    </div>
-  </div>
-  {% endif %}
-  <div class="pd-warn" data-live-warn hidden role="status"><span class="pd-warn-i">{{ crate::web::icons::icon("info")|safe }}</span><p class="grow" data-live-text></p></div>
-  <div class="pd-seg only-phone" role="tablist" aria-label="Show"><button type="button" class="on" data-pane="src" role="tab" aria-selected="true">Markdown</button><button type="button" data-pane="prev" role="tab" aria-selected="false">Preview</button></div>
-  <div class="pd-panes" data-show="src">
-    <div class="pd-src">
-      <div class="etb" role="toolbar" aria-label="Formatting">
-        <button type="button" data-md="h" title="Section heading (##)" aria-label="Section heading"><b>H</b></button>
-        <button type="button" data-md="b" title="Bold" aria-label="Bold"><b>B</b></button>
-        <button type="button" data-md="i" title="Italic" aria-label="Italic"><i>I</i></button>
-        <button type="button" data-md="c" title="Code" aria-label="Code">{{ crate::web::icons::icon("code")|safe }}</button>
-        <button type="button" data-md="l" title="List" aria-label="List">{{ crate::web::icons::icon("list")|safe }}</button>
-        <button type="button" data-md="a" title="Link" aria-label="Link">{{ crate::web::icons::icon("out")|safe }}</button>
-        <span class="sep" aria-hidden="true"></span><span class="sub">Markdown · each <span class="mono">##</span> heading is a section</span>
-      </div>
-      <label class="vh" for="pd-text">The project document, in Markdown</label>
-      <textarea id="pd-text" name="text" class="mono pd-ta" spellcheck="true">{{ e.text }}</textarea>
-    </div>
-    <div class="pd-prev" aria-label="Preview"><div class="label hide-phone">Preview</div><div class="prose" data-preview>{{ e.preview_html|safe }}</div></div>
-  </div>
-  <div class="pd-foot">
-    <button class="btn" type="submit">Save</button>
-    <a class="btn ghost" href="/p/{{ slug }}/doc" data-dlg data-cancel>Cancel</a>
-    <span class="sub hide-phone">Ctrl+S saves · Esc asks before it drops your edits</span>
-    <span class="grow"></span>
-    <span class="sub hide-phone">{{ slug }} hears of your edit with its next call</span>
-  </div>
-</form>
+{% if let Some(ed) = editor %}
+{% include "md_editor.html" %}
 
 {% else if let Some((r, secs)) = old %}
 <div class="pd-hist">

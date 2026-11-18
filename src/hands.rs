@@ -1,7 +1,7 @@
 //! The agents' hands: everything AgentFlow does in the agents' world, as the agents' Unix user.
 //!
 //! That is: running the owner's buttons (git, gh, build commands in the checkouts), `gh` itself,
-//! reading and committing guides in the handbook checkout, writing token files, setting up a
+//! writing token files, setting up a
 //! new project's folder, reading Claude Code's transcripts, and finding which folder an agent
 //! process works in.
 //!
@@ -37,24 +37,6 @@ pub enum Job {
         /// Extra environment, e.g. `GH_TOKEN` when the server has a GitHub token of its own.
         #[serde(default)]
         env: Vec<(String, String)>,
-    },
-    GuideList {
-        dir: PathBuf,
-    },
-    GuideRead {
-        dir: PathBuf,
-        name: String,
-    },
-    GuideSave {
-        dir: PathBuf,
-        author: String,
-        name: String,
-        version: String,
-        content: String,
-        what: String,
-    },
-    GuideUnpushed {
-        dir: PathBuf,
     },
     WriteToken {
         path: PathBuf,
@@ -125,7 +107,7 @@ enum Reply {
     Err { message: String, code: Option<String> },
 }
 
-/// An error that carries a code across the socket, e.g. a guide save's "stale".
+/// An error that carries a code across the socket, e.g. "stale".
 #[derive(Debug, thiserror::Error)]
 #[error("{message}")]
 pub struct Coded {
@@ -189,17 +171,6 @@ impl Job {
     pub fn execute(self) -> anyhow::Result<serde_json::Value> {
         match self {
             Job::Exec { argv, cwd, timeout_s, env } => to_value(exec(&argv, cwd.as_deref(), timeout_s, &env)?),
-            Job::GuideList { dir } => to_value(crate::guides::list_here(&dir)?),
-            Job::GuideRead { dir, name } => to_value(crate::guides::read_here(&dir, &name)?),
-            Job::GuideSave { dir, author, name, version, content, what } => {
-                let repo = crate::guides::Repo { dir, author };
-                match repo.save_here(&name, &version, &content, &what) {
-                    Ok(commit) => to_value(commit),
-                    Err(crate::guides::SaveError::Other(e)) => Err(e),
-                    Err(e) => Err(Coded { code: e.code().into(), message: e.to_string() }.into()),
-                }
-            }
-            Job::GuideUnpushed { dir } => to_value(crate::guides::Repo { dir, author: String::new() }.unpushed_here()),
             Job::WriteToken { path, secret } => to_value(crate::tokens::write_token_file_here(&path, &secret)?),
             Job::TokenExists { path } => to_value(path.exists()),
             Job::WriteSetup { folder, token_file, name, public_url } => {
@@ -307,7 +278,7 @@ pub fn serve(socket: &Path, allow_uid: u32) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Requests are small; a guide's text is the largest.
+/// Requests are small; a setup's text is the largest.
 const MAX_REQUEST: u64 = 4 * 1024 * 1024;
 
 fn handle(mut stream: UnixStream, allow_uid: u32) -> anyhow::Result<()> {
@@ -367,26 +338,6 @@ mod tests {
         )
         .unwrap();
         assert!(slow.timed_out && slow.code.is_none());
-        // Errors keep their code across the socket.
-        std::fs::write(dir.path().join("A.md"), "# A\n").unwrap();
-        let e = send(
-            &sock,
-            &Job::GuideSave {
-                dir: dir.path().into(),
-                author: "o <o@x>".into(),
-                name: "A.md".into(),
-                version: "old".into(),
-                content: "x".into(),
-                what: "t".into(),
-            },
-        )
-        .unwrap_err();
-        assert_eq!(e.downcast_ref::<Coded>().map(|c| c.code.as_str()), Some("stale"));
-        let g: crate::guides::Guide = serde_json::from_value(
-            send(&sock, &Job::GuideRead { dir: dir.path().into(), name: "A.md".into() }).unwrap(),
-        )
-        .unwrap();
-        assert_eq!(g.text, "# A\n");
     }
 
     #[test]
@@ -400,6 +351,6 @@ mod tests {
             std::thread::sleep(Duration::from_millis(5));
         }
         // The connection is dropped without an answer (reset, or an empty reply).
-        assert!(send(&sock, &Job::GuideList { dir: dir.path().into() }).is_err());
+        assert!(send(&sock, &Job::TokenExists { path: dir.path().into() }).is_err());
     }
 }

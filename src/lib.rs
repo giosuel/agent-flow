@@ -20,7 +20,7 @@ pub mod contributions;
 pub mod db;
 pub mod demo;
 pub mod github;
-pub mod guides;
+pub mod handbook;
 pub mod hands;
 pub mod hardening;
 pub mod logview;

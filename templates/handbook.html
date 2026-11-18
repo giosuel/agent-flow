@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}Handbook{% endblock %}
+{% block content %}
+{# The handbook, kept by AgentFlow (D-208); read and edited like the project document (D-211). #}
+<div class="head{% if picked %} hide-on-phone{% endif %}">
+  <h1>Handbook</h1>
+  <p class="status-line">Your rules for every project. Agents read them through AgentFlow and have a copy on every machine; you and the consultant edit them here. Every edit is kept, and the backup holds them.</p>
+</div>
+{% if files.is_empty() %}
+<section class="card pad empty"><h2>No files yet</h2><p class="sub">The handbook's files come in once from the ai-handbook folder at the next start, or the consultant adds them with <span class="mono">handbook_edit</span>.</p></section>
+{% else %}
+<div class="split guides hb{% if picked %} picked{% endif %}">
+  <nav class="split-side stack" aria-label="Handbook">
+    <div class="card list">
+      {% for f in files %}
+      <a class="item conv-row{% if f.selected %} on{% endif %}" href="/handbook?f={{ f.name }}"{% if f.selected %} aria-current="true"{% endif %}>
+        <div class="ttl"><strong class="mono">{{ f.name }}</strong>{% if !f.blurb.is_empty() %}<span class="sub">{{ f.blurb }}</span>{% endif %}</div>
+      </a>
+      {% endfor %}
+    </div>
+  </nav>
+
+  <section class="split-main card pad hb-main">
+  {% if let Some(name) = file %}
+    <div class="pd-bar hb-bar">
+      <h2 class="mono">{{ name }}</h2>
+      <span class="sub">{{ line }}</span>
+      <span class="grow"></span>
+      {% if editor.is_none() %}
+      <a class="btn sm" href="/handbook?f={{ name }}&amp;edit=1">{{ crate::web::icons::icon("pencil")|safe }}<span>Edit</span></a>
+      {% if rev > 1 %}<a class="btn sm ghost" href="/handbook?f={{ name }}&amp;history=1">{{ crate::web::icons::icon("history")|safe }}<span>History</span></a>{% endif %}
+      {% else %}<span class="dirty" data-dirty hidden><i aria-hidden="true"></i>Not saved</span>{% endif %}
+    </div>
+    {% if let Some((ok, text)) = notice %}<p class="notice{% if *ok %} ok{% else %} warn{% endif %}" role="status">{{ text }}</p>{% endif %}
+    {% if let Some(ed) = editor %}
+    {% include "md_editor.html" %}
+    {% else if let Some((r, secs)) = old %}
+    <div class="pd-hist">
+      <div class="sec"><h3>As it was at rev {{ r }}</h3><a class="sub" href="/handbook?f={{ name }}&amp;history=1">Back to the history</a></div>
+      <div class="prose pd-doc old">{% for s in secs %}<section>{% if !s.intro %}<h2>{{ s.title }}</h2>{% endif %}{{ s.html|safe }}</section>{% endfor %}</div>
+    </div>
+    {% else if !history.is_empty() %}
+    <div class="pd-hist">
+      <div class="sec"><h3>History</h3><a class="sub" href="/handbook?f={{ name }}">Back to the file</a></div>
+      <ol class="plain history">{% for h in history %}<li><span class="mono sub">rev {{ h.rev }} · {{ h.when }}</span> {{ h.who }}: {{ h.what }}{% if h.rev < rev %} · <a href="/handbook?f={{ name }}&amp;rev={{ h.rev }}">see it</a>{% endif %}</li>{% endfor %}</ol>
+    </div>
+    {% else %}
+    <div class="pd-view">
+      <nav class="pd-toc" aria-label="Contents">{% for s in sections %}<a href="#pd-s{{ s.index }}"{% if loop.first %} class="on"{% endif %}>{{ s.title }}</a>{% endfor %}</nav>
+      <div class="prose pd-doc">{% for s in sections %}<section id="pd-s{{ s.index }}">{% if !s.intro %}<h2>{{ s.title }}</h2>{% endif %}{{ s.html|safe }}</section>{% endfor %}</div>
+    </div>
+    {% endif %}
+  {% endif %}
+  </section>
+</div>
+{% endif %}
+{% endblock %}

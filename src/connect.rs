@@ -618,6 +618,19 @@ fn finish_setup(
     }
     let client = Client::with_token(url, token);
     client.post_json("/api/setup/done", &json!({"folder": folder.display().to_string(), "machine": machine}))?;
+    // The handbook: a copy on this machine, and Claude Code's global CLAUDE.md including it (the
+    // owner, 2026-11-18, D-209).
+    match crate::cli::sync_handbook(&client) {
+        Ok(_) => println!("  ✓ the handbook's copy is in {}", crate::cli::handbook_dir().display()),
+        Err(e) => println!("  ! the handbook's copy wasn't made: {e:#}"),
+    }
+    if crate::cli::handbook_dir().join("CLAUDE.md").exists() {
+        match include_handbook(&crate::util::home_dir()) {
+            Ok(Some(what)) => println!("  ✓ {what}"),
+            Ok(None) => {}
+            Err(e) => println!("  ! ~/.claude/CLAUDE.md wasn't changed: {e:#}"),
+        }
+    }
     let (n, _) = crate::sync::session_count(folder);
     if n > 0 {
         let files = crate::sync::conversations(folder);
@@ -636,6 +649,52 @@ fn finish_setup(
     println!();
     println!("The project has been set up.");
     Ok(())
+}
+
+/// Makes `~/.claude/CLAUDE.md` include the handbook's copy: a line including the old ai-handbook
+/// checkout's CLAUDE.md is replaced, else the include is added. Says what it did; None when it
+/// was so already.
+pub fn include_handbook(home: &Path) -> anyhow::Result<Option<String>> {
+    let path = home.join(".claude/CLAUDE.md");
+    let line = format!("@{}", crate::cli::handbook_dir().join("CLAUDE.md").display());
+    let text = std::fs::read_to_string(&path).unwrap_or_default();
+    let Some(new) = with_handbook_include(&text, &line) else { return Ok(None) };
+    if let Some(d) = path.parent() {
+        std::fs::create_dir_all(d)?;
+    }
+    std::fs::write(&path, &new)?;
+    Ok(Some(if text.contains("ai-handbook/CLAUDE.md") {
+        "~/.claude/CLAUDE.md includes the handbook from AgentFlow's copy now, instead of ~/ai-handbook".to_owned()
+    } else {
+        "~/.claude/CLAUDE.md includes the handbook now".to_owned()
+    }))
+}
+
+/// The text with the handbook's include in it, or None when it has it already.
+fn with_handbook_include(text: &str, line: &str) -> Option<String> {
+    if text.lines().any(|l| l.trim() == line) {
+        return None;
+    }
+    let mut replaced = false;
+    let mut out: Vec<String> = text
+        .lines()
+        .map(|l| {
+            let t = l.trim();
+            if !replaced && t.starts_with('@') && t.ends_with("ai-handbook/CLAUDE.md") {
+                replaced = true;
+                line.to_owned()
+            } else {
+                l.to_owned()
+            }
+        })
+        .collect();
+    if !replaced {
+        if out.last().is_some_and(|l| !l.trim().is_empty()) {
+            out.push(String::new());
+        }
+        out.push(line.to_owned());
+    }
+    Some(out.join("\n") + "\n")
 }
 
 fn s(v: &Value) -> String {
@@ -658,5 +717,16 @@ mod tests {
         assert_eq!(name("/x/flow hello --no-doc --session 'Cold Trace' --token-file t").as_deref(), Some("Cold Trace"));
         assert_eq!(name(r"/x/flow hello --no-doc --session 'it'\''s' --token-file t").as_deref(), Some("it's"));
         assert_eq!(session_name_in(&json!({})), None);
+    }
+
+    #[test]
+    fn the_handbook_include_replaces_the_old_one_or_is_added_once() {
+        let line = "@/home/u/.local/share/agentflow/handbook/CLAUDE.md";
+        let old = "@/home/u/ai-handbook/CLAUDE.md\n";
+        assert_eq!(with_handbook_include(old, line).unwrap(), format!("{line}\n"));
+        let other = "# Mine\n\nBe brief.\n";
+        assert_eq!(with_handbook_include(other, line).unwrap(), format!("# Mine\n\nBe brief.\n\n{line}\n"));
+        assert_eq!(with_handbook_include(&format!("{line}\n"), line), None, "once");
+        assert_eq!(with_handbook_include("", line).unwrap(), format!("{line}\n"));
     }
 }

@@ -35,7 +35,7 @@ const NAV: &[(&str, &str)] = &[
     ("/machine", "Machine"),
     ("/usage", "Usage"),
     ("/conversations", "Conversations"),
-    ("/guides", "Guides"),
+    ("/handbook", "Handbook"),
     ("/log", "Log"),
 ];
 
@@ -52,7 +52,7 @@ const TABS: &[(&str, &str, &str)] = &[
     ("/", "Dashboard", "grid"),
     ("/projects", "Projects", "folder"),
     ("/usage", "Usage", "chart"),
-    ("/guides", "Guides", "book"),
+    ("/handbook", "Handbook", "book"),
 ];
 pub const MORE: &[(&str, &str, &str)] = &[
     ("/machine", "Machine", "machine"),
@@ -72,7 +72,7 @@ pub struct Tab {
 pub struct Nav {
     pub items: Vec<NavItem>,
     pub tabs: Vec<Tab>,
-    /// On the phone a sub-page shows a back bar ("‹ Guides") instead of the logo, like an app's
+    /// On the phone a sub-page shows a back bar ("‹ Handbook") instead of the logo, like an app's
     /// navigation (the owner, 2026-11-11: "clicking on something should open a new "window" or
     /// feel more like navigation").
     pub back: Option<(String, String)>,
@@ -87,8 +87,7 @@ pub struct Nav {
 pub async fn nav(state: &AppState, actor: &Actor, active: &str) -> Nav {
     let mut n = Nav::new(actor, active);
     if actor.is_owner() {
-        let guides = crate::util::lock(&state.guide_prs).open.len() as i64;
-        n.waiting = state.db.call(|c| crate::waiting::count(c)).await.unwrap_or(0) as i64 + guides;
+        n.waiting = state.db.call(|c| crate::waiting::count(c)).await.unwrap_or(0) as i64;
         n.unread = state.db.call(|c| crate::notifications::unread(c)).await.unwrap_or(0);
     }
     n

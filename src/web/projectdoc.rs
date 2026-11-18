@@ -12,6 +12,7 @@ use axum::routing::{get, post};
 use axum::{Extension, Form, Json, Router};
 use serde::Deserialize;
 
+use super::editor::MdEditor;
 use super::pages::{Nav, nav, render};
 use super::{AppResult, AppState, ClientIp};
 use crate::activity::{self, Action, Entry, Via};
@@ -42,24 +43,6 @@ pub struct RevRow {
     pub what: String,
 }
 
-/// A section both changed, offered to pick: its title, the agent's version (Markdown, for the
-/// editor, and rendered), and whether the owner's text still has it.
-pub struct ConflictView {
-    pub title: String,
-    pub theirs: String,
-    pub theirs_html: String,
-    pub mine_kept: bool,
-}
-
-pub struct Editor {
-    pub text: String,
-    pub base_rev: i64,
-    pub preview_html: String,
-    pub conflicts: Vec<ConflictView>,
-    /// Who saved the version merged in, for the conflict banner.
-    pub other: String,
-}
-
 #[derive(Template)]
 #[template(path = "project_doc.html")]
 struct DocPage {
@@ -71,7 +54,7 @@ struct DocPage {
     line: String,
     bytes: String,
     sections: Vec<SectionView>,
-    editor: Option<Editor>,
+    editor: Option<MdEditor>,
     history: Vec<RevRow>,
     /// An older revision being looked at: (rev, its sections).
     old: Option<(i64, Vec<SectionView>)>,
@@ -156,13 +139,8 @@ async fn page(
             Ok((p, d, history, old))
         })
         .await?;
-    let editor = (owner && q.edit == Some(1)).then(|| Editor {
-        preview_html: crate::markdown::to_html(&d.text),
-        text: d.text.clone(),
-        base_rev: d.rev,
-        conflicts: Vec::new(),
-        other: String::new(),
-    });
+    let editor =
+        (owner && q.edit == Some(1)).then(|| doc_editor(&p.slug, d.text.clone(), d.rev, Vec::new(), String::new()));
     render(DocPage {
         nav: nav(&state, &actor, "/projects").await,
         notice: notice(q.done.as_deref(), q.taken.as_deref(), &p.slug),
@@ -256,6 +234,31 @@ async fn save(
     }
 }
 
+/// The project document's editor (`base_rev`: the version the text goes over).
+fn doc_editor(
+    slug: &str,
+    text: String,
+    base_rev: i64,
+    conflicts: Vec<super::editor::Conflict>,
+    other: String,
+) -> MdEditor {
+    MdEditor {
+        action: format!("/p/{slug}/doc"),
+        hidden: Vec::new(),
+        base_rev,
+        preview_html: crate::markdown::to_html(&text),
+        text,
+        preview_url: format!("/p/{slug}/doc/preview"),
+        rev_url: format!("/p/{slug}/doc/rev"),
+        conflicts,
+        other,
+        cancel_href: format!("/p/{slug}/doc"),
+        cancel_dlg: true,
+        label: "The project document, in Markdown".into(),
+        note: format!("{slug} hears of your edit with its next call"),
+    }
+}
+
 async fn editor_again(
     state: &AppState,
     actor: &Actor,
@@ -268,6 +271,7 @@ async fn editor_again(
     let now = now_ms();
     let s = slug.to_owned();
     let p = state.db.call(move |c| crate::projects::require(c, &s)).await?;
+    let editor = doc_editor(&p.slug, text, cur.rev, MdEditor::conflicts_of(conflicts), cur.author.clone());
     render(DocPage {
         nav: nav(state, actor, "/projects").await,
         slug: p.slug,
@@ -277,25 +281,7 @@ async fn editor_again(
         line: line(&cur, now),
         bytes: format!("{:.1} KB of {} KB", cur.text.len() as f64 / 1024.0, projectdoc::MAX_BYTES / 1024),
         sections: Vec::new(),
-        editor: Some(Editor {
-            preview_html: crate::markdown::to_html(&text),
-            text,
-            // Saving again goes over the version merged in.
-            base_rev: cur.rev,
-            conflicts: conflicts
-                .into_iter()
-                .map(|c| {
-                    let body = c.theirs.split_once('\n').map(|x| x.1).unwrap_or("");
-                    ConflictView {
-                        theirs_html: crate::markdown::to_html(body),
-                        title: c.title,
-                        theirs: c.theirs.trim_end().to_owned(),
-                        mine_kept: c.mine_kept,
-                    }
-                })
-                .collect(),
-            other: cur.author.clone(),
-        }),
+        editor: Some(editor),
         history: Vec::new(),
         old: None,
         notice,

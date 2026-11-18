@@ -56,7 +56,7 @@ impl Kind {
         match self {
             Kind::Question => "New question",
             Kind::Build => "Build ready to try",
-            Kind::Review => "Something to review: a PR, a tag, a guide",
+            Kind::Review => "Something to review: a PR or a tag",
             Kind::Urgent => "Urgent calls from an agent",
             Kind::Usage => "The plan's usage passed 80%",
         }

@@ -98,20 +98,6 @@ async fn dashboard(
     let today = tz.long(crate::util::now_ms());
     let now = now_ms();
     let answered = q.answered.clone();
-    // The guides' open pull requests, from the poller's cache.
-    let repo = state.config.handbook_repo.clone();
-    let guide_prs: Vec<Item> = crate::util::lock(&state.guide_prs)
-        .open
-        .iter()
-        .map(|p| Item {
-            icon: icon("doc"),
-            title: p.title.clone(),
-            sub: format!("{} · {repo}/pull/{}", p.files.join(", "), p.number),
-            // The Guides page has the diff link and the Merge button together.
-            url: format!("/guides?view=prs#pr-{}", p.number),
-            action: "Review",
-        })
-        .collect();
     let data = state
         .db
         .call(move |c| {
@@ -254,9 +240,6 @@ async fn dashboard(
             };
             if !to_test.is_empty() {
                 groups.push(Group { title: "To test", items: to_test });
-            }
-            if !guide_prs.is_empty() {
-                groups.push(Group { title: "Guides to review", items: guide_prs });
             }
             // The owner, 2026-11-11: "put it on the dashboard in the existing card under a new
             // title "external PRs / issues"". Only drafts waiting for their Send.

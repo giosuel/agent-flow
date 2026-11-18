@@ -96,7 +96,7 @@ impl Taken {
         for (dir, what) in [
             (config.token_dir(), "AgentFlow's tokens"),
             (config.data_dir(), "AgentFlow's data"),
-            (config.handbook_dir(), "the guides"),
+            (config.handbook_dir(), "the old ai-handbook folder"),
             (crate::util::home_dir().join(".claude"), "Claude Code's own folder"),
             (crate::util::home_dir().join(".config"), "your settings"),
         ] {
@@ -278,7 +278,7 @@ pub fn create_files(
                 "---\nname: agentflow\ndescription: this project ({name}) is run through AgentFlow; start every session with its hello tool\nmetadata:\n  type: project\n---\n\n\
                  {name} is managed in AgentFlow ({public_url}), through the `agentflow` MCP server. A hook loads `hello` at \
                  the start of every session and after every compaction (call it yourself if it didn't come); record tasks, decisions and questions there, not in files \
-                 in the repository. The owner's rules are in the guides (`guides`, `guide`). Ask the owner with \
+                 in the repository. The owner's rules are in the handbook (`handbook`, `handbook_read`; a copy is in ~/.local/share/agentflow/handbook). Ask the owner with \
                  `ask_question`; write to other agents and the consultant with Claude Code's SendMessage (AgentFlow logs it).\n",
                 name = p.name.trim()
             )

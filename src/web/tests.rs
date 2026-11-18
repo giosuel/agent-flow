@@ -32,16 +32,18 @@ impl TestServer {
         let addr = listener.local_addr().unwrap();
         // Builds and keys go to a folder of the test's own, never the real data directory.
         let data = tempfile::tempdir().unwrap();
-        // A handbook of the test's own: a git repository with one guide.
-        let handbook = data.path().join("handbook");
+        // A handbook of the test's own, brought in from an old checkout like at a first start.
+        let handbook = data.path().join("ai-handbook");
         std::fs::create_dir(&handbook).unwrap();
         std::fs::write(handbook.join("MACHINE.md"), "# MACHINE\n\nThe server.\n\n## Ports\n\nUse 10.0.8.1.\n").unwrap();
-        for args in [
-            &["init", "-q", "-b", "main"][..],
-            &["add", "MACHINE.md"],
-            &["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "init"],
-        ] {
-            assert!(std::process::Command::new("git").arg("-C").arg(&handbook).args(args).status().unwrap().success());
+        {
+            let (h, d) = (handbook.clone(), data.path().to_owned());
+            db.call(move |c| {
+                crate::handbook::import(c, &h)?;
+                crate::handbook::mirror(c, &d)
+            })
+            .await
+            .unwrap();
         }
         let config = Config {
             listen: addr,
@@ -1529,110 +1531,121 @@ async fn conversations_log_sessions_and_subagents_from_the_transcripts() {
 }
 
 #[tokio::test]
-async fn the_owner_edits_a_guide_and_agents_read_it() {
+async fn the_owner_and_the_consultant_edit_the_handbook_and_agents_read_it() {
     let s = TestServer::start().await;
     let token = s.token(TokenKind::Project, Some("vinculum")).await;
     let sess = mcp_session(&s, &token).await;
-    let (_, list) = mcp_tool(&s, &token, &sess, "guides", json!({})).await;
-    assert_eq!(list["guides"][0]["sections"], json!(["Introduction", "Ports"]));
-    let (ok, err) = mcp_tool(&s, &token, &sess, "guide", json!({"name": "MACHINE.md", "section": "Nope"})).await;
+    let (_, list) = mcp_tool(&s, &token, &sess, "handbook", json!({})).await;
+    assert_eq!(list["pages"][0]["sections"], json!(["Introduction", "Ports"]), "{list}");
+    let (ok, err) =
+        mcp_tool(&s, &token, &sess, "handbook_read", json!({"name": "MACHINE.md", "section": "Nope"})).await;
     assert!(!ok && err.as_str().unwrap().contains("it has: Introduction, Ports"));
-    let (ok, _) = mcp_tool(&s, &token, &sess, "guide", json!({"name": "../secret.md"})).await;
+    let (ok, _) = mcp_tool(&s, &token, &sess, "handbook_read", json!({"name": "../secret.md"})).await;
     assert!(!ok);
+    // Only the consultant edits through MCP.
+    let (ok, err) =
+        mcp_tool(&s, &token, &sess, "handbook_edit", json!({"name": "MACHINE.md", "text": "x", "what": "x"})).await;
+    assert!(!ok && err.as_str().unwrap().contains("only the consultant"), "{err}");
 
     let cookie = s.owner_cookie().await;
-    let page = s
+    let get = |path: &'static str| {
+        let (s, cookie) = (&s, cookie.clone());
+        async move { s.http.get(s.url(path)).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap() }
+    };
+    let page = get("/handbook").await;
+    assert!(
+        page.contains("<h1>Handbook</h1>") && page.contains("MACHINE.md") && !page.contains("pull request"),
+        "{page}"
+    );
+    // The owner edits the whole file in the Markdown editor, like the project document (D-211).
+    let page = get("/handbook?f=MACHINE.md&edit=1").await;
+    assert!(page.contains("data-md-editor") && page.contains(r#"name="base_rev" value="1""#), "{page}");
+    let save = |base: i64, text: &'static str| {
+        let (s, cookie) = (&s, cookie.clone());
+        async move {
+            s.http
+                .post(s.url("/handbook"))
+                .header(COOKIE, &cookie)
+                .header(ORIGIN, &s.base)
+                .form(&[("f", "MACHINE.md"), ("base_rev", &base.to_string()), ("text", text)])
+                .send()
+                .await
+                .unwrap()
+        }
+    };
+    let res = save(1, "# MACHINE\n\nThe server.\n\n## Ports\n\nUse 10.0.8.1 or 127.0.0.1.\n").await;
+    assert_eq!(res.headers()[LOCATION], "/handbook?f=MACHINE.md&saved=2");
+    let (_, ports) =
+        mcp_tool(&s, &token, &sess, "handbook_read", json!({"name": "MACHINE.md", "section": "ports"})).await;
+    assert!(ports["text"].as_str().unwrap().contains("127.0.0.1"));
+    // Written out as a file too.
+    let file = std::fs::read_to_string(s.state.config.data_dir().join("handbook/MACHINE.md")).unwrap();
+    assert!(file.contains("127.0.0.1"));
+    assert!(get("/handbook?f=MACHINE.md&history=1").await.contains("owner: Ports"));
+    let preview = s
         .http
-        .get(s.url("/guides?f=MACHINE.md&edit=1"))
+        .post(s.url("/handbook/preview"))
         .header(COOKIE, &cookie)
+        .header(ORIGIN, &s.base)
+        .form(&[("text", "See [OWNER.md](OWNER.md).")])
         .send()
         .await
         .unwrap()
         .text()
         .await
         .unwrap();
-    let start = page.find(r#"name="version" value=""#).unwrap() + r#"name="version" value=""#.len();
-    let version = page[start..].split('"').next().unwrap().to_owned();
-    let res = s
-        .http
-        .post(s.url("/guides/save"))
-        .header(COOKIE, &cookie)
-        .header(ORIGIN, &s.base)
-        .form(&[
-            ("f", "MACHINE.md"),
-            ("version", version.as_str()),
-            ("section", "1"),
-            ("text", "## Ports\n\nUse 10.0.8.1 or 127.0.0.1."),
-        ])
-        .send()
-        .await
-        .unwrap();
-    assert!(
-        res.headers()[LOCATION].to_str().unwrap().starts_with("/guides?f=MACHINE.md&saved="),
-        "{:?}",
-        res.headers()[LOCATION]
-    );
-    let (_, ports) = mcp_tool(&s, &token, &sess, "guide", json!({"name": "MACHINE.md", "section": "ports"})).await;
-    assert!(ports["text"].as_str().unwrap().contains("127.0.0.1"));
-    // The same old version again: refused, nothing written.
-    let res = s
-        .http
-        .post(s.url("/guides/save"))
-        .header(COOKIE, &cookie)
-        .header(ORIGIN, &s.base)
-        .form(&[("f", "MACHINE.md"), ("version", version.as_str()), ("section", "1"), ("text", "## Ports\n\nx")])
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(res.headers()[LOCATION], "/guides?f=MACHINE.md&error=stale");
+    assert!(preview.contains(r#"href="/handbook?f=OWNER.md""#), "{preview}");
 
-    // A PR of the guides: shown, counted, merged by the owner.
-    s.github.repo_open.lock().unwrap().push(crate::github::RepoPr {
-        number: 27,
-        title: "MACHINE: gnome-keyring is installed now".into(),
-        url: "https://github.com/giosuel/ai-handbook/pull/27".into(),
-        additions: 1,
-        deletions: 1,
-        files: vec!["MACHINE.md".into()],
-        author: "giosuel".into(),
-        created_at: String::new(),
-        head_ref_oid: "a".repeat(40),
-    });
-    crate::poller::refresh_guide_prs(&s.state).await.unwrap();
-    let html = s.http.get(s.url("/")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
-    assert!(html.contains("Guides to review · 1"));
-    let res = s
+    // The consultant edits a section with the version it read; a stale one is refused.
+    let admin = s.token(TokenKind::Admin, None).await;
+    let asess = mcp_session(&s, &admin).await;
+    let (_, read) = mcp_tool(&s, &admin, &asess, "handbook_read", json!({"name": "MACHINE.md"})).await;
+    let v = read["version"].as_str().unwrap().to_owned();
+    let (ok, r) = mcp_tool(&s, &admin, &asess, "handbook_edit", json!({"name": "MACHINE.md", "version": v, "section": "Ports", "text": "## Ports\n\nOnly 10.0.8.1.", "what": "Ports"})).await;
+    assert!(ok && r["rev"] == 3, "{r}");
+    let (ok, err) = mcp_tool(
+        &s,
+        &admin,
+        &asess,
+        "handbook_edit",
+        json!({"name": "MACHINE.md", "version": v, "text": "x", "what": "x"}),
+    )
+    .await;
+    assert!(!ok && err.as_str().unwrap().contains("changed since"), "{err}");
+    let (ok, _) = mcp_tool(
+        &s,
+        &admin,
+        &asess,
+        "handbook_edit",
+        json!({"name": "templates/new.md", "text": "# New\n", "what": "a template"}),
+    )
+    .await;
+    assert!(ok);
+    // The owner's save from rev 2 after the consultant's rev 3: merged by section, or both versions.
+    let res = save(2, "# MACHINE\n\nThe server, viber.\n\n## Ports\n\nUse 10.0.8.1 or 127.0.0.1.\n").await;
+    assert_eq!(res.headers()[LOCATION], "/handbook?f=MACHINE.md&saved=4&taken=Ports");
+    let (_, now) = mcp_tool(&s, &token, &sess, "handbook_read", json!({"name": "MACHINE.md"})).await;
+    let text = now["text"].as_str().unwrap();
+    assert!(text.contains("viber") && text.contains("Only 10.0.8.1."), "{text}");
+    let page = save(3, "# MACHINE\n\nThe server, mine.\n\n## Ports\n\nOnly 10.0.8.1.\n").await.text().await.unwrap();
+    assert!(page.contains("Use its version") && page.contains(r#"name="base_rev" value="4""#), "{page}");
+
+    // Machines fetch it whole, or hear it's unchanged.
+    let b: Value = s.http.get(s.url("/api/handbook")).bearer_auth(&token).send().await.unwrap().json().await.unwrap();
+    assert_eq!(b["files"].as_array().unwrap().len(), 2, "{b}");
+    let v = b["version"].as_str().unwrap();
+    let again: Value = s
         .http
-        .post(s.url("/guides/prs/merge"))
-        .header(COOKIE, &cookie)
-        .header(ORIGIN, &s.base)
-        .form(&[("number", "27"), ("head", &"b".repeat(40))])
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(res.status(), StatusCode::BAD_REQUEST, "pushed to since the owner looked");
-    assert!(s.github.merged.lock().unwrap().is_empty());
-    let res = s
-        .http
-        .post(s.url("/guides/prs/merge"))
-        .header(COOKIE, &cookie)
-        .header(ORIGIN, &s.base)
-        .form(&[("number", "27"), ("head", &"a".repeat(40))])
-        .send()
-        .await
-        .unwrap();
-    // The test's checkout has no remote, so the pull after the merge reports a problem.
-    assert_eq!(res.headers()[LOCATION], "/guides?view=prs&error=pull");
-    assert_eq!(*s.github.merged.lock().unwrap(), vec![27]);
-    let res = s
-        .http
-        .post(s.url("/guides/prs/merge"))
+        .get(s.url(&format!("/api/handbook?have={v}")))
         .bearer_auth(&token)
-        .form(&[("number", "27"), ("head", "")])
         .send()
         .await
+        .unwrap()
+        .json()
+        .await
         .unwrap();
-    assert_eq!(res.status(), StatusCode::FORBIDDEN);
+    assert_eq!(again["unchanged"], true);
+    assert_eq!(s.http.get(s.url("/api/handbook")).send().await.unwrap().status(), StatusCode::UNAUTHORIZED);
 }
 
 #[tokio::test]

@@ -1,4 +1,4 @@
-//! Markdown to HTML for record bodies and guides. Agents write the text, so it's treated as
+//! Markdown to HTML for record bodies and the handbook. Agents write the text, so it's treated as
 //! untrusted: raw HTML is shown as text, and links and images keep only http(s), mailto and
 //! relative targets.
 
