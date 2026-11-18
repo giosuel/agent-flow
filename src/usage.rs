@@ -880,8 +880,10 @@ mod tests {
                 }
             }
             fn row(c: &Connection, id: &str) -> (Option<i64>, bool) {
-                c.query_row("SELECT cache_write_1h, fast FROM usage WHERE message_id = ?1", [id], |r| Ok((r.get(0)?, r.get(1)?)))
-                    .unwrap()
+                c.query_row("SELECT cache_write_1h, fast FROM usage WHERE message_id = ?1", [id], |r| {
+                    Ok((r.get(0)?, r.get(1)?))
+                })
+                .unwrap()
             }
             assert_eq!(row(c, "m1"), (Some(0), true));
             assert_eq!(row(c, "m2"), (None, false));
@@ -982,7 +984,15 @@ mod tests {
                 vec![(
                     Some(p.id),
                     1,
-                    Tokens { calls: 3, input: 21, cache_write: 300, output: 30, cache_read: 3000, cost_micro: 3684, unpriced: 0 }
+                    Tokens {
+                        calls: 3,
+                        input: 21,
+                        cache_write: 300,
+                        output: 30,
+                        cache_read: 3000,
+                        cost_micro: 3684,
+                        unpriced: 0
+                    }
                 )]
             );
 
