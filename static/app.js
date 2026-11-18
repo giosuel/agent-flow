@@ -654,6 +654,10 @@ document.addEventListener("change", (e) => {
   let back = null;
   const close = () => {
     if (!back) return;
+    // An editor with unsaved edits asks first (the project document).
+    if (window.afDocGuard && back.querySelector("form[data-doc-editor]") && !window.afDocGuard()) return;
+    const ed = back.querySelector("form[data-doc-editor] textarea[name=text]");
+    if (ed) ed.defaultValue = ed.value;
     back.classList.remove("open");
     const b = back;
     back = null;
@@ -796,4 +800,153 @@ document.addEventListener("click", (e) => {
     const first = [...f.closest(".dd-menu").querySelectorAll("a[data-name]")].find((a) => !a.hidden);
     if (first) location.href = first.href;
   });
+})();
+
+// The project document (the owner, 2026-11-18): contents that follow the reading, and the editor:
+// the whole document as Markdown with a preview beside it (Markdown or Preview on the phone),
+// Ctrl+S saves, closing asks before dropping edits, and a newer version saved meanwhile is said.
+(() => {
+  // Contents: a click scrolls inside the dialog; the section being read is marked.
+  document.addEventListener("click", (e) => {
+    const a = e.target.closest(".pd-toc a[href^='#']");
+    if (!a) return;
+    const t = document.getElementById(a.getAttribute("href").slice(1));
+    if (!t) return;
+    e.preventDefault();
+    t.scrollIntoView({ behavior: "smooth", block: "start" });
+  });
+  document.addEventListener("scroll", (e) => {
+    const box = e.target;
+    if (!(box instanceof Element)) return;
+    const toc = box.querySelector(".pd-toc");
+    if (!toc) return;
+    const top = box.getBoundingClientRect().top + 40;
+    let cur = null;
+    for (const s of box.querySelectorAll(".pd-doc section[id]")) if (s.getBoundingClientRect().top <= top) cur = s.id;
+    for (const a of toc.querySelectorAll("a")) a.classList.toggle("on", a.getAttribute("href") === "#" + (cur || toc.querySelector("a")?.getAttribute("href").slice(1)));
+  }, true);
+
+  const dirty = (form) => {
+    const ta = form && form.querySelector("textarea[name=text]");
+    return !!ta && ta.value !== ta.defaultValue;
+  };
+  const ask = () => confirm("Drop your edits to the project document?");
+  window.afDocGuard = () => {
+    const f = document.querySelector("form[data-doc-editor]");
+    return !dirty(f) || ask();
+  };
+  // Cancel and links out of the editor ask first.
+  document.addEventListener("click", (e) => {
+    const a = e.target.closest("a[data-cancel]");
+    if (!a || !dirty(a.closest("form"))) return;
+    if (!ask()) { e.preventDefault(); e.stopImmediatePropagation(); }
+    else a.closest("form").querySelector("textarea[name=text]").defaultValue = a.closest("form").querySelector("textarea[name=text]").value;
+  }, true);
+  window.addEventListener("beforeunload", (e) => {
+    if (dirty(document.querySelector("form[data-doc-editor]"))) { e.preventDefault(); e.returnValue = ""; }
+  });
+
+  // Section helpers for "Use its version": the text split at `## ` headings outside code.
+  const split = (text) => {
+    const out = [{ title: "Introduction", lines: [] }];
+    let code = false;
+    for (const line of text.split("\n")) {
+      if (line.trimStart().startsWith("```")) code = !code;
+      if (!code && line.startsWith("## ")) out.push({ title: line.slice(3).trim(), lines: [] });
+      out[out.length - 1].lines.push(line);
+    }
+    return out.filter((s, i) => i > 0 || s.lines.join("").trim() !== "");
+  };
+
+  const wire = (root) => {
+    const form = root.querySelector && root.querySelector("form[data-doc-editor]");
+    if (!form || form.dataset.wired) return;
+    form.dataset.wired = "1";
+    const ta = form.querySelector("textarea[name=text]");
+    const prev = form.querySelector("[data-preview]");
+    const flag = form.closest("[data-dlg-content], main")?.querySelector("[data-dirty]");
+    const slug = form.dataset.slug;
+    let timer = null;
+    let seq = 0;
+    const render = async () => {
+      const n = ++seq;
+      try {
+        const res = await fetch(`/p/${encodeURIComponent(slug)}/doc/preview`, {
+          method: "POST", credentials: "same-origin",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({ text: ta.value }),
+        });
+        if (res.ok && n === seq) prev.innerHTML = await res.text(); // rendered and sanitised by the server
+      } catch (_) { /* the preview waits for the next edit */ }
+    };
+    ta.addEventListener("input", () => {
+      if (flag) flag.hidden = !dirty(form);
+      clearTimeout(timer);
+      timer = setTimeout(render, 250);
+    });
+    ta.addEventListener("keydown", (e) => {
+      if ((e.ctrlKey || e.metaKey) && (e.key === "s" || e.key === "Enter")) { e.preventDefault(); form.requestSubmit(); }
+    });
+    form.addEventListener("submit", () => { ta.defaultValue = ta.value; });
+    // Formatting buttons wrap the selection or start a line.
+    form.addEventListener("click", (e) => {
+      const b = e.target.closest("button[data-md]");
+      if (!b) return;
+      const [s, t] = [ta.selectionStart, ta.selectionEnd];
+      const sel = ta.value.slice(s, t);
+      const lineStart = ta.value.lastIndexOf("\n", s - 1) + 1;
+      const wrap = (l, r, ph) => ta.setRangeText(l + (sel || ph) + r, s, t, sel ? "end" : "select");
+      const lead = (p) => ta.setRangeText(p, lineStart, lineStart, "end");
+      switch (b.dataset.md) {
+        case "h": lead("## "); break;
+        case "b": wrap("**", "**", "bold"); break;
+        case "i": wrap("_", "_", "italic"); break;
+        case "c": wrap("`", "`", "code"); break;
+        case "l": lead("- "); break;
+        case "a": wrap("[", "](https://)", "text"); break;
+      }
+      ta.focus();
+      ta.dispatchEvent(new Event("input"));
+    });
+    // Phone: Markdown or Preview.
+    form.addEventListener("click", (e) => {
+      const b = e.target.closest(".pd-seg button[data-pane]");
+      if (!b) return;
+      form.querySelector(".pd-panes").dataset.show = b.dataset.pane;
+      for (const x of b.parentElement.children) { x.classList.toggle("on", x === b); x.setAttribute("aria-selected", String(x === b)); }
+      if (b.dataset.pane === "prev") render();
+    });
+    // Both changed a section: take the agent's version into the editor.
+    form.addEventListener("click", (e) => {
+      const b = e.target.closest("button[data-use-theirs]");
+      if (!b) return;
+      const title = b.dataset.useTheirs;
+      const theirs = [...form.querySelectorAll("textarea[data-theirs]")].find((x) => x.dataset.theirs === title).value;
+      const parts = split(ta.value);
+      const i = parts.findIndex((p) => p.title.toLowerCase() === title.toLowerCase());
+      const block = theirs.trimEnd().split("\n").concat([""]);
+      if (i >= 0) parts[i].lines = block; else parts.push({ title, lines: block });
+      ta.value = parts.map((p) => p.lines.join("\n").replace(/\n+$/, "")).join("\n\n") + "\n";
+      ta.dispatchEvent(new Event("input"));
+      b.disabled = true;
+      b.textContent = "Its version is in the editor";
+    });
+    // A newer version saved while editing: say so (it's merged on Save).
+    const warn = form.querySelector("[data-live-warn]");
+    const base = Number(form.dataset.base);
+    const poll = setInterval(async () => {
+      if (!form.isConnected) { clearInterval(poll); return; }
+      try {
+        const res = await fetch(`/p/${encodeURIComponent(slug)}/doc/rev?since=${base}`, { credentials: "same-origin" });
+        const d = await res.json();
+        if (d.rev > base && warn) {
+          warn.querySelector("[data-live-text]").textContent = `${d.author} saved rev ${d.rev} while you were editing; it changed ${d.changed || "the document"}. Saving keeps your edits and takes its changes to the sections you didn't touch; where you both changed a section, you pick.`;
+          warn.hidden = false;
+        }
+      } catch (_) { /* try again next time */ }
+    }, 20000);
+    if (!form.querySelector(".pd-warn:not([data-live-warn])")) ta.focus();
+  };
+  document.addEventListener("DOMContentLoaded", () => wire(document));
+  document.addEventListener("af:content", (e) => e.detail && wire(e.detail));
 })();

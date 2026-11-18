@@ -2,7 +2,8 @@
 //! 2026-11-12): rules for working on the project (like a per-project AGENTS.md), the tech stack and
 //! platform, the roadmap if the project has one, pointers. `hello` returns it in full, so the agent
 //! is never out of date; it stays small, and the agent changes one section at a time. The owner
-//! reads and edits it on the project's Notes tab, laid out like the Guides. Every edit is a revision.
+//! reads it in a dialog from the project's overview and edits it as one Markdown document (the
+//! owner, 2026-11-18: "just the whole document"). Every edit is a revision.
 
 use anyhow::bail;
 use rusqlite::{Connection, OptionalExtension, params};
@@ -143,6 +144,122 @@ pub fn revision_text(conn: &Connection, project_id: i64, rev: i64) -> anyhow::Re
         .optional()?)
 }
 
+/// A section both sides changed since the version the owner started from.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Conflict {
+    pub title: String,
+    /// The agent's version, heading and all; empty when it removed the section.
+    pub theirs: String,
+    /// Whether the owner's text has the section (false: the owner removed it).
+    pub mine_kept: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Merged {
+    pub text: String,
+    /// Sections the other side changed that were taken over.
+    pub taken: Vec<String>,
+    pub conflicts: Vec<Conflict>,
+}
+
+/// A section's key: its title in lower case, and which of that name it is.
+fn keyed(text: &str) -> Vec<((String, usize), String, String)> {
+    let mut seen: Vec<String> = Vec::new();
+    sections(text)
+        .into_iter()
+        .map(|(title, body)| {
+            let k = title.to_lowercase();
+            let n = seen.iter().filter(|s| **s == k).count();
+            seen.push(k.clone());
+            ((k, n), title, body)
+        })
+        .collect()
+}
+
+fn same(a: Option<&str>, b: Option<&str>) -> bool {
+    a.map(str::trim_end) == b.map(str::trim_end)
+}
+
+fn join(parts: &[String]) -> String {
+    let mut out = String::new();
+    for p in parts {
+        out.push_str(p.trim_end());
+        out.push_str("\n\n");
+    }
+    out.trim_end().to_owned()
+}
+
+/// The owner's edit of `base` merged with the agent's edit of it, by `##` section (the owner,
+/// 2026-11-18: keep the owner's edits, take the agent's changes to the sections the owner didn't
+/// touch, and let the owner pick where both changed one). A conflict keeps the owner's version.
+pub fn merge(base: &str, theirs: &str, mine: &str) -> Merged {
+    let (b, t, m) = (keyed(base), keyed(theirs), keyed(mine));
+    let find = |v: &[((String, usize), String, String)], k: &(String, usize)| {
+        v.iter().find(|x| &x.0 == k).map(|x| x.2.clone())
+    };
+    let mut out: Vec<((String, usize), String)> = Vec::new();
+    let mut taken = Vec::new();
+    let mut conflicts = Vec::new();
+    for (k, title, mb) in &m {
+        let (bb, tb) = (find(&b, k), find(&t, k));
+        if same(tb.as_deref(), bb.as_deref()) || same(tb.as_deref(), Some(mb)) {
+            out.push((k.clone(), mb.clone()));
+        } else if same(Some(mb), bb.as_deref()) {
+            // Only the agent changed it (or removed it).
+            taken.push(title.clone());
+            if let Some(tb) = tb {
+                out.push((k.clone(), tb));
+            }
+        } else {
+            conflicts.push(Conflict { title: title.clone(), theirs: tb.unwrap_or_default(), mine_kept: true });
+            out.push((k.clone(), mb.clone()));
+        }
+    }
+    // Sections only the agent has: added by it, or removed by the owner.
+    for (i, (k, title, tb)) in t.iter().enumerate() {
+        if m.iter().any(|x| &x.0 == k) {
+            continue;
+        }
+        match find(&b, k) {
+            // The owner removed it and the agent didn't touch it: it stays removed.
+            Some(bb) if same(Some(&bb), Some(tb)) => {}
+            Some(_) => conflicts.push(Conflict { title: title.clone(), theirs: tb.clone(), mine_kept: false }),
+            None => {
+                taken.push(title.clone());
+                // After the section it follows in the agent's version, or at the end.
+                let at = t[..i]
+                    .iter()
+                    .rev()
+                    .find_map(|p| out.iter().position(|o| o.0 == p.0))
+                    .map(|p| p + 1)
+                    .unwrap_or(if i == 0 { 0 } else { out.len() });
+                out.insert(at, (k.clone(), tb.clone()));
+            }
+        }
+    }
+    Merged { text: join(&out.into_iter().map(|x| x.1).collect::<Vec<_>>()), taken, conflicts }
+}
+
+/// What changed from `old` to `new`, by section: "How to work on it, Roadmap (new), Design
+/// (removed)", or "" when nothing did.
+pub fn changed_sections(old: &str, new: &str) -> String {
+    let (o, n) = (keyed(old), keyed(new));
+    let mut out = Vec::new();
+    for (k, title, body) in &n {
+        match o.iter().find(|x| &x.0 == k) {
+            Some(x) if same(Some(&x.2), Some(body)) => {}
+            Some(_) => out.push(title.clone()),
+            None => out.push(format!("{title} (new)")),
+        }
+    }
+    for (k, title, _) in &o {
+        if !n.iter().any(|x| &x.0 == k) {
+            out.push(format!("{title} (removed)"));
+        }
+    }
+    out.join(", ")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -176,5 +293,34 @@ mod tests {
             Ok(())
         })
         .unwrap();
+    }
+
+    #[test]
+    fn edits_merge_by_section_and_conflicts_keep_the_owners_version() {
+        let base = "Intro.\n\n## A\n\na\n\n## B\n\nb\n\n## C\n\nc\n";
+        // The owner changed A and removed C; the agent changed B and added D after B.
+        let mine = "Intro.\n\n## A\n\na, mine\n\n## B\n\nb\n";
+        let theirs = "Intro.\n\n## A\n\na\n\n## B\n\nb, theirs\n\n## D\n\nd\n\n## C\n\nc\n";
+        let m = merge(base, theirs, mine);
+        assert_eq!(m.text, "Intro.\n\n## A\n\na, mine\n\n## B\n\nb, theirs\n\n## D\n\nd");
+        assert_eq!(m.taken, ["B", "D"]);
+        assert!(m.conflicts.is_empty());
+        // Both changed B: the owner's stays, the agent's is offered.
+        let mine = "Intro.\n\n## A\n\na\n\n## B\n\nb, mine\n\n## C\n\nc\n";
+        let m = merge(base, theirs, mine);
+        assert!(m.text.contains("b, mine") && !m.text.contains("b, theirs"));
+        assert_eq!(
+            m.conflicts,
+            [Conflict { title: "B".into(), theirs: "## B\n\nb, theirs\n\n".into(), mine_kept: true }]
+        );
+        // The owner removed B, which the agent changed: offered back.
+        let m = merge(base, theirs, "Intro.\n\n## A\n\na\n\n## C\n\nc\n");
+        assert_eq!(m.conflicts.len(), 1);
+        assert!(!m.conflicts[0].mine_kept && !m.text.contains("## B"));
+        // Nothing changed on the agent's side: the owner's text as it is.
+        assert_eq!(merge(base, base, mine).text, mine.trim_end());
+        assert_eq!(changed_sections(base, mine), "B");
+        assert_eq!(changed_sections(base, theirs), "B, D (new)");
+        assert_eq!(changed_sections(base, "## A\n\na\n"), "Introduction (removed), B (removed), C (removed)");
     }
 }
