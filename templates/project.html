@@ -107,18 +107,6 @@
       </div>
     </section>
     {% endif %}
-
-
-    {% if !prs.is_empty() %}
-    <details class="ov-fold" open aria-labelledby="mo-h">
-      <summary class="ph"><span class="ofi">{{ crate::web::icons::icon("merge")|safe }}</span><h2 class="label" id="mo-h">Merge order</h2><span class="sub of-phone">{{ prs_total }} open</span><span class="grow"></span>{% if prs_total > prs.len() %}<a class="sub of-desk" href="/p/{{ slug }}?tab=prs">All {{ prs_total }} open PRs</a>{% endif %}<span class="of-chev">{{ crate::web::icons::icon("chevron")|safe }}</span></summary>
-      <div class="of-body stack">
-        <p class="sub">PRs based on main can merge in any order once ready; a PR based on another merges after it.{% if has_stack_button %} "Merge #a–#b" merges every PR up to that one, in order.{% endif %}</p>
-        {% include "pr_list.html" %}
-        {% if prs_total > prs.len() %}<a class="sub" href="/p/{{ slug }}?tab=prs">All {{ prs_total }} open PRs</a>{% endif %}
-      </div>
-    </details>
-    {% endif %}
   </div>
 
   <aside class="ov-side" aria-label="About the project">

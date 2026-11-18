@@ -920,6 +920,10 @@ async fn prs_merge_in_order_from_the_owners_buttons() {
         s.http.get(s.url("/p/vinculum?tab=prs")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
     assert!(html.contains("Merge #48–#49"), "stack button");
     assert_eq!(html.matches(">Merge</button>").count(), 1, "#49 has no Merge of its own, only #48 does");
+    // The overview has no merge panel any more, only the count on the Pull requests tab.
+    let overview = s.http.get(s.url("/p/vinculum")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
+    assert!(!overview.contains("Merge order") && !overview.contains("Merge #48–#49"), "no merge panel");
+    assert!(overview.contains(r#"<span class="only-phone">PRs</span> <span class="mono sub">2</span>"#), "the count");
     let start = html.find(r#"name="actions" value=""#).unwrap() + r#"name="actions" value=""#.len();
     let ids = html[start..].split('"').next().unwrap().to_owned();
 

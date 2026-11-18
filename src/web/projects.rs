@@ -1049,12 +1049,10 @@ async fn project(
                 .await?,
         );
     }
-    page.prs_total = page.prs.len();
-    page.has_stack_button = page.prs.iter().any(|p| p.up_to.is_some());
-    if tab == "overview" {
-        // The overview shows the start of the order; the Pull requests tab has all of them.
-        page.prs.truncate(8);
+    if tab == "prs" {
+        page.prs_total = page.prs.len();
     }
+    page.has_stack_button = page.prs.iter().any(|p| p.up_to.is_some());
     let next = if tab == "overview" { format!("/p/{}", page.slug) } else { format!("/p/{}?tab={tab}", page.slug) };
     let page = ProjectPage {
         nav: nav(&state, &actor, "/projects").await.back_to("/projects", "Projects"),
@@ -1762,11 +1760,21 @@ fn build_project_page(
         shots_all: shots.len(),
         shots,
         shot_cats: Vec::new(),
-        prs_total: 0,
+        // The overview counts them for its tab; the Pull requests tab lists them (the owner,
+        // 2026-11-18: "lets remove the merge panel from the project dashboard").
+        prs_total: if tab == "overview" {
+            c.query_row(
+                "SELECT count(*) FROM records WHERE project_id = ?1 AND kind = 'pr' AND state = 'open'",
+                [p.id],
+                |r| r.get::<_, i64>(0),
+            )? as usize
+        } else {
+            0
+        },
         has_stack_button: false,
         tabs: TABS,
-        // Merge order and releases appear on the overview and the Pull requests tab only.
-        prs: if matches!(tab, "overview" | "prs") { super::buttons::pr_rows(c, p.id, now)? } else { Vec::new() },
+        prs: if tab == "prs" { super::buttons::pr_rows(c, p.id, now)? } else { Vec::new() },
+        // Releases appear on the overview and the Pull requests tab only.
         releases: if matches!(tab, "overview" | "prs") {
             super::buttons::release_rows(c, p.id, now)?
         } else {
