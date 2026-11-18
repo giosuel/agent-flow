@@ -958,7 +958,12 @@ a.blk.q:hover { text-decoration: underline; }
 .dd-none { padding: 8px 10px; margin: 0; }
 .nhead, .nrow { display: grid; grid-template-columns: 36px minmax(0, 1fr) minmax(0, 190px) minmax(0, 250px) 120px 110px 40px; column-gap: 16px; align-items: center; padding: 0 20px; }
 .nhead { min-height: 38px; margin-top: 12px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); background: #0C0C0F; font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
-ul.nrows { margin: 0; padding: 0; gap: 0; list-style: none; }
+.nhead .nh { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); text-decoration: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nhead .nh:hover { color: var(--ink); }
+.nhead .nh.on { color: var(--ink); }
+.nhead .sort-i { font-size: 13px; opacity: .45; letter-spacing: 0; }
+.nhead .nh.on .sort-i { opacity: 1; color: var(--hover); }
+.nhead .nh:hover .sort-i { opacity: .9; }
 .nrow { min-height: 64px; padding-top: 10px; padding-bottom: 10px; border-bottom: 1px solid var(--line2); font-size: 14px; position: relative; }
 .nrow:last-child { border-bottom: 0; }
 .nrow:hover { background: #121217; }

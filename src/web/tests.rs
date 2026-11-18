@@ -2064,6 +2064,13 @@ async fn notes_are_files_or_text_and_come_back() {
     let t = notes("ncat=known+issue").await;
     assert!(t.contains("x-wing pin") && !t.contains(">Morning report<"), "{t}");
     assert!(t.contains(r#"href="/p/vinculum?tab=notes""#), "Clear: {t}");
+    // Sorted by a click on a column's header; another click turns it around (2026-11-18).
+    let t = notes("nstate=all&nsort=title").await;
+    let at = |t: &str, x: &str| t.find(x).unwrap_or_else(|| panic!("{x}"));
+    assert!(at(&t, ">Later<") < at(&t, ">Loro needs im<") && at(&t, ">Loro needs im<") < at(&t, ">x-wing pin<"), "{t}");
+    assert!(t.contains(r#"aria-sort="ascending""#) && t.contains("nsort=-title"), "{t}");
+    let t = notes("nstate=all&nsort=-title").await;
+    assert!(at(&t, ">x-wing pin<") < at(&t, ">Later<"), "{t}");
     let t = notes("nq=%3Cscript").await;
     assert!(!t.contains("<script>alert") && t.contains("Nothing matches"), "{t}");
     let page = s.http.get(s.url("/p/vinculum/N-1")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
