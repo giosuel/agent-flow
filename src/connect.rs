@@ -492,7 +492,10 @@ pub fn project_setup(
     {
         let slug = s(&st["who"]["name"]);
         println!("{} is set up already as {slug} on {url}; refreshing its setup.", folder.display());
-        return finish_setup(&folder, &url, &slug, &slug, &token, &machine_name());
+        // The name its hooks give the session stays (Imaginarium's agent, 2026-11-18: a refresh
+        // had turned "--session Imaginarium" into the slug).
+        let name = session_name(&folder).unwrap_or_else(|| slug.clone());
+        return finish_setup(&folder, &url, &slug, &name, &token, &machine_name());
     }
     let code = match code {
         Some(c) => c,
@@ -555,6 +558,48 @@ pub(crate) fn existing_setup(folder: &Path) -> Option<(String, String)> {
     (!token.is_empty()).then_some((url, token))
 }
 
+/// The session name a folder's AgentFlow hooks give (`flow hello --session <name>`), if they do.
+fn session_name(folder: &Path) -> Option<String> {
+    let text = std::fs::read_to_string(folder.join(".claude/settings.local.json")).ok()?;
+    let v: Value = serde_json::from_str(&text).ok()?;
+    session_name_in(&v)
+}
+
+fn session_name_in(v: &Value) -> Option<String> {
+    let groups = v["hooks"]["SessionStart"].as_array()?;
+    let command = groups
+        .iter()
+        .flat_map(|g| g["hooks"].as_array().into_iter().flatten())
+        .filter_map(|h| h["command"].as_str())
+        .find(|c| c.contains(" hello ") && c.contains(" --session "))?;
+    let rest: Vec<char> = command.split(" --session ").nth(1)?.chars().collect();
+    // One shell word, as onboard::shell_word writes it: plain, or in single quotes with '\'' for a
+    // quote inside.
+    let (mut name, mut i) = (String::new(), 0);
+    while i < rest.len() {
+        match rest[i] {
+            '\'' => {
+                i += 1;
+                while i < rest.len() && rest[i] != '\'' {
+                    name.push(rest[i]);
+                    i += 1;
+                }
+                i += 1;
+            }
+            '\\' if i + 1 < rest.len() => {
+                name.push(rest[i + 1]);
+                i += 2;
+            }
+            c if c.is_whitespace() => break,
+            c => {
+                name.push(c);
+                i += 1;
+            }
+        }
+    }
+    (!name.is_empty()).then_some(name)
+}
+
 /// The local part of a setup: folder, git, token file, first note, Claude Code setup; then where
 /// it lies, and the folder's earlier conversations (only what the server doesn't have yet).
 fn finish_setup(
@@ -595,4 +640,23 @@ fn finish_setup(
 
 fn s(v: &Value) -> String {
     v.as_str().unwrap_or("").to_owned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_refresh_keeps_the_session_name() {
+        let hooks = |cmd: &str| {
+            json!({"hooks": {"SessionStart": [{"hooks": [
+                {"type": "command", "command": "/x/flow hello --doc --token-file t"},
+                {"type": "command", "command": cmd}]}]}})
+        };
+        let name = |cmd: &str| session_name_in(&hooks(cmd));
+        assert_eq!(name("/x/flow hello --no-doc --session Imaginarium --token-file t").as_deref(), Some("Imaginarium"));
+        assert_eq!(name("/x/flow hello --no-doc --session 'Cold Trace' --token-file t").as_deref(), Some("Cold Trace"));
+        assert_eq!(name(r"/x/flow hello --no-doc --session 'it'\''s' --token-file t").as_deref(), Some("it's"));
+        assert_eq!(session_name_in(&json!({})), None);
+    }
 }
