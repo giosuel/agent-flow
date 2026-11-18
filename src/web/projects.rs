@@ -838,8 +838,13 @@ struct TabQuery {
 
 /// The line shown after pressing a button, from the redirect's query.
 fn press_notice(q: &TabQuery) -> (Option<String>, bool) {
-    if let Some(a) = q.answered.as_deref().filter(|a| a.len() <= 40 && a.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')) {
-        return (Some(format!("Answered {a}: the agent gets your answer word for word, and it's a decision now.")), false);
+    if let Some(a) =
+        q.answered.as_deref().filter(|a| a.len() <= 40 && a.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-'))
+    {
+        return (
+            Some(format!("Answered {a}: the agent gets your answer word for word, and it's a decision now.")),
+            false,
+        );
     }
     if let Some(n) = q.tested {
         return (Some(tested_notice(n)), false);
@@ -1114,7 +1119,8 @@ fn build_project_page(
         let mine: Vec<&&Record> = tasks.iter().filter(|t| t.milestone_id.is_some_and(|x| ids.contains(&x))).collect();
         let done = mine.iter().filter(|t| t.state == "done").count();
         let counted = mine.iter().filter(|t| !matches!(t.state.as_str(), "skipped" | "archived")).count();
-        let steps: Vec<&Milestone> = ms.iter().filter(|s| s.parent_id == Some(m.id) && s.archived_at.is_none()).collect();
+        let steps: Vec<&Milestone> =
+            ms.iter().filter(|s| s.parent_id == Some(m.id) && s.archived_at.is_none()).collect();
         let mut sub = Vec::new();
         if let Some(t) = m.started_at {
             sub.push(format!("since {}", tz.day(t)));
@@ -1664,7 +1670,11 @@ fn build_project_page(
         ms_closed,
         ms_counts,
         qcards,
-        server: if tab == "overview" { crate::remote::project_server(c, p.id)?.unwrap_or_default() } else { String::new() },
+        server: if tab == "overview" {
+            crate::remote::project_server(c, p.id)?.unwrap_or_default()
+        } else {
+            String::new()
+        },
         board,
         agent: AgentCard {
             machine: if p.agent.machine.is_empty() { "–".into() } else { p.agent.machine.clone() },
