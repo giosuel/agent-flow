@@ -582,6 +582,8 @@ struct StepView {
     name: String,
     title: String,
     class: &'static str,
+    /// The step's page, opened as a dialog from the step bar (D-218).
+    url: String,
 }
 
 struct TaskCard {
@@ -605,6 +607,8 @@ struct Column {
 struct Board {
     title: String,
     summary: String,
+    /// A line under the heading: for the tasks without a milestone.
+    note: String,
     columns: Vec<Column>,
     /// The step bar (the owner, 2026-11-17: "find an alternative way to show the steps as there
     /// can be many"): the step under way (or next), dots for every step, the menu.
@@ -630,47 +634,6 @@ struct StepItem {
     sub: String,
     href: String,
     on: bool,
-}
-
-/// A milestone on the Tasks tab: its own tasks, then its steps (the owner, 2026-11-12).
-struct TaskGroup {
-    name: String,
-    title: String,
-    state: String,
-    sub: String,
-    rows: Vec<TaskLine>,
-    steps: Vec<StepBox>,
-}
-
-/// A step: concluded (one line and its summary), under way (its tasks in order) or planned.
-struct StepBox {
-    name: String,
-    title: String,
-    review: bool,
-    /// concluded, active, blocked (every open task is) or planned.
-    state: &'static str,
-    sub: String,
-    url: String,
-    rows: Vec<TaskLine>,
-}
-
-/// One task in the agent's order, with what blocks it.
-struct TaskLine {
-    n: usize,
-    short: String,
-    url: String,
-    title: String,
-    state: String,
-    est: String,
-    next: bool,
-    /// Open questions it waits for: (Q-1, url).
-    blocked_by: Vec<(String, String)>,
-    blocked_note: String,
-    /// "added · your feedback": a task that turned up while its step was under way.
-    added: String,
-    skip_reason: String,
-    /// Time spent (its share), when it has any.
-    spent: String,
 }
 
 /// How a task's source reads on the page.
@@ -849,6 +812,9 @@ struct ProjectPage {
     ms_closed: Vec<MsRow>,
     /// The closed ones start open when the board shows one of them.
     ms_closed_open: bool,
+    /// "Without a milestone": how many tasks, and whether the board shows them (D-218).
+    loose_count: usize,
+    loose_selected: bool,
     ms_counts: String,
     qcards: Vec<QCard>,
     /// The build server its `flow remote` uses, for the side card.
@@ -862,7 +828,6 @@ struct ProjectPage {
     /// Decisions of closed milestones, and replaced ones: folded away.
     decisions_closed: Vec<RecordRow>,
     decisions_replaced: Vec<RecordRow>,
-    groups: Vec<TaskGroup>,
     questions: Vec<RecordRow>,
     /// The Builds tab: every build, newest first.
     builds: Vec<RecordRow>,
@@ -945,10 +910,12 @@ fn press_notice(q: &TabQuery) -> (Option<String>, bool) {
 }
 
 /// The project page's tabs, in order; questions come right after the overview.
+/// `?ms=none`: the board of the tasks without a milestone.
+const LOOSE: &str = "none";
+
 const TABS: &[(&str, &str)] = &[
     ("overview", "Overview"),
     ("questions", "Questions"),
-    ("tasks", "Tasks"),
     ("prs", "Pull requests"),
     ("builds", "Builds"),
     ("decisions", "Decisions"),
@@ -969,6 +936,10 @@ async fn project(
     if q.tab.as_deref() == Some("settings") {
         let code = q.settings.as_deref().map(|c| format!("?settings={}", super::log::enc(c))).unwrap_or_default();
         return Ok(Redirect::to(&format!("/p/{slug}/settings{code}")).into_response());
+    }
+    // The Tasks tab went (the owner, 2026-11-18, D-218): its links open the overview.
+    if q.tab.as_deref() == Some("tasks") {
+        return Ok(Redirect::to(&format!("/p/{slug}")).into_response());
     }
     let tab = q.tab.filter(|t| TABS.iter().any(|(k, _)| k == t)).unwrap_or_else(|| "overview".into());
     let now = now_ms();
@@ -1111,11 +1082,17 @@ fn build_project_page(
     );
     meta("Ports", p.ports.join(", "));
 
-    // The board shows the chosen milestone (a top-level one), else the current one.
-    let current = chosen
-        .and_then(|name| ms.iter().find(|m| m.parent_id.is_none() && m.name.eq_ignore_ascii_case(name)))
-        .or_else(|| current_milestone(&ms))
-        .cloned();
+    // The board shows the chosen milestone (a top-level one), else the current one; or, with
+    // ?ms=none, the tasks without a milestone (the owner, 2026-11-18, D-218).
+    let loose_chosen = chosen.is_some_and(|n| n.eq_ignore_ascii_case(LOOSE));
+    let current = if loose_chosen {
+        None
+    } else {
+        chosen
+            .and_then(|name| ms.iter().find(|m| m.parent_id.is_none() && m.name.eq_ignore_ascii_case(name)))
+            .or_else(|| current_milestone(&ms))
+            .cloned()
+    };
     let now_ms_id = current_milestone(&ms).map(|m| m.id);
     // Open questions that block a task, for "blocked by Q-31" on its card.
     let mut blockers: HashMap<i64, Vec<(String, String)>> = HashMap::new();
@@ -1236,15 +1213,27 @@ fn build_project_page(
         parts.join(" · ")
     };
 
-    let board = current.as_ref().map(|cur| {
-        let steps: Vec<&Milestone> = ms.iter().filter(|s| s.parent_id == Some(cur.id)).collect();
-        let step = chosen_step.and_then(|n| steps.iter().find(|s| s.name.eq_ignore_ascii_case(n)).copied());
-        let ids: Vec<i64> = match step {
-            Some(s) => vec![s.id],
-            None => projects::with_steps(&ms, cur.id),
+    let loose_count =
+        tasks.iter().filter(|t| t.milestone_id.is_none() && !matches!(t.state.as_str(), "archived")).count();
+    let build_board = |cur: Option<&Milestone>| -> anyhow::Result<Board> {
+        let steps: Vec<&Milestone> = match cur {
+            Some(cur) => ms.iter().filter(|s| s.parent_id == Some(cur.id)).collect(),
+            None => Vec::new(),
         };
-        let mut mine: Vec<&Record> =
-            tasks.iter().copied().filter(|t| t.milestone_id.is_some_and(|m| ids.contains(&m))).collect();
+        let step = chosen_step.and_then(|n| steps.iter().find(|s| s.name.eq_ignore_ascii_case(n)).copied());
+        let ids: Vec<i64> = match (step, cur) {
+            (Some(s), _) => vec![s.id],
+            (None, Some(cur)) => projects::with_steps(&ms, cur.id),
+            (None, None) => Vec::new(),
+        };
+        let mut mine: Vec<&Record> = tasks
+            .iter()
+            .copied()
+            .filter(|t| match cur {
+                Some(_) => t.milestone_id.is_some_and(|m| ids.contains(&m)),
+                None => t.milestone_id.is_none(),
+            })
+            .collect();
         mine.sort_by(|a, b| a.position.partial_cmp(&b.position).unwrap_or(std::cmp::Ordering::Equal));
         let col = |title: &'static str, states: &[&str]| {
             let mut list: Vec<&Record> = mine.iter().copied().filter(|t| states.contains(&t.state.as_str())).collect();
@@ -1268,6 +1257,17 @@ fn build_project_page(
         let mut summary = vec![plural(mine.len() as i64, "task", "tasks")];
         if count("done") > 0 {
             summary.push(format!("{} done", count("done")));
+        }
+        // The totals the Tasks tab had (D-218): estimated, and the agent's time in doing.
+        let counted: Vec<&Record> =
+            mine.iter().copied().filter(|t| !matches!(t.state.as_str(), "skipped" | "archived")).collect();
+        let est: i64 = counted.iter().map(|t| crate::times::estimate_min(t)).sum();
+        if est > 0 {
+            summary.push(format!("estimated {}", crate::times::fmt_min(est)));
+        }
+        let spent = crate::times::times_of(c, &p.slug, &counted, now)?.total_ms;
+        if spent > 0 {
+            summary.push(format!("{} of agent time", crate::times::fmt_ms(spent)));
         }
         // The step under way, else the next planned one, else the last.
         let now_step = steps
@@ -1294,9 +1294,10 @@ fn build_project_page(
             }
             parts.join(" · ")
         };
+        let ms_name = cur.map(|c| c.name.as_str()).unwrap_or(LOOSE);
         let href = |step: Option<&str>| match step {
-            Some(n) => format!("/p/{}?ms={}&step={}#board", p.slug, cur.name, n),
-            None => format!("/p/{}?ms={}#board", p.slug, cur.name),
+            Some(n) => format!("/p/{}?ms={}&step={}#board", p.slug, ms_name, n),
+            None => format!("/p/{}?ms={}#board", p.slug, ms_name),
         };
         let item = |s: &&Milestone| StepItem {
             name: s.name.clone(),
@@ -1325,11 +1326,21 @@ fn build_project_page(
         ];
         // On the phone: the column with work in it first.
         let first_col = [1, 0, 2, 3, 4].into_iter().find(|&i| columns[i].count > 0).unwrap_or(0);
-        Board {
-            title: format!("{} · {}", cur.name, cur.title),
+        // The step bar shows the step the board shows, else the one under way (or next).
+        let bar_step = step.or(now_step);
+        Ok(Board {
+            title: match cur {
+                Some(cur) => format!("{} · {}", cur.name, cur.title),
+                None => "Without a milestone".into(),
+            },
             summary: summary.join(" · "),
-            step_now_sub: now_step.map(step_sub).unwrap_or_default(),
-            step_now: now_step.map(|s| StepView {
+            note: if cur.is_none() {
+                "Tasks the agent parked without putting them in a milestone.".into()
+            } else {
+                String::new()
+            },
+            step_now_sub: bar_step.map(step_sub).unwrap_or_default(),
+            step_now: bar_step.map(|s| StepView {
                 name: s.name.clone(),
                 title: s.title.clone(),
                 class: match s.state.as_str() {
@@ -1337,6 +1348,7 @@ fn build_project_page(
                     "active" => "now",
                     _ => "next",
                 },
+                url: format!("/p/{}/steps/{}", p.slug, s.id),
             }),
             dots: steps
                 .iter()
@@ -1358,8 +1370,13 @@ fn build_project_page(
             menu_done_more: older,
             columns,
             first_col,
-        }
-    });
+        })
+    };
+    let board = match (loose_chosen, current.as_ref()) {
+        (true, _) => Some(build_board(None)?),
+        (false, Some(cur)) => Some(build_board(Some(cur))?),
+        (false, None) => None,
+    };
 
     let row = |r: &Record| {
         let sub = match r.kind {
@@ -1517,155 +1534,6 @@ fn build_project_page(
         Vec::new()
     };
 
-    let groups = if tab == "tasks" {
-        let line = |i: usize, t: &Record, next: bool, times: &crate::times::Times| -> anyhow::Result<TaskLine> {
-            let blocked_by = if t.state == "blocked" {
-                crate::steps::blocking_questions(c, t.id)?.into_iter().map(|(s, _, u)| (s, u)).collect()
-            } else {
-                Vec::new()
-            };
-            Ok(TaskLine {
-                n: i + 1,
-                short: t.short_id(),
-                url: t.url(),
-                title: t.title.clone(),
-                state: t.state.clone(),
-                est: t.str("estimate").to_owned(),
-                next,
-                blocked_by,
-                blocked_note: if t.state == "blocked" { t.str("blocked_note").to_owned() } else { String::new() },
-                added: if t.data.get("added").and_then(Value::as_bool).unwrap_or(false) {
-                    let from = t.str("source_ref");
-                    let src = source_label(t.str("source"));
-                    if from.is_empty() { format!("added · {src}") } else { format!("added · {src} · from {from}") }
-                } else {
-                    String::new()
-                },
-                skip_reason: if t.state == "skipped" { t.str("skip_reason").to_owned() } else { String::new() },
-                spent: times
-                    .share_ms
-                    .get(&t.id)
-                    .filter(|ms| **ms > 0)
-                    .map(|ms| crate::times::fmt_ms(*ms))
-                    .unwrap_or_default(),
-            })
-        };
-        let lines = |list: &[&Record], active: bool, times: &crate::times::Times| -> anyhow::Result<Vec<TaskLine>> {
-            let next = if active { list.iter().position(|t| t.state == "todo") } else { None };
-            list.iter().enumerate().map(|(i, t)| line(i, t, Some(i) == next, times)).collect()
-        };
-        let est_of = |list: &[&Record]| -> i64 {
-            list.iter().filter(|t| t.state != "skipped").map(|t| crate::times::estimate_min(t)).sum()
-        };
-        let mut sorted: Vec<&Record> = tasks.clone();
-        sorted.sort_by(|a, b| {
-            a.position
-                .unwrap_or(f64::MAX)
-                .partial_cmp(&b.position.unwrap_or(f64::MAX))
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
-        let of = |id: i64| -> Vec<&Record> { sorted.iter().copied().filter(|t| t.milestone_id == Some(id)).collect() };
-        let mut groups = Vec::new();
-        for m in ms.iter().filter(|m| m.parent_id.is_none()) {
-            let steps: Vec<&Milestone> = ms.iter().filter(|s| s.parent_id == Some(m.id)).collect();
-            let own = of(m.id);
-            let count: usize = own.len() + steps.iter().map(|s| of(s.id).len()).sum::<usize>();
-            if count == 0 && steps.is_empty() && m.state != "active" {
-                continue;
-            }
-            let mut boxes = Vec::new();
-            let mut agent_ms = 0;
-            let mut est_all = est_of(&own);
-            for st in &steps {
-                let mine = of(st.id);
-                let counted: Vec<&Record> = mine.iter().copied().filter(|t| t.state != "skipped").collect();
-                let times = crate::times::times_of(c, &p.slug, &counted, now)?;
-                agent_ms += times.total_ms;
-                let est = est_of(&mine);
-                est_all += est;
-                let open = mine.iter().filter(|t| crate::steps::OPEN.contains(&t.state.as_str())).count();
-                let blocked = mine.iter().filter(|t| t.state == "blocked").count();
-                let state = match st.state.as_str() {
-                    "closed" => "concluded",
-                    "active" if open > 0 && blocked == open => "blocked",
-                    "active" => "active",
-                    _ => "planned",
-                };
-                let n = mine.len();
-                let est_txt = if est > 0 { format!("est. {}", crate::times::fmt_min(est)) } else { String::new() };
-                let sub = match state {
-                    "concluded" => format!("{est_txt} · took {}", crate::times::fmt_ms(times.total_ms)),
-                    "planned" if n == 0 => "starts when its first task does".into(),
-                    "planned" => format!("{n} task{} · {est_txt}", if n == 1 { "" } else { "s" }),
-                    _ => format!(
-                        "{open} open of {n} · {est_txt} · spent {} so far",
-                        crate::times::fmt_ms(times.total_ms)
-                    ),
-                };
-                let sub = sub.trim_start_matches(" · ").trim_end_matches(" · ").replace(" ·  · ", " · ");
-                let review = !st.review.is_empty();
-                let sub = if review {
-                    let r: Value = serde_json::from_str(&st.review).unwrap_or_default();
-                    let n = r["reviewers"].as_array().map(Vec::len).unwrap_or(0);
-                    format!(
-                        "{n} reviewer{} · commit {} · {sub}",
-                        if n == 1 { "" } else { "s" },
-                        r["commit"].as_str().unwrap_or("")
-                    )
-                } else {
-                    sub
-                };
-                boxes.push(StepBox {
-                    name: st.name.clone(),
-                    title: st.title.clone(),
-                    review,
-                    state,
-                    sub,
-                    url: format!("/p/{}/steps/{}", p.slug, st.id),
-                    rows: if state == "concluded" { Vec::new() } else { lines(&mine, st.state == "active", &times)? },
-                });
-            }
-            let own_counted: Vec<&Record> = own.iter().copied().filter(|t| t.state != "skipped").collect();
-            let own_times = crate::times::times_of(c, &p.slug, &own_counted, now)?;
-            agent_ms += own_times.total_ms;
-            let mut sub = match (steps.len(), count) {
-                (0, n) => format!("{n} task{}", if n == 1 { "" } else { "s" }),
-                (k, n) => {
-                    format!("{k} step{} · {n} task{}", if k == 1 { "" } else { "s" }, if n == 1 { "" } else { "s" })
-                }
-            };
-            if est_all > 0 {
-                sub.push_str(&format!(" · estimated {}", crate::times::fmt_min(est_all)));
-            }
-            if agent_ms > 0 {
-                sub.push_str(&format!(" · {} of agent time", crate::times::fmt_ms(agent_ms)));
-            }
-            let sub = sub;
-            groups.push(TaskGroup {
-                name: m.name.clone(),
-                title: m.title.clone(),
-                state: m.state.clone(),
-                sub,
-                rows: lines(&own, m.state == "active" && steps.is_empty(), &own_times)?,
-                steps: boxes,
-            });
-        }
-        let loose: Vec<&Record> = sorted.iter().copied().filter(|t| t.milestone_id.is_none()).collect();
-        if !loose.is_empty() {
-            groups.push(TaskGroup {
-                name: String::new(),
-                title: "Without a milestone".into(),
-                state: String::new(),
-                sub: format!("{} tasks", loose.len()),
-                rows: lines(&loose, false, &crate::times::Times::default())?,
-                steps: Vec::new(),
-            });
-        }
-        groups
-    } else {
-        Vec::new()
-    };
-
     let (external, external_done) = external_rows(c, &all, now)?;
     let to_test = if tab == "to-test" {
         Some(super::totest::view(
@@ -1700,6 +1568,8 @@ fn build_project_page(
         ms_now,
         ms_rows,
         ms_closed_open: ms_closed.iter().any(|r| r.selected),
+        loose_count,
+        loose_selected: loose_chosen,
         ms_closed,
         ms_counts,
         qcards,
@@ -1754,7 +1624,6 @@ fn build_project_page(
         decisions_archived,
         decisions_closed,
         decisions_replaced,
-        groups,
         questions,
         builds,
         shots_all: shots.len(),

@@ -1348,6 +1348,12 @@ html.no-scroll { overflow: hidden; }
    of a pill per step; the board fills the window and each column scrolls on its own. */
 .stepbar { display: flex; align-items: center; gap: 10px 12px; flex-wrap: wrap; padding: 10px 12px 10px 16px; }
 .sb-t { font-weight: 500; }
+/* The step in the step bar opens its page (D-218). */
+.sb-link { display: inline-flex; align-items: center; gap: 10px; min-width: 0; color: var(--ink); text-decoration: none; padding: 4px 8px; margin: -4px -8px; border-radius: 8px; }
+.sb-link .sb-t { text-decoration: underline; text-decoration-color: var(--border); text-underline-offset: 4px; }
+.sb-link .i { width: 16px; height: 16px; color: var(--chip-accent-ink); flex: none; }
+.sb-link:hover { background: var(--soft); }
+.sb-link:hover .sb-t { text-decoration-color: var(--accent); }
 .sb-dots { display: inline-flex; gap: 4px; }
 .sb-dots i { width: 18px; height: 5px; border-radius: 3px; background: var(--line); }
 .sb-dots i.done { background: #3F7D55; }
@@ -1382,6 +1388,9 @@ html.no-scroll { overflow: hidden; }
   .sb-menu { width: 100%; }
   .sb-menu > summary { width: 100%; }
   .sb-menu .dd-menu { position: fixed; left: 16px; right: 16px; min-width: 0; }
+  /* The step as a row to tap, above Show (D-218). */
+  .sb-link { flex: 1 1 100%; margin: 0; padding: 10px 12px; min-height: 48px; border: 1px solid var(--line); border-radius: 10px; box-sizing: border-box; }
+  .sb-link .sb-t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-decoration: none; }
 }
 
 /* Settings lists: Build servers and Clients, a row per entry that opens (the owner, 2026-11-17,
@@ -1501,6 +1510,9 @@ html.no-scroll { overflow: hidden; }
 .msr .tg { font-size: 12px; color: var(--muted); }
 .msr .d { width: 64px; text-align: right; }
 .msr.sel { background: var(--soft); box-shadow: inset 3px 0 0 var(--ink2); }
+.msr.loose { grid-template-columns: 20px minmax(0, 1fr) auto; }
+.loose-i { display: inline-flex; color: var(--muted); justify-self: center; }
+.loose-i .i { width: 18px; height: 18px; }
 .msa:not(.sel) { background: var(--panel); box-shadow: inset 3px 0 0 var(--line); }
 .msr-i { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--muted); box-sizing: border-box; justify-self: center; }
 .msr.now .msr-i { border-color: var(--accent); background: var(--accent); }
@@ -1549,6 +1561,8 @@ html.no-scroll { overflow: hidden; }
   .msr { grid-template-columns: 18px 52px minmax(0, 1fr) auto; padding: 0 14px; }
   .msr .d, .msr .tg { display: none; }
   .msr.now .tg, .msr.up .tg { display: inline; }
+  .msr.loose { grid-template-columns: 18px minmax(0, 1fr) auto; }
+  .msr.loose .tg { display: inline; }
   .ov-fold > summary { cursor: pointer; min-height: 56px; border-bottom: 0; }
   .ov-fold[open] > summary { border-bottom: 1px solid var(--line2); }
   .ofi, .of-phone { display: inline-flex; }

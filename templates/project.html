@@ -66,14 +66,16 @@
         </div>
       </details>
       {% endif %}
+      {% if loose_count > 0 %}<a class="msr loose{% if loose_selected %} sel{% endif %}" href="/p/{{ slug }}?ms=none#board" data-ms{% if loose_selected %} aria-current="true"{% endif %}><span class="loose-i" aria-hidden="true">{{ crate::web::icons::icon("inbox")|safe }}</span><span class="t">Without a milestone <span class="sub">· parked, no milestone yet</span></span><span class="tg mono">{{ loose_count }} task{% if loose_count != 1 %}s{% endif %}</span></a>{% endif %}
     </section>
 
     {% if let Some(b) = board %}
     <section class="stack" aria-labelledby="board-h" id="board">
       <div class="sec"><h2 id="board-h">{{ b.title }}</h2><span class="sub">{{ b.summary }}</span></div>
+      {% if !b.note.is_empty() %}<p class="sub">{{ b.note }}</p>{% endif %}
       {% if b.steps_total > 0 %}
       <div class="stepbar card">
-        {% if let Some(st) = b.step_now %}<span class="label">Step</span><span class="chip mono">{{ st.name }}</span><strong class="sb-t">{{ st.title }}</strong><span class="chip {% if st.class == "now" %}accent{% endif %}">{% if st.class == "now" %}under way{% else if st.class == "done" %}done{% else %}next{% endif %}</span><span class="sub sb-sub">{{ b.step_now_sub }}</span>{% endif %}
+        {% if let Some(st) = b.step_now %}<span class="label">Step</span><a class="sb-link" href="{{ st.url }}" title="Open the step: its summary, estimated and actual, your decisions"><span class="chip mono">{{ st.name }}</span><strong class="sb-t">{{ st.title }}</strong>{{ crate::web::icons::icon("out")|safe }}</a><span class="chip {% if st.class == "now" %}accent{% endif %}">{% if st.class == "now" %}under way{% else if st.class == "done" %}done{% else %}next{% endif %}</span><span class="sub sb-sub">{{ b.step_now_sub }}</span>{% endif %}
         <span class="grow"></span>
         <span class="sb-dots" aria-label="{{ b.steps_done }} of {{ b.steps_total }} steps done">{% for d in b.dots %}<i class="{{ d }}"></i>{% endfor %}</span>
         <span class="sub sb-n">{{ b.steps_done }} of {{ b.steps_total }} done</span>
@@ -169,21 +171,6 @@
 </div>
 {% endif %}
 
-{% if tab == "tasks" %}
-{% if groups.is_empty() %}<section class="card pad empty"><h2>No tasks yet</h2></section>{% endif %}
-{% for g in groups %}
-<section class="card pad stack">
-  <div class="sec"><h2>{% if !g.name.is_empty() %}<span class="mono">{{ g.name }}</span> {% endif %}{{ g.title }}</h2><span class="sub">{% if !g.state.is_empty() %}{{ g.state }} · {% endif %}{{ g.sub }}</span></div>
-  {% if !g.rows.is_empty() %}{% let rows = g.rows %}{% include "task_lines.html" %}{% endif %}
-  {% for st in g.steps %}
-  <div class="stp {{ st.state }}">
-    <div class="stp-h"><span class="mono">{{ st.name }}</span><h3>{{ st.title }}</h3><span class="chip {% if st.state == "concluded" %}state-done{% else if st.state == "active" %}accent{% else if st.state == "blocked" %}state-blocked{% else %}quiet{% endif %}">{% if st.review %}review step · {% endif %}{{ st.state }}</span><span class="grow"></span><span class="sub">{{ st.sub }}</span>{% if st.state == "concluded" %}<a class="btn sm ghost" href="{{ st.url }}">Summary</a>{% else if st.review %}<a class="btn sm ghost" href="{{ st.url }}">Review</a>{% endif %}</div>
-    {% if !st.rows.is_empty() %}{% let rows = st.rows %}{% include "task_lines.html" %}{% endif %}
-  </div>
-  {% endfor %}
-</section>
-{% endfor %}
-{% endif %}
 
 {% if tab == "notes" %}{% if let Some(nv) = notes %}{% include "notes_list.html" %}{% endif %}{% endif %}
 
