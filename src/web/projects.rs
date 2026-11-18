@@ -830,8 +830,12 @@ struct TabQuery {
     history: Option<u8>,
     rev: Option<i64>,
     doc: Option<String>,
-    /// The Notes tab's category filter.
+    /// The Notes tab's search and filters (see `super::notes::Filter`).
+    nq: Option<String>,
     ncat: Option<String>,
+    nkind: Option<String>,
+    nstate: Option<String>,
+    nrange: Option<String>,
     /// After answering a question on the overview: its id.
     answered: Option<String>,
 }
@@ -981,13 +985,20 @@ async fn project(
                 })
                 .await?,
         );
-        let (slug, pick) = (page.slug.clone(), q.ncat.clone());
+        let slug = page.slug.clone();
+        let filter = super::notes::Filter::new(
+            q.nq.as_deref(),
+            q.ncat.as_deref(),
+            q.nkind.as_deref(),
+            q.nstate.as_deref(),
+            q.nrange.as_deref(),
+        );
         page.notes = Some(
             state
                 .db
                 .call(move |c| {
                     let p = projects::require(c, &slug)?;
-                    super::notes::view(c, &slug, p.id, pick.as_deref(), now)
+                    super::notes::view(c, &slug, p.id, &filter, now)
                 })
                 .await?,
         );

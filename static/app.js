@@ -760,3 +760,40 @@ document.addEventListener("click", (e) => {
     if (s && !phone.matches && !e.target.closest("a, button")) e.preventDefault();
   });
 })();
+
+// Filter menus (the Log, the Notes tab): one open at a time, closed by Esc or a click beside them;
+// "Find a category" narrows a long list as you type.
+(() => {
+  const closeAll = (except) => {
+    for (const d of document.querySelectorAll("details.dd[open]")) if (d !== except) d.open = false;
+  };
+  document.addEventListener("toggle", (e) => {
+    const d = e.target;
+    if (!(d instanceof HTMLDetailsElement) || !d.matches("details.dd") || !d.open) return;
+    closeAll(d);
+    d.querySelector("[data-find]")?.focus();
+  }, true);
+  document.addEventListener("click", (e) => { if (!e.target.closest("details.dd")) closeAll(null); });
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape") return;
+    const open = document.querySelector("details.dd[open]");
+    if (!open) return;
+    e.preventDefault();
+    open.open = false;
+    open.querySelector("summary")?.focus();
+  });
+  document.addEventListener("input", (e) => {
+    const f = e.target.closest("[data-find]");
+    if (!f) return;
+    const q = f.value.trim().toLowerCase();
+    for (const a of f.closest(".dd-menu").querySelectorAll("a[data-name]")) a.hidden = q !== "" && !a.dataset.name.toLowerCase().includes(q);
+  });
+  // Enter in the find box opens the first category left.
+  document.addEventListener("keydown", (e) => {
+    const f = e.target.closest && e.target.closest("[data-find]");
+    if (!f || e.key !== "Enter") return;
+    e.preventDefault();
+    const first = [...f.closest(".dd-menu").querySelectorAll("a[data-name]")].find((a) => !a.hidden);
+    if (first) location.href = first.href;
+  });
+})();

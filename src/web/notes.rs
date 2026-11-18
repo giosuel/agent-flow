@@ -239,102 +239,415 @@ pub fn text_of(data_dir: &std::path::Path, r: &records::Record) -> Option<(Strin
     Some((text, matches!(ext, "md" | "markdown")))
 }
 
-/// A note in the Notes tab's list.
+/// The Notes tab's search and filters (the owner, 2026-11-18: "an option to better filter and
+/// search for files, similar to how logs look"), from the address: `nq` (words, `category:…`,
+/// `is:file|note|resolved|current`, `ext:…`), `ncat` (categories, `|` between them), `nkind`
+/// (file, note), `nstate` (current by default, resolved, all) and `nrange` (24h, 7d, 30d; all by
+/// default).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Filter {
+    pub q: String,
+    pub cats: Vec<String>,
+    pub kind: String,
+    pub state: String,
+    pub range: String,
+}
+
+impl Filter {
+    pub fn new(
+        q: Option<&str>,
+        cats: Option<&str>,
+        kind: Option<&str>,
+        state: Option<&str>,
+        range: Option<&str>,
+    ) -> Self {
+        let pick = |v: Option<&str>, ok: &[&str]| v.filter(|v| ok.contains(v)).unwrap_or("").to_owned();
+        Filter {
+            q: q.unwrap_or("").trim().chars().take(200).collect(),
+            cats: cats.unwrap_or("").split('|').map(str::trim).filter(|c| !c.is_empty()).map(str::to_owned).collect(),
+            kind: pick(kind, &["file", "note"]),
+            state: pick(state, &["resolved", "all"]),
+            range: pick(range, &["24h", "7d", "30d"]),
+        }
+    }
+
+    /// The tab's address with these filters.
+    pub fn href(&self, slug: &str) -> String {
+        use super::log::enc;
+        let mut u = format!("/p/{slug}?tab=notes");
+        if !self.q.is_empty() {
+            u += &format!("&nq={}", enc(&self.q));
+        }
+        if !self.cats.is_empty() {
+            u += &format!("&ncat={}", enc(&self.cats.join("|")));
+        }
+        for (k, v) in [("nkind", &self.kind), ("nstate", &self.state), ("nrange", &self.range)] {
+            if !v.is_empty() {
+                u += &format!("&{k}={v}");
+            }
+        }
+        u
+    }
+
+    fn with(&self, f: impl FnOnce(&mut Filter)) -> Filter {
+        let mut x = self.clone();
+        f(&mut x);
+        x
+    }
+
+    fn range_ms(&self) -> Option<i64> {
+        match self.range.as_str() {
+            "24h" => Some(86_400_000),
+            "7d" => Some(7 * 86_400_000),
+            "30d" => Some(30 * 86_400_000),
+            _ => None,
+        }
+    }
+}
+
+/// What a file's type looks like: an icon and a tint (the owner, 2026-11-18: "since the
+/// categories can be freely chosen, lets make the icon dependent on the file type").
+pub fn type_icon(ext: &str) -> (&'static str, &'static str) {
+    match ext.to_ascii_lowercase().as_str() {
+        "" => ("note", "teal"),
+        "md" | "markdown" => ("ftext", "violet"),
+        "txt" | "log" | "rst" | "adoc" => ("ftext", "gray"),
+        "gz" | "tgz" | "zip" | "tar" | "xz" | "zst" | "bz2" | "7z" => ("archive", "orange"),
+        "png" | "jpg" | "jpeg" | "gif" | "webp" | "svg" | "avif" => ("image", "blue"),
+        "csv" | "tsv" | "xlsx" | "ods" | "json" | "toml" | "yaml" | "yml" => ("table", "green"),
+        "pdf" => ("pdf", "red"),
+        "rs" | "py" | "js" | "ts" | "sh" | "html" | "css" | "patch" | "diff" => ("code", "blue"),
+        _ => ("file", "gray"),
+    }
+}
+
+fn esc(s: &str) -> String {
+    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
+}
+
+/// `text`, escaped, with every search word marked.
+fn marked(text: &str, words: &[String]) -> String {
+    let lower = text.to_lowercase();
+    // Lowercasing can change byte lengths (rare letters); then nothing is marked.
+    if lower.len() != text.len() || words.is_empty() {
+        return esc(text);
+    }
+    let mut spans: Vec<(usize, usize)> = Vec::new();
+    for w in words.iter().filter(|w| !w.is_empty()) {
+        let mut from = 0;
+        while let Some(i) = lower[from..].find(w.as_str()) {
+            let a = from + i;
+            spans.push((a, a + w.len()));
+            from = a + w.len();
+        }
+    }
+    spans.sort();
+    let mut out = String::new();
+    let mut at = 0;
+    for (a, b) in spans {
+        if a < at || !text.is_char_boundary(a) || !text.is_char_boundary(b) {
+            continue;
+        }
+        out += &esc(&text[at..a]);
+        out += &format!("<mark>{}</mark>", esc(&text[a..b]));
+        at = b;
+    }
+    out += &esc(&text[at..]);
+    out
+}
+
+/// A line of a note's text: Markdown marks left out, on one line; around the first search word
+/// when it's further in.
+fn snippet(body: &str, words: &[String]) -> String {
+    let flat: String = body
+        .lines()
+        .map(|l| l.trim().trim_start_matches(['#', '>', '-', '*', ' ']).trim())
+        .filter(|l| !l.is_empty() && !l.starts_with("```"))
+        .collect::<Vec<_>>()
+        .join(" ")
+        .replace(['`', '*'], "");
+    let lower = flat.to_lowercase();
+    let hit = words.iter().filter_map(|w| lower.find(w.as_str())).min().filter(|_| lower.len() == flat.len());
+    let start = match hit {
+        Some(i) if i > 90 => {
+            let mut s = i - 50;
+            while !flat.is_char_boundary(s) {
+                s -= 1;
+            }
+            s
+        }
+        _ => 0,
+    };
+    let rest: String = flat[start..].chars().take(220).collect();
+    if start > 0 { format!("…{rest}") } else { rest }
+}
+
+/// A note in the Notes tab's table.
 pub struct NoteRow {
     pub short: String,
     pub url: String,
-    pub title: String,
+    /// The title and the line under it, escaped, with the search words marked.
+    pub title_html: String,
+    pub snippet_html: String,
     pub category: String,
-    /// What the file icon says: md, pdf, csv… or "!" for a known issue, "txt" for a text note.
-    pub ext: String,
-    pub issue: bool,
-    pub linked: String,
+    pub icon: &'static str,
+    pub tint: &'static str,
+    /// "md · 5 KB", or "note".
+    pub kind: String,
     pub resurface: String,
-    pub meta: String,
+    pub added: String,
+    pub resolved: bool,
     pub download: String,
 }
 
+/// One choice of a filter's menu: (label, count or "", href, picked).
+pub type Choice = (String, String, String, bool);
+
 pub struct NotesView {
-    /// (category, href, count, selected), "All" first.
-    pub pills: Vec<(String, String, usize, bool)>,
-    pub current: Vec<NoteRow>,
-    pub resolved: Vec<NoteRow>,
+    pub q: String,
+    /// Hidden fields that keep the other filters when searching.
+    pub keep: Vec<(&'static str, String)>,
+    pub cat_label: String,
+    pub cats: Vec<Choice>,
+    pub cats_clear: String,
+    pub kind_label: String,
+    pub kinds: Vec<Choice>,
+    pub state_label: String,
+    pub states: Vec<Choice>,
+    pub ranges: Vec<Choice>,
+    pub reset: Option<String>,
+    pub rows: Vec<NoteRow>,
+    /// "37 · 6 files to download", or "3 found".
+    pub summary: String,
+    /// Under the table: what's hidden.
+    pub foot: String,
+    /// The project has no notes at all.
+    pub none: bool,
 }
 
-pub fn view(
-    c: &rusqlite::Connection,
-    slug: &str,
-    project_id: i64,
-    pick: Option<&str>,
-    now: i64,
-) -> anyhow::Result<NotesView> {
+/// Does a note match the search words and `key:value` terms?
+fn matches(r: &records::Record, terms: &[(String, String)]) -> bool {
+    let hay =
+        format!("{} {} {} {} {}", r.short_id(), r.title, r.body, r.str("category"), r.str("filename")).to_lowercase();
+    terms.iter().all(|(k, v)| match k.as_str() {
+        "category" | "cat" => r.str("category").to_lowercase().contains(v.as_str()),
+        "ext" | "type" => r.str("ext").eq_ignore_ascii_case(v),
+        "is" => match v.as_str() {
+            "file" => !r.str("ext").is_empty(),
+            "note" => r.str("ext").is_empty(),
+            "resolved" => r.state != "current",
+            "current" | "open" => r.state == "current",
+            _ => true,
+        },
+        _ => hay.contains(v.as_str()),
+    })
+}
+
+fn terms_of(q: &str) -> Vec<(String, String)> {
+    q.split_whitespace()
+        .map(|t| {
+            let t = t.to_lowercase();
+            match t.split_once(':') {
+                Some((k, v)) if ["category", "cat", "ext", "type", "is"].contains(&k) && !v.is_empty() => {
+                    (k.to_owned(), v.trim_start_matches('.').to_owned())
+                }
+                _ => (String::new(), t),
+            }
+        })
+        .collect()
+}
+
+pub fn view(c: &rusqlite::Connection, slug: &str, project_id: i64, f: &Filter, now: i64) -> anyhow::Result<NotesView> {
     let all = records::query(
         c,
         &records::Query { project_id: Some(project_id), kinds: vec![Kind::Note], limit: 0, ..Default::default() },
     )?;
-    let row = |r: &records::Record| -> anyhow::Result<NoteRow> {
-        let ext = r.str("ext").to_owned();
+    let terms = terms_of(&f.q);
+    let words: Vec<String> = terms.iter().filter(|(k, _)| k.is_empty()).map(|(_, v)| v.clone()).collect();
+    // The State filter is set by the search too ("is:resolved").
+    let state_in_q = terms.iter().any(|(k, v)| k == "is" && ["resolved", "current", "open"].contains(&v.as_str()));
+    let since = f.range_ms().map(|ms| now - ms);
+    let kind_ok = |r: &records::Record| match f.kind.as_str() {
+        "file" => !r.str("ext").is_empty(),
+        "note" => r.str("ext").is_empty(),
+        _ => true,
+    };
+    let state_ok = |r: &records::Record| {
+        state_in_q
+            || match f.state.as_str() {
+                "all" => true,
+                "resolved" => r.state != "current",
+                _ => r.state == "current",
+            }
+    };
+    let cat_ok = |r: &records::Record| f.cats.is_empty() || f.cats.iter().any(|c| c == r.str("category"));
+    let time_ok = |r: &records::Record| since.is_none_or(|s| r.created_at >= s);
+    let search_ok = |r: &records::Record| matches(r, &terms);
+
+    // Each menu counts what its own choices would show, with the other filters as they are.
+    let mut cat_n: Vec<(String, usize)> = Vec::new();
+    for r in all.iter().filter(|r| kind_ok(r) && state_ok(r) && time_ok(r) && search_ok(r)) {
         let cat = r.str("category").to_owned();
-        let issue = cat.contains("issue");
-        let linked: Vec<String> =
-            records::links_of(c, r)?.iter().filter(|l| l.outgoing).map(|l| l.other.short_id()).collect();
-        let size = r.data.get("size").and_then(Value::as_i64).map(notes::size).unwrap_or_else(|| "text".into());
-        let versions = r.data.get("versions").and_then(Value::as_i64).unwrap_or(0);
-        let mut meta = vec![size, crate::util::ago(r.updated_at, now)];
-        if versions > 0 {
-            meta.insert(1, format!("{} versions", versions + 1));
+        match cat_n.iter_mut().find(|x| x.0 == cat) {
+            Some(x) => x.1 += 1,
+            None => cat_n.push((cat, 1)),
         }
-        Ok(NoteRow {
+    }
+    // A picked category stays in the menu even when nothing else matches it.
+    for c in &f.cats {
+        if !cat_n.iter().any(|x| &x.0 == c) {
+            cat_n.push((c.clone(), 0));
+        }
+    }
+    cat_n.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    let cats = cat_n
+        .into_iter()
+        .map(|(cat, n)| {
+            let on = f.cats.contains(&cat);
+            let next = f.with(|x| {
+                if on {
+                    x.cats.retain(|c| c != &cat);
+                } else {
+                    x.cats.push(cat.clone());
+                }
+            });
+            (cat, n.to_string(), next.href(slug), on)
+        })
+        .collect();
+    let count = |pred: &dyn Fn(&records::Record) -> bool| all.iter().filter(|r| pred(r)).count().to_string();
+    let kinds = [("", "Files and notes"), ("file", "Files"), ("note", "Notes")]
+        .into_iter()
+        .map(|(k, label)| {
+            let n = count(&|r| {
+                cat_ok(r)
+                    && state_ok(r)
+                    && time_ok(r)
+                    && search_ok(r)
+                    && match k {
+                        "file" => !r.str("ext").is_empty(),
+                        "note" => r.str("ext").is_empty(),
+                        _ => true,
+                    }
+            });
+            (label.to_owned(), n, f.with(|x| x.kind = k.into()).href(slug), f.kind == k)
+        })
+        .collect();
+    let states = [("", "Current"), ("resolved", "Resolved"), ("all", "All")]
+        .into_iter()
+        .map(|(k, label)| {
+            let n = count(&|r| {
+                cat_ok(r)
+                    && kind_ok(r)
+                    && time_ok(r)
+                    && search_ok(r)
+                    && match k {
+                        "all" => true,
+                        "resolved" => r.state != "current",
+                        _ => r.state == "current",
+                    }
+            });
+            (label.to_owned(), n, f.with(|x| x.state = k.into()).href(slug), f.state == k)
+        })
+        .collect();
+    let ranges = [("24h", "24 h"), ("7d", "7 d"), ("30d", "30 d"), ("", "All")]
+        .into_iter()
+        .map(|(k, label)| (label.to_owned(), String::new(), f.with(|x| x.range = k.into()).href(slug), f.range == k))
+        .collect();
+
+    let shown: Vec<&records::Record> =
+        all.iter().filter(|r| cat_ok(r) && kind_ok(r) && state_ok(r) && time_ok(r) && search_ok(r)).collect();
+    let mut rows = Vec::new();
+    for r in &shown {
+        let ext = r.str("ext").to_owned();
+        let (icon, tint) = type_icon(&ext);
+        let size = r.data.get("size").and_then(Value::as_i64).map(notes::size);
+        rows.push(NoteRow {
             short: r.short_id(),
             url: r.url(),
-            title: r.title.clone(),
-            category: cat,
-            ext: if issue {
-                "!".into()
-            } else if ext.is_empty() {
-                "txt".into()
-            } else {
-                ext.clone()
+            title_html: marked(&r.title, &words),
+            snippet_html: marked(&snippet(&r.body, &words), &words),
+            category: r.str("category").to_owned(),
+            icon,
+            tint,
+            kind: match (&ext[..], size) {
+                ("", _) => "note".into(),
+                (e, Some(s)) => format!("{e} · {s}"),
+                (e, None) => e.to_owned(),
             },
-            issue,
-            linked: linked.join(", "),
             resurface: match (r.str("resurface"), r.data.get("resurface_at").and_then(Value::as_i64)) {
                 ("", _) => String::new(),
                 (_, Some(at)) => {
-                    format!("comes back {}", crate::tz::Tz::named("UTC").map(|t| t.date(at)).unwrap_or_default())
+                    format!("Comes back {}", crate::tz::Tz::named("UTC").map(|t| t.date(at)).unwrap_or_default())
                 }
-                (w, None) => format!("comes back {w}"),
+                (w, None) => format!("Comes back {w}"),
             },
-            meta: meta.join(" · "),
-            download: if ext.is_empty() || notes::readable(&ext) { String::new() } else { format!("{}/file", r.url()) },
-        })
+            added: crate::util::ago(r.created_at, now),
+            resolved: r.state != "current",
+            download: if ext.is_empty() { String::new() } else { format!("{}/file", r.url()) },
+        });
+    }
+    let filtered = !f.q.is_empty() || !f.cats.is_empty() || !f.kind.is_empty() || !f.range.is_empty();
+    let files = rows.iter().filter(|r| !r.download.is_empty()).count();
+    let summary = if filtered {
+        format!("{} found", rows.len())
+    } else if files > 0 {
+        format!("{} · {files} file{} to download", rows.len(), if files == 1 { "" } else { "s" })
+    } else {
+        rows.len().to_string()
     };
-    let mut cats: Vec<(String, usize)> = Vec::new();
-    for r in all.iter().filter(|r| r.state == "current") {
-        let cat = r.str("category").to_owned();
-        match cats.iter_mut().find(|x| x.0 == cat) {
-            Some(x) => x.1 += 1,
-            None => cats.push((cat, 1)),
+    let hidden_resolved = if f.state.is_empty() && !state_in_q {
+        all.iter().filter(|r| r.state != "current" && cat_ok(r) && kind_ok(r) && time_ok(r) && search_ok(r)).count()
+    } else {
+        0
+    };
+    let foot = match (rows.is_empty(), hidden_resolved) {
+        (_, 0) if all.is_empty() => String::new(),
+        (true, 0) => "Nothing matches.".into(),
+        (true, n) => format!("Nothing current matches; {n} resolved hidden (State)."),
+        (false, 0) => String::new(),
+        (false, n) => format!("{n} resolved hidden (State)."),
+    };
+    let label = |picked: Vec<&str>| if picked.is_empty() { "All".to_owned() } else { picked.join(", ") };
+    let mut keep = Vec::new();
+    for (k, v) in [
+        ("ncat", f.cats.join("|")),
+        ("nkind", f.kind.clone()),
+        ("nstate", f.state.clone()),
+        ("nrange", f.range.clone()),
+    ] {
+        if !v.is_empty() {
+            keep.push((k, v));
         }
     }
-    cats.sort();
-    let base = format!("/p/{slug}?tab=notes");
-    let pick = pick.filter(|p| cats.iter().any(|c| c.0 == *p));
-    let current_n = all.iter().filter(|r| r.state == "current").count();
-    let mut pills = vec![("All".to_owned(), base.clone(), current_n, pick.is_none())];
-    for (cat, n) in cats {
-        let on = pick == Some(cat.as_str());
-        pills.push((cat.clone(), format!("{base}&ncat={}#notes", super::log::enc(&cat)), n, on));
-    }
-    let mut current = Vec::new();
-    let mut resolved = Vec::new();
-    for r in &all {
-        if pick.is_some_and(|p| r.str("category") != p) {
-            continue;
-        }
-        if r.state == "current" { current.push(row(r)?) } else { resolved.push(row(r)?) }
-    }
-    Ok(NotesView { pills, current, resolved })
+    Ok(NotesView {
+        q: f.q.clone(),
+        keep,
+        cat_label: if f.cats.len() > 2 {
+            format!("{} picked", f.cats.len())
+        } else {
+            label(f.cats.iter().map(String::as_str).collect())
+        },
+        cats,
+        cats_clear: f.with(|x| x.cats.clear()).href(slug),
+        kind_label: match f.kind.as_str() {
+            "file" => "Files".into(),
+            "note" => "Notes".into(),
+            _ => "Files and notes".into(),
+        },
+        kinds,
+        state_label: match f.state.as_str() {
+            "resolved" => "Resolved".into(),
+            "all" => "All".into(),
+            _ => "Current".into(),
+        },
+        states,
+        ranges,
+        reset: (filtered || !f.state.is_empty()).then(|| format!("/p/{slug}?tab=notes")),
+        rows,
+        summary,
+        foot,
+        none: all.is_empty(),
+    })
 }
 
 /// A note on its own page: its text (a text note, or a readable file), and the file to download.
@@ -366,5 +679,25 @@ pub fn page(data_dir: &std::path::Path, r: &records::Record) -> NotePage {
         category: r.str("category").to_owned(),
         resurface: r.str("resurface").to_owned(),
         versions: (1..=versions).rev().map(|v| (v, format!("{}/file?v={v}", r.url()))).collect(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn filters_round_trip_through_the_address_and_search_words_are_marked_safely() {
+        let f = Filter::new(Some(" flaky "), Some("known issue|plan"), Some("file"), Some("bogus"), Some("7d"));
+        assert_eq!(f.href("im"), "/p/im?tab=notes&nq=flaky&ncat=known+issue%7Cplan&nkind=file&nrange=7d");
+        assert_eq!(f.state, "", "unknown values are left out");
+        assert_eq!(marked("Flaky <b> test", &["flaky".into()]), "<mark>Flaky</mark> &lt;b&gt; test");
+        assert_eq!(marked("a & b", &["&".into()]), "a <mark>&amp;</mark> b");
+        let long = format!("{} the word flaky here", "x ".repeat(80));
+        assert!(snippet(&long, &["flaky".into()]).starts_with('…'));
+        assert_eq!(snippet("# Title\n\n- **bold** `code`", &[]), "Title bold code");
+        assert_eq!(type_icon("MD"), ("ftext", "violet"));
+        assert_eq!(type_icon(""), ("note", "teal"));
+        assert_eq!(type_icon("tar"), ("archive", "orange"));
     }
 }
