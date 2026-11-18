@@ -1439,9 +1439,35 @@ async fn conversations_log_sessions_and_subagents_from_the_transcripts() {
     let cookie = s.owner_cookie().await;
     let page = s.http.get(s.url("/conversations")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
     assert!(
-        page.contains("Between sessions") && page.contains("Subagents") && page.contains("Review 1: security"),
+        page.contains("Between sessions") && page.contains("Subagents") && page.contains("Scopes are live."),
         "{page}"
     );
+    // Subagents, by their session (2026-11-18): one run at a time.
+    let subs = s
+        .http
+        .get(s.url("/conversations?kind=sub"))
+        .header(COOKIE, &cookie)
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(
+        subs.contains("Subagents, by session") && subs.contains("Review 1: security") && subs.contains("Run 1 of 1"),
+        "{subs}"
+    );
+    assert!(subs.contains(">told<") && subs.contains(">reported<") && subs.contains("Worked 20 min"), "{subs}");
+    // Participant and search narrow the list.
+    let get = |path: &'static str| {
+        let (s, cookie) = (&s, cookie.clone());
+        async move { s.http.get(s.url(path)).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap() }
+    };
+    let p = get("/conversations?who=agent-flow").await;
+    assert!(p.contains("With agent-flow") && p.contains("1 pair · 2 messages"), "{p}");
+    assert!(get("/conversations?who=nobody").await.contains("Nothing matches."));
+    assert!(get("/conversations?q=thanks").await.contains("Conversation 1 of 1"));
+    assert!(get("/conversations?q=from:nobody").await.contains("Nothing matches."));
     let pair = s
         .http
         .get(s.url("/conversations?t=pair%3Aagent-flow%7Cimaginarium"))
@@ -1452,8 +1478,9 @@ async fn conversations_log_sessions_and_subagents_from_the_transcripts() {
         .text()
         .await
         .unwrap();
-    assert_eq!(pair.matches("Scopes are live.").count(), 1, "kept once: {pair}");
-    assert!(pair.contains("<strong>thanks</strong>") && pair.contains("→ agent-flow"), "{pair}");
+    assert_eq!(pair.matches("<p>Scopes are live.</p>").count(), 1, "kept once: {pair}");
+    assert!(pair.contains("<strong>thanks</strong>") && pair.contains("› agent-flow"), "{pair}");
+    assert!(pair.contains("Conversation 1 of 1") && pair.contains("This is the newest conversation"), "{pair}");
     let sub = s
         .http
         .get(s.url("/conversations?t=sub%3Aa0ca2a7e879b8b08a"))

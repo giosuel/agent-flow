@@ -957,3 +957,26 @@ document.addEventListener("click", (e) => {
   document.addEventListener("DOMContentLoaded", () => wire(document));
   document.addEventListener("af:content", (e) => e.detail && wire(e.detail));
 })();
+
+// Conversations: ← → step between conversations (or runs); on the phone, a swipe does.
+(() => {
+  const go = (sel) => { const a = document.querySelector(sel); if (a) location.href = a.href; };
+  document.addEventListener("keydown", (e) => {
+    if (!document.querySelector(".cv-pager") || e.altKey || e.ctrlKey || e.metaKey) return;
+    if (e.target.closest && e.target.closest("input, textarea, select, [contenteditable]")) return;
+    if (e.key === "ArrowLeft") go("a[data-newer]");
+    if (e.key === "ArrowRight") go("a[data-older]");
+  });
+  let x0 = null, y0 = null;
+  document.addEventListener("touchstart", (e) => {
+    if (!e.target.closest || !e.target.closest("[data-swipe]") || e.touches.length !== 1) { x0 = null; return; }
+    x0 = e.touches[0].clientX; y0 = e.touches[0].clientY;
+  }, { passive: true });
+  document.addEventListener("touchend", (e) => {
+    if (x0 === null) return;
+    const dx = e.changedTouches[0].clientX - x0, dy = e.changedTouches[0].clientY - y0;
+    x0 = null;
+    if (Math.abs(dx) < 80 || Math.abs(dx) < Math.abs(dy) * 2) return;
+    go(dx < 0 ? "a[data-older]" : "a[data-newer]");
+  }, { passive: true });
+})();

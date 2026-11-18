@@ -414,6 +414,10 @@ pub struct Thread {
     pub count: i64,
     pub last_at: i64,
     pub is_subagent: bool,
+    /// Who takes part, as shown: a pair's two sessions, or a subagent's session.
+    pub parties: Vec<String>,
+    /// A subagent's type ("fork", "general-purpose"), or "".
+    pub agent_type: String,
 }
 
 /// Conversations between sessions, newest first.
@@ -449,14 +453,17 @@ pub fn session_threads(conn: &Connection, limit: i64) -> anyhow::Result<Vec<Thre
             })
             .unwrap_or_else(|| n.to_owned())
         };
+        let parties = vec![self::shown(&shown(a)), self::shown(&shown(b))];
         out.push(Thread {
-            title: format!("{} ↔ {}", self::shown(&shown(a)), self::shown(&shown(b))),
+            title: format!("{} ↔ {}", parties[0], parties[1]),
             key,
             sub: String::new(),
             project_id,
             count,
             last_at,
             is_subagent: false,
+            parties,
+            agent_type: String::new(),
         });
     }
     Ok(out)
@@ -496,6 +503,8 @@ pub fn subagent_threads(conn: &Connection, project_id: Option<i64>, limit: i64) 
         out.push(Thread {
             key: format!("sub:{id}"),
             title: if description.is_empty() { "Subagent".into() } else { description },
+            parties: vec![self::shown(&session_name)],
+            agent_type: agent_type.clone(),
             sub: [agent_type, format!("for {session_name}")]
                 .into_iter()
                 .filter(|s| !s.is_empty())
@@ -516,6 +525,28 @@ pub struct LogMsg {
     pub from: String,
     pub to: String,
     pub body: String,
+}
+
+/// The threads with a message that matches every term, and when the newest such message was: a
+/// term is a word in the text, or `from:name` / `to:name` (any case, part of the name).
+pub fn search(conn: &Connection, terms: &[(String, String)]) -> anyhow::Result<std::collections::HashMap<String, i64>> {
+    let mut sql = String::from("SELECT thread, max(at) FROM session_messages WHERE 1");
+    let mut args: Vec<String> = Vec::new();
+    for (k, v) in terms {
+        let col = match k.as_str() {
+            "from" => "from_name",
+            "to" => "to_name",
+            _ => "body",
+        };
+        let like = format!("%{}%", v.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_"));
+        args.push(like);
+        sql += &format!(" AND {col} LIKE ?{} ESCAPE '\\'", args.len());
+    }
+    sql += " GROUP BY thread";
+    let mut stmt = conn.prepare(&sql)?;
+    let rows =
+        stmt.query_map(rusqlite::params_from_iter(args.iter()), |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?;
+    Ok(rows.collect::<Result<_, _>>()?)
 }
 
 pub fn messages(conn: &Connection, thread: &str) -> anyhow::Result<Vec<LogMsg>> {
