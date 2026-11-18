@@ -101,6 +101,42 @@ pub fn between(conn: &Connection, from: i64, to: i64) -> anyhow::Result<Vec<Samp
     Ok(rows.collect::<Result<_, _>>()?)
 }
 
+/// A window that's over: when it ran and how much of it was used at most; `limit_at` when it
+/// reached 100%.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Past {
+    pub start: i64,
+    pub end: i64,
+    pub peak: f64,
+    pub limit_at: Option<i64>,
+}
+
+/// The last `n` windows that ended before `now`, newest first: the 5-hour ones, or the weeks.
+pub fn past(conn: &Connection, five: bool, now: i64, n: usize) -> anyhow::Result<Vec<Past>> {
+    let (pct, reset, len) = if five { ("five_pct", "five_reset", FIVE_HOURS) } else { ("week_pct", "week_reset", WEEK) };
+    // Resets can come a second apart between samples of one window: grouped by the minute.
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {reset} / 60000 * 60000 AS r, max({pct}), min(CASE WHEN {pct} >= 100 THEN at END)
+         FROM plan_samples WHERE {reset} IS NOT NULL AND {pct} IS NOT NULL
+         GROUP BY r HAVING r <= ?1 ORDER BY r DESC LIMIT ?2"
+    ))?;
+    let rows = stmt.query_map(params![now, n as i64], |r| {
+        let end: i64 = r.get(0)?;
+        Ok(Past { start: end - len, end, peak: r.get(1)?, limit_at: r.get(2)? })
+    })?;
+    Ok(rows.collect::<Result<_, _>>()?)
+}
+
+/// The middle value (the mean of the two middle ones for an even count).
+pub fn median(mut v: Vec<f64>) -> Option<f64> {
+    if v.is_empty() {
+        return None;
+    }
+    v.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let m = v.len() / 2;
+    Some(if !v.len().is_multiple_of(2) { v[m] } else { (v[m - 1] + v[m]) / 2.0 })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -121,6 +157,17 @@ mod tests {
             let s = latest(c)?.unwrap();
             assert_eq!((s.at, s.five_pct, s.five_reset, s.week_pct), (1_100_000, Some(42.0), Some(1_763_419_800_000), Some(71.5)));
             assert_eq!(between(c, 0, 2_000_000)?.len(), 2);
+            // Windows that are over, newest first, with their peak.
+            let w = |pct: f64, reset: i64| Limits { five_hour: Some(Window { used_percentage: pct, resets_at: reset }), seven_day: None };
+            let (r1, r2) = (1_763_400_000_i64, 1_763_418_000_i64);
+            for (k, (pct, reset)) in [(30.0, r1), (96.0, r1), (40.0, r2), (100.0, r2), (5.0, r2 + 18_000)].iter().enumerate() {
+                assert!(store(c, &w(*pct, *reset), 2_000_000 + k as i64 * 60_000, None, "")?);
+            }
+            let p = past(c, true, r2 * 1000 + 1, 10)?;
+            assert_eq!(p.len(), 2, "the one still running isn't over");
+            assert_eq!((p[0].end, p[0].peak, p[0].start), (r2 * 1000, 100.0, r2 * 1000 - FIVE_HOURS));
+            assert!(p[0].limit_at.is_some() && p[1].limit_at.is_none());
+            assert_eq!(median(vec![3.0, 1.0, 2.0, 10.0]), Some(2.5));
             Ok(())
         })
         .unwrap();

@@ -26,7 +26,9 @@ struct UsageQuery {
     tab: Option<String>,
     /// "2026-11-10": that day's hours instead of 14 days.
     day: Option<String>,
-    /// "cache" for cache reads; new tokens otherwise.
+    /// What the chart counts: "total", "cache" (reads), "cost"; new tokens otherwise (the
+    /// owner, 2026-11-17: "lets make \"new tokens\" the default view, and add cost and \"total
+    /// tokens\" as other options").
     metric: Option<String>,
     /// Tasks tab: 7 or 14 days.
     days: Option<i64>,
@@ -53,6 +55,8 @@ struct Cells {
     output: String,
     new_tokens: String,
     cache_read: String,
+    /// At API prices; "–" when none of it has a price.
+    cost: String,
 }
 
 impl Cells {
@@ -64,8 +68,92 @@ impl Cells {
             output: short(t.output),
             new_tokens: short(t.new_tokens()),
             cache_read: short(t.cache_read),
+            cost: cost_of(t),
         }
     }
+}
+
+fn cost_of(t: &Tokens) -> String {
+    if t.cost_micro == 0 && t.unpriced > 0 { "–".into() } else { crate::prices::dollars(t.usd()) }
+}
+
+/// What the chart counts.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Metric {
+    New,
+    Total,
+    Cache,
+    Cost,
+}
+
+impl Metric {
+    fn parse(s: Option<&str>) -> Self {
+        match s {
+            Some("total") => Metric::Total,
+            Some("cache") => Metric::Cache,
+            Some("cost") => Metric::Cost,
+            _ => Metric::New,
+        }
+    }
+
+    fn of(self, t: &Tokens) -> f64 {
+        match self {
+            Metric::New => t.new_tokens() as f64,
+            Metric::Total => t.total() as f64,
+            Metric::Cache => t.cache_read as f64,
+            Metric::Cost => t.usd(),
+        }
+    }
+
+    fn fmt(self, v: f64) -> String {
+        match self {
+            Metric::Cost => crate::prices::dollars(v),
+            _ => short(v as i64),
+        }
+    }
+
+    fn key(self) -> &'static str {
+        match self {
+            Metric::New => "",
+            Metric::Total => "total",
+            Metric::Cache => "cache",
+            Metric::Cost => "cost",
+        }
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            Metric::New => "New tokens",
+            Metric::Total => "Total tokens",
+            Metric::Cache => "Cache reads",
+            Metric::Cost => "Cost",
+        }
+    }
+}
+
+/// One of the plan's windows, as a meter (M13, the "Usage: plan and cost" mockups).
+struct Meter {
+    label: &'static str,
+    pct: String,
+    width: f64,
+    warn: bool,
+    reset: String,
+    so_far: String,
+    so_far_sub: String,
+    /// "100% ≈ $250 at API prices ≈ 10.3M new tokens", and what it's based on.
+    estimate: String,
+    basis: String,
+}
+
+/// A finished 5-hour window in "How big a window is".
+struct EstRow {
+    day: String,
+    span: String,
+    used: String,
+    limit: String,
+    cost: String,
+    per_pct: String,
+    tokens_per_pct: String,
 }
 
 struct TaskRow {
@@ -103,7 +191,6 @@ struct UsagePage {
     bars_max: String,
     x_labels: Vec<String>,
     zoomed: bool,
-    cache: bool,
     /// Query string that keeps the day while switching the metric.
     day_q: String,
     legend: Vec<Legend>,
@@ -118,6 +205,18 @@ struct UsagePage {
     show_estimate: bool,
     days: i64,
     empty: bool,
+    /// The chart's metric, as the switch shows it: (key, name, on).
+    metrics: Vec<(&'static str, &'static str, bool)>,
+    /// The plan's windows, when a status line has sent them; why not otherwise.
+    meters: Vec<Meter>,
+    plan_seen: String,
+    /// The plan's % under the bars: its title and chart, empty without samples.
+    strip: String,
+    strip_title: String,
+    est_rows: Vec<EstRow>,
+    est_median: (String, String),
+    /// Calls of models without a price in this window, not in the cost.
+    unpriced: i64,
 }
 
 async fn page(
@@ -133,7 +232,7 @@ async fn page(
     let today = fortnight_days[13];
     let end = fortnight_days[14];
     let tab = if q.tab.as_deref() == Some("tasks") { "tasks" } else { "overview" }.to_owned();
-    let cache = q.metric.as_deref() == Some("cache");
+    let metric_kind = Metric::parse(q.metric.as_deref());
     let day = q.day.as_deref().and_then(|s| tz.parse_day(s)).filter(|d| *d <= today);
     let days = if q.days == Some(7) { 7 } else { 14 };
     // A bar per local hour of an opened day (23 or 25 when the clocks change), else per day.
@@ -162,10 +261,12 @@ async fn page(
             let today_total = usage::per_project(c, today, end)?;
             let fortnight = usage::per_project(c, fortnight_from, end)?;
             let newest: Option<i64> = c.query_row("SELECT max(at) FROM usage", [], |r| r.get(0))?;
-            Ok((projects, buckets, per_project, tasks, task_records, today_total, fortnight, newest))
+            let week = usage::per_project(c, fortnight_days[7], end)?;
+            let plan = plan_data(c, now, bounds_q[0], bounds_q[bounds_q.len() - 1])?;
+            Ok((projects, buckets, per_project, tasks, task_records, today_total, fortnight, newest, week, plan))
         })
         .await?;
-    let (projects, buckets, per_project, tasks, task_records, today_total, fortnight, newest) = data;
+    let (projects, buckets, per_project, tasks, task_records, today_total, fortnight, newest, week, plan) = data;
 
     let slugs: Vec<String> = projects.iter().map(|p| p.slug.clone()).collect();
     let colors = charts::colors(&slugs);
@@ -175,7 +276,7 @@ async fn page(
             None => ("Other".into(), charts::OTHER),
         }
     };
-    let metric = |t: &Tokens| if cache { t.cache_read } else { t.new_tokens() } as f64;
+    let metric = |t: &Tokens| metric_kind.of(t);
 
     // One series per project that has any tokens in the window, in project order; Other last.
     let mut ids: Vec<Option<i64>> = projects.iter().map(|p| Some(p.id)).collect();
@@ -197,17 +298,21 @@ async fn page(
             continue;
         }
         let (name, color) = name_of(id);
-        legend.push(Legend { name: name.clone(), color, total: short(total as i64) });
+        legend.push(Legend { name: name.clone(), color, total: metric_kind.fmt(total) });
         ids_of.push((name.clone(), id));
         series.push(Series { name, color, values });
     }
     let labels: Vec<String> =
         bounds[..n].iter().map(|t| if day.is_some() { tz.hm(*t) } else { tz.day_label(*t) }).collect();
-    let metric_q = if cache { "&metric=cache" } else { "" };
+    let metric_q = match metric_kind.key() {
+        "" => String::new(),
+        k => format!("&metric={k}"),
+    };
     let link_tz = tz.clone();
-    let link = move |i: usize| format!("/usage?day={}{metric_q}", link_tz.date(bounds[i]));
-    let fmt = |v: f64| short(v as i64);
-    let what = if cache { "cache reads" } else { "new tokens" };
+    let link_bounds = bounds.clone();
+    let link = move |i: usize| format!("/usage?day={}{metric_q}", link_tz.date(link_bounds[i]));
+    let fmt = |v: f64| metric_kind.fmt(v);
+    let what = metric_kind.name().to_lowercase();
     let (bars, bars_max) = charts::stacked_bars(
         &format!("{what} per {}", if day.is_some() { "hour" } else { "day" }),
         &labels,
@@ -255,18 +360,17 @@ async fn page(
         }
     };
     // An opened day gets its own figures; the 14-day view shows today and the fortnight.
+    let wk = sum(&week);
+    let tokens_hint = |t: &Tokens| format!("{} new tokens · {} cache reads", short(t.new_tokens()), short(t.cache_read));
     let tiles = match day {
         Some(d) => vec![
-            Tile {
-                label: format!("New tokens on {}", tz.date(d)),
-                value: short(window.new_tokens()),
-                hint: calls(&window),
-            },
-            Tile { label: "Cache reads that day".into(), value: short(window.cache_read), hint: ratio(&window) },
+            Tile { label: format!("Cost on {}", tz.date(d)), value: cost_of(&window), hint: tokens_hint(&window) },
+            Tile { label: "Calls that day".into(), value: crate::util::fmt_count(window.calls), hint: ratio(&window) },
         ],
         None => vec![
-            Tile { label: "New tokens today".into(), value: short(td.new_tokens()), hint: calls(&td) },
-            Tile { label: "New tokens, 14 days".into(), value: short(fn_.new_tokens()), hint: calls(&fn_) },
+            Tile { label: "Today".into(), value: cost_of(&td), hint: tokens_hint(&td) },
+            Tile { label: "Last 7 days".into(), value: cost_of(&wk), hint: calls(&wk) },
+            Tile { label: "Last 14 days".into(), value: cost_of(&fn_), hint: format!("≈ {} a day", crate::prices::dollars(fn_.usd() / 14.0)) },
             Tile { label: "Cache reads, 14 days".into(), value: short(fn_.cache_read), hint: ratio(&fn_) },
         ],
     };
@@ -312,6 +416,7 @@ async fn page(
         .collect();
 
     let day_q = day.map(|d| format!("day={}&", tz.date(d))).unwrap_or_default();
+    let (meters, est_rows, est_median) = plan_view(&plan, now, &tz);
     render(UsagePage {
         reading: super::READING.load(std::sync::atomic::Ordering::Relaxed),
         nav: nav(&state, &actor, "/usage").await,
@@ -319,15 +424,14 @@ async fn page(
         newest: newest.map(|t| crate::util::ago(t, now)).unwrap_or_else(|| "not yet".into()),
         tiles,
         chart_title: match day {
-            Some(d) => format!("{} by hour · {}", if cache { "Cache reads" } else { "New tokens" }, tz.date(d)),
-            None => format!("{} per day · 14 days", if cache { "Cache reads" } else { "New tokens" }),
+            Some(d) => format!("{} by hour · {}", metric_kind.name(), tz.date(d)),
+            None => format!("{} per day · 14 days", metric_kind.name()),
         },
         chart_sub: if day.is_some() { format!("Hours in {}", tz.name()) } else { "Open a day for its hours".into() },
         bars,
-        bars_max: short(bars_max as i64),
+        bars_max: metric_kind.fmt(bars_max),
         x_labels,
         zoomed: day.is_some(),
-        cache,
         day_q,
         empty: legend.is_empty(),
         legend,
@@ -343,7 +447,166 @@ async fn page(
         show_estimate: task_rows.iter().any(|t| !t.estimate.is_empty()),
         tasks: task_rows,
         days,
+        metrics: [Metric::New, Metric::Total, Metric::Cache, Metric::Cost]
+            .iter()
+            .map(|m| (m.key(), m.name(), *m == metric_kind))
+            .collect(),
+        plan_seen: plan.latest.map(|s| crate::util::ago(s.at, now)).unwrap_or_default(),
+        strip_title: if day.is_some() { "5 hours · % used".into() } else { "Week · % used at the end of the day".into() },
+        strip: if plan.samples.is_empty() {
+            String::new()
+        } else {
+            charts::percent_line("the plan's % used", &labels, &strip_values(&plan.samples, &bounds, day.is_some()))
+        },
+        meters,
+        est_rows,
+        est_median,
+        unpriced: window.unpriced,
     })
+}
+
+/// What the page needs of the plan's samples (M13).
+struct PlanData {
+    latest: Option<crate::plan::Sample>,
+    /// Tokens since the current 5-hour window and week began.
+    five_now: Tokens,
+    week_now: Tokens,
+    five_past: Vec<(crate::plan::Past, Tokens)>,
+    week_past: Vec<(crate::plan::Past, Tokens)>,
+    /// The samples in the chart's range, for the strip.
+    samples: Vec<crate::plan::Sample>,
+}
+
+fn plan_data(c: &rusqlite::Connection, now: i64, from: i64, to: i64) -> anyhow::Result<PlanData> {
+    use crate::plan::{FIVE_HOURS, WEEK};
+    let total = |a: i64, b: i64| -> anyhow::Result<Tokens> {
+        Ok(usage::per_project(c, a, b)?.iter().fold(Tokens::default(), |mut acc, (_, _, t)| {
+            acc.add(t);
+            acc
+        }))
+    };
+    let latest = crate::plan::latest(c)?;
+    let since = |reset: Option<i64>, len: i64| -> anyhow::Result<Tokens> {
+        match reset.filter(|r| *r > now) {
+            Some(r) => total(r - len, now),
+            None => Ok(Tokens::default()),
+        }
+    };
+    let five_now = since(latest.and_then(|s| s.five_reset), FIVE_HOURS)?;
+    let week_now = since(latest.and_then(|s| s.week_reset), WEEK)?;
+    let mut five_past = Vec::new();
+    for p in crate::plan::past(c, true, now, 12)? {
+        five_past.push((p, total(p.start, p.end)?));
+    }
+    let mut week_past = Vec::new();
+    for p in crate::plan::past(c, false, now, 6)? {
+        week_past.push((p, total(p.start, p.end)?));
+    }
+    Ok(PlanData { latest, five_now, week_now, five_past, week_past, samples: crate::plan::between(c, from, to)? })
+}
+
+/// "3 h 20 min", "4 days": how long until `t`.
+fn until(t: i64, now: i64) -> String {
+    let m = ((t - now).max(0) + 59_999) / 60_000;
+    match m {
+        0..=59 => format!("{m} min"),
+        60..=1439 if m % 60 == 0 => format!("{} h", m / 60),
+        60..=1439 => format!("{} h {} min", m / 60, m % 60),
+        _ => {
+            let d = (m + 720) / 1440;
+            format!("{d} day{}", if d == 1 { "" } else { "s" })
+        }
+    }
+}
+
+/// The plan card's two meters and "How big a window is", from the samples.
+fn plan_view(p: &PlanData, now: i64, tz: &Tz) -> (Vec<Meter>, Vec<EstRow>, (String, String)) {
+    let per_pct = |past: &[(crate::plan::Past, Tokens)]| -> (Option<f64>, Option<f64>, usize) {
+        let ok: Vec<&(crate::plan::Past, Tokens)> = past.iter().filter(|(w, t)| w.peak >= 10.0 && t.calls > 0).collect();
+        let usd = crate::plan::median(ok.iter().map(|(w, t)| t.usd() / w.peak).collect());
+        let tok = crate::plan::median(ok.iter().map(|(w, t)| t.new_tokens() as f64 / w.peak).collect());
+        (usd, tok, ok.len())
+    };
+    let mut meters = Vec::new();
+    if let Some(s) = p.latest {
+        for (label, pct, reset, so_far, past, five) in [
+            ("5 hours", s.five_pct, s.five_reset, &p.five_now, &p.five_past, true),
+            ("Week", s.week_pct, s.week_reset, &p.week_now, &p.week_past, false),
+        ] {
+            let (Some(pct), Some(reset)) = (pct, reset) else { continue };
+            let over = reset <= now;
+            let pct = if over { 0.0 } else { pct };
+            let when = if five { tz.hm(reset) } else { tz.short(reset) };
+            let (m_usd, m_tok, n) = per_pct(past);
+            // The finished windows' median, else this window so far (from 5% on).
+            let (usd1, tok1, basis) = match (m_usd, m_tok) {
+                (Some(u), Some(t)) => (Some(u), Some(t), format!("median of {n} window{}", if n == 1 { "" } else { "s" })),
+                _ if pct >= 5.0 && so_far.calls > 0 => (
+                    Some(so_far.usd() / pct),
+                    Some(so_far.new_tokens() as f64 / pct),
+                    if five { "this window so far".into() } else { "this week so far".into() },
+                ),
+                _ => (None, None, String::new()),
+            };
+            meters.push(Meter {
+                label,
+                pct: format!("{pct:.0}%"),
+                width: pct.clamp(0.0, 100.0),
+                warn: pct >= 80.0,
+                reset: if over { format!("reset at {when}") } else { format!("{when} · in {}", until(reset, now)) },
+                so_far: if over { "–".into() } else { cost_of(so_far) },
+                so_far_sub: if over {
+                    "no session has reported since".into()
+                } else {
+                    format!("{} new tokens · {} cache reads", short(so_far.new_tokens()), short(so_far.cache_read))
+                },
+                estimate: match (usd1, tok1) {
+                    (Some(u), Some(t)) => format!(
+                        "100% ≈ {} at API prices ≈ {} new tokens",
+                        crate::prices::dollars(u * 100.0),
+                        short((t * 100.0) as i64)
+                    ),
+                    _ => "100%: known once the window is 5% used".into(),
+                },
+                basis,
+            });
+        }
+    }
+    let rows = p
+        .five_past
+        .iter()
+        .filter(|(w, _)| w.peak >= 1.0)
+        .take(6)
+        .map(|(w, t)| EstRow {
+            day: tz.date(w.start),
+            span: format!("{}–{}", tz.hm(w.start), tz.hm(w.end)),
+            used: format!("{:.0}%", w.peak),
+            limit: w.limit_at.map(|a| format!("limit {}", tz.hm(a))).unwrap_or_default(),
+            cost: cost_of(t),
+            per_pct: crate::prices::dollars(t.usd() / w.peak.max(1.0)),
+            tokens_per_pct: short((t.new_tokens() as f64 / w.peak.max(1.0)) as i64),
+        })
+        .collect();
+    let (m_usd, m_tok, _) = per_pct(&p.five_past);
+    let median = match (m_usd, m_tok) {
+        (Some(u), Some(t)) => (crate::prices::dollars(u), short(t as i64)),
+        _ => (String::new(), String::new()),
+    };
+    (meters, rows, median)
+}
+
+/// The strip's values: the last sample in each bar's span (the week's % for days, the 5 hours'
+/// for an opened day's hours).
+fn strip_values(samples: &[crate::plan::Sample], bounds: &[i64], hours: bool) -> Vec<Option<f64>> {
+    (0..bounds.len() - 1)
+        .map(|i| {
+            samples
+                .iter()
+                .filter(|s| s.at >= bounds[i] && s.at < bounds[i + 1])
+                .filter_map(|s| if hours { s.five_pct } else { s.week_pct })
+                .next_back()
+        })
+        .collect()
 }
 
 #[derive(serde::Deserialize)]

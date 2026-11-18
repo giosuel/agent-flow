@@ -188,6 +188,58 @@ pub fn lines(label: &str, labels: &[String], series: &[Series], fmt: &dyn Fn(f64
     (out, max)
 }
 
+/// The plan's % used under the bars (M13): one line on a fixed 0–100 scale, points in the middle
+/// of each slot so they sit under the bars, a gap where there's no sample, and the 80% mark. Its
+/// own chart under the bars, never a second axis on theirs (D-192).
+pub fn percent_line(label: &str, labels: &[String], values: &[Option<f64>]) -> String {
+    let n = labels.len().max(1);
+    let tips: Vec<serde_json::Value> = labels
+        .iter()
+        .enumerate()
+        .map(|(i, l)| {
+            let rows = match values.get(i).copied().flatten() {
+                Some(v) => vec![serde_json::json!(["#A78BFA", "plan used", format!("{v:.0}%")])],
+                None => Vec::new(),
+            };
+            serde_json::json!({"t": l, "r": rows, "s": ""})
+        })
+        .collect();
+    let mut out = String::new();
+    let _ = write!(
+        out,
+        r#"<svg class="chart-marks pct-marks" viewBox="0 0 {W} {H}" preserveAspectRatio="none" role="img" aria-label="{}" data-tips="{}" data-mode="centers">"#,
+        esc(label),
+        esc(&serde_json::Value::from(tips).to_string())
+    );
+    let y = |v: f64| H - v.clamp(0.0, 100.0) / 100.0 * H;
+    let _ = write!(out, r#"<line class="grid" x1="0" x2="{W}" y1="{:.1}" y2="{:.1}" vector-effect="non-scaling-stroke"/>"#, y(50.0), y(50.0));
+    let _ = write!(out, r#"<line class="limit warn" x1="0" x2="{W}" y1="{0:.1}" y2="{0:.1}" vector-effect="non-scaling-stroke"/>"#, y(80.0));
+    // Runs of consecutive samples, each an area under a line.
+    let mut run: Vec<(f64, f64)> = Vec::new();
+    let flush = |run: &mut Vec<(f64, f64)>, out: &mut String| {
+        if run.is_empty() {
+            return;
+        }
+        let mut d = String::new();
+        for (k, (x, v)) in run.iter().enumerate() {
+            let _ = write!(d, "{}{x:.1},{:.2} ", if k == 0 { "M" } else { "L" }, y(*v));
+        }
+        let (x0, x1) = (run[0].0, run[run.len() - 1].0);
+        let _ = write!(out, r#"<path d="{d}L{x1:.1},{H} L{x0:.1},{H} Z" class="pct-area"/>"#);
+        let _ = write!(out, r#"<path d="{d}" class="pct-line" vector-effect="non-scaling-stroke"/>"#);
+        run.clear();
+    };
+    for i in 0..n {
+        match values.get(i).copied().flatten() {
+            Some(v) => run.push(((i as f64 + 0.5) / n as f64 * W, v)),
+            None => flush(&mut run, &mut out),
+        }
+    }
+    flush(&mut run, &mut out);
+    out.push_str("</svg>");
+    out
+}
+
 /// A round number at or above `v` for the top of the scale: 1, 2, 2.5 or 5 × a power of ten.
 pub fn nice_max(v: f64) -> f64 {
     if v <= 0.0 {
