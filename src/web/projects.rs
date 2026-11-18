@@ -11,7 +11,6 @@ use rusqlite::{Connection, OptionalExtension};
 use serde::Deserialize;
 use serde_json::Value;
 
-use super::icons::icon;
 use super::pages::{Nav, nav, render};
 use super::{AppError, AppResult, AppState, ClientIp};
 use crate::activity::{self, Action, Entry, Via};
@@ -457,19 +456,48 @@ fn model_line(p: &Project) -> String {
 // A project's page
 
 struct MetaRow {
-    icon: &'static str,
     label: &'static str,
     value: String,
-    list: Vec<String>,
 }
 
-struct MsView {
+/// An open question on the overview, answered with one click on an option (the owner,
+/// 2026-11-17, D-198).
+struct QCard {
+    short: String,
+    url: String,
+    /// Its milestone, or "project".
+    scope: String,
+    asked: String,
+    blocks: Vec<(String, String)>,
+    title: String,
+    /// (number, title, recommended)
+    options: Vec<(usize, String, bool)>,
+}
+
+/// The milestone under way, large at the top of the overview's list.
+struct MsNow {
     name: String,
     title: String,
-    class: &'static str,
+    href: String,
+    sub: String,
+    /// The step under way: name and title.
+    step: Option<(String, String)>,
+    done: usize,
+    total: usize,
+    steps_done: usize,
+    steps_total: usize,
+    pct: usize,
+    selected: bool,
+}
+
+/// A planned, other active, or closed milestone: one row.
+struct MsRow {
+    name: String,
+    title: String,
+    href: String,
     note: String,
-    /// Its tasks are on the board below (the owner, 2026-11-11: "make the milestones into
-    /// buttons, and the kanban board switches based on the selected milestone").
+    state: &'static str,
+    date: String,
     selected: bool,
 }
 
@@ -659,7 +687,6 @@ fn external_rows(c: &Connection, all: &[Record], now: i64) -> anyhow::Result<(Ve
 }
 
 struct AgentCard {
-    session: String,
     machine: String,
     model: String,
     working_on: String,
@@ -708,9 +735,8 @@ pub struct ShotView {
 }
 
 pub struct Connect {
-    /// Where it's set up: the folder and the machine, if it is.
+    /// Where it's set up, if it is.
     folder: String,
-    machine: String,
 }
 
 #[derive(Template)]
@@ -738,7 +764,17 @@ struct ProjectPage {
     headline: String,
     tab: String,
     about: Vec<MetaRow>,
-    milestones: Vec<MsView>,
+    /// The overview's milestone list (D-198): the one under way, the planned (and other active)
+    /// ones, and the closed ones folded, newest first.
+    ms_now: Option<MsNow>,
+    ms_rows: Vec<MsRow>,
+    ms_closed: Vec<MsRow>,
+    /// The closed ones start open when the board shows one of them.
+    ms_closed_open: bool,
+    ms_counts: String,
+    qcards: Vec<QCard>,
+    /// The build server its `flow remote` uses, for the side card.
+    server: String,
     board: Option<Board>,
     agent: AgentCard,
     open_questions: Vec<RecordRow>,
@@ -796,10 +832,20 @@ struct TabQuery {
     doc: Option<String>,
     /// The Notes tab's category filter.
     ncat: Option<String>,
+    /// After answering a question on the overview: its id.
+    answered: Option<String>,
 }
 
 /// The line shown after pressing a button, from the redirect's query.
 fn press_notice(q: &TabQuery) -> (Option<String>, bool) {
+    if let Some(a) =
+        q.answered.as_deref().filter(|a| a.len() <= 40 && a.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-'))
+    {
+        return (
+            Some(format!("Answered {a}: the agent gets your answer word for word, and it's a decision now.")),
+            false,
+        );
+    }
     if let Some(n) = q.tested {
         return (Some(tested_notice(n)), false);
     }
@@ -889,7 +935,7 @@ async fn project(
         })
         .await?
         .ok_or(AppError::NotFound)?;
-    let (mut page, (checkout, page_machine)) = page;
+    let (mut page, (checkout, _)) = page;
     if tab == "screenshots" {
         let mut cats: Vec<(String, usize)> = Vec::new();
         for s in &page.shots {
@@ -913,7 +959,7 @@ async fn project(
         page.shot_cats = pills;
     }
     if tab == "overview" && actor.is_owner() {
-        page.connect = Some(Connect { folder: checkout.clone(), machine: page_machine.clone() });
+        page.connect = Some(Connect { folder: checkout.clone() });
     }
     if tab == "notes" {
         let (slug, edit, rev, outcome) = (page.slug.clone(), q.edit.clone(), q.rev, q.doc.clone());
@@ -993,25 +1039,22 @@ fn build_project_page(
     };
 
     let mut about = Vec::new();
-    let mut meta = |icon_name: &str, label: &'static str, value: String, list: Vec<String>| {
-        if !value.is_empty() || !list.is_empty() {
-            about.push(MetaRow { icon: icon(icon_name), label, value, list });
+    let mut meta = |label: &'static str, value: String| {
+        if !value.is_empty() {
+            about.push(MetaRow { label, value });
         }
     };
-    meta("info", "About", p.description.clone(), vec![]);
-    meta("model", "AI model", model_line(&p), vec![]);
+    meta("About", p.description.clone());
+    meta("AI model", model_line(&p));
     meta(
-        "machine",
         "Machine",
-        [p.machine.as_str(), p.checkout.as_str()]
-            .iter()
-            .filter(|s| !s.is_empty())
-            .copied()
-            .collect::<Vec<_>>()
-            .join(" · "),
-        vec![],
+        match (p.checkout.trim(), p.machine.trim()) {
+            ("", m) => m.to_owned(),
+            (c, "") => c.to_owned(),
+            (c, m) => format!("{c} on {m}"),
+        },
     );
-    meta("port", "Ports", p.ports.join(", "), vec![]);
+    meta("Ports", p.ports.join(", "));
 
     // The board shows the chosen milestone (a top-level one), else the current one.
     let current = chosen
@@ -1019,35 +1062,6 @@ fn build_project_page(
         .or_else(|| current_milestone(&ms))
         .cloned();
     let now_ms_id = current_milestone(&ms).map(|m| m.id);
-    let milestones = ms
-        .iter()
-        .filter(|m| m.parent_id.is_none())
-        .map(|m| {
-            let is_current = now_ms_id == Some(m.id);
-            let step =
-                ms.iter().filter(|s| s.parent_id == Some(m.id) && s.state == "active").map(|s| s.name.clone()).next();
-            MsView {
-                name: m.name.clone(),
-                title: m.title.clone(),
-                class: match (m.state.as_str(), is_current) {
-                    ("closed", _) => "done",
-                    (_, true) => "now",
-                    _ => "up",
-                },
-                note: match m.state.as_str() {
-                    "closed" if !m.tag.is_empty() => m.tag.clone(),
-                    "closed" => "closed".into(),
-                    "active" => match step {
-                        Some(s) => format!("in progress · step {s}"),
-                        None => "in progress".into(),
-                    },
-                    _ => "planned".into(),
-                },
-                selected: current.as_ref().is_some_and(|c| c.id == m.id),
-            }
-        })
-        .collect();
-
     // Open questions that block a task, for "blocked by Q-31" on its card.
     let mut blockers: HashMap<i64, Vec<(String, String)>> = HashMap::new();
     {
@@ -1094,6 +1108,78 @@ fn build_project_page(
         blocked_by: blockers.get(&r.id).cloned().unwrap_or_default(),
     };
     let tasks: Vec<&Record> = all.iter().filter(|r| r.kind == Kind::Task).collect();
+
+    // The overview's milestone list (the owner, 2026-11-17: "start with the milestones right
+    // away? also we could make it scrollable or something?").
+    let ms_href = |name: &str| format!("/p/{}?ms={name}#board", p.slug);
+    let selected = |m: &Milestone| current.as_ref().is_some_and(|c| c.id == m.id);
+    let top: Vec<&Milestone> = ms.iter().filter(|m| m.parent_id.is_none() && m.archived_at.is_none()).collect();
+    let ms_now = top.iter().find(|m| Some(m.id) == now_ms_id && m.state == "active").map(|m| {
+        let ids = projects::with_steps(&ms, m.id);
+        let mine: Vec<&&Record> = tasks.iter().filter(|t| t.milestone_id.is_some_and(|x| ids.contains(&x))).collect();
+        let done = mine.iter().filter(|t| t.state == "done").count();
+        let counted = mine.iter().filter(|t| !matches!(t.state.as_str(), "skipped" | "archived")).count();
+        let steps: Vec<&Milestone> =
+            ms.iter().filter(|s| s.parent_id == Some(m.id) && s.archived_at.is_none()).collect();
+        let mut sub = Vec::new();
+        if let Some(t) = m.started_at {
+            sub.push(format!("since {}", tz.day(t)));
+        }
+        sub.push(if m.tag.is_empty() { "ends with a tag".into() } else { format!("ends with {}", m.tag) });
+        MsNow {
+            name: m.name.clone(),
+            title: m.title.clone(),
+            href: ms_href(&m.name),
+            sub: sub.join(" · "),
+            step: steps.iter().find(|s| s.state == "active").map(|s| (s.name.clone(), s.title.clone())),
+            done,
+            total: counted,
+            steps_done: steps.iter().filter(|s| s.state == "closed").count(),
+            steps_total: steps.len(),
+            pct: (done * 100).checked_div(counted).unwrap_or(0),
+            selected: selected(m),
+        }
+    });
+    let ms_row = |m: &Milestone| MsRow {
+        name: m.name.clone(),
+        title: m.title.clone(),
+        href: ms_href(&m.name),
+        note: match m.state.as_str() {
+            "active" => "under way".into(),
+            "closed" => m.tag.clone(),
+            _ => "planned".into(),
+        },
+        state: match m.state.as_str() {
+            "active" => "now",
+            "closed" => "done",
+            _ => "up",
+        },
+        date: m.closed_at.map(|t| tz.day(t)).unwrap_or_default(),
+        selected: selected(m),
+    };
+    let ms_rows: Vec<MsRow> = top
+        .iter()
+        .filter(|m| m.state != "closed" && ms_now.as_ref().is_none_or(|n| n.name != m.name))
+        .map(|m| ms_row(m))
+        .collect();
+    let mut closed: Vec<&&Milestone> = top.iter().filter(|m| m.state == "closed").collect();
+    closed.sort_by_key(|m| std::cmp::Reverse((m.closed_at.unwrap_or(0), (m.position * 1000.0) as i64)));
+    let ms_closed: Vec<MsRow> = closed.iter().map(|m| ms_row(m)).collect();
+    let ms_counts = {
+        let active = top.iter().filter(|m| m.state == "active").count();
+        let planned = top.iter().filter(|m| !matches!(m.state.as_str(), "active" | "closed")).count();
+        let mut parts = Vec::new();
+        if active > 0 {
+            parts.push(format!("{active} under way"));
+        }
+        if planned > 0 {
+            parts.push(format!("{planned} planned"));
+        }
+        if !ms_closed.is_empty() {
+            parts.push(format!("{} closed", ms_closed.len()));
+        }
+        parts.join(" · ")
+    };
 
     let board = current.as_ref().map(|cur| {
         let steps: Vec<&Milestone> = ms.iter().filter(|s| s.parent_id == Some(cur.id)).collect();
@@ -1277,6 +1363,33 @@ fn build_project_page(
         }
     };
     let open_questions = questions_all.iter().filter(|r| r.state == "open").map(|r| row(r)).collect();
+    let mut qcards = Vec::new();
+    if tab == "overview" {
+        for q in questions_all.iter().filter(|r| r.state == "open") {
+            let rec = q.data.get("recommended").and_then(Value::as_u64).unwrap_or(0) as usize;
+            qcards.push(QCard {
+                short: q.short_id(),
+                url: q.url(),
+                scope: q.milestone.clone().unwrap_or_else(|| "project".into()),
+                asked: format!("asked {}", ago(q.created_at, now)),
+                blocks: crate::waiting::blocks(c, q)?,
+                title: q.title.clone(),
+                options: q
+                    .data
+                    .get("options")
+                    .and_then(Value::as_array)
+                    .map(|opts| {
+                        opts.iter()
+                            .enumerate()
+                            .map(|(i, o)| {
+                                (i + 1, o.get("title").and_then(Value::as_str).unwrap_or("").to_owned(), rec == i + 1)
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+            });
+        }
+    }
     let questions = if tab == "questions" { questions_all.iter().map(|r| row(r)).collect() } else { Vec::new() };
 
     // "1 works · 1 problem · 1 skipped" per build, from its feedback records.
@@ -1551,10 +1664,19 @@ fn build_project_page(
         headline,
         tab: tab.into(),
         about,
-        milestones,
+        ms_now,
+        ms_rows,
+        ms_closed_open: ms_closed.iter().any(|r| r.selected),
+        ms_closed,
+        ms_counts,
+        qcards,
+        server: if tab == "overview" {
+            crate::remote::project_server(c, p.id)?.unwrap_or_default()
+        } else {
+            String::new()
+        },
         board,
         agent: AgentCard {
-            session: if p.agent.session.is_empty() { "–".into() } else { p.agent.session.clone() },
             machine: if p.agent.machine.is_empty() { "–".into() } else { p.agent.machine.clone() },
             model: [p.agent.model.as_str(), p.agent.effort.as_str()]
                 .iter()

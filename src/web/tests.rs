@@ -569,6 +569,66 @@ async fn an_agent_runs_its_project_over_mcp() {
     assert!(s.log_summaries().await.iter().any(|l| l.starts_with("update_task refused")));
 }
 
+/// The overview (the owner, 2026-11-17, D-198): open questions on top with one-click answers, the
+/// milestone under way large, planned ones as rows, closed ones folded.
+#[tokio::test]
+async fn the_overview_puts_questions_first_and_folds_closed_milestones() {
+    let s = TestServer::start().await;
+    let token = s.token(TokenKind::Project, Some("vinculum")).await;
+    let sess = mcp_session(&s, &token).await;
+    for (name, state) in [("M1", "closed"), ("M2", "active"), ("M3", "planned")] {
+        mcp_tool(
+            &s,
+            &token,
+            &sess,
+            "add_milestone",
+            json!({"name": name, "title": format!("Work {name}"), "state": state}),
+        )
+        .await;
+    }
+    mcp_tool(
+        &s,
+        &token,
+        &sess,
+        "ask_question",
+        json!({"title": "A or B?", "options": [{"title": "Take A"}, {"title": "Take B"}], "recommended": 2}),
+    )
+    .await;
+    let cookie = s.owner_cookie().await;
+    let page = s.http.get(s.url("/p/vinculum")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
+    assert!(page.contains("Waiting on you") && page.contains("Take A") && page.contains("qopt rec"), "{page}");
+    assert!(page.contains(r#"name="next" value="/p/vinculum?answered=Q-1""#), "{page}");
+    assert!(page.contains(r#"class="msa"#) && page.contains("Work M2") && page.contains("1 closed"), "{page}");
+    assert!(page.contains("1 under way · 1 planned · 1 closed"), "{page}");
+    assert!(!page.contains("Open questions"), "the old card at the bottom is gone");
+    // One click answers, and the overview says so.
+    let res = s
+        .http
+        .post(s.url("/p/vinculum/Q-1/answer"))
+        .header(COOKIE, &cookie)
+        .header(ORIGIN, &s.base)
+        .form(&[("option", "2"), ("next", "/p/vinculum?answered=Q-1")])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.headers()[LOCATION], "/p/vinculum?answered=Q-1");
+    let page = s
+        .http
+        .get(s.url("/p/vinculum?answered=Q-1"))
+        .header(COOKIE, &cookie)
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(page.contains("Answered Q-1") && !page.contains("Waiting on you"), "{page}");
+    // A closed milestone's board opens the fold.
+    let page =
+        s.http.get(s.url("/p/vinculum?ms=M1")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
+    assert!(page.contains(r#"<details class="ms-fold" open>"#), "{page}");
+}
+
 #[tokio::test]
 async fn the_owner_answers_on_the_page_and_the_agent_reads_it() {
     let s = TestServer::start().await;
@@ -1557,7 +1617,7 @@ async fn usage_and_machine_pages_show_the_counts() {
     let res = s.http.get(s.url("/machine/now")).bearer_auth(&token).send().await.unwrap();
     assert_eq!(res.status(), StatusCode::FORBIDDEN);
     let html = get("/p/imaginarium").await.text().await.unwrap();
-    assert!(html.contains("Tokens this week") && html.contains("1.2 M"));
+    assert!(html.contains("Tokens, 7 days") && html.contains("1.2 M"));
     // Agents don't see it.
     let res = s.http.get(s.url("/usage")).bearer_auth(&token).send().await.unwrap();
     assert_eq!(res.status(), StatusCode::FORBIDDEN);
