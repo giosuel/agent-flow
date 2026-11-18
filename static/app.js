@@ -504,7 +504,7 @@ document.addEventListener("change", (e) => {
 // The bell (the owner, 2026-11-17: "like youtube, so when the user opens the notifications on the
 // desktop or phone, they are all marked as read and the badge goes away"): a panel under it (a
 // sheet on the phone). Opening it marks everything read and removes the badge; what was new keeps
-// its dot until it closes. Without scripts the bell is a link to /notifications.
+// its dot until it closes. /notifications opened directly is the dashboard with the panel open.
 (() => {
   let panel = null;
   const close = () => {
@@ -545,6 +545,13 @@ document.addEventListener("change", (e) => {
     for (const b of document.querySelectorAll("[data-bell]")) b.setAttribute("aria-label", "Notifications");
     fetch("/notifications/read", { method: "POST", credentials: "same-origin", headers: { Accept: "application/json" } }).catch(() => {});
   };
+  // A direct link to /notifications: the server sent the dashboard; the panel opens over it.
+  const o = document.body.dataset;
+  if (o.openDlg === "ntf" && o.openFrom) {
+    history.replaceState(null, "", o.openFrom);
+    const bell = document.querySelector("[data-bell]");
+    if (bell) open(bell);
+  }
   document.addEventListener("click", (e) => {
     const bell = e.target.closest("[data-bell]");
     if (!bell || e.metaKey || e.ctrlKey || e.shiftKey || e.button) return;
