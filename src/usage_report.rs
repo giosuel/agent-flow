@@ -16,9 +16,11 @@ pub fn estimate(past: &[(Past, Tokens)], so_far: &Tokens, pct: f64, five: bool) 
     let usd = crate::plan::median(ok.iter().map(|(w, t)| t.usd() / w.peak).collect());
     let tok = crate::plan::median(ok.iter().map(|(w, t)| t.new_tokens() as f64 / w.peak).collect());
     match (usd, tok) {
-        (Some(u), Some(t)) => {
-            Some((u * 100.0, t * 100.0, format!("median of {} window{}", ok.len(), if ok.len() == 1 { "" } else { "s" })))
-        }
+        (Some(u), Some(t)) => Some((
+            u * 100.0,
+            t * 100.0,
+            format!("median of {} window{}", ok.len(), if ok.len() == 1 { "" } else { "s" }),
+        )),
         _ if pct >= 5.0 && so_far.calls > 0 => Some((
             so_far.usd() / pct * 100.0,
             so_far.new_tokens() as f64 / pct * 100.0,
@@ -55,7 +57,9 @@ fn rfc3339(ms: i64) -> String {
 /// The plan's windows now, or why there are none.
 fn plan(c: &Connection, now: i64) -> anyhow::Result<Value> {
     let Some(s) = crate::plan::latest(c)? else {
-        return Ok(json!({"note": "no status line has sent the plan's usage yet; `flow project setup` in a project's folder sets it up"}));
+        return Ok(
+            json!({"note": "no status line has sent the plan's usage yet; `flow project setup` in a project's folder sets it up"}),
+        );
     };
     let mut out = serde_json::Map::new();
     for (key, pct, reset, len, five) in
@@ -63,7 +67,10 @@ fn plan(c: &Connection, now: i64) -> anyhow::Result<Value> {
     {
         let (Some(pct), Some(reset)) = (pct, reset) else { continue };
         if reset <= now {
-            out.insert(key.into(), json!({"used": 0, "reset_at": rfc3339(reset), "note": "reset; no session has reported since"}));
+            out.insert(
+                key.into(),
+                json!({"used": 0, "reset_at": rfc3339(reset), "note": "reset; no session has reported since"}),
+            );
             continue;
         }
         let so_far = sum(&usage::per_project(c, reset - len, now)?, None);
@@ -180,13 +187,20 @@ pub fn print(v: &Value, all: bool) -> String {
         any = true;
         let used = w["used"].as_f64().unwrap_or(0.0);
         let pct = format!("{used:.0}%");
-        let left = w["resets_in_min"].as_i64().map(|m| if m >= 1440 { format!("in {} d", (m + 720) / 1440) } else { format!("in {} h {} min", m / 60, m % 60) });
+        let left = w["resets_in_min"].as_i64().map(|m| {
+            if m >= 1440 { format!("in {} d", (m + 720) / 1440) } else { format!("in {} h {} min", m / 60, m % 60) }
+        });
         let resets = match (w["resets_at"].as_str(), left) {
             (Some(r), Some(l)) => format!("resets {} ({l})", local(r)),
             _ => w["note"].as_str().unwrap_or("").to_owned(),
         };
         let full = match (w["full_usd"].as_f64(), w["full_new_tokens"].as_i64()) {
-            (Some(u), Some(t)) => format!("100% ≈ {} · {} new tokens ({})", crate::prices::dollars(u), crate::usage::short(t), w["estimate_from"].as_str().unwrap_or("")),
+            (Some(u), Some(t)) => format!(
+                "100% ≈ {} · {} new tokens ({})",
+                crate::prices::dollars(u),
+                crate::usage::short(t),
+                w["estimate_from"].as_str().unwrap_or("")
+            ),
             _ => String::new(),
         };
         out.push(fit(
@@ -219,12 +233,21 @@ pub fn print(v: &Value, all: bool) -> String {
                 &[
                     (Tone::Plain, &format!("{label:<13}")),
                     (Tone::Number, &format!("{:>8}", usd(&t["usd"]))),
-                    (Tone::Dim, &format!("{} new · {} cache reads · {} calls", short(&t["new_tokens"]), short(&t["cache_reads"]), t["calls"].as_i64().unwrap_or(0))),
+                    (
+                        Tone::Dim,
+                        &format!(
+                            "{} new · {} cache reads · {} calls",
+                            short(&t["new_tokens"]),
+                            short(&t["cache_reads"]),
+                            t["calls"].as_i64().unwrap_or(0)
+                        ),
+                    ),
                 ],
                 on,
             ));
         }
-        let tasks: Vec<&Value> = p["tasks_7_days"].as_array().into_iter().flatten().take(if all { 3 } else { 8 }).collect();
+        let tasks: Vec<&Value> =
+            p["tasks_7_days"].as_array().into_iter().flatten().take(if all { 3 } else { 8 }).collect();
         if !tasks.is_empty() {
             out.push(paint(Tone::Dim, "  tasks, 7 days", on));
             for t in tasks {
@@ -252,7 +275,8 @@ mod tests {
 
     #[test]
     fn a_window_is_estimated_from_finished_ones_else_from_itself() {
-        let t = |usd: f64, new: i64| Tokens { calls: 1, cost_micro: (usd * 1e6) as i64, input: new, ..Default::default() };
+        let t =
+            |usd: f64, new: i64| Tokens { calls: 1, cost_micro: (usd * 1e6) as i64, input: new, ..Default::default() };
         let w = |peak: f64| Past { start: 0, end: 1, peak, limit_at: None };
         let past = vec![(w(50.0), t(125.0, 5_000_000)), (w(100.0), t(260.0, 9_000_000)), (w(4.0), t(1.0, 1))];
         let (usd, tok, basis) = estimate(&past, &Tokens::default(), 0.0, true).unwrap();

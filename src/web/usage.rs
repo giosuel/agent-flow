@@ -554,11 +554,9 @@ fn plan_view(p: &PlanData, now: i64, tz: &Tz) -> (Vec<Meter>, Vec<EstRow>, (Stri
                     format!("{} new tokens · {} cache reads", short(so_far.new_tokens()), short(so_far.cache_read))
                 },
                 estimate: match &est {
-                    Some((u, t, _)) => format!(
-                        "100% ≈ {} at API prices ≈ {} new tokens",
-                        crate::prices::dollars(*u),
-                        short(*t as i64)
-                    ),
+                    Some((u, t, _)) => {
+                        format!("100% ≈ {} at API prices ≈ {} new tokens", crate::prices::dollars(*u), short(*t as i64))
+                    }
                     None => "100%: known once the window is 5% used".into(),
                 },
                 basis: est.map(|e| e.2).unwrap_or_default(),
