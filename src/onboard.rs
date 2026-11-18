@@ -323,7 +323,12 @@ pub fn hook_commands(token_file: &Path, name: &str, public_url: &str) -> Vec<(&'
 
 /// The status line's command: `flow statusline` with the project's token and server.
 pub fn statusline_command(token_file: &Path, public_url: &str) -> String {
-    format!("{} statusline --token-file {} --url {}", bin(), token_file.display(), shell_word(public_url.trim_end_matches('/')))
+    format!(
+        "{} statusline --token-file {} --url {}",
+        bin(),
+        token_file.display(),
+        shell_word(public_url.trim_end_matches('/'))
+    )
 }
 
 fn is_ours_statusline(command: &str) -> bool {
