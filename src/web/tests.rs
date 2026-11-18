@@ -2209,6 +2209,12 @@ async fn notes_are_files_or_text_and_come_back() {
     assert!(!call("update_note", json!({"id": "N-1", "text": "x"})).await.0, "files get a new version instead");
 
     let cookie = s.owner_cookie().await;
+    // Its History (the owner, 2026-11-18): folded, one short line per change, the file it replaced
+    // linked, no "changed the size" noise.
+    let n1 = owner_page(&s, &cookie, "/p/vinculum/N-1").await;
+    assert!(n1.contains(r#"<details class="rhist">"#) && n1.contains("<b>2 changes</b> · last: New version"), "{n1}");
+    assert!(n1.contains(r#"href="/p/vinculum/N-1/file?v=1""#) && n1.contains("Created the note"), "{n1}");
+    assert!(!n1.contains("changed the size") && !n1.contains(">size<") && !n1.contains("report.md)"), "{n1}");
     let tab =
         s.http.get(s.url("/p/vinculum?tab=notes")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
     assert!(

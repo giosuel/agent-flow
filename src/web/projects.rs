@@ -1681,10 +1681,34 @@ pub struct TimeView {
     corrected: bool,
 }
 
-struct HistoryRow {
+/// A record's History (the owner, 2026-11-18: "it seems messy"; then "couldn't we fold the whole
+/// history by default?"): folded to one line, opened a timeline by day, a short line per change.
+struct History {
+    count: usize,
+    /// "New version, imaginarium · 23:25".
+    last: String,
+    days: Vec<HistoryDay>,
+}
+
+struct HistoryDay {
+    /// "Today, 18 Nov".
+    label: String,
+    events: Vec<HistoryEvent>,
+}
+
+struct HistoryEvent {
     rev: i64,
-    at: String,
-    text: String,
+    /// "23:25".
+    time: String,
+    who: String,
+    /// "New version", "Created the note", "Answered: A, “…”".
+    what: String,
+    /// What changed, with the new value: ("title", "Morning report", accent).
+    chips: Vec<(String, String, bool)>,
+    /// The file a new version replaced: ("v11", its address).
+    replaced: Option<(String, String)>,
+    /// "first" for the creation, "owner" for the owner's own changes.
+    dot: &'static str,
 }
 
 #[derive(Template)]
@@ -1730,7 +1754,7 @@ struct RecordPage {
     waits_for: Vec<RecordRow>,
     blocked_note: String,
     stale: Vec<RecordRow>,
-    history: Vec<HistoryRow>,
+    history: History,
     error: Option<String>,
     buttons: Vec<super::buttons::ButtonView>,
     pr_url: String,
@@ -2136,10 +2160,7 @@ async fn load_record_page(
         time,
         timings,
         note: if r.kind == Kind::Note { Some(super::notes::page(&state.config.data_dir(), &r)) } else { None },
-        history: history
-            .iter()
-            .map(|h| HistoryRow { rev: h.rev, at: tz.short(h.at), text: describe_revision(h, &r) })
-            .collect(),
+        history: history_view(&history, &r, &tz, now_ms()),
         error,
         buttons,
         pr_url: if r.kind == Kind::Pr { r.str("url").to_owned() } else { String::new() },
@@ -2225,44 +2246,110 @@ fn build_view(r: &Record, links: &[records::LinkView], sent: bool) -> BuildView 
     }
 }
 
-fn describe_revision(h: &records::Revision, r: &Record) -> String {
-    let who = if h.author == "owner" { "You".to_owned() } else { h.author.clone() };
-    if h.rev == 1 {
-        return format!("{who} created the {}.", r.kind.label().to_lowercase());
+/// Fields a History leaves out: set together with something it shows (a new file's size and
+/// version count, the answer's own bookkeeping) or not worth a line.
+const QUIET: &[&str] = &[
+    "size",
+    "versions",
+    "ext",
+    "bytes",
+    "filename",
+    "answer",
+    "answered_at",
+    "answer_option",
+    "answer_option_title",
+    "started_at",
+    "ready_for_feedback",
+];
+
+fn history_view(revs: &[records::Revision], r: &Record, tz: &Tz, now: i64) -> History {
+    let mut days: Vec<HistoryDay> = Vec::new();
+    let today = tz.day_start(now);
+    for h in revs {
+        let e = history_event(h, r, tz);
+        let start = tz.day_start(h.at);
+        let label = if start == today {
+            format!("Today, {}", tz.day(h.at))
+        } else if start == tz.day_start(today - 3_600_000) {
+            format!("Yesterday, {}", tz.day(h.at))
+        } else {
+            tz.day(h.at)
+        };
+        match days.last_mut() {
+            Some(d) if d.label == label => d.events.push(e),
+            _ => days.push(HistoryDay { label, events: vec![e] }),
+        }
     }
+    let last = revs
+        .first()
+        .map(|h| {
+            let e = history_event(h, r, tz);
+            let when = if tz.day_start(h.at) == today { e.time.clone() } else { tz.short(h.at) };
+            format!("{}, {} · {when}", e.what, e.who)
+        })
+        .unwrap_or_default();
+    History { count: revs.len(), last, days }
+}
+
+fn history_event(h: &records::Revision, r: &Record, tz: &Tz) -> HistoryEvent {
+    let mut e = HistoryEvent {
+        rev: h.rev,
+        time: tz.hm(h.at),
+        who: if h.author == "owner" { "you".to_owned() } else { h.author.clone() },
+        what: String::new(),
+        chips: Vec::new(),
+        replaced: None,
+        dot: if h.author == "owner" { "owner" } else { "" },
+    };
+    if h.rev == 1 {
+        e.what = format!("Created the {}", r.kind.label().to_lowercase());
+        e.dot = "first";
+        return e;
+    }
+    let obj = h.changes.as_object();
     // The owner's answer reads as the answer, not as a list of fields.
-    if let Some(obj) = h.changes.as_object()
+    if let Some(obj) = obj
         && obj.contains_key("answer")
     {
         let words = obj.get("answer").and_then(Value::as_str).unwrap_or("").trim();
         let option = obj.get("answer_option_title").and_then(Value::as_str);
-        return match (option, words) {
-            (Some(o), "") => format!("{who} answered: {o}."),
-            (Some(o), w) => format!("{who} answered: {o}, “{w}”."),
-            (None, w) => format!("{who} answered: “{w}”."),
+        e.what = match (option, words) {
+            (Some(o), "") => format!("Answered: {o}"),
+            (Some(o), w) => format!("Answered: {o}, “{w}”"),
+            (None, w) => format!("Answered: “{w}”"),
         };
+        return e;
     }
-    let mut parts: Vec<String> = Vec::new();
-    if let Some(obj) = h.changes.as_object() {
-        for (k, v) in obj {
-            parts.push(match (k.as_str(), v) {
-                ("state", Value::String(s)) => format!("set it to {s}"),
-                ("milestone", Value::String(m)) if !m.is_empty() => format!("moved it to {m}"),
-                ("answer", Value::String(_))
-                | ("answered_at", _)
-                | ("answer_option", _)
-                | ("answer_option_title", _) => continue,
-                ("started_at", _) => continue,
-                // Set by the feedback itself, which the next line of the history says.
-                ("ready_for_feedback", _) => continue,
-                (k, _) => format!("changed the {}", k.replace('_', " ")),
-            });
+    for (k, v) in obj.into_iter().flatten() {
+        if QUIET.contains(&k.as_str()) {
+            continue;
+        }
+        let value = match v {
+            Value::String(s) if s.chars().count() > 60 => s.chars().take(57).collect::<String>() + "…",
+            Value::String(s) => s.clone(),
+            Value::Number(n) => n.to_string(),
+            Value::Bool(b) => if *b { "yes" } else { "no" }.to_owned(),
+            _ => String::new(),
+        };
+        match k.as_str() {
+            "milestone" if !value.is_empty() => e.chips.push(("moved to".into(), value, false)),
+            "state" => e.chips.push(("state".into(), value, true)),
+            _ => e.chips.push((k.replace('_', " "), value, false)),
         }
     }
-    if !h.note.is_empty() {
-        parts.push(h.note.clone());
+    // A note's new file: the one it replaced is kept as v(n).
+    if h.note.starts_with("new version of the file") {
+        e.what = "New version".into();
+        if let Some(n) = obj.and_then(|o| o.get("versions")).and_then(Value::as_i64) {
+            e.replaced = Some((format!("v{n}"), format!("{}/file?v={n}", r.url())));
+        }
+    } else if !h.note.is_empty() {
+        let mut c = h.note.chars();
+        e.what = c.next().map(|f| f.to_uppercase().collect::<String>() + c.as_str()).unwrap_or_default();
+    } else {
+        e.what = "Changed".into();
     }
-    if parts.is_empty() { format!("{who} changed it.") } else { format!("{who}: {}.", parts.join(", ")) }
+    e
 }
 
 #[derive(Deserialize)]

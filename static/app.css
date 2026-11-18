@@ -330,6 +330,39 @@ ul.plain, ol.plain { margin: 0; padding-left: 18px; display: flex; flex-directio
 .opt-t { display: flex; flex-direction: column; gap: 2px; }
 .opts-ro li.chosen { color: var(--ink); font-weight: 500; }
 ol.history { padding-left: 0; list-style: none; font-size: 14px; color: var(--ink2); }
+/* A record's History: folded to one line, opened a timeline by day (the owner, 2026-11-18). */
+.rhist > summary { list-style: none; display: grid; grid-template-columns: auto minmax(0, 1fr) 18px; gap: 6px 14px; align-items: center; min-height: 50px; padding: 6px 16px; border: 1px solid var(--line); border-radius: 10px; background: var(--ground); cursor: pointer; }
+.rhist > summary::-webkit-details-marker { display: none; }
+.rhist > summary .label { margin: 0; }
+.rhist > summary .hs { font-size: 14px; color: var(--muted); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rhist > summary .hs b { color: var(--ink); font-weight: 600; }
+.rhist > summary .i { width: 18px; height: 18px; color: var(--chip-accent-ink); transform: rotate(90deg); transition: transform .15s; }
+.rhist[open] > summary { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+.rhist[open] > summary .i { transform: rotate(-90deg); }
+.hist-body { border: 1px solid var(--line); border-top: 0; border-radius: 0 0 10px 10px; padding: 4px 16px 10px; max-height: 560px; overflow: auto; }
+.hist-day { font-size: 12px; color: var(--muted); padding: 10px 0 4px; display: flex; gap: 8px; align-items: center; }
+.hist-day::after { content: ""; flex: 1; border-top: 1px solid var(--line2); }
+.hist-tl { margin: 0; }
+.hist-ev { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; gap: 10px; align-items: start; padding: 7px 0; position: relative; }
+.hist-ev::before { content: ""; position: absolute; left: 8px; top: 0; bottom: 0; border-left: 1px solid var(--line); }
+.hist-pt { width: 9px; height: 9px; border-radius: 5px; background: #5B4A99; margin: 7px 0 0 4px; position: relative; z-index: 1; }
+.hist-pt.owner { background: var(--accent); }
+.hist-pt.first { background: var(--ok); }
+.hist-w { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; font-size: 14px; color: var(--ink); min-width: 0; overflow-wrap: anywhere; }
+.hist-r { display: flex; gap: 10px; align-items: center; font-size: 13px; color: var(--muted); white-space: nowrap; }
+.hist-r .mono { font-size: 12px; color: var(--muted); opacity: .7; }
+.hist-chip { display: inline-block; max-width: 100%; box-sizing: border-box; line-height: 1.45; padding: 1px 8px; border-radius: 6px; background: var(--chip); border: 1px solid var(--line); font-size: 12.5px; color: var(--ink2); }
+.hist-chip b { font-weight: 500; color: var(--ink); }
+.hist-chip.acc { background: var(--soft); border-color: #3A2F66; color: var(--chip-accent-ink); }
+.hist-v { font-size: 12.5px; color: var(--chip-accent-ink); }
+@media (max-width: 700px) {
+  .rhist > summary { grid-template-columns: minmax(0, 1fr) 18px; padding: 8px 14px; }
+  .rhist > summary .hs { grid-column: 1; grid-row: 2; white-space: normal; }
+  .rhist > summary .i { grid-column: 2; grid-row: 1 / 3; }
+  .hist-body { padding: 4px 12px 10px; max-height: none; }
+  .hist-ev { grid-template-columns: 18px minmax(0, 1fr); }
+  .hist-r { grid-column: 2; }
+}
 .warn-card { border-color: #4a3a12; }
 
 /* Titles in lists read as text; the accent shows on hover. */
