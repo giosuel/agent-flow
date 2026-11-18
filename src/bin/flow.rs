@@ -165,6 +165,18 @@ enum Command {
         #[arg(long = "file", hide = true)]
         files: Vec<PathBuf>,
     },
+    /// The plan's usage (the 5-hour and weekly windows) and what this project's tokens cost at API
+    /// prices: today, in the current window, over 7 days, and per task.
+    Usage {
+        #[command(flatten)]
+        client: cli::ClientArgs,
+        /// Every project, not only this folder's.
+        #[arg(long)]
+        all: bool,
+        /// The numbers as JSON.
+        #[arg(long)]
+        json: bool,
+    },
     /// Claude Code's status line for a project's sessions: the plan's 5-hour and weekly windows,
     /// sent to AgentFlow at most once a minute. Project setup sets it up.
     Statusline {
@@ -395,6 +407,17 @@ fn real_main() -> anyhow::Result<()> {
         Command::Wait { client, record, minutes } => cli::wait(&config_path, client, record, minutes),
         Command::McpHeaders { token_file } => cli::mcp_headers(&token_file),
         Command::Sync { client, all, files } => agentflow::sync::run(&config_path, &client, all, files),
+        Command::Usage { client, all, json } => {
+            let here = std::env::current_dir()?;
+            let c = cli::Client::for_project(&config_path, &client, &here)?;
+            let v = c.get(if all { "/api/usage?all=1" } else { "/api/usage" })?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&v)?);
+            } else {
+                println!("{}", agentflow::usage_report::print(&v, all));
+            }
+            Ok(())
+        }
         Command::Statusline { client, send } => agentflow::statusline::run(&config_path, &client, send),
     }
 }

@@ -8,7 +8,7 @@
 use axum::extract::{DefaultBodyLimit, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::routing::post;
+use axum::routing::{get, post};
 use axum::{Extension, Json, Router};
 use serde::Deserialize;
 use serde_json::json;
@@ -26,6 +26,31 @@ pub fn routes() -> Router<AppState> {
         .route("/api/sync", post(upload).layer(DefaultBodyLimit::max(MAX_UPLOAD)))
         .route("/api/sync/split", post(split).layer(DefaultBodyLimit::max(MAX_UPLOAD)))
         .route("/api/usage/plan", post(plan))
+        .route("/api/usage", get(usage_api))
+}
+
+#[derive(Deserialize)]
+struct UsageQuery {
+    all: Option<u8>,
+}
+
+/// `flow usage`: the plan's windows and the project's tokens and cost (every project's with
+/// `all=1`, and always for the owner's own machines).
+async fn usage_api(
+    State(state): State<AppState>,
+    Extension(actor): Extension<Actor>,
+    axum::extract::Query(q): axum::extract::Query<UsageQuery>,
+) -> Response {
+    let project = match &actor {
+        Actor::Project { project_id, .. } if q.all != Some(1) => Some(*project_id),
+        Actor::Project { .. } | Actor::Owner { .. } | Actor::Device { .. } | Actor::Admin { .. } => None,
+        _ => return json_error(StatusCode::FORBIDDEN, "not for this token"),
+    };
+    let now = crate::util::now_ms();
+    match state.db.call(move |c| crate::usage_report::report(c, project, now, &crate::tz::Tz::default())).await {
+        Ok(v) => Json(v).into_response(),
+        Err(e) => json_error(StatusCode::INTERNAL_SERVER_ERROR, format!("{e:#}")),
+    }
 }
 
 #[derive(Deserialize)]
@@ -43,7 +68,23 @@ async fn plan(State(state): State<AppState>, Extension(actor): Extension<Actor>,
     };
     let now = crate::util::now_ms();
     match state.db.call(move |c| crate::plan::store(c, &b.rate_limits, now, Some(project_id), &b.machine)).await {
-        Ok(kept) => Json(json!({"kept": kept})).into_response(),
+        Ok(stored) => {
+            let tz = crate::tz::Tz::default();
+            for x in &stored.crossed {
+                let (what, when) =
+                    if x.five { ("The 5-hour window", tz.hm(x.reset)) } else { ("The week", tz.short(x.reset)) };
+                state.push.spawn(
+                    crate::push::Kind::Usage,
+                    crate::push::Notification {
+                        title: format!("{what} passed 80%"),
+                        body: format!("{:.0}% of the plan used; it resets {when}.", x.pct),
+                        url: "/usage".into(),
+                        tag: Some(format!("plan-{}", if x.five { "5h" } else { "week" })),
+                    },
+                );
+            }
+            Json(json!({"kept": stored.kept})).into_response()
+        }
         Err(e) => json_error(StatusCode::BAD_REQUEST, format!("{e:#}")),
     }
 }

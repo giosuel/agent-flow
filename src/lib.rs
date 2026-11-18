@@ -55,6 +55,7 @@ pub mod totest;
 pub mod tz;
 pub mod ui;
 pub mod usage;
+pub mod usage_report;
 pub mod util;
 pub mod waiting;
 pub mod web;

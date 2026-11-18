@@ -60,7 +60,8 @@ and build until the owner tested them, and you mark what they tell you with `res
 tests, use the build server (hello's `builds` says which and whether it's online): `flow remote [--fetch \
 target/release/app] -- cargo build --release` runs it there and prints the output; exit code 75 means it's \
 offline, so build here; 78 means none is picked for your project and names the online ones for `--server`. \
-Your token can \
+The owner's plan is shared by every agent: `usage` (or `flow usage`) tells how much of its 5-hour and weekly \
+windows is used and what your tokens cost; look before a big job or many subagents. Your token can \
 change only your own project and read all others. Every call is logged.";
 
 pub fn service(state: AppState) -> StreamableHttpService<FlowMcp, LocalSessionManager> {
