@@ -577,7 +577,14 @@ async fn the_overview_puts_questions_first_and_folds_closed_milestones() {
     let token = s.token(TokenKind::Project, Some("vinculum")).await;
     let sess = mcp_session(&s, &token).await;
     for (name, state) in [("M1", "closed"), ("M2", "active"), ("M3", "planned")] {
-        mcp_tool(&s, &token, &sess, "add_milestone", json!({"name": name, "title": format!("Work {name}"), "state": state})).await;
+        mcp_tool(
+            &s,
+            &token,
+            &sess,
+            "add_milestone",
+            json!({"name": name, "title": format!("Work {name}"), "state": state}),
+        )
+        .await;
     }
     mcp_tool(
         &s,
@@ -605,11 +612,20 @@ async fn the_overview_puts_questions_first_and_folds_closed_milestones() {
         .await
         .unwrap();
     assert_eq!(res.headers()[LOCATION], "/p/vinculum?answered=Q-1");
-    let page =
-        s.http.get(s.url("/p/vinculum?answered=Q-1")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
+    let page = s
+        .http
+        .get(s.url("/p/vinculum?answered=Q-1"))
+        .header(COOKIE, &cookie)
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
     assert!(page.contains("Answered Q-1") && !page.contains("Waiting on you"), "{page}");
     // A closed milestone's board opens the fold.
-    let page = s.http.get(s.url("/p/vinculum?ms=M1")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
+    let page =
+        s.http.get(s.url("/p/vinculum?ms=M1")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
     assert!(page.contains(r#"<details class="ms-fold" open>"#), "{page}");
 }
 
