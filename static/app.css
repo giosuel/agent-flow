@@ -1676,3 +1676,18 @@ html.no-scroll { overflow: hidden; }
   .cv-foot { flex-direction: column; padding: 12px 16px; }
   .cv-main .back { padding: 0 16px; }
 }
+
+/* An outcome ("Saved", "Test notification sent") on top of a dialog, flush under its header (the
+   owner, 2026-11-18: "put it a bit higher so its distinctly on the top"). */
+.notice.flash { display: flex; align-items: center; gap: 10px; }
+.notice.flash .i { width: 18px; height: 18px; flex: none; }
+.set-pane > .notice.flash { position: sticky; top: -32px; z-index: 3; margin: -32px -36px 28px; padding: 14px 36px; border-radius: 0; border-bottom: 1px solid #1E4D30; }
+.set-pane > .notice.flash.warn { border-bottom-color: #4A3A12; }
+.pdlg-body .notice.flash { position: sticky; top: -20px; z-index: 3; margin: -20px -24px 18px; padding: 14px 24px; border-radius: 0; border-bottom: 1px solid #1E4D30; }
+.pdlg-body .notice.flash.warn { border-bottom-color: #4A3A12; }
+/* The dialog's title goes over a page's own h1; nothing above the outcome then. */
+.pdlg-body [data-dlg-content] > .head:empty { display: none; }
+@media (max-width: 700px) {
+  .set-pane > .notice.flash { top: 0; margin: -8px -16px 20px; padding: 12px 16px; }
+  .pdlg-body .notice.flash { top: -16px; margin: -16px -16px 16px; padding: 12px 16px; }
+}

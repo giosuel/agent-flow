@@ -13,8 +13,8 @@
     {% endfor %}
   </nav>
   <div class="set-pane">
+  {% if let Some(notice) = notice %}<p class="notice ok flash" role="status">{{ crate::web::icons::icon("check")|safe }}<span>{{ notice }}</span></p>{% endif %}
   <a class="set-back" href="/settings">{{ crate::web::icons::icon("back")|safe }}<span>Settings</span></a>
-  {% if let Some(notice) = notice %}<p class="notice ok" role="status">{{ notice }}</p>{% endif %}
 
   {% if section == "passkeys" %}
   <section aria-labelledby="h-sec">
