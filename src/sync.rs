@@ -124,7 +124,8 @@ fn send_file(client: &Client, root: &Path, file: &str, path: &Path) -> anyhow::R
 /// Once per folder (a marker file says it's done): what the folder's conversations say of their
 /// calls' cache writes and speed, for the calls AgentFlow stored before it kept them (M13).
 fn fill_split(client: &Client, project_dir: &Path) -> anyhow::Result<usize> {
-    let marker = expand_home("~/.local/state/agentflow/split-done").join(folder_for(&project_dir.display().to_string()));
+    let marker =
+        expand_home("~/.local/state/agentflow/split-done").join(folder_for(&project_dir.display().to_string()));
     if marker.exists() {
         return Ok(0);
     }
