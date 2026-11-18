@@ -35,6 +35,7 @@ pub mod passkey;
 pub mod poller;
 pub mod projectdoc;
 pub mod projects;
+pub mod prices;
 pub mod prs;
 pub mod push;
 pub mod records;

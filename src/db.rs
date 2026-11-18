@@ -38,6 +38,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/025_notifications.sql"),
     include_str!("../migrations/026_job_requests.sql"),
     include_str!("../migrations/027_job_slots.sql"),
+    include_str!("../migrations/028_usage_cost.sql"),
 ];
 
 const POOL_SIZE: usize = 6;
@@ -150,6 +151,7 @@ fn open_connection(path: &Path) -> anyhow::Result<Connection> {
          PRAGMA foreign_keys = ON;
          PRAGMA temp_store = MEMORY;",
     )?;
+    crate::prices::register(&conn)?;
     Ok(conn)
 }
 
