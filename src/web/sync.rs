@@ -201,6 +201,7 @@ async fn upload(
         .await;
     match stored {
         Ok(Ok((calls, offset))) => {
+            super::LAST_READ.store(crate::util::now_ms(), std::sync::atomic::Ordering::Relaxed);
             // One entry for a round that brought something, none for an empty one.
             if calls > 0 || messages > 0 {
                 let what = match (calls, messages) {
