@@ -47,7 +47,11 @@ pub fn of(model: &str) -> Option<Price> {
     let m = m.split('[').next().unwrap_or(m);
     PRICES
         .iter()
-        .filter(|(id, _)| m == *id || m.strip_prefix(id).is_some_and(|rest| rest.starts_with('-') && rest[1..].bytes().all(|b| b.is_ascii_digit())))
+        .filter(|(id, _)| {
+            m == *id
+                || m.strip_prefix(id)
+                    .is_some_and(|rest| rest.starts_with('-') && rest[1..].bytes().all(|b| b.is_ascii_digit()))
+        })
         .max_by_key(|(id, _)| id.len())
         .map(|(_, p)| *p)
 }
@@ -149,7 +153,13 @@ mod tests {
         assert_eq!(of("claude-opus-5-5[1m]").unwrap().cache_read, 0.20);
         assert_eq!(of("claude-opus-5-5x"), None);
         assert_eq!(of("gpt-9"), None);
-        let t = Tokens { input: 1_000_000, output: 1_000_000, cache_read: 10_000_000, cache_write: 2_000_000, cache_write_1h: 1_000_000 };
+        let t = Tokens {
+            input: 1_000_000,
+            output: 1_000_000,
+            cache_read: 10_000_000,
+            cache_write: 2_000_000,
+            cache_write_1h: 1_000_000,
+        };
         // 4 + 20 + 2 + 5 (5 min) + 8 (1 h)
         assert_eq!(cost("claude-opus-5-5", &t, false), Some(39.0));
         assert_eq!(cost("claude-opus-5-5", &t, true), Some(78.0), "fast mode doubles it");
