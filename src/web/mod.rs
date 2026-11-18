@@ -18,6 +18,7 @@ mod buttons;
 mod charts;
 mod conversations;
 mod dashboard;
+mod editor;
 mod handbook;
 mod icons;
 mod log;

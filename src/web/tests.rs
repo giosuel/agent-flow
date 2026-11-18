@@ -1557,23 +1557,23 @@ async fn the_owner_and_the_consultant_edit_the_handbook_and_agents_read_it() {
         page.contains("<h1>Handbook</h1>") && page.contains("MACHINE.md") && !page.contains("pull request"),
         "{page}"
     );
+    // The owner edits the whole file in the Markdown editor, like the project document (D-211).
     let page = get("/handbook?f=MACHINE.md&edit=1").await;
-    let start = page.find(r#"name="version" value=""#).unwrap() + r#"name="version" value=""#.len();
-    let version = page[start..].split('"').next().unwrap().to_owned();
-    let save = |version: String, text: &'static str| {
+    assert!(page.contains("data-md-editor") && page.contains(r#"name="base_rev" value="1""#), "{page}");
+    let save = |base: i64, text: &'static str| {
         let (s, cookie) = (&s, cookie.clone());
         async move {
             s.http
-                .post(s.url("/handbook/save"))
+                .post(s.url("/handbook"))
                 .header(COOKIE, &cookie)
                 .header(ORIGIN, &s.base)
-                .form(&[("f", "MACHINE.md"), ("version", version.as_str()), ("section", "1"), ("text", text)])
+                .form(&[("f", "MACHINE.md"), ("base_rev", &base.to_string()), ("text", text)])
                 .send()
                 .await
                 .unwrap()
         }
     };
-    let res = save(version.clone(), "## Ports\n\nUse 10.0.8.1 or 127.0.0.1.").await;
+    let res = save(1, "# MACHINE\n\nThe server.\n\n## Ports\n\nUse 10.0.8.1 or 127.0.0.1.\n").await;
     assert_eq!(res.headers()[LOCATION], "/handbook?f=MACHINE.md&saved=2");
     let (_, ports) =
         mcp_tool(&s, &token, &sess, "handbook_read", json!({"name": "MACHINE.md", "section": "ports"})).await;
@@ -1581,10 +1581,20 @@ async fn the_owner_and_the_consultant_edit_the_handbook_and_agents_read_it() {
     // Written out as a file too.
     let file = std::fs::read_to_string(s.state.config.data_dir().join("handbook/MACHINE.md")).unwrap();
     assert!(file.contains("127.0.0.1"));
-    // The same old version again: refused, nothing written.
-    let res = save(version, "## Ports\n\nx").await;
-    assert_eq!(res.headers()[LOCATION], "/handbook?f=MACHINE.md&error=stale");
-    assert!(get("/handbook?f=MACHINE.md&history=1").await.contains("owner: section Ports"));
+    assert!(get("/handbook?f=MACHINE.md&history=1").await.contains("owner: Ports"));
+    let preview = s
+        .http
+        .post(s.url("/handbook/preview"))
+        .header(COOKIE, &cookie)
+        .header(ORIGIN, &s.base)
+        .form(&[("text", "See [OWNER.md](OWNER.md).")])
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(preview.contains(r#"href="/handbook?f=OWNER.md""#), "{preview}");
 
     // The consultant edits a section with the version it read; a stale one is refused.
     let admin = s.token(TokenKind::Admin, None).await;
@@ -1611,6 +1621,14 @@ async fn the_owner_and_the_consultant_edit_the_handbook_and_agents_read_it() {
     )
     .await;
     assert!(ok);
+    // The owner's save from rev 2 after the consultant's rev 3: merged by section, or both versions.
+    let res = save(2, "# MACHINE\n\nThe server, viber.\n\n## Ports\n\nUse 10.0.8.1 or 127.0.0.1.\n").await;
+    assert_eq!(res.headers()[LOCATION], "/handbook?f=MACHINE.md&saved=4&taken=Ports");
+    let (_, now) = mcp_tool(&s, &token, &sess, "handbook_read", json!({"name": "MACHINE.md"})).await;
+    let text = now["text"].as_str().unwrap();
+    assert!(text.contains("viber") && text.contains("Only 10.0.8.1."), "{text}");
+    let page = save(3, "# MACHINE\n\nThe server, mine.\n\n## Ports\n\nOnly 10.0.8.1.\n").await.text().await.unwrap();
+    assert!(page.contains("Use its version") && page.contains(r#"name="base_rev" value="4""#), "{page}");
 
     // Machines fetch it whole, or hear it's unchanged.
     let b: Value = s.http.get(s.url("/api/handbook")).bearer_auth(&token).send().await.unwrap().json().await.unwrap();

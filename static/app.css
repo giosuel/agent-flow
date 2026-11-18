@@ -1734,6 +1734,12 @@ html.no-scroll { overflow: hidden; }
 .cv-foot .cf-l, .cv-foot .cf-r { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cv-foot .cf-r { text-align: right; }
 @media (max-width: 700px) { .cv-foot .cf-r { text-align: left; } }
-/* The Handbook: an older revision; on the phone, the list first, a file once picked. */
-.guide-sec.old { opacity: .8; border-style: dashed; }
-@media (max-width: 700px) { .split.guides:not(.picked) > .split-main { display: none; } }
+/* The Handbook, read and edited like the project document; on the phone, the list first. */
+.hb-bar h2 { margin: 0; font-size: 19px; }
+.hb-main .pd-toc { top: 16px; max-height: calc(100dvh - 120px); }
+.hb-main .pd-edit .pd-panes { height: calc(100dvh - 400px); min-height: 440px; }
+@media (max-width: 700px) {
+  .split.guides:not(.picked) > .split-main { display: none; }
+  .hb-main { padding: 14px; }
+  .hb-main .pd-edit .pd-panes { height: auto; min-height: 0; }
+}
