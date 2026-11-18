@@ -8,7 +8,7 @@
 {% if let Some(n) = notice %}<p class="notice ok" role="status">{{ n }}. The agent gets your answer word for word.</p>{% endif %}
 
 {# The overview (the owner, 2026-11-18, D-212): the plan, today, the machine, agents and builds. #}
-<div class="ov" aria-label="Overview">
+<div class="dov" aria-label="Overview">
   <a href="/usage" class="tile ov-plan">
     <div class="th"><span class="ic">{{ crate::web::icons::icon("chart")|safe }}</span><span class="label">Plan</span><span class="go">Usage ›</span></div>
     <div class="ov-desk">
