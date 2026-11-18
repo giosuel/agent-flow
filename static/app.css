@@ -1734,3 +1734,6 @@ html.no-scroll { overflow: hidden; }
 .cv-foot .cf-l, .cv-foot .cf-r { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cv-foot .cf-r { text-align: right; }
 @media (max-width: 700px) { .cv-foot .cf-r { text-align: left; } }
+/* The Handbook: an older revision; on the phone, the list first, a file once picked. */
+.guide-sec.old { opacity: .8; border-style: dashed; }
+@media (max-width: 700px) { .split.guides:not(.picked) > .split-main { display: none; } }

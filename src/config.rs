@@ -28,9 +28,10 @@ pub struct Config {
     pub trusted_proxies: Vec<std::net::IpAddr>,
     /// Where project and consultant tokens are written for Claude Code's headersHelper.
     pub token_dir: String,
-    /// The checkout of the guides repository (ai-handbook) that agents read and the owner edits.
+    /// The old ai-handbook checkout: the handbook's files are brought in from it once, while the
+    /// handbook is still empty (see `crate::handbook::import`). AgentFlow keeps them since.
     pub handbook_dir: String,
-    /// That repository on GitHub, for its pull requests and links.
+    /// No longer used (the handbook left git, 2026-11-18); kept so older configs still load.
     pub handbook_repo: String,
     /// The socket for `sudo flow server add-passkey`; empty: `$XDG_RUNTIME_DIR/agentflow/admin.sock`
     /// for a user install, `/run/agentflow/admin.sock` otherwise.
@@ -38,9 +39,9 @@ pub struct Config {
     /// The `flow` program the server hands out for download and writes into hooks; empty: the one
     /// installed next to the server.
     pub flow_bin: String,
-    /// Who the owner's guide edits are committed as.
+    /// No longer used (the handbook left git, 2026-11-18); kept so older configs still load.
     pub git_author: String,
-    /// False on a test instance: the Guides page's Merge button refuses instead of merging on GitHub.
+    /// No longer used (the handbook left git, 2026-11-18); kept so older configs still load.
     pub github_writes: bool,
     /// The contact push services ask senders for (Apple requires one): mailto: or https:.
     pub push_contact: String,

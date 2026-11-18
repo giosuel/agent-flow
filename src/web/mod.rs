@@ -18,7 +18,7 @@ mod buttons;
 mod charts;
 mod conversations;
 mod dashboard;
-mod guides;
+mod handbook;
 mod icons;
 mod log;
 mod machine;
@@ -67,22 +67,10 @@ pub struct AppState {
     denied: Arc<std::sync::Mutex<std::collections::HashMap<String, (i64, u32)>>>,
     /// Running `/api/wait` calls per project.
     pub waits: Arc<std::sync::Mutex<std::collections::HashMap<i64, u32>>>,
-    /// The guides repository's pull requests, refreshed by the poller.
-    pub guide_prs: Arc<std::sync::Mutex<GuidePrs>>,
     /// Held while a build uploads: one at a time.
     pub uploads: Arc<tokio::sync::Mutex<()>>,
-    /// Held while AgentFlow changes the handbook checkout (an edit's commit, a merge's pull).
-    pub handbook: Arc<tokio::sync::Mutex<()>>,
     /// Tokens already reported as used from two places, with the day: one alert a day each.
     two_places: Arc<std::sync::Mutex<std::collections::HashMap<i64, i64>>>,
-}
-
-#[derive(Default, Clone)]
-pub struct GuidePrs {
-    pub open: Vec<crate::github::RepoPr>,
-    pub merged: Vec<crate::github::RepoPr>,
-    /// Fetched at least once since start (the first fetch doesn't notify).
-    pub fetched: bool,
 }
 
 impl AppState {
@@ -100,9 +88,7 @@ impl AppState {
             remote: Arc::default(),
             denied: Arc::default(),
             waits: Arc::default(),
-            guide_prs: Arc::default(),
             uploads: Arc::default(),
-            handbook: Arc::default(),
             two_places: Arc::default(),
         }
     }
@@ -169,7 +155,7 @@ pub fn router(state: AppState) -> Router {
         .merge(steps::routes())
         .merge(projectdoc::routes())
         .merge(conversations::routes())
-        .merge(guides::routes())
+        .merge(handbook::routes())
         .merge(log::routes())
         .merge(machine::routes())
         .merge(new_project::routes())
@@ -277,6 +263,21 @@ pub async fn serve(state: AppState) -> anyhow::Result<()> {
         state.config.public_url
     );
     let recovered = state.db.call(|c| crate::actions::recover_interrupted(c)).await?;
+    // The handbook: brought in once from the old ai-handbook checkout, then written out as files.
+    let (data, from) = (state.config.data_dir(), state.config.handbook_dir());
+    match state
+        .db
+        .call(move |c| {
+            let n = crate::handbook::import(c, &from)?;
+            crate::handbook::mirror(c, &data)?;
+            Ok(n)
+        })
+        .await
+    {
+        Ok(0) => {}
+        Ok(n) => tracing::info!("handbook: {n} files brought in from the ai-handbook folder"),
+        Err(e) => tracing::warn!("handbook: {e:#}"),
+    }
     // Sessions a stray title had named "\\" get their name back (see crate::sessionlog::is_name).
     match state.db.call(|c| crate::sessionlog::repair_names(c)).await {
         Ok(0) => {}
