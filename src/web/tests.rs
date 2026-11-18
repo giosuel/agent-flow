@@ -577,7 +577,14 @@ async fn the_overview_puts_questions_first_and_folds_closed_milestones() {
     let token = s.token(TokenKind::Project, Some("vinculum")).await;
     let sess = mcp_session(&s, &token).await;
     for (name, state) in [("M1", "closed"), ("M2", "active"), ("M3", "planned")] {
-        mcp_tool(&s, &token, &sess, "add_milestone", json!({"name": name, "title": format!("Work {name}"), "state": state})).await;
+        mcp_tool(
+            &s,
+            &token,
+            &sess,
+            "add_milestone",
+            json!({"name": name, "title": format!("Work {name}"), "state": state}),
+        )
+        .await;
     }
     mcp_tool(
         &s,
@@ -605,11 +612,20 @@ async fn the_overview_puts_questions_first_and_folds_closed_milestones() {
         .await
         .unwrap();
     assert_eq!(res.headers()[LOCATION], "/p/vinculum?answered=Q-1");
-    let page =
-        s.http.get(s.url("/p/vinculum?answered=Q-1")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
+    let page = s
+        .http
+        .get(s.url("/p/vinculum?answered=Q-1"))
+        .header(COOKIE, &cookie)
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
     assert!(page.contains("Answered Q-1") && !page.contains("Waiting on you"), "{page}");
     // A closed milestone's board opens the fold.
-    let page = s.http.get(s.url("/p/vinculum?ms=M1")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
+    let page =
+        s.http.get(s.url("/p/vinculum?ms=M1")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
     assert!(page.contains(r#"<details class="ms-fold" open>"#), "{page}");
 }
 
@@ -634,7 +650,15 @@ async fn the_usage_page_shows_the_plan_and_the_cost() {
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
-    let res = s.http.post(s.url("/api/usage/plan")).header(COOKIE, &cookie).header(ORIGIN, &s.base).json(&json!({"rate_limits": {}})).send().await.unwrap();
+    let res = s
+        .http
+        .post(s.url("/api/usage/plan"))
+        .header(COOKIE, &cookie)
+        .header(ORIGIN, &s.base)
+        .json(&json!({"rate_limits": {}}))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(res.status(), StatusCode::FORBIDDEN, "only a project's status line sends them");
     let page = get("/usage").await;
     assert!(page.contains("42%") && page.contains("81%") && page.contains("mp-bar"), "{page}");
@@ -1986,8 +2010,41 @@ async fn notes_are_files_or_text_and_come_back() {
     let cookie = s.owner_cookie().await;
     let tab =
         s.http.get(s.url("/p/vinculum?tab=notes")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
-    assert!(tab.contains("Morning report") && tab.contains("morning report") && tab.contains("1 resolved"), "{tab}");
-    assert!(tab.contains("comes back when Loro updates") || tab.contains("2 versions"), "{tab}");
+    assert!(
+        tab.contains("Morning report") && tab.contains("morning report") && tab.contains("1 resolved hidden"),
+        "{tab}"
+    );
+    assert!(
+        !tab.contains("Loro needs im") && tab.contains("Comes back 2099-01-01"),
+        "resolved notes are hidden: {tab}"
+    );
+    assert!(tab.contains(r#"nic t-violet"#) && tab.contains(r#"nic t-teal"#), "icons by file type: {tab}");
+    // Search and filters like the Log (the owner, 2026-11-18).
+    let notes = |q: &'static str| {
+        let (s, cookie) = (&s, cookie.clone());
+        async move {
+            s.http
+                .get(s.url(&format!("/p/vinculum?tab=notes&{q}")))
+                .header(COOKIE, &cookie)
+                .send()
+                .await
+                .unwrap()
+                .text()
+                .await
+                .unwrap()
+        }
+    };
+    let t = notes("nq=loro&nstate=all").await;
+    assert!(t.contains("<mark>Loro</mark> needs im") && !t.contains("x-wing pin"), "{t}");
+    let t = notes("nq=is:resolved").await;
+    assert!(t.contains("Loro needs im") && !t.contains("Later"), "{t}");
+    let t = notes("nkind=file").await;
+    assert!(t.contains("Morning report") && !t.contains("x-wing pin") && t.contains("md · "), "{t}");
+    let t = notes("ncat=known+issue").await;
+    assert!(t.contains("x-wing pin") && !t.contains(">Morning report<"), "{t}");
+    assert!(t.contains(r#"href="/p/vinculum?tab=notes""#), "Clear: {t}");
+    let t = notes("nq=%3Cscript").await;
+    assert!(!t.contains("<script>alert") && t.contains("Nothing matches"), "{t}");
     let page = s.http.get(s.url("/p/vinculum/N-1")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
     assert!(page.contains("<li>T-5</li>") && page.contains("v1"), "the newest version rendered: {page}");
     // Opened directly (a link in a notification, a reload), it's its project's page with the note

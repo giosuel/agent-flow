@@ -830,16 +830,25 @@ struct TabQuery {
     history: Option<u8>,
     rev: Option<i64>,
     doc: Option<String>,
-    /// The Notes tab's category filter.
+    /// The Notes tab's search and filters (see `super::notes::Filter`).
+    nq: Option<String>,
     ncat: Option<String>,
+    nkind: Option<String>,
+    nstate: Option<String>,
+    nrange: Option<String>,
     /// After answering a question on the overview: its id.
     answered: Option<String>,
 }
 
 /// The line shown after pressing a button, from the redirect's query.
 fn press_notice(q: &TabQuery) -> (Option<String>, bool) {
-    if let Some(a) = q.answered.as_deref().filter(|a| a.len() <= 40 && a.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')) {
-        return (Some(format!("Answered {a}: the agent gets your answer word for word, and it's a decision now.")), false);
+    if let Some(a) =
+        q.answered.as_deref().filter(|a| a.len() <= 40 && a.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-'))
+    {
+        return (
+            Some(format!("Answered {a}: the agent gets your answer word for word, and it's a decision now.")),
+            false,
+        );
     }
     if let Some(n) = q.tested {
         return (Some(tested_notice(n)), false);
@@ -976,13 +985,20 @@ async fn project(
                 })
                 .await?,
         );
-        let (slug, pick) = (page.slug.clone(), q.ncat.clone());
+        let slug = page.slug.clone();
+        let filter = super::notes::Filter::new(
+            q.nq.as_deref(),
+            q.ncat.as_deref(),
+            q.nkind.as_deref(),
+            q.nstate.as_deref(),
+            q.nrange.as_deref(),
+        );
         page.notes = Some(
             state
                 .db
                 .call(move |c| {
                     let p = projects::require(c, &slug)?;
-                    super::notes::view(c, &slug, p.id, pick.as_deref(), now)
+                    super::notes::view(c, &slug, p.id, &filter, now)
                 })
                 .await?,
         );
@@ -1114,7 +1130,8 @@ fn build_project_page(
         let mine: Vec<&&Record> = tasks.iter().filter(|t| t.milestone_id.is_some_and(|x| ids.contains(&x))).collect();
         let done = mine.iter().filter(|t| t.state == "done").count();
         let counted = mine.iter().filter(|t| !matches!(t.state.as_str(), "skipped" | "archived")).count();
-        let steps: Vec<&Milestone> = ms.iter().filter(|s| s.parent_id == Some(m.id) && s.archived_at.is_none()).collect();
+        let steps: Vec<&Milestone> =
+            ms.iter().filter(|s| s.parent_id == Some(m.id) && s.archived_at.is_none()).collect();
         let mut sub = Vec::new();
         if let Some(t) = m.started_at {
             sub.push(format!("since {}", tz.day(t)));
@@ -1664,7 +1681,11 @@ fn build_project_page(
         ms_closed,
         ms_counts,
         qcards,
-        server: if tab == "overview" { crate::remote::project_server(c, p.id)?.unwrap_or_default() } else { String::new() },
+        server: if tab == "overview" {
+            crate::remote::project_server(c, p.id)?.unwrap_or_default()
+        } else {
+            String::new()
+        },
         board,
         agent: AgentCard {
             machine: if p.agent.machine.is_empty() { "–".into() } else { p.agent.machine.clone() },
