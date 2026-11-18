@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Conversations{% endblock %}
 {% block content %}
-{# Reworked 2026-11-18: a toolbar like the Log's, one conversation at a time (D-207). #}
+{# Reworked 2026-11-18: a toolbar like the Log's (D-207); three panes: pairs, their conversations by day, one conversation (D-210). #}
 <div class="head cv-top">
   <div><h1>Conversations</h1>
   <p class="status-line">What sessions tell each other, and what their subagents were told and reported, from the Claude Code transcripts.</p></div>
@@ -32,7 +32,7 @@
 {% if empty %}
 <section class="card pad empty"><h2>No conversations yet</h2><p class="sub">When sessions message each other or start subagents, it shows up here after the next read of the transcripts.</p></section>
 {% else %}
-<div class="split conv cv2{% if picked %} picked{% endif %}">
+<div class="split conv cv2 cv3{% if picked %} picked{% endif %}{% if opened %} opened{% endif %}">
   <nav class="split-side card cv-list" aria-label="Conversations">
     <div class="cv-lh"><span class="label">{{ list_label }}</span><span class="sub">{{ list_meta }}</span></div>
     <div class="cv-rows">
@@ -46,25 +46,38 @@
     {% if rows.is_empty() %}<p class="sub cv-none">Nothing matches.</p>{% endif %}
     </div>
   </nav>
+  {% if let Some(s) = selected %}
+  <section class="card cv-mid" aria-label="The {{ s.noun }}s">
+    <div class="cv-lh"><span class="label">{{ s.list_count }}</span><span class="sub">newest first{% if s.noun == "conversation" && !s.list_count.contains("match") %} · split at a pause of 30 min{% endif %}</span></div>
+    <div class="cv-midtop">
+      {% if !s.types.is_empty() %}<div class="cv-chips" role="group" aria-label="Type">{% for (label, n, href, on) in s.types %}<a class="cv-chip{% if *on %} on{% endif %}" href="{{ href }}"{% if *on %} aria-current="true"{% endif %}>{{ label }} <span class="mono">{{ n }}</span></a>{% endfor %}</div>{% endif %}
+      <label class="lsearch cv-find">{{ crate::web::icons::icon("search")|safe }}<span class="vh">Find a {{ s.noun }}</span><input type="search" placeholder="Find in these {{ s.noun }}s" data-cv-find autocomplete="off"></label>
+    </div>
+    <div class="cv-days" data-cv-days>
+      {% for d in s.days %}
+      <div class="cv-day">
+        <p class="cv-dh"><span>{{ d.label }}</span><span class="mono">{{ d.items.len() }}</span></p>
+        {% for it in d.items %}<a class="cv-item{% if it.on %} on{% endif %}" href="{{ it.href }}" data-find="{{ it.find }}"{% if it.on %} aria-current="true"{% endif %}><span class="ci-t"><span class="mono">{{ it.span }}</span>{% if !it.chip.is_empty() %}<span class="chip">{{ it.chip }}</span>{% endif %}<span class="grow"></span><span class="sub">{{ it.count }}</span></span><span class="ci-x">{{ it.text }}</span></a>{% endfor %}
+      </div>
+      {% endfor %}
+      <p class="sub cv-none" data-cv-none hidden>No {{ s.noun }} matches.</p>
+    </div>
+    <div class="cv-mfoot sub"><span>{{ s.list_foot }}</span><span class="hide-phone">↑ ↓ moves through them</span></div>
+  </section>
+  {% endif %}
   <section class="split-main card cv-main" aria-labelledby="thread-h">
     {% if let Some(s) = selected %}
     <a class="back phone-only" href="{{ list_href }}">← Conversations</a>
     <div class="cv-head">
       <span class="avs" aria-hidden="true">{% for a in s.avatars %}<span class="av t-{{ a.tint }}">{{ a.initials }}</span>{% endfor %}{% if s.fork %}<span class="av fork">{{ crate::web::icons::icon("fork")|safe }}</span>{% endif %}</span>
       <div class="grow"><h2 id="thread-h">{{ s.title.0 }} <span class="sep">{{ s.title.1 }}</span> {{ s.title.2 }}</h2><span class="sub">{{ s.line }}</span></div>
-      {% if !s.types.is_empty() %}
-      <details class="dd{% if s.type_label != "All" %} set{% endif %}"><summary><span class="sub">Type</span> {{ s.type_label }}</summary>
-        <div class="dd-menu dd-right">{% for (label, n, href, on) in s.types %}<a href="{{ href }}"{% if *on %} class="on" aria-current="true"{% endif %}><span>{{ label }}</span><span class="mono sub">{{ n }}</span></a>{% endfor %}</div>
-      </details>
-      {% endif %}
     </div>
     <div class="cv-pager">
       {% if let Some(n) = s.next %}<a class="pg-btn" href="{{ n }}" data-newer aria-label="Newer {{ s.noun }}">{{ crate::web::icons::icon("back")|safe }}</a>{% else %}<span class="pg-btn off" aria-hidden="true">{{ crate::web::icons::icon("back")|safe }}</span>{% endif %}
       <div class="grow cv-pg-t"><strong>{{ s.pager }}</strong> <span class="sub">{{ s.pager_sub }}</span></div>
-      <span class="sub hide-phone">newest first · ← → to step</span>
+      <span class="sub hide-phone">← → or ↑ ↓ to step</span>
       {% if let Some(p) = s.prev %}<a class="pg-btn" href="{{ p }}" data-older aria-label="Older {{ s.noun }}">{{ crate::web::icons::icon("chevron")|safe }}</a>{% else %}<span class="pg-btn off" aria-hidden="true">{{ crate::web::icons::icon("chevron")|safe }}</span>{% endif %}
     </div>
-    {% if s.pills.len() > 1 %}<nav class="cv-strip" aria-label="Jump to a {{ s.noun }}">{% for p in s.pills %}<a class="cv-pill{% if p.on %} on{% endif %}" href="{{ p.href }}"{% if p.on %} aria-current="true"{% endif %}><b>{{ p.when }} · {{ p.count }}</b><span>{{ p.text }}</span></a>{% endfor %}{% if let Some((label, href)) = s.more %}<a class="cv-pill more" href="{{ href }}">{{ label }}</a>{% endif %}</nav>{% endif %}
     <div class="cv-body" data-swipe>
       <div class="cv-topic"><h3>{{ s.heading }}</h3><p class="sub">{{ s.heading_sub }}</p></div>
       <ol class="plain msgs cv-msgs">
@@ -82,8 +95,8 @@
       </ol>
     </div>
     <div class="cv-foot">
-      <span>{% if let Some((t, href)) = s.newer %}<a href="{{ href }}">‹ Newer: {{ t }}</a>{% else %}This is the newest {{ s.noun }}{% endif %}</span>
-      <span>{% if let Some((t, href)) = s.older %}<a href="{{ href }}">Older: {{ t }} ›</a>{% else %}This is the oldest{% endif %}</span>
+      <span class="cf-l">{% if let Some((t, href)) = s.newer %}<a href="{{ href }}">‹ Newer: {{ t }}</a>{% else %}This is the newest {{ s.noun }}{% endif %}</span>
+      <span class="cf-r">{% if let Some((t, href)) = s.older %}<a href="{{ href }}">Older: {{ t }} ›</a>{% else %}This is the oldest{% endif %}</span>
     </div>
     {% else %}
     <p class="sub cv-none">Nothing to show with these filters.</p>

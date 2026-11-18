@@ -1468,6 +1468,21 @@ async fn conversations_log_sessions_and_subagents_from_the_transcripts() {
     assert!(get("/conversations?who=nobody").await.contains("Nothing matches."));
     assert!(get("/conversations?q=thanks").await.contains("Conversation 1 of 1"));
     assert!(get("/conversations?q=from:nobody").await.contains("Nothing matches."));
+    // Three panes (2026-11-18): the pair's conversations by day in the middle; on the phone, the
+    // pair's list is the second level and a conversation the third.
+    let mid = get("/conversations?t=pair%3Aagent-flow%7Cimaginarium").await;
+    assert!(
+        mid.contains("cv-mid")
+            && mid.contains("class=\"cv-dh\"")
+            && mid.contains("12 Nov")
+            && mid.contains("1 conversation<"),
+        "{mid}"
+    );
+    assert!(mid.contains("cv3 picked\"") && !mid.contains("opened"), "the middle level on the phone");
+    assert!(mid.contains("data-find=\"scopes are live."), "{mid}");
+    let one = get("/conversations?t=pair%3Aagent-flow%7Cimaginarium&c=1").await;
+    assert!(one.contains("cv3 picked opened") && one.contains("Conversation 1 of 1"), "{one}");
+    assert!(get("/conversations?q=nothing-like-this").await.contains("Nothing matches."));
     let pair = s
         .http
         .get(s.url("/conversations?t=pair%3Aagent-flow%7Cimaginarium"))

@@ -37,9 +37,6 @@ const GAP_MS: i64 = 30 * 60_000;
 /// Messages longer than this fold to a preview (briefs and reports run to pages).
 const FOLD_AT: usize = 1200;
 
-/// How many conversations the strip shows at once.
-const STRIP: usize = 5;
-
 fn preview(body: &str) -> Option<String> {
     if body.len() <= FOLD_AT {
         return None;
@@ -186,12 +183,25 @@ struct MessageView {
     relayed: bool,
 }
 
-struct Pill {
+/// A conversation (or run) in the middle list.
+struct Item {
     href: String,
-    when: String,
-    count: usize,
+    /// "18:09–19:00".
+    span: String,
+    /// "8 messages", or for a run how long it worked.
+    count: String,
+    /// A run's type ("fork").
+    chip: String,
     text: String,
     on: bool,
+    /// What the find box looks in, lower case.
+    find: String,
+}
+
+/// A day of the middle list: "Today · 18 Nov" and its conversations, newest first.
+struct Day {
+    label: String,
+    items: Vec<Item>,
 }
 
 struct Selected {
@@ -199,17 +209,17 @@ struct Selected {
     fork: bool,
     title: (String, &'static str, String),
     line: String,
-    /// For subagents: the Type menu (label, count, href, on), and its label.
+    /// For subagents: the Type chips (label, count, href, on).
     types: Vec<(String, String, String, bool)>,
-    type_label: String,
+    /// The middle list: the conversations (or runs) by day, newest first, and its header.
+    days: Vec<Day>,
+    list_count: String,
+    list_foot: String,
     /// "Conversation 3 of 3" and the details after it.
     pager: String,
     pager_sub: String,
     prev: Option<String>,
     next: Option<String>,
-    pills: Vec<Pill>,
-    /// A link to the conversations past the strip: ("+18 older", href).
-    more: Option<(String, String)>,
     heading: String,
     heading_sub: String,
     messages: Vec<MessageView>,
@@ -250,8 +260,10 @@ struct ConversationsPage {
     selected: Option<Selected>,
     /// Nothing logged at all (not just nothing matching).
     empty: bool,
-    /// A conversation was chosen (not just the newest shown): on the phone, the list steps aside.
+    /// A pair (or session) was chosen: on the phone, its conversations show instead of the pairs.
     picked: bool,
+    /// A conversation was chosen too: on the phone, it shows full screen.
+    opened: bool,
     reading: bool,
     /// "last refreshed 3 min ago" (the owner, 2026-11-18: "a simple \"last refreshed n mins ago\" is
     /// enough"); empty until the first read since the start.
@@ -314,13 +326,14 @@ async fn page(
         h.kind = "sub".into();
     }
     let q_terms = terms(&h.q);
+    let sql_terms = q_terms.clone();
     let (pairs, subs, hits, names) = state
         .db
         .call(move |c| {
             let names: HashMap<i64, String> = crate::projects::list(c)?.into_iter().map(|p| (p.id, p.name)).collect();
             let pairs = sessionlog::session_threads(c, 1000)?;
             let subs = sessionlog::subagent_threads(c, None, 5000)?;
-            let hits = if q_terms.is_empty() { None } else { Some(sessionlog::search(c, &q_terms)?) };
+            let hits = if sql_terms.is_empty() { None } else { Some(sessionlog::search(c, &sql_terms)?) };
             Ok((pairs, subs, hits, names))
         })
         .await?;
@@ -437,8 +450,9 @@ async fn page(
             let key = t.key.clone();
             let msgs = state.db.call(move |c| sessionlog::messages(c, &key)).await?;
             let convs = split(msgs);
-            let newest_hit = hits.as_ref().and_then(|m| m.get(&t.key).copied());
-            selected = Some(selected_view(&h, t, None, convs, newest_hit, &tz, project(t), "conversation"));
+            // Links from here name the pair, also when it was shown as the newest.
+            let hs = h.with(|x| x.t = t.key.clone());
+            selected = Some(selected_view(&hs, t, None, convs, &q_terms, &tz, now, project(t), "conversation"));
         }
     } else {
         // Subagents, by the session that started them.
@@ -504,19 +518,20 @@ async fn page(
                 .call(move |c| keys.iter().map(|k| sessionlog::messages(c, k)).collect::<anyhow::Result<Vec<_>>>())
                 .await?;
             let first = runs[0];
-            let newest_hit = hits.as_ref().and_then(|m| runs.iter().filter_map(|t| m.get(&t.key).copied()).max());
             let summary = types
                 .iter()
                 .map(|(t, n)| format!("{} {n}", if t.is_empty() { "other" } else { t }))
                 .collect::<Vec<_>>()
                 .join(", ");
+            let hs = h.with(|x| x.t = format!("s:{name}"));
             let mut sel = selected_view(
-                &h,
+                &hs,
                 first,
                 Some((name.clone(), runs.iter().rev().copied().collect())),
                 convs,
-                newest_hit,
+                &q_terms,
                 &tz,
+                now,
                 project(first),
                 "run",
             );
@@ -526,11 +541,10 @@ async fn page(
                     .filter(|s| !s.is_empty())
                     .collect::<Vec<_>>()
                     .join(" · ");
-            sel.type_label = ty.clone().unwrap_or_else(|| "All".into());
             sel.types = std::iter::once((
                 "All".to_owned(),
-                String::new(),
-                h.with(|x| {
+                types.iter().map(|x| x.1).sum::<usize>().to_string(),
+                hs.with(|x| {
                     x.ty.clear();
                     x.c = 0;
                 })
@@ -542,7 +556,7 @@ async fn page(
                 (
                     label,
                     n.to_string(),
-                    h.with(|x| {
+                    hs.with(|x| {
                         x.ty = t.clone();
                         x.c = 0;
                     })
@@ -573,9 +587,15 @@ async fn page(
             x.c = 0;
         })
         .href();
-    // On the phone, a conversation opened full screen goes back to the list.
+    // On the phone the back bar goes up one level: a conversation to its pair's list, the pair's
+    // list to all pairs.
+    let opened = picked && h.c > 0;
     let mut nav = nav(&state, &actor, "/conversations").await;
-    if picked {
+    if opened {
+        let up = h.with(|x| x.c = 0).href();
+        let label = selected.as_ref().map(|s| format!("{} {} {}", s.title.0, s.title.1, s.title.2)).unwrap_or_default();
+        nav = nav.back_to(up, label.trim().to_owned());
+    } else if picked {
         nav = nav.back_to(list_href.clone(), "Conversations");
     }
     render(ConversationsPage {
@@ -621,6 +641,7 @@ async fn page(
         selected,
         empty,
         picked,
+        opened,
         reading: super::READING.load(std::sync::atomic::Ordering::Relaxed),
         refreshed: match super::LAST_READ.load(std::sync::atomic::Ordering::Relaxed) {
             0 => String::new(),
@@ -632,63 +653,125 @@ async fn page(
     })
 }
 
-/// The right side: one conversation (or run) of `convs` (oldest first), with the pager and strip.
-/// `runs`: for subagents, the session and its runs in the same order as `convs`.
+/// Does a message match every search term (a word in its text, `from:` or `to:` a name)? The
+/// same test as `sessionlog::search`, for the conversations of the pair shown.
+fn matches(m: &LogMsg, terms: &[(String, String)]) -> bool {
+    let has = |hay: &str, v: &str| hay.to_lowercase().contains(&v.to_lowercase());
+    terms.iter().all(|(k, v)| match k.as_str() {
+        "from" => has(&m.from, v),
+        "to" => has(&m.to, v),
+        _ => has(&m.body, v),
+    })
+}
+
+/// The middle list's days: (label, the indexes of `starts` on that day), newest first. `starts`
+/// are the conversations' first messages' times, oldest first; `order` the ones to show.
+pub fn day_groups(starts: &[i64], order: &[usize], now: i64, tz: &Tz) -> Vec<(String, Vec<usize>)> {
+    let today = tz.day_start(now);
+    let yesterday = tz.day_start(today - 1);
+    let mut out: Vec<(i64, String, Vec<usize>)> = Vec::new();
+    for &i in order.iter().rev() {
+        let at = starts[i];
+        let day = tz.day_start(at);
+        match out.last_mut() {
+            Some(d) if d.0 == day => d.2.push(i),
+            _ => {
+                let label = if day == today {
+                    format!("Today · {}", tz.day(at))
+                } else if day == yesterday {
+                    format!("Yesterday · {}", tz.day(at))
+                } else {
+                    let wd = tz.day_label(at);
+                    format!("{} · {}", wd.split(' ').next().unwrap_or(""), tz.day(at))
+                };
+                out.push((day, label, vec![i]));
+            }
+        }
+    }
+    out.into_iter().map(|(_, l, v)| (l, v)).collect()
+}
+
+/// The middle list and the right side: the conversations (or runs) of `convs` (oldest first) by
+/// day, and one of them. `runs`: for subagents, the session and its runs in the same order.
 #[allow(clippy::too_many_arguments)]
 fn selected_view(
     h: &Here,
     t: &Thread,
     runs: Option<(String, Vec<&Thread>)>,
     convs: Vec<Vec<LogMsg>>,
-    newest_hit: Option<i64>,
+    terms: &[(String, String)],
     tz: &Tz,
+    now: i64,
     project: String,
     noun: &'static str,
 ) -> Selected {
-    let n = convs.len().max(1);
-    // Which one: asked for, else the one with the newest search hit, else the newest.
-    let idx = if (1..=n).contains(&h.c) {
-        h.c - 1
-    } else if let Some(at) = newest_hit {
-        convs.iter().position(|c| c.iter().any(|m| m.at == at)).unwrap_or(n - 1)
-    } else {
-        n - 1
+    // A search shows only the conversations with a match.
+    let mut visible: Vec<usize> =
+        (0..convs.len()).filter(|&i| terms.is_empty() || convs[i].iter().any(|m| matches(m, terms))).collect();
+    if visible.is_empty() {
+        visible = (0..convs.len()).collect();
+    }
+    // Which one: asked for, else the newest shown.
+    let idx = match h.c.checked_sub(1) {
+        Some(i) if visible.contains(&i) => i,
+        _ => visible.last().copied().unwrap_or(0),
     };
+    let pos = visible.iter().position(|&i| i == idx).unwrap_or(0);
     let go = |i: usize| h.with(|x| x.c = i + 1).href();
-    let span = |c: &[LogMsg]| -> String {
+    let span_hm = |c: &[LogMsg]| -> String {
         match (c.first(), c.last()) {
-            (Some(a), Some(b)) if b.at - a.at >= 60_000 => {
-                format!("{}–{}", tz.short(a.at), tz.hm(b.at))
-            }
-            (Some(a), _) => tz.short(a.at),
+            (Some(a), Some(b)) if b.at - a.at >= 60_000 => format!("{}–{}", tz.hm(a.at), tz.hm(b.at)),
+            (Some(a), _) => tz.hm(a.at),
             _ => String::new(),
         }
     };
-    let title_of = |i: usize| -> String {
-        match &runs {
-            Some((_, rs)) => rs.get(i).map(|r| r.title.clone()).unwrap_or_default(),
-            None => convs.get(i).and_then(|c| c.first()).map(|m| first_line(&m.body, 60)).unwrap_or_default(),
+    let span = |c: &[LogMsg]| -> String {
+        match c.first() {
+            Some(a) => match span_hm(c).split_once('–') {
+                Some((_, end)) => format!("{}–{end}", tz.short(a.at)),
+                None => tz.short(a.at),
+            },
+            None => String::new(),
         }
     };
-    // The strip: newest first, a window of five around the one shown.
-    let order: Vec<usize> = (0..convs.len()).rev().collect();
-    let pos = order.iter().position(|&i| i == idx).unwrap_or(0);
-    let start = pos.saturating_sub(STRIP / 2).min(order.len().saturating_sub(STRIP));
-    let window: Vec<usize> = order.iter().skip(start).take(STRIP).copied().collect();
-    let pills = window
-        .iter()
-        .map(|&i| Pill {
-            href: go(i),
-            when: convs[i].first().map(|m| tz.short(m.at)).unwrap_or_default(),
-            count: convs[i].len(),
-            text: title_of(i),
-            on: i == idx,
+    let run_at = |i: usize| runs.as_ref().and_then(|(_, rs)| rs.get(i).copied());
+    let title_of = |i: usize| -> String {
+        match run_at(i) {
+            Some(r) => r.title.clone(),
+            None => convs.get(i).and_then(|c| c.first()).map(|m| first_line(&m.body, 90)).unwrap_or_default(),
+        }
+    };
+    let count_of = |c: &[LogMsg]| -> String {
+        match (noun, c.first(), c.last()) {
+            ("run", Some(a), Some(b)) if c.len() > 1 => minutes(b.at - a.at),
+            _ => format!("{} message{}", c.len(), if c.len() == 1 { "" } else { "s" }),
+        }
+    };
+    let starts: Vec<i64> = convs.iter().map(|c| c.first().map(|m| m.at).unwrap_or(0)).collect();
+    let days = day_groups(&starts, &visible, now, tz)
+        .into_iter()
+        .map(|(label, idxs)| Day {
+            label,
+            items: idxs
+                .into_iter()
+                .map(|i| {
+                    let text = title_of(i);
+                    let chip = run_at(i).map(|r| r.agent_type.clone()).unwrap_or_default();
+                    Item {
+                        href: go(i),
+                        span: span_hm(&convs[i]),
+                        count: count_of(&convs[i]),
+                        find: format!("{text} {chip}").to_lowercase(),
+                        chip,
+                        text,
+                        on: i == idx,
+                    }
+                })
+                .collect(),
         })
         .collect();
-    let older_left = order.len().saturating_sub(start + window.len());
-    let more = (older_left > 0).then(|| (format!("+{older_left} older"), go(order[start + window.len()])));
     let cur: &[LogMsg] = convs.get(idx).map(Vec::as_slice).unwrap_or(&[]);
-    let run = runs.as_ref().and_then(|(_, rs)| rs.get(idx).copied());
+    let run = run_at(idx);
     let messages = cur
         .iter()
         .map(|m| {
@@ -734,43 +817,44 @@ fn selected_view(
         }
     };
     let total: usize = convs.iter().map(Vec::len).sum();
+    let plural = |n: usize, one: &str| format!("{n} {one}{}", if n == 1 { "" } else { "s" });
     let noun_cap = if noun == "run" { "Run" } else { "Conversation" };
     let link = |i: usize| -> (String, String) {
         (format!("{}, {}", convs[i].first().map(|m| tz.short(m.at)).unwrap_or_default(), title_of(i)), go(i))
     };
+    let older = pos.checked_sub(1).map(|p| visible[p]);
+    let newer = visible.get(pos + 1).copied();
+    let ndays = {
+        let mut d: Vec<i64> = visible.iter().map(|&i| tz.day_start(starts[i])).collect();
+        d.dedup();
+        d.len()
+    };
+    let shown_msgs: usize = visible.iter().map(|&i| convs[i].len()).sum();
     Selected {
         avatars,
         fork,
         title,
-        line: [
-            "Between sessions".to_owned(),
-            project,
-            format!("{} conversation{}", convs.len(), if convs.len() == 1 { "" } else { "s" }),
-            format!("{total} message{}", if total == 1 { "" } else { "s" }),
-        ]
-        .into_iter()
-        .filter(|s| !s.is_empty())
-        .collect::<Vec<_>>()
-        .join(" · "),
+        line: ["Between sessions".to_owned(), project, plural(convs.len(), "conversation"), plural(total, "message")]
+            .into_iter()
+            .filter(|s| !s.is_empty())
+            .collect::<Vec<_>>()
+            .join(" · "),
         types: Vec::new(),
-        type_label: String::new(),
-        pager: format!("{noun_cap} {} of {}", idx + 1, convs.len()),
-        pager_sub: [
-            span(cur),
-            run.map(|r| r.agent_type.clone()).unwrap_or_default(),
-            match (noun, cur.first(), cur.last()) {
-                ("run", Some(a), Some(b)) if cur.len() > 1 => minutes(b.at - a.at),
-                _ => format!("{} message{}", cur.len(), if cur.len() == 1 { "" } else { "s" }),
-            },
-        ]
-        .into_iter()
-        .filter(|s| !s.is_empty())
-        .collect::<Vec<_>>()
-        .join(" · "),
-        prev: (idx > 0).then(|| go(idx - 1)),
-        next: (idx + 1 < convs.len()).then(|| go(idx + 1)),
-        pills,
-        more,
+        days,
+        list_count: if visible.len() < convs.len() {
+            format!("{} of {} {noun}s match", visible.len(), convs.len())
+        } else {
+            plural(convs.len(), noun)
+        },
+        list_foot: format!("{} · {}", plural(ndays, "day"), plural(shown_msgs, "message")),
+        pager: format!("{noun_cap} {} of {}", pos + 1, visible.len()),
+        pager_sub: [span(cur), run.map(|r| r.agent_type.clone()).unwrap_or_default(), count_of(cur)]
+            .into_iter()
+            .filter(|s| !s.is_empty())
+            .collect::<Vec<_>>()
+            .join(" · "),
+        prev: older.map(go),
+        next: newer.map(go),
         heading: match run {
             Some(r) => r.title.clone(),
             None => cur.first().map(|m| first_line(&m.body, 90)).unwrap_or_default(),
@@ -785,8 +869,8 @@ fn selected_view(
         },
         messages,
         worked,
-        newer: (idx + 1 < convs.len()).then(|| link(idx + 1)),
-        older: (idx > 0).then(|| link(idx - 1)),
+        newer: newer.map(link),
+        older: older.map(link),
         noun,
     }
 }
@@ -818,6 +902,19 @@ mod tests {
         assert_eq!(avatar("Imaginarium").0, "Im");
         assert_eq!(avatar("Viber Consultant").0, "VC");
         assert_eq!(avatar("x").1, avatar("x").1, "the same tint every time");
+        let utc = Tz::named("UTC").unwrap();
+        let day = 86_400_000;
+        let now = 20 * day + 10 * 3_600_000;
+        // Oldest first: two days ago, yesterday twice, today; shown newest first, by day.
+        let starts = [18 * day + 3_600_000, 19 * day + 3_600_000, 19 * day + 7_200_000, 20 * day];
+        let g = day_groups(&starts, &[0, 1, 2, 3], now, &utc);
+        assert_eq!(g.iter().map(|x| x.1.clone()).collect::<Vec<_>>(), [vec![3], vec![2, 1], vec![0]]);
+        assert!(g[0].0.starts_with("Today · ") && g[1].0.starts_with("Yesterday · "), "{g:?}");
+        assert!(!g[2].0.starts_with("Today") && g[2].0.contains(" · "), "{g:?}");
+        assert_eq!(day_groups(&starts, &[1, 3], now, &utc).len(), 2, "only the ones shown");
+        let m = LogMsg { at: 0, from: "office".into(), to: "agent-flow".into(), body: "Flow remote works".into() };
+        assert!(matches(&m, &[(String::new(), "REMOTE".into()), ("from".into(), "off".into())]));
+        assert!(!matches(&m, &[("to".into(), "office".into())]));
         let h = Here { who: vec!["agent-flow".into()], t: "pair:a|b".into(), c: 2, ..Default::default() };
         assert_eq!(h.href(), "/conversations?t=pair:a%7Cb&who=agent-flow&c=2");
     }

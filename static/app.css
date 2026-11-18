@@ -1615,7 +1615,7 @@ html.no-scroll { overflow: hidden; }
 .avs { display: inline-flex; flex: none; }
 .avs .av + .av { margin-left: -6px; }
 .split.cv2 { gap: 16px; flex-wrap: nowrap; }
-.split.cv2 .split-side { flex: 0 0 470px; max-width: 470px; padding: 0; overflow: hidden; }
+.split.cv2 .split-side { flex: 0 0 340px; max-width: 340px; padding: 0; overflow: hidden; }
 .split.cv2 .split-main { flex: 1 1 auto; padding: 0; overflow: hidden; display: flex; flex-direction: column; }
 .cv-lh { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; padding: 16px 18px 12px; border-bottom: 1px solid var(--line2); }
 .cv-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 12px 18px; min-height: 66px; border-bottom: 1px solid var(--line2); color: var(--ink); text-decoration: none; }
@@ -1635,13 +1635,6 @@ html.no-scroll { overflow: hidden; }
 .pg-btn.off { opacity: .35; }
 .pg-btn .i { width: 18px; height: 18px; }
 .cv-pg-t { min-width: 0; }
-.cv-strip { display: flex; gap: 6px; padding: 12px 22px; border-bottom: 1px solid var(--line2); overflow-x: auto; }
-.cv-pill { flex: 0 0 196px; display: flex; flex-direction: column; gap: 2px; padding: 8px 12px; border-radius: 8px; border: 1px solid var(--line); color: var(--ink2); text-decoration: none; font-size: 12.5px; min-width: 0; }
-.cv-pill b { color: var(--ink); font-weight: 600; font-size: 12.5px; }
-.cv-pill span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.cv-pill:hover { border-color: var(--border); background: #121216; }
-.cv-pill.on { border-color: #5B4A99; background: var(--soft); }
-.cv-pill.more { flex: 0 0 auto; justify-content: center; color: var(--muted); }
 .cv-body { padding: 20px 22px; flex: 1; }
 .cv-topic h3 { margin: 0; font-size: 18px; }
 .cv-topic p { margin: 4px 0 14px; font-size: 13px; }
@@ -1658,7 +1651,7 @@ html.no-scroll { overflow: hidden; }
 .cv-foot { display: flex; justify-content: space-between; gap: 12px; padding: 14px 22px; border-top: 1px solid var(--line2); font-size: 14px; color: var(--muted); }
 .cv-foot a { color: var(--ink2); text-decoration: none; }
 .cv-foot a:hover { color: var(--ink); }
-@media (max-width: 1100px) { .split.cv2 .split-side { flex-basis: 360px; max-width: 360px; } }
+@media (max-width: 1400px) { .split.cv2 .split-side { flex-basis: 280px; max-width: 280px; } .split.cv3 .cv-mid { flex-basis: 330px; max-width: 330px; } }
 @media (max-width: 700px) {
   .split.cv2 { flex-direction: column; }
   .split.cv2 .split-side, .split.cv2 .split-main { flex: none; width: 100%; max-width: none; }
@@ -1667,8 +1660,6 @@ html.no-scroll { overflow: hidden; }
   .cv-pager { padding: 10px 16px; }
   .cv-pg-t { text-align: center; }
   .cv-pg-t .sub { display: block; font-size: 13px; }
-  .cv-strip { padding: 10px 16px; }
-  .cv-pill { flex-basis: 170px; }
   .cv-body { padding: 16px; }
   .cv-msg { grid-template-columns: 1fr; gap: 6px; }
   .cv-msg > .av { display: none; }
@@ -1694,12 +1685,52 @@ html.no-scroll { overflow: hidden; }
 
 /* Conversations: the panes fill the window and scroll on their own (the owner, 2026-11-18: "make
    it so the panels scroll so they aren't as long"); the conversation's header and ‹ › stay. */
-@media (min-width: 701px) {
+@media (min-width: 701px) and (min-height: 700px) {
   .split.cv2 { height: calc(100dvh - 300px); min-height: 520px; align-items: stretch; }
+  .split.cv3 .cv-days { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
   .split.cv2 .split-side { display: flex; flex-direction: column; }
   .split.cv2 .cv-lh { flex: none; }
   .split.cv2 .cv-rows { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
   .split.cv2 .split-main { min-height: 0; }
-  .split.cv2 .cv-head, .split.cv2 .cv-pager, .split.cv2 .cv-strip, .split.cv2 .cv-foot { flex: none; }
+  .split.cv2 .cv-head, .split.cv2 .cv-pager, .split.cv2 .cv-foot { flex: none; }
   .split.cv2 .cv-body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 }
+
+/* Conversations in three panes (the owner, 2026-11-18: "this can be like over 200 conversations.
+   please suggest a better way to display this"): the middle pane lists them by day. */
+.split.cv3 .cv-mid { flex: 0 0 420px; max-width: 420px; min-width: 0; padding: 0; overflow: hidden; display: flex; flex-direction: column; }
+.cv-mid .cv-lh .label { white-space: nowrap; }
+.cv-mid .cv-lh .sub { font-size: 12px; text-align: right; }
+.cv-midtop { flex: none; display: flex; flex-direction: column; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--line2); }
+.cv-find { min-height: 38px; flex: none; }
+.cv-find input { min-height: 34px; }
+.cv-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.cv-chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; min-height: 30px; border-radius: 999px; border: 1px solid var(--line); color: var(--ink2); text-decoration: none; font-size: 13px; }
+.cv-chip .mono { color: var(--muted); font-size: 12px; }
+.cv-chip:hover { border-color: var(--border); }
+.cv-chip.on { border-color: #5B4A99; background: var(--soft); color: var(--ink); }
+.cv-days { position: relative; }
+.cv-dh { position: sticky; top: 0; z-index: 1; display: flex; justify-content: space-between; margin: 0; padding: 8px 16px; background: #0C0C0F; border-bottom: 1px solid var(--line2); font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.cv-item { display: flex; flex-direction: column; gap: 2px; padding: 10px 16px; border-bottom: 1px solid var(--line2); color: var(--ink); text-decoration: none; }
+.cv-item:hover { background: #121216; }
+.cv-item.on { background: var(--soft); box-shadow: inset 3px 0 0 var(--accent); }
+.cv-item[hidden] { display: none; }
+.ci-t { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--ink2); }
+.ci-t .chip { font-size: 11.5px; padding: 1px 8px; }
+.ci-t .sub { font-size: 12px; }
+.ci-x { font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cv-mfoot { flex: none; display: flex; justify-content: space-between; gap: 10px; padding: 10px 16px; border-top: 1px solid var(--line2); font-size: 12.5px; }
+@media (max-width: 700px) {
+  .split.cv3 .cv-mid { flex: none; width: 100%; max-width: none; }
+  /* Three levels by tapping: the pairs, a pair's conversations, one conversation. */
+  .split.cv3:not(.picked) > .cv-mid, .split.cv3:not(.picked) > .split-main { display: none; }
+  .split.cv3.picked:not(.opened) > .split-side, .split.cv3.picked:not(.opened) > .split-main { display: none; }
+  .split.cv3.picked:not(.opened) > .cv-mid { display: flex; }
+  .split.cv3.opened > .split-side, .split.cv3.opened > .cv-mid { display: none; }
+  .split.cv3.opened > .split-main { display: flex; }
+  .ci-x { white-space: normal; }
+}
+.cv-day[hidden] { display: none; }
+.cv-foot .cf-l, .cv-foot .cf-r { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cv-foot .cf-r { text-align: right; }
+@media (max-width: 700px) { .cv-foot .cf-r { text-align: left; } }
