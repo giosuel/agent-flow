@@ -22,16 +22,38 @@
 </head>
 <body>
 <a class="skip" href="#main">Skip to content</a>
+{# The header (the owner, 2026-11-19, D-232): on the desktop one bar with the project switcher,
+   the project's tabs and the global pages as icons, the current one a pill with its name. The
+   phone keeps its own navigation: the logo and the bell here, the tab bar at the bottom. #}
 <header class="top">
   <div class="top-in">
-    <a class="brand" href="/"><img src="/static/logo.svg?v={{ nav.version }}" width="28" height="28" alt=""><span>AgentFlow</span></a>
-    <nav class="nav" aria-label="Main">
-      {% for item in nav.items %}
-      <a href="{{ item.href }}"{% if item.active %} class="on" aria-current="page"{% endif %}>{{ item.name }}{% if item.href == "/" && nav.waiting > 0 %} <span class="mono count">{{ nav.waiting }}</span>{% endif %}</a>
-      {% endfor %}
+    <a class="brand" href="/" aria-label="AgentFlow, Dashboard"><img src="/static/logo.svg?v={{ nav.version }}" width="28" height="28" alt=""><span>AgentFlow</span></a>
+    {% if !nav.projects.is_empty() || nav.here.is_some() %}
+    <details class="pswitch" data-menu>
+      <summary class="pswitch-btn{% if nav.here.is_none() && nav.on_projects() %} on{% endif %}">{% if let Some(h) = nav.here %}<span>{{ h.name }}</span>{% else %}<span>All projects</span>{% endif %}<span class="chev-d">{{ crate::web::icons::icon("chevron")|safe }}</span></summary>
+      <div class="bmenu pswitch-menu">
+        <div class="bmenu-h"><span class="label">Projects</span><a href="/projects">All projects</a></div>
+        {% for p in nav.projects %}<a class="bmi{% if let Some(h) = nav.here %}{% if h.slug == p.slug %} on{% endif %}{% endif %}" href="/p/{{ p.slug }}"{% if let Some(h) = nav.here %}{% if h.slug == p.slug %} aria-current="page"{% endif %}{% endif %}>{{ crate::web::icons::icon("folder")|safe }}<span>{{ p.name }}</span>{% if p.online %}<span class="dot ok" aria-label="agent online"></span>{% endif %}</a>{% endfor %}
+        <hr><a class="bmi" href="/projects/new">{{ crate::web::icons::icon("plus")|safe }}<span>New project</span></a>
+      </div>
+    </details>
+    {% endif %}
+    {% if let Some(h) = nav.here %}
+    <nav class="btabs" aria-label="{{ h.name }}" data-fold>
+      {% for t in h.tabs %}<a href="{{ t.href }}"{% if t.dlg %} data-dlg{% endif %}{% if t.on %} class="on" aria-current="page"{% endif %}>{{ t.label }}{% if !t.count.is_empty() %}<span class="mono n{% if t.warn %} y{% endif %}">{{ t.count }}</span>{% endif %}</a>{% endfor %}
     </nav>
+    <details class="btabs-more" data-menu hidden>
+        <summary>More<span class="chev-d">{{ crate::web::icons::icon("chevron")|safe }}</span></summary>
+        <div class="bmenu">{% for t in h.tabs %}<a class="bmi{% if t.on %} on{% endif %}" href="{{ t.href }}"{% if t.dlg %} data-dlg{% endif %} hidden><span>{{ t.label }}</span>{% if !t.count.is_empty() %}<span class="mono n{% if t.warn %} y{% endif %}">{{ t.count }}</span>{% endif %}</a>{% endfor %}</div>
+    </details>
+    {% endif %}
     <div class="grow"></div>
-    <span class="who">{{ nav.label }}</span>
+    <nav class="nav gnav" aria-label="Pages">
+      {% for item in nav.items %}{% if item.href != "/projects" %}
+      <a href="{{ item.href }}"{% if item.active %} class="on" aria-current="page"{% else %} aria-label="{{ item.name }}{% if item.href == "/" && nav.waiting > 0 %}, {{ nav.waiting }} waiting{% endif %}" data-name="{{ item.name }}"{% endif %}>{{ item.icon()|safe }}{% if item.active %}<span>{{ item.name }}</span>{% endif %}{% if item.href == "/" && nav.waiting > 0 %}<b class="gbadge">{{ nav.waiting }}</b>{% endif %}</a>
+      {% endif %}{% endfor %}
+    </nav>
+    <span class="vsep" aria-hidden="true"></span>
     <a class="icon-btn bell" href="/notifications" aria-label="Notifications{% if nav.unread > 0 %}, {{ nav.unread }} new{% endif %}" aria-haspopup="dialog" data-bell>{{ crate::web::icons::icon("bell")|safe }}{% if nav.unread > 0 %}<b class="bell-badge">{% if nav.unread > 99 %}99+{% else %}{{ nav.unread }}{% endif %}</b>{% endif %}</a>
     <a class="icon-btn" href="/settings" aria-label="Settings" data-settings aria-haspopup="dialog"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"></path></svg></a>
   </div>
