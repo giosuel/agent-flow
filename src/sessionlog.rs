@@ -673,7 +673,8 @@ pub struct Thread {
     pub count: i64,
     pub last_at: i64,
     pub is_subagent: bool,
-    /// Who takes part, as shown: a pair's two sessions, or a subagent's session.
+    /// Who takes part, as shown: a pair's two sessions (the one that wrote first first), or a
+    /// subagent's session.
     pub parties: Vec<String>,
     /// A subagent's type ("fork", "general-purpose"), or "".
     pub agent_type: String,
@@ -715,7 +716,17 @@ pub fn session_threads(conn: &Connection, limit: i64) -> anyhow::Result<Vec<Thre
             })
             .unwrap_or_else(|| n.to_owned())
         };
-        let (na, nb) = (shown(a), shown(b));
+        let (mut na, mut nb) = (shown(a), shown(b));
+        // The side that wrote first comes first: the row names the initiator first and tags only
+        // its model (the owner, 2026-11-19: "maybe it would be better if we only mention the initiator").
+        let first: Option<String> = conn
+            .query_row("SELECT from_name FROM session_messages WHERE thread = ?1 ORDER BY at LIMIT 1", [&key], |r| {
+                r.get(0)
+            })
+            .optional()?;
+        if first.is_some_and(|f| norm(&f) == norm(&nb) && norm(&f) != norm(&na)) {
+            std::mem::swap(&mut na, &mut nb);
+        }
         // Each side's model: the newest of the session with that name (D-228).
         let model_of = |name: &str| -> anyhow::Result<String> {
             let session: Option<String> = conn
@@ -987,6 +998,23 @@ mod tests {
             let m: String = c.query_row("SELECT model FROM subagent_threads WHERE agent_id = 'r1'", [], |r| r.get(0))?;
             assert_eq!(m, "claude-fable-5-2");
             assert_eq!(session_model(c, "s1")?, "claude-opus-5-5", "the session's own calls, not its subagents'");
+            Ok(())
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn the_pair_that_wrote_first_comes_first() {
+        let db = crate::db::Db::open_memory();
+        db.call_blocking(|c| {
+            for (k, at, from, to) in [("k1", 10, "zeta", "alpha"), ("k2", 20, "alpha", "zeta")] {
+                c.execute(
+                    "INSERT INTO session_messages (key, at, thread, from_name, to_name, body) VALUES (?1, ?2, 'pair:alpha|zeta', ?3, ?4, 'hi')",
+                    params![k, at, from, to],
+                )?;
+            }
+            let t = session_threads(c, 10)?;
+            assert_eq!(t[0].parties, ["zeta", "alpha"], "zeta started it, though the key sorts alpha first");
             Ok(())
         })
         .unwrap();

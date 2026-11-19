@@ -495,7 +495,12 @@ async fn page(
                 [one] if *one == b => (b.clone(), a.clone(), (label(1), label(0))),
                 _ => (a.clone(), b.clone(), (label(0), label(1))),
             };
-            let models = if h.who.len() == 1 { (String::new(), models.1) } else { models };
+            // Only the initiator's model (parties[0]); with one picked, only when it's the other side.
+            let models = match h.who.as_slice() {
+                [one] if *one == a => (String::new(), String::new()),
+                [_] => (String::new(), models.1),
+                _ => (models.0, String::new()),
+            };
             let title = if h.who.len() == 1 {
                 (String::new(), "⇄", second.clone())
             } else {
@@ -548,9 +553,6 @@ async fn page(
         );
         let sel_name = groups.iter().find(|g| format!("s:{}", g.0) == h.t).or(groups.first()).map(|g| g.0.clone());
         for (name, runs) in &groups {
-            let mut kinds: Vec<&str> = runs.iter().map(|t| t.agent_type.as_str()).collect();
-            kinds.sort_unstable();
-            kinds.dedup();
             rows.push(ListRow {
                 href: h
                     .with(|x| {
@@ -566,8 +568,8 @@ async fn page(
                 models: (runs[0].models.first().map(|m| sessionlog::model_label(m)).unwrap_or_default(), String::new()),
                 sub: [
                     project(runs[0]),
+                    // The kinds are the middle list's chips; here they only cut the line short.
                     format!("{} run{}", runs.len(), if runs.len() == 1 { "" } else { "s" }),
-                    format!("{} kind{}", kinds.len(), if kinds.len() == 1 { "" } else { "s" }),
                 ]
                 .into_iter()
                 .filter(|s| !s.is_empty())

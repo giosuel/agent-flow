@@ -39,8 +39,7 @@
     {% for r in rows %}
     <a class="cv-row{% if r.on %} on{% endif %}" href="{{ r.href }}"{% if r.on %} aria-current="true"{% endif %}>
       <span class="avs" aria-hidden="true">{% for a in r.avatars %}<span class="av t-{{ a.tint }}">{{ a.initials }}</span>{% endfor %}{% if r.fork %}<span class="av fork">{{ crate::web::icons::icon("fork")|safe }}</span>{% endif %}</span>
-      <span class="ttl"><strong>{% if !r.title.0.is_empty() %}{{ r.title.0 }}{% if !r.models.0.is_empty() %} <span class="mtag">{{ r.models.0 }}</span>{% endif %} {% endif %}<span class="sep">{{ r.title.1 }}</span> {{ r.title.2 }}{% if !r.models.1.is_empty() %} <span class="mtag">{{ r.models.1 }}</span>{% endif %}</strong><span class="sub">{{ r.sub }}</span></span>
-      <span class="sub when">{{ r.when }}</span>
+      <span class="ttl"><strong>{% if !r.title.0.is_empty() %}{{ r.title.0 }} {% endif %}<span class="sep">{{ r.title.1 }}</span> {{ r.title.2 }}</strong><span class="l2">{% if !r.models.0.is_empty() %}<span class="mtag" title="{{ r.title.0 }}'s model">{{ r.models.0 }}</span>{% endif %}{% if !r.models.1.is_empty() %}<span class="mtag" title="{{ r.title.2 }}'s model">{{ r.models.1 }}</span>{% endif %}<span class="sub">{{ r.sub }}</span><span class="sub when">{{ r.when }}</span></span></span>
     </a>
     {% endfor %}
     {% if rows.is_empty() %}<p class="sub cv-none">Nothing matches.</p>{% endif %}
