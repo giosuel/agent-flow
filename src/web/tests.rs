@@ -1100,6 +1100,63 @@ async fn a_stack_merges_past_red_ci_in_the_middle_only_up_to_a_green_pr() {
     assert!(!dir.path().join("merged-64").exists());
 }
 
+/// The owner, 2026-11-19 (D-228–D-230): a subagent's model shows in Conversations, a note it
+/// uploaded is tagged as its, and record ids in its report link to them.
+#[tokio::test]
+async fn a_subagents_model_note_and_links_show() {
+    use crate::sessionlog::{Found, Msg, SubagentInfo, Who};
+    let s = TestServer::start().await;
+    let token = s.token(TokenKind::Project, Some("vinculum")).await;
+    let now = crate::util::now_ms();
+    // Its transcript: it runs on Fable, uploads handover.md, and reports back naming N-1.
+    s.state
+        .db
+        .call(move |c| {
+            let pid: i64 = c.query_row("SELECT id FROM projects WHERE slug = 'vinculum'", [], |r| r.get(0))?;
+            let found = Found {
+                subagent: Some(SubagentInfo {
+                    id: "a1b2c3".into(),
+                    parent_session: "s1".into(),
+                    description: "Inspector handover".into(),
+                    agent_type: "code-review".into(),
+                }),
+                first_at: Some(now),
+                model: Some("claude-fable-5-2".into()),
+                note_calls: vec![(now, "handover.md".into())],
+                msgs: vec![Msg {
+                    at: now,
+                    from: Who::Me,
+                    to: Who::Parent,
+                    body: "Done; the handover is in N-1.".into(),
+                }],
+                ..Default::default()
+            };
+            crate::sessionlog::store(c, &found, "a1b2c3", "-home-viber-vinculum", "/home/viber/vinculum", Some(pid))?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    // The upload comes after the call was seen; it's tagged when it arrives.
+    let res = s
+        .http
+        .post(s.url("/api/notes?name=Handover&category=handover&filename=handover.md"))
+        .bearer_auth(&token)
+        .body(&b"# Handover"[..])
+        .send()
+        .await
+        .unwrap();
+    assert!(res.status().is_success(), "{}", res.text().await.unwrap());
+    let cookie = s.owner_cookie().await;
+    let note = owner_page(&s, &cookie, "/p/vinculum/N-1").await;
+    assert!(note.contains("by a subagent · code-review · Fable 5.2"), "{note}");
+    assert!(note.contains("s subagent · "), "its History says who: {note}");
+    let notes = owner_page(&s, &cookie, "/p/vinculum?tab=notes").await;
+    assert!(notes.contains(r#"<span class="chip subagent""#), "{notes}");
+    let conv = owner_page(&s, &cookie, "/conversations?kind=sub").await;
+    assert!(conv.contains(r#"<span class="mtag">Fable 5.2</span>"#), "{conv}");
+    assert!(conv.contains(r#"<a href="/p/vinculum/N-1">N-1</a>"#), "{conv}");
+}
+
 #[test]
 fn return_addresses_stay_on_our_pages() {
     assert_eq!(local_path(Some("/p/v/Q-1")).as_deref(), Some("/p/v/Q-1"));
