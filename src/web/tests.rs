@@ -632,8 +632,7 @@ async fn the_overview_puts_questions_first_and_folds_closed_milestones() {
     // A closed milestone picked is the large card; the path names it (D-222).
     let plan = owner_page(&s, &cookie, "/p/vinculum/plan/M1").await;
     assert!(plan.contains(r#"<span class="chip state-done">closed</span>"#), "{plan}");
-    assert!(plan.contains(r#"<span aria-current="page" title="M1 · Work M1">"#), "{plan}");
-    assert!(plan.contains(r#"<a href="/p/vinculum/plan" title="Plan">Plan</a>"#), "{plan}");
+    assert!(plan.contains(r#"<span aria-current="page" title="Plan">Plan</span>"#), "the path ends at Plan: {plan}");
 }
 
 /// M13: a status line's sample makes the Usage page's plan card, and the chart counts cost.

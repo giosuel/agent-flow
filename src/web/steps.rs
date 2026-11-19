@@ -93,12 +93,9 @@ async fn step(
             if m.project_id != p.id {
                 return Ok(None);
             }
-            let (parent, parent_title) = match m.parent_id {
-                Some(pid) => {
-                    let pm = projects::get_milestone(c, pid)?;
-                    (pm.name, pm.title)
-                }
-                None => (String::new(), String::new()),
+            let parent = match m.parent_id {
+                Some(pid) => projects::get_milestone(c, pid)?.name,
+                None => String::new(),
             };
             let tasks: Vec<Record> = crate::steps::tasks_of(c, m.id)?;
             let now = crate::util::now_ms();
@@ -185,12 +182,11 @@ async fn step(
                 .filter(|r| r.kind == crate::records::Kind::Note && r.milestone_id == Some(m.id))
                 .map(|r| Link { short: r.short_id(), url: r.url(), title: r.title.clone(), sub: r.str("category").to_owned() })
                 .collect();
-            Ok(Some((p, m, (parent, parent_title), tasks, (times, timings, decisions, follow_ups, with_owner, review, notes))))
+            Ok(Some((p, m, parent, tasks, (times, timings, decisions, follow_ups, with_owner, review, notes))))
         })
         .await?
         .ok_or(AppError::NotFound)?;
-    let (p, m, (parent, parent_title), mut tasks, (times, timings, decisions, follow_ups, with_owner, review, notes)) =
-        page;
+    let (p, m, parent, mut tasks, (times, timings, decisions, follow_ups, with_owner, review, notes)) = page;
     // A review's findings by importance (high first), then in the agent's order.
     if review.is_some() {
         let rank = |t: &Record| match t.str("importance") {
@@ -261,10 +257,8 @@ async fn step(
     // Its path (D-222): Projects / the project / Plan / its milestone / the step.
     let mut path =
         vec![PathPart::link("Projects", "/projects"), PathPart::link(p.name.clone(), format!("/p/{}", p.slug))];
-    path.push(PathPart::link("Plan", format!("/p/{}/plan", p.slug)));
-    if !parent.is_empty() {
-        path.push(PathPart::link(format!("{parent} · {parent_title}"), format!("/p/{}/plan/{}", p.slug, parent)));
-    }
+    // Plan, opened with this step picked; then the step.
+    path.push(PathPart::link("Plan", back.clone()));
     path.push(PathPart::here(format!("{} {}", m.name, m.title)));
     render(StepPage {
         nav: nav(&state, &actor, "/projects").await.back_to(back, "Plan"),

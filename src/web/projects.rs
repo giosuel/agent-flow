@@ -611,8 +611,6 @@ struct Column {
 
 struct Board {
     title: String,
-    /// The milestone's own address in Plan (/p/slug/plan/M4).
-    href: String,
     /// The milestone's totals.
     summary: String,
     /// A line under the heading: for the tasks without a milestone.
@@ -861,19 +859,9 @@ fn project_path(page: &ProjectPage, tab: &str) -> Vec<super::pages::PathPart> {
     }
     path.push(PathPart::link(page.name.clone(), format!("/p/{}", page.slug)));
     let label = TABS.iter().find(|(k, _)| *k == tab).map(|(_, l)| *l).unwrap_or("");
-    match (&page.board, tab) {
-        (Some(b), "plan") => {
-            path.push(PathPart::link(label, format!("/p/{}/plan", page.slug)));
-            match b.step.as_ref() {
-                Some(st) => {
-                    path.push(PathPart::link(b.title.clone(), b.href.clone()));
-                    path.push(PathPart::here(format!("{} {}", st.name, st.title)));
-                }
-                None => path.push(PathPart::here(b.title.clone())),
-            }
-        }
-        _ => path.push(PathPart::here(label)),
-    }
+    // On Plan the milestone and the step are picks on the same page, so the path ends at the tab
+    // (the owner, 2026-11-19: "these all do the same, lets leave it at "plan"").
+    path.push(PathPart::here(label));
     path
 }
 
@@ -1415,7 +1403,6 @@ fn build_project_page(
         // On the phone: the column with work in it first.
         let first_col = [1, 0, 2, 3, 4].into_iter().find(|&i| columns[i].count > 0).unwrap_or(0);
         Ok(Board {
-            href: format!("/p/{}/plan/{}", p.slug, ms_name),
             title: match cur {
                 Some(cur) => format!("{} · {}", cur.name, cur.title),
                 None => "Without a milestone".into(),
@@ -1908,26 +1895,16 @@ fn record_path(c: &Connection, r: &Record, project: &Project) -> anyhow::Result<
         let label = TABS.iter().find(|(k, _)| *k == t).map(|(_, l)| *l).unwrap_or(t);
         path.push(PathPart::link(label, format!("/p/{slug}?tab={t}")));
     }
+    // A task: Plan, opened with its milestone and step picked.
     if r.kind == Kind::Task {
-        path.push(PathPart::link("Plan", format!("/p/{slug}/plan")));
-        match r.milestone_id.map(|id| projects::get_milestone(c, id)).transpose()? {
+        let href = match r.milestone_id.map(|id| projects::get_milestone(c, id)).transpose()? {
             Some(m) => match m.parent_id.map(|id| projects::get_milestone(c, id)).transpose()? {
-                Some(parent) => {
-                    path.push(PathPart::link(
-                        format!("{} · {}", parent.name, parent.title),
-                        format!("/p/{slug}/plan/{}", parent.name),
-                    ));
-                    path.push(PathPart::link(
-                        format!("{} {}", m.name, m.title),
-                        format!("/p/{slug}/plan/{}?step={}", parent.name, m.name),
-                    ));
-                }
-                None => {
-                    path.push(PathPart::link(format!("{} · {}", m.name, m.title), format!("/p/{slug}/plan/{}", m.name)))
-                }
+                Some(parent) => format!("/p/{slug}/plan/{}?step={}", parent.name, m.name),
+                None => format!("/p/{slug}/plan/{}", m.name),
             },
-            None => path.push(PathPart::link("Without a milestone", format!("/p/{slug}/plan/{LOOSE}"))),
-        }
+            None => format!("/p/{slug}/plan/{LOOSE}"),
+        };
+        path.push(PathPart::link("Plan", href));
     }
     path.push(PathPart::here(r.short_id()));
     Ok(path)
