@@ -45,6 +45,48 @@ pub struct NavItem {
     pub active: bool,
 }
 
+impl NavItem {
+    /// Its icon in the desktop bar (the owner, 2026-11-19, D-232: the global pages as icon buttons).
+    pub fn icon(&self) -> &'static str {
+        super::icons::icon(match self.href {
+            "/" => "grid",
+            "/projects" => "folder",
+            "/machine" => "machine",
+            "/usage" => "chart",
+            "/conversations" => "message",
+            "/handbook" => "book",
+            _ => "list",
+        })
+    }
+}
+
+/// A project in the desktop bar's switcher.
+pub struct NavProject {
+    pub slug: String,
+    pub name: String,
+    pub online: bool,
+}
+
+/// One of the project's tabs in the desktop bar.
+pub struct BarTab {
+    pub label: &'static str,
+    pub href: String,
+    /// Its count ("2"), or empty.
+    pub count: String,
+    /// The count asks for the owner (questions, to test): drawn in the warning colour.
+    pub warn: bool,
+    pub on: bool,
+    /// Opens as a dialog (Settings).
+    pub dlg: bool,
+}
+
+/// The project a page belongs to: the desktop bar shows its name in the switcher and its tabs.
+pub struct Here {
+    pub slug: String,
+    pub name: String,
+    pub tabs: Vec<BarTab>,
+}
+
 /// On the phone a tab bar at the bottom, as in iOS apps and the owner's viber console (the owner,
 /// 2026-11-11: "in the mobile version, it has the classic iOS menu at the bottom. can we also do
 /// it like this?"): four sections and More, which lists the rest. iOS fits five tabs at most.
@@ -76,25 +118,40 @@ pub struct Nav {
     /// navigation (the owner, 2026-11-11: "clicking on something should open a new "window" or
     /// feel more like navigation").
     pub back: Option<(String, String)>,
-    pub label: String,
     pub version: &'static str,
     pub waiting: i64,
     /// Notifications not read yet (the bell's badge).
     pub unread: i64,
+    /// The projects for the desktop bar's switcher, not the archived ones.
+    pub projects: Vec<NavProject>,
+    /// The project the page is in, if any.
+    pub here: Option<Here>,
 }
 
 /// The navigation with the live "waiting on you" count, for every page.
 pub async fn nav(state: &AppState, actor: &Actor, active: &str) -> Nav {
-    let mut n = Nav::new(actor, active);
+    let mut n = Nav::new(active);
     if actor.is_owner() {
         n.waiting = state.db.call(|c| crate::waiting::count(c)).await.unwrap_or(0) as i64;
         n.unread = state.db.call(|c| crate::notifications::unread(c)).await.unwrap_or(0);
+        let now = crate::util::now_ms();
+        n.projects = state
+            .db
+            .call(move |c| {
+                Ok(crate::projects::list(c)?
+                    .into_iter()
+                    .filter(|p| p.status != "archived")
+                    .map(|p| NavProject { online: p.agent.online(now), slug: p.slug, name: p.name })
+                    .collect())
+            })
+            .await
+            .unwrap_or_default();
     }
     n
 }
 
 impl Nav {
-    pub fn new(actor: &Actor, active: &str) -> Self {
+    pub fn new(active: &str) -> Self {
         Self {
             items: NAV.iter().map(|&(href, name)| NavItem { href, name, active: href == active }).collect(),
             tabs: TABS
@@ -108,10 +165,11 @@ impl Nav {
                 }))
                 .collect(),
             back: MORE.iter().any(|m| m.0 == active).then(|| ("/more".to_owned(), "More".to_owned())),
-            label: actor.label(),
             version: VERSION,
             waiting: 0,
             unread: 0,
+            projects: Vec::new(),
+            here: None,
         }
     }
 }
@@ -146,6 +204,59 @@ impl Nav {
             Some((href, label)) => self.back_to(href, label),
             None => self,
         }
+    }
+
+    /// The page is the list of projects (or a page under it that isn't one project's).
+    pub fn on_projects(&self) -> bool {
+        self.items.iter().any(|i| i.href == "/projects" && i.active)
+    }
+
+    /// The page belongs to the project `slug`, under its tab `tab` (a key of the project page's
+    /// tabs): the desktop bar shows the project and its tabs, with their counts (D-232).
+    pub async fn in_project(mut self, state: &AppState, slug: &str, tab: &str) -> Self {
+        let s = slug.to_owned();
+        let counts = state
+            .db
+            .call(move |c| {
+                let Some(p) = crate::projects::get(c, &s)? else { return Ok(None) };
+                let open = |kind: &str| -> anyhow::Result<i64> {
+                    Ok(c.query_row(
+                        "SELECT count(*) FROM records WHERE project_id = ?1 AND kind = ?2 AND state = 'open'",
+                        rusqlite::params![p.id, kind],
+                        |r| r.get(0),
+                    )?)
+                };
+                Ok(Some((p.name.clone(), open("question")?, open("pr")?, open("test")?)))
+            })
+            .await
+            .ok()
+            .flatten();
+        let Some((name, questions, prs, tests)) = counts else { return self };
+        let tabs = super::projects::TABS
+            .iter()
+            .map(|&(key, label)| {
+                let (count, warn) = match key {
+                    "questions" => (questions, true),
+                    "prs" => (prs, false),
+                    "to-test" => (tests, true),
+                    _ => (0, false),
+                };
+                BarTab {
+                    label,
+                    href: match key {
+                        "overview" => format!("/p/{slug}"),
+                        "plan" | "settings" => format!("/p/{slug}/{key}"),
+                        _ => format!("/p/{slug}?tab={key}"),
+                    },
+                    count: if count > 0 { count.to_string() } else { String::new() },
+                    warn,
+                    on: key == tab,
+                    dlg: key == "settings",
+                }
+            })
+            .collect();
+        self.here = Some(Here { slug: slug.to_owned(), name, tabs });
+        self
     }
 
     /// A back bar to `href` on the phone.

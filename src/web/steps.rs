@@ -261,7 +261,7 @@ async fn step(
     path.push(PathPart::link("Plan", back.clone()));
     path.push(PathPart::here(format!("{} {}", m.name, m.title)));
     render(StepPage {
-        nav: nav(&state, &actor, "/projects").await.back_to(back, "Plan"),
+        nav: nav(&state, &actor, "/projects").await.in_project(&state, &p.slug, "plan").await.back_to(back, "Plan"),
         path,
         project_name: p.name.clone(),
         project_slug: p.slug.clone(),

@@ -142,7 +142,7 @@ async fn page(
     let editor =
         (owner && q.edit == Some(1)).then(|| doc_editor(&p.slug, d.text.clone(), d.rev, Vec::new(), String::new()));
     render(DocPage {
-        nav: nav(&state, &actor, "/projects").await,
+        nav: nav(&state, &actor, "/projects").await.in_project(&state, &p.slug, "overview").await,
         notice: notice(q.done.as_deref(), q.taken.as_deref(), &p.slug),
         slug: p.slug,
         name: p.name,
@@ -273,7 +273,7 @@ async fn editor_again(
     let p = state.db.call(move |c| crate::projects::require(c, &s)).await?;
     let editor = doc_editor(&p.slug, text, cur.rev, MdEditor::conflicts_of(conflicts), cur.author.clone());
     render(DocPage {
-        nav: nav(state, actor, "/projects").await,
+        nav: nav(state, actor, "/projects").await.in_project(state, &p.slug, "overview").await,
         slug: p.slug,
         name: p.name,
         owner: true,

@@ -198,7 +198,7 @@ async fn settings_page(
         .await?;
     let (notice, notice_bad) = settings_notice(q.settings.as_deref()).map_or((None, false), |(t, bad)| (Some(t), bad));
     render(SettingsPage {
-        nav: nav(&state, &actor, "/projects").await,
+        nav: nav(&state, &actor, "/projects").await.in_project(&state, &p.slug, "settings").await,
         slug: p.slug,
         name: p.name,
         status: p.status,
@@ -275,7 +275,7 @@ async fn setup_code(
         .ip(Some(ip.0));
     activity::write(&state.db, e).await;
     render(SetupCodePage {
-        nav: nav(&state, &actor, "/projects").await,
+        nav: nav(&state, &actor, "/projects").await.in_project(&state, &p.slug, "overview").await,
         slug: p.slug,
         name: p.name,
         code,
@@ -947,7 +947,7 @@ fn press_notice(q: &TabQuery) -> (Option<String>, bool) {
 /// `?ms=none`: the board of the tasks without a milestone.
 const LOOSE: &str = "none";
 
-const TABS: &[(&str, &str)] = &[
+pub(super) const TABS: &[(&str, &str)] = &[
     ("overview", "Overview"),
     ("plan", "Plan"),
     ("questions", "Questions"),
@@ -1068,7 +1068,7 @@ async fn project(
     let next = if tab == "overview" { format!("/p/{}", page.slug) } else { format!("/p/{}?tab={tab}", page.slug) };
     let path = project_path(&page, &tab);
     let page = ProjectPage {
-        nav: nav(&state, &actor, "/projects").await.up(&path),
+        nav: nav(&state, &actor, "/projects").await.in_project(&state, &page.slug, &tab).await.up(&path),
         path,
         tab,
         notice,
@@ -1636,7 +1636,7 @@ fn build_project_page(
         external,
         external_done,
         session_url: crate::usage::session_link(c, p.id)?.map(|(u, _)| u),
-        nav: Nav::new(&Actor::Anonymous, ""),
+        nav: Nav::new(""),
         connect: None,
         slug: p.slug.clone(),
         name: p.name.clone(),
@@ -1901,15 +1901,10 @@ async fn record(
     render(page)
 }
 
-/// A record's path (D-222): Projects / the project / where it lives (a task: Plan, its milestone and
-/// step; others: their tab) / the record.
-fn record_path(c: &Connection, r: &Record, project: &Project) -> anyhow::Result<Vec<super::pages::PathPart>> {
-    use super::pages::PathPart;
-    let slug = &project.slug;
-    let mut path =
-        vec![PathPart::link("Projects", "/projects"), PathPart::link(project.name.clone(), format!("/p/{slug}"))];
-    let tab = match r.kind {
-        Kind::Task => None,
+/// The project tab a record of this kind lives under, if any.
+fn record_tab(kind: Kind) -> Option<&'static str> {
+    match kind {
+        Kind::Task => Some("plan"),
         Kind::Question => Some("questions"),
         Kind::Decision | Kind::Adr => Some("decisions"),
         Kind::Pr => Some("prs"),
@@ -1918,7 +1913,17 @@ fn record_path(c: &Connection, r: &Record, project: &Project) -> anyhow::Result<
         Kind::Test => Some("to-test"),
         Kind::Note => Some("notes"),
         Kind::Release | Kind::Contribution => None,
-    };
+    }
+}
+
+/// A record's path (D-222): Projects / the project / where it lives (a task: Plan, its milestone and
+/// step; others: their tab) / the record.
+fn record_path(c: &Connection, r: &Record, project: &Project) -> anyhow::Result<Vec<super::pages::PathPart>> {
+    use super::pages::PathPart;
+    let slug = &project.slug;
+    let mut path =
+        vec![PathPart::link("Projects", "/projects"), PathPart::link(project.name.clone(), format!("/p/{slug}"))];
+    let tab = record_tab(r.kind).filter(|&t| t != "plan");
     if let Some(t) = tab {
         let label = TABS.iter().find(|(k, _)| *k == t).map(|(_, l)| *l).unwrap_or(t);
         path.push(PathPart::link(label, format!("/p/{slug}?tab={t}")));
@@ -2218,7 +2223,11 @@ async fn load_record_page(
     };
 
     Ok(RecordPage {
-        nav: nav(state, actor, "/projects").await.up(&path),
+        nav: nav(state, actor, "/projects")
+            .await
+            .in_project(state, &project.slug, record_tab(r.kind).unwrap_or("overview"))
+            .await
+            .up(&path),
         path,
         session_url,
         // A text note's body is its text, shown in its own section.
