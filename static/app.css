@@ -201,6 +201,11 @@ pre code { background: none; padding: 0; }
    2026-11-11: "so on the project page and all its subpages i can get to the agent discussion
    quickly"). */
 .crumb-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+/* A model tag (the owner, 2026-11-19, D-228): small and muted beside a name. */
+.mtag { display: inline-flex; align-items: center; height: 18px; padding: 0 6px; border-radius: 5px; border: 1px solid var(--line); font-family: var(--mono); font-size: 11px; font-weight: 400; color: var(--muted); vertical-align: middle; white-space: nowrap; letter-spacing: 0; }
+.mtag.unk { border-style: dashed; opacity: .75; }
+/* A note a subagent wrote (D-229). */
+.chip.subagent { background: rgba(74, 222, 128, .1); color: var(--ok); }
 /* A page's path (the owner, 2026-11-18, D-222): each part a link up; the last is where you are. */
 .path ol { display: flex; align-items: center; flex-wrap: wrap; gap: 2px 0; margin: 0; padding: 0; list-style: none; font-size: 14px; min-width: 0; }
 .path li { display: inline-flex; align-items: center; min-width: 0; }

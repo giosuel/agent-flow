@@ -2412,6 +2412,12 @@ fn history_event(h: &records::Revision, r: &Record, tz: &Tz) -> HistoryEvent {
     if h.rev == 1 {
         e.what = format!("Created the {}", r.kind.label().to_lowercase());
         e.dot = "first";
+        // A note a subagent uploaded (D-229): its session's subagent, with its model.
+        let sub = super::notes::subagent_line(r);
+        if r.kind == Kind::Note && !sub.is_empty() {
+            e.who = format!("{}'s subagent", e.who);
+            e.chips.push(("by".into(), sub, false));
+        }
         return e;
     }
     let obj = h.changes.as_object();

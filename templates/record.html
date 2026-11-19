@@ -40,7 +40,7 @@
 
     {% if let Some(nt) = note %}
     <section class="stack-sm" aria-labelledby="note-h">
-      <div class="row wrap"><h2 class="label" id="note-h">{% if nt.download.is_empty() %}Note{% else %}File{% endif %}</h2>{% if !nt.category.is_empty() %}<span class="chip">{{ nt.category }}</span>{% endif %}{% if !nt.size.is_empty() %}<span class="sub">{{ nt.filename }} · {{ nt.size }}</span>{% endif %}<span class="grow"></span>{% if !nt.download.is_empty() %}<a class="btn sm ghost" href="{{ nt.download }}" download>Download</a>{% endif %}</div>
+      <div class="row wrap"><h2 class="label" id="note-h">{% if nt.download.is_empty() %}Note{% else %}File{% endif %}</h2>{% if !nt.category.is_empty() %}<span class="chip">{{ nt.category }}</span>{% endif %}{% if !nt.subagent.is_empty() %}<span class="chip subagent" title="A subagent of the project's agent wrote it">by a subagent · {{ nt.subagent }}</span>{% endif %}{% if !nt.size.is_empty() %}<span class="sub">{{ nt.filename }} · {{ nt.size }}</span>{% endif %}<span class="grow"></span>{% if !nt.download.is_empty() %}<a class="btn sm ghost" href="{{ nt.download }}" download>Download</a>{% endif %}</div>
       {% if !nt.resurface.is_empty() %}<p class="sub">Comes back to the agent {{ nt.resurface }}.</p>{% endif %}
       {% if !nt.text_html.is_empty() %}<div class="md-doc prose">{{ nt.text_html|safe }}</div>{% endif %}
       {% if !nt.plain.is_empty() %}<pre class="md-doc mono note-plain">{{ nt.plain }}</pre>{% endif %}

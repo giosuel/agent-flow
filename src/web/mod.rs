@@ -280,6 +280,12 @@ pub async fn serve(state: AppState) -> anyhow::Result<()> {
         Ok(n) => tracing::info!("handbook: {n} files brought in from the ai-handbook folder"),
         Err(e) => tracing::warn!("handbook: {e:#}"),
     }
+    // Subagent runs from before their model was read get it from the usage records (D-228).
+    match state.db.call(|c| crate::sessionlog::backfill_models(c)).await {
+        Ok(0) => {}
+        Ok(n) => tracing::info!("session log: the model of {n} earlier subagent run(s) filled in"),
+        Err(e) => tracing::warn!("session log: filling in models failed: {e:#}"),
+    }
     // Sessions a stray title had named "\\" get their name back (see crate::sessionlog::is_name).
     match state.db.call(|c| crate::sessionlog::repair_names(c)).await {
         Ok(0) => {}

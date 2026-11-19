@@ -30,7 +30,7 @@ use crate::web::AppState;
 const INSTRUCTIONS: &str = "AgentFlow is the owner's project-management server. Each project has one agent \
 (you, for your project); it records the project's milestones, steps, tasks, decisions, ADRs, questions for the \
 owner, notes, PRs and builds here instead of in Markdown files, and only it writes here (subagents report back \
-to it). Start every session with `hello`: it returns your project document (how to work on the project, its \
+to it, apart from handing in notes with `flow note`). Start every session with `hello`: it returns your project document (how to work on the project, its \
 stack, its roadmap if it has one; keep it current with `edit_project_doc`), `where` (the steps under way, their \
 tasks in doing, the next one, what's blocked) and the notes coming back to you; after your context is reset or \
 summarized, call `hello` again with `brief: true`. Work in steps: add a step's tasks \
@@ -52,7 +52,9 @@ archived ones). The owner's answers and other news come in the replies of your w
 `since_last_check`. Show the \
 owner what you see with screenshots: `flow screenshot <file> --name \"…\" --category \"…\"` (mockups with \
 --design-url); hand in files (reports, plans, logs) with `flow note <file> --name \"…\" --category \"…\"` and \
-short notes or known issues with `add_note`. Never post or push to other people's repositories yourself (PRs, \
+short notes or known issues with `add_note`. Handovers, reports and plans meant for another agent, a subagent's \
+session or later go into AgentFlow that way, not into a scratchpad; refer to them by their id (N-12), which the \
+owner can click. Subagents may run `flow note` too; AgentFlow marks those notes as a subagent's. Never post or push to other people's repositories yourself (PRs, \
 issues, comments, commits), even if a token would let you: draft them with `flow contribute pr|commits` or \
 `draft_contribution` (issue, comment), and the owner sends them from AgentFlow. When something is ready for the \
 owner to try, add it with `add_to_test` (a category of your choosing); open items come along with every release \

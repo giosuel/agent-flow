@@ -37,6 +37,68 @@ const GAP_MS: i64 = 30 * 60_000;
 /// Messages longer than this fold to a preview (briefs and reports run to pages).
 const FOLD_AT: usize = 1200;
 
+/// Record ids in a message become links that open the record (the owner, 2026-11-19, D-230: "so i can
+/// click on the link and go to the note directly"): "N-58" in the conversation's project,
+/// "imaginarium/D-290" in the one it names. Not inside code, paths, URLs or links already made.
+pub fn link_records(md: &str, slug: &str) -> String {
+    const KINDS: [&str; 12] = ["ADR", "PR", "TT", "Q", "D", "T", "R", "B", "F", "C", "S", "N"];
+    let b = md.as_bytes();
+    let word = |c: u8| c.is_ascii_alphanumeric() || matches!(c, b'_' | b'-' | b'/' | b'.' | b':' | b'[' | b'#');
+    // At i: an id, as (its length, the project, the id).
+    let id_at = |i: usize| -> Option<(usize, String, String)> {
+        let mut j = i;
+        let mut project = String::new();
+        if b[j].is_ascii_lowercase() {
+            let start = j;
+            while j < b.len() && (b[j].is_ascii_lowercase() || b[j].is_ascii_digit() || b[j] == b'-') {
+                j += 1;
+            }
+            if j >= b.len() || b[j] != b'/' {
+                return None;
+            }
+            project = md[start..j].to_owned();
+            j += 1;
+        }
+        let kind = KINDS.iter().find(|k| md[j..].starts_with(&format!("{k}-")))?;
+        let digits_from = j + kind.len() + 1;
+        let mut k = digits_from;
+        while k < b.len() && b[k].is_ascii_digit() {
+            k += 1;
+        }
+        if k == digits_from || (k < b.len() && (b[k].is_ascii_alphanumeric() || b[k] == b'-' || b[k] == b'_')) {
+            return None;
+        }
+        // A file's name ("N-1.md") isn't an id.
+        if k + 1 < b.len() && b[k] == b'.' && b[k + 1].is_ascii_alphanumeric() {
+            return None;
+        }
+        let project = if project.is_empty() { slug.to_owned() } else { project };
+        (!project.is_empty()).then(|| (k - i, project, md[j..k].to_owned()))
+    };
+    let mut out = String::with_capacity(md.len() + 64);
+    let mut code = false;
+    let mut i = 0;
+    while i < b.len() {
+        let c = b[i];
+        if c == b'`' {
+            code = !code;
+        } else if !code
+            && (c.is_ascii_uppercase() || c.is_ascii_lowercase())
+            && (i == 0 || !word(b[i - 1]))
+            && !md[..i].ends_with("](")
+            && let Some((len, project, id)) = id_at(i)
+        {
+            out.push_str(&format!("[{}](/p/{project}/{id})", &md[i..i + len]));
+            i += len;
+            continue;
+        }
+        let ch = md[i..].chars().next().unwrap_or(' ');
+        out.push(ch);
+        i += ch.len_utf8();
+    }
+    out
+}
+
 fn preview(body: &str) -> Option<String> {
     if body.len() <= FOLD_AT {
         return None;
@@ -166,6 +228,8 @@ struct ListRow {
     fork: bool,
     /// (first, separator, second): "agent-flow ⇄ office", "⇄ office" (one picked), "agent-flow › subagents".
     title: (String, &'static str, String),
+    /// The models of the title's two names ("Opus 5.5"), "" where unknown or not shown (D-228).
+    models: (String, String),
     sub: String,
     when: String,
     on: bool,
@@ -173,6 +237,8 @@ struct ListRow {
 
 struct MessageView {
     from: String,
+    /// The sender's model, as people say it ("Fable 5.2"), or "" (D-228).
+    model: String,
     to: String,
     /// For subagents: "told" or "reported".
     verb: &'static str,
@@ -192,6 +258,8 @@ struct Item {
     count: String,
     /// A run's type ("fork").
     chip: String,
+    /// A run's model ("Fable 5.2"), "model unknown", or "" for a conversation (D-228).
+    model: String,
     text: String,
     on: bool,
     /// What the find box looks in, lower case.
@@ -208,6 +276,8 @@ struct Selected {
     avatars: Vec<Avatar>,
     fork: bool,
     title: (String, &'static str, String),
+    /// The models of the title's two sides (D-228).
+    title_models: (String, String),
     line: String,
     /// For subagents: the Type chips (label, count, href, on).
     types: Vec<(String, String, String, bool)>,
@@ -330,7 +400,8 @@ async fn page(
     let (pairs, subs, hits, names) = state
         .db
         .call(move |c| {
-            let names: HashMap<i64, String> = crate::projects::list(c)?.into_iter().map(|p| (p.id, p.name)).collect();
+            let names: HashMap<i64, (String, String)> =
+                crate::projects::list(c)?.into_iter().map(|p| (p.id, (p.name, p.slug))).collect();
             let pairs = sessionlog::session_threads(c, 1000)?;
             let subs = sessionlog::subagent_threads(c, None, 5000)?;
             let hits = if sql_terms.is_empty() { None } else { Some(sessionlog::search(c, &sql_terms)?) };
@@ -342,7 +413,8 @@ async fn page(
     let since = h.range_ms().map(|ms| now - ms);
     let in_range = |t: &Thread| since.is_none_or(|s| t.last_at >= s);
     let hit = |t: &Thread| hits.as_ref().is_none_or(|m| m.contains_key(&t.key));
-    let project = |t: &Thread| t.project_id.and_then(|p| names.get(&p).cloned()).unwrap_or_default();
+    let project = |t: &Thread| t.project_id.and_then(|p| names.get(&p).map(|x| x.0.clone())).unwrap_or_default();
+    let slug_of = |t: &Thread| t.project_id.and_then(|p| names.get(&p).map(|x| x.1.clone())).unwrap_or_default();
     if let Some(k) = &old_sub
         && let Some(t) = subs.iter().find(|t| &t.key == k)
     {
@@ -418,10 +490,12 @@ async fn page(
             let on = sel_key.as_deref() == Some(t.key.as_str());
             let (a, b) = (t.parties[0].clone(), t.parties[1].clone());
             // With one picked, the row names the other side.
-            let (first, second) = match h.who.as_slice() {
-                [one] if *one == b => (b.clone(), a.clone()),
-                _ => (a.clone(), b.clone()),
+            let label = |i: usize| t.models.get(i).map(|m| sessionlog::model_label(m)).unwrap_or_default();
+            let (first, second, models) = match h.who.as_slice() {
+                [one] if *one == b => (b.clone(), a.clone(), (label(1), label(0))),
+                _ => (a.clone(), b.clone(), (label(0), label(1))),
             };
+            let models = if h.who.len() == 1 { (String::new(), models.1) } else { models };
             let title = if h.who.len() == 1 {
                 (String::new(), "⇄", second.clone())
             } else {
@@ -437,6 +511,7 @@ async fn page(
                 avatars: vec![av(&first), av(&second)],
                 fork: false,
                 title,
+                models,
                 sub: [project(t), format!("{} message{}", t.count, if t.count == 1 { "" } else { "s" })]
                     .into_iter()
                     .filter(|s| !s.is_empty())
@@ -452,7 +527,8 @@ async fn page(
             let convs = split(msgs);
             // Links from here name the pair, also when it was shown as the newest.
             let hs = h.with(|x| x.t = t.key.clone());
-            selected = Some(selected_view(&hs, t, None, convs, &q_terms, &tz, now, project(t), "conversation"));
+            selected =
+                Some(selected_view(&hs, t, None, convs, &q_terms, &tz, now, (project(t), slug_of(t)), "conversation"));
         }
     } else {
         // Subagents, by the session that started them.
@@ -485,7 +561,9 @@ async fn page(
                     .href(),
                 avatars: vec![av(name)],
                 fork: true,
-                title: (name.clone(), "›", "subagents".into()),
+                // The list is all subagents: the session's name and model are enough (D-228).
+                title: (name.clone(), "", String::new()),
+                models: (runs[0].models.first().map(|m| sessionlog::model_label(m)).unwrap_or_default(), String::new()),
                 sub: [
                     project(runs[0]),
                     format!("{} run{}", runs.len(), if runs.len() == 1 { "" } else { "s" }),
@@ -532,7 +610,7 @@ async fn page(
                 &q_terms,
                 &tz,
                 now,
-                project(first),
+                (project(first), slug_of(first)),
                 "run",
             );
             sel.line =
@@ -702,7 +780,7 @@ fn selected_view(
     terms: &[(String, String)],
     tz: &Tz,
     now: i64,
-    project: String,
+    (project, slug): (String, String),
     noun: &'static str,
 ) -> Selected {
     // A search shows only the conversations with a match.
@@ -757,7 +835,15 @@ fn selected_view(
                 .map(|i| {
                     let text = title_of(i);
                     let chip = run_at(i).map(|r| r.agent_type.clone()).unwrap_or_default();
+                    let model = match run_at(i) {
+                        Some(r) => match r.models.get(1).map(|m| sessionlog::model_label(m)).unwrap_or_default() {
+                            m if m.is_empty() => "model unknown".to_owned(),
+                            m => m,
+                        },
+                        None => String::new(),
+                    };
                     Item {
+                        model,
                         href: go(i),
                         span: span_hm(&convs[i]),
                         count: count_of(&convs[i]),
@@ -777,6 +863,13 @@ fn selected_view(
         .map(|m| {
             let (body, relayed) = strip_relayed(&m.body);
             let from = sessionlog::shown(&m.from);
+            // Its model (D-228): a run's session or the subagent; a pair's side.
+            let model = match (&runs, run) {
+                (Some((session, _)), Some(r)) => r.models.get(usize::from(from != *session)).cloned(),
+                _ => t.parties.iter().position(|p| *p == from).and_then(|i| t.models.get(i).cloned()),
+            }
+            .map(|m| sessionlog::model_label(&m))
+            .unwrap_or_default();
             let verb = match &runs {
                 Some((session, _)) if from == *session => "told",
                 Some(_) => "reported",
@@ -794,11 +887,12 @@ fn selected_view(
             };
             MessageView {
                 avatar: av(&shown_from),
+                model,
                 from: shown_from,
                 to: shown_to,
                 verb,
                 at: tz.hm(m.at),
-                body_html: markdown::to_html(&body),
+                body_html: markdown::to_html(&link_records(&body, &slug)),
                 preview: preview(&body),
                 relayed,
             }
@@ -809,11 +903,25 @@ fn selected_view(
         _ => None,
     };
     let starter = cur.first().map(|m| sessionlog::shown(&m.from)).unwrap_or_default();
-    let (title, avatars, fork) = match &runs {
-        Some((session, _)) => ((session.clone(), "›", "subagents".to_owned()), vec![av(session)], true),
-        None => {
+    let label = |m: Option<&String>| m.map(|m| sessionlog::model_label(m)).unwrap_or_default();
+    let (title, avatars, fork, title_models) = match (&runs, run) {
+        // The run shown: its session and the subagent, each with its model (D-228).
+        (Some((session, _)), Some(r)) => {
+            let sub =
+                if r.agent_type.is_empty() { "subagent".to_owned() } else { format!("{} subagent", r.agent_type) };
+            ((session.clone(), "›", sub), vec![av(session)], true, (label(r.models.first()), label(r.models.get(1))))
+        }
+        (Some((session, _)), None) => {
+            ((session.clone(), "›", "subagents".to_owned()), vec![av(session)], true, Default::default())
+        }
+        (None, _) => {
             let (a, b) = (t.parties[0].clone(), t.parties[1].clone());
-            ((a.clone(), "⇄", b.clone()), vec![av(&a), av(&b)], false)
+            (
+                (a.clone(), "⇄", b.clone()),
+                vec![av(&a), av(&b)],
+                false,
+                (label(t.models.first()), label(t.models.get(1))),
+            )
         }
     };
     let total: usize = convs.iter().map(Vec::len).sum();
@@ -831,6 +939,7 @@ fn selected_view(
     };
     let shown_msgs: usize = visible.iter().map(|&i| convs[i].len()).sum();
     Selected {
+        title_models,
         avatars,
         fork,
         title,
@@ -917,5 +1026,20 @@ mod tests {
         assert!(!matches(&m, &[("to".into(), "office".into())]));
         let h = Here { who: vec!["agent-flow".into()], t: "pair:a|b".into(), c: 2, ..Default::default() };
         assert_eq!(h.href(), "/conversations?t=pair:a%7Cb&who=agent-flow&c=2");
+    }
+
+    /// D-230: record ids in a message link to the record; code, paths and file names don't.
+    #[test]
+    fn record_ids_become_links() {
+        let l = |md: &str| link_records(md, "imaginarium");
+        assert_eq!(
+            l("Handover in N-58, see T-127."),
+            "Handover in [N-58](/p/imaginarium/N-58), see [T-127](/p/imaginarium/T-127)."
+        );
+        assert_eq!(l("and agent-flow/D-12"), "and [agent-flow/D-12](/p/agent-flow/D-12)");
+        assert_eq!(l("`T-127` stays"), "`T-127` stays");
+        assert_eq!(l("/tmp/x/N-58 and N-58.md and SNT-1 and T-12a"), "/tmp/x/N-58 and N-58.md and SNT-1 and T-12a");
+        assert_eq!(l("[T-1](/p/x/T-1)"), "[T-1](/p/x/T-1)");
+        assert_eq!(link_records("N-1", ""), "N-1", "no project, no link");
     }
 }
