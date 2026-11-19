@@ -864,7 +864,7 @@ async fn the_dashboard_features_a_question_and_answers_on_send() {
     let featured = html.find("Tabs A or B?").unwrap();
     assert!(featured < html.find("Old question").unwrap());
     assert!(html.contains("More questions · 1"));
-    assert!(html.contains(r#"<span class="mono count">2</span>"#));
+    assert!(html.contains(r#"<b class="gbadge">2</b>"#));
 
     let res = s
         .http
@@ -887,7 +887,7 @@ async fn the_dashboard_features_a_question_and_answers_on_send() {
         .await
         .unwrap();
     assert!(html.contains("Sent to vinculum: vinculum/Q-2"), "notice");
-    assert!(html.contains(r#"<span class="mono count">1</span>"#));
+    assert!(html.contains(r#"<b class="gbadge">1</b>"#));
 }
 
 #[tokio::test]
@@ -999,12 +999,18 @@ async fn the_bar_shows_the_project_its_tabs_and_the_global_pages() {
     let s = TestServer::start().await;
     let token = s.token(TokenKind::Project, Some("vinculum")).await;
     let sess = mcp_session(&s, &token).await;
-    mcp_tool(&s, &token, &sess, "ask_question", json!({"title": "A or B?", "options": [{"title": "A"}, {"title": "B"}]}))
-        .await;
+    mcp_tool(
+        &s,
+        &token,
+        &sess,
+        "ask_question",
+        json!({"title": "A or B?", "options": [{"title": "A"}, {"title": "B"}]}),
+    )
+    .await;
     let cookie = s.owner_cookie().await;
     let page = owner_page(&s, &cookie, "/p/vinculum?tab=decisions").await;
     let bar = &page[page.find("<header").unwrap()..page.find("</header>").unwrap()];
-    assert!(bar.contains(r#"<summary class="pswitch-btn"><span>Vinculum</span>"#), "{bar}");
+    assert!(bar.contains(r#"<summary class="pswitch-btn"><span>vinculum</span>"#), "{bar}");
     assert!(bar.contains(r#"href="/p/vinculum" aria-current="page""#), "the project is checked in the switcher");
     assert!(bar.contains(r#"<a href="/p/vinculum?tab=decisions" class="on" aria-current="page">Decisions</a>"#));
     assert!(bar.contains(r#"Questions<span class="mono n y">1</span>"#), "the open question is counted");
@@ -1051,7 +1057,9 @@ async fn wait_for_records(s: &TestServer, slug: &str, numbers: &[i64], state: &s
                 anyhow::Ok(all)
             })
             .await
-            .unwrap();
+            // The tests' in-memory database shares its cache: a read that meets the merge's write
+            // fails at once ("table is locked") instead of waiting. Not yet, then.
+            .unwrap_or(false);
         if all {
             return;
         }
