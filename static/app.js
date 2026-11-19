@@ -453,12 +453,28 @@ document.addEventListener("click", async (e) => {
   }
 });
 
-// Plan (the owner, 2026-11-18, D-219): on the phone the step rail starts folded to the picked step.
+// Plan (the owner, 2026-11-18, D-219; 2026-11-19, D-226): the milestone list scrolls to the picked
+// milestone, the one before it just above; on the phone there's no scroll box, the done ones and
+// the step rail start folded (unless the picked one is among them).
 const foldRail = (root) => {
+  for (const box of root.querySelectorAll(".ml-plan [data-ml]")) {
+    const picked = box.querySelector(".ml-row.picked");
+    if (picked && box.scrollHeight > box.clientHeight) {
+      // The row before it, among the rows shown (the done ones sit in their own fold).
+      const rows = [...box.querySelectorAll(".ml-row")].filter((r) => r.offsetHeight > 0);
+      const before = rows[rows.indexOf(picked) - 1];
+      box.scrollTop = Math.max(0, picked.offsetTop - (before ? before.offsetHeight : 0) - 4);
+    }
+  }
   if (!window.matchMedia("(max-width: 700px)").matches) return;
   for (const d of root.querySelectorAll("details[data-srail]")) d.open = false;
+  for (const d of root.querySelectorAll("details[data-ml-done]")) {
+    if (!d.querySelector(".picked")) d.open = false;
+  }
 };
 document.addEventListener("DOMContentLoaded", () => foldRail(document));
+// Again once the styles are in: before that the list's box has no height to scroll in.
+window.addEventListener("load", () => foldRail(document));
 document.addEventListener("af:content", (e) => foldRail(e.detail));
 
 // Project tabs on the phone switch in place (the owner, 2026-11-12: "on mobile clicking a tab in a

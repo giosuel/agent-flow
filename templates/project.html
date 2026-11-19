@@ -42,22 +42,31 @@
 </section>
 {% endif %}
 
+<section class="pcard" aria-labelledby="pc-h">
+  <div class="ph"><h2 class="label" id="pc-h">Project</h2><a class="sub" href="/p/{{ slug }}/settings" data-dlg>Edit</a></div>
+  <div class="pcard-b">
+    <div class="pcard-about">{% for m in about %}{% if m.label == "About" %}<p class="info-about">{{ m.value }}</p>{% endif %}{% endfor %}
+      {% if session_url.is_none() %}<p class="sub">The link to its Claude Code session shows up once the agent runs with <span class="mono">/remote-control</span>.</p>{% endif %}</div>
+    <dl class="info-dl pcard-facts">
+          <div><dt>Agent</dt><dd><span class="dot{% if agent.online %} ok{% endif %}" aria-hidden="true"></span> {% if agent.online %}online{% else %}last seen {{ agent.seen }}{% endif %}{% if !agent.model.is_empty() %} · {{ agent.model }}{% endif %}</dd></div>
+          {% if !agent.working_on.is_empty() %}<div><dt>Working on</dt><dd>{{ agent.working_on }}</dd></div>{% endif %}
+          {% if !repo.is_empty() %}<div><dt>Repository</dt><dd><a href="https://github.com/{{ repo }}">{{ repo }}</a></dd></div>{% endif %}
+          {% for m in about %}{% if m.label == "AI model" && agent.model.is_empty() %}<div><dt>Model</dt><dd>{{ m.value }}</dd></div>{% else if m.label == "Machine" %}<div><dt>Set up in</dt><dd class="mono">{{ m.value }}</dd></div>{% else if m.label == "Ports" %}<div><dt>Ports</dt><dd class="mono">{{ m.value }}</dd></div>{% endif %}{% endfor %}
+          {% if !server.is_empty() %}<div><dt>Build server</dt><dd>{{ server }}</dd></div>{% endif %}
+          <div><dt>Tokens, 7 days</dt><dd><span class="strip" role="img" aria-label="new tokens per day, the last 7 days">{% for (h, t) in agent.strip %}<span style="height: {{ h }}%" data-tip="{{ t }}"></span>{% endfor %}</span><span class="mono">{{ agent.tokens_week }}</span> <a class="sub" href="/usage">Usage</a></dd></div>
+        </dl>
+    <div class="info-links pcard-links">
+          <a href="/p/{{ slug }}/doc" data-dlg class="pd-link">{{ crate::web::icons::icon("doc")|safe }}<span>Project document</span>{% if !doc_line.is_empty() %}<span class="sub pd-rev">{{ doc_line }}</span>{% endif %}</a>
+          {% if let Some(u) = session_url %}<a href="{{ u }}" target="_blank" rel="noopener">{{ crate::web::icons::icon("session")|safe }}<span>Open the agent's session</span>{{ crate::web::icons::icon("out")|safe }}</a>{% endif %}
+          {% if let Some(c) = connect %}<form method="post" action="/p/{{ slug }}/setup-code" data-dlg><button class="linkish" type="submit">{{ crate::web::icons::icon("laptop")|safe }}<span>{% if c.folder.is_empty() %}Set up on a machine{% else %}Set up on another machine{% endif %}</span></button></form>{% endif %}
+          <a href="/p/{{ slug }}/settings" data-dlg>{{ crate::web::icons::icon("gear")|safe }}<span>Project settings</span></a>
+        </div>
+  </div>
+</section>
+
 <div class="ov-lay">
   <div class="ov-main">
-    <section class="ovp ms-panel" aria-labelledby="ms-h">
-      <div class="ph"><h2 class="label" id="ms-h">Milestones</h2><a class="sub" href="/p/{{ slug }}/plan">{{ ms_counts }}{% if !ms_counts.is_empty() %} · {% endif %}Plan</a></div>
-      {% if ms_now.is_none() && ms_rows.is_empty() && ms_closed.is_empty() && loose_count == 0 %}<p class="sub ovp-pad">The agent hasn't set milestones yet.</p>{% endif %}
-      {% if let Some(m) = ms_now %}
-      <a class="msa" href="{{ m.href }}">
-        <span class="msa-l"><span class="row wrap msa-top"><span class="mono k">{{ m.name }}</span><span class="chip accent">under way</span><span class="sub">{{ m.sub }}</span></span>
-          <span class="t">{{ m.title }}</span>
-          {% if let Some((sn, st)) = m.step %}<span class="sub">Step <span class="mono acc-ink">{{ sn }}</span> {{ st }}</span>{% endif %}</span>
-        <span class="msa-r"><span class="sub"><b>{{ m.done }}</b> of {{ m.total }} tasks{% if m.steps_total > 0 %} · {{ m.steps_done }} of {{ m.steps_total }} steps{% endif %}</span><span class="pbar" aria-hidden="true"><i style="width: {{ m.pct }}%"></i></span><span class="btn sm ghost msa-go">Open in Plan {{ crate::web::icons::icon("chevron")|safe }}</span></span>
-      </a>
-      {% else %}
-      {% if !ms_rows.is_empty() || !ms_closed.is_empty() || loose_count > 0 %}<a class="msr loose" href="/p/{{ slug }}/plan"><span class="loose-i" aria-hidden="true">{{ crate::web::icons::icon("chevron")|safe }}</span><span class="t">Nothing under way · see every milestone in Plan</span><span class="tg mono"></span></a>{% endif %}
-      {% endif %}
-    </section>
+    {% include "milestone_list.html" %}
   </div>
 
   <aside class="ov-side" aria-label="About the project">
@@ -72,27 +81,6 @@
       </div>
     </details>
     {% endfor %}
-    <details class="ov-fold" open>
-      <summary class="ph"><span class="ofi">{{ crate::web::icons::icon("folder")|safe }}</span><h2 class="label">Project<span class="of-phone">&nbsp;info</span></h2><span class="sub of-phone">{% if !repo.is_empty() %}{{ repo }}{% else %}{{ agent.machine }}{% endif %}</span><span class="grow"></span><a class="sub of-desk" href="/p/{{ slug }}/settings" data-dlg>Edit</a><span class="of-chev">{{ crate::web::icons::icon("chevron")|safe }}</span></summary>
-      <div class="of-body info">
-        {% for m in about %}{% if m.label == "About" %}<p class="info-about">{{ m.value }}</p>{% endif %}{% endfor %}
-        <dl class="info-dl">
-          <dt>Agent</dt><dd><span class="dot{% if agent.online %} ok{% endif %}" aria-hidden="true"></span> {% if agent.online %}online{% else %}last seen {{ agent.seen }}{% endif %}{% if !agent.model.is_empty() %} · {{ agent.model }}{% endif %}</dd>
-          {% if !agent.working_on.is_empty() %}<dt>Working on</dt><dd>{{ agent.working_on }}</dd>{% endif %}
-          {% if !repo.is_empty() %}<dt>Repository</dt><dd><a href="https://github.com/{{ repo }}">{{ repo }}</a></dd>{% endif %}
-          {% for m in about %}{% if m.label == "AI model" && agent.model.is_empty() %}<dt>Model</dt><dd>{{ m.value }}</dd>{% else if m.label == "Machine" %}<dt>Set up in</dt><dd class="mono">{{ m.value }}</dd>{% else if m.label == "Ports" %}<dt>Ports</dt><dd class="mono">{{ m.value }}</dd>{% endif %}{% endfor %}
-          {% if !server.is_empty() %}<dt>Build server</dt><dd>{{ server }}</dd>{% endif %}
-          <dt>Tokens, 7 days</dt><dd><span class="strip" role="img" aria-label="new tokens per day, the last 7 days">{% for (h, t) in agent.strip %}<span style="height: {{ h }}%" data-tip="{{ t }}"></span>{% endfor %}</span><span class="mono">{{ agent.tokens_week }}</span> <a class="sub" href="/usage">Usage</a></dd>
-        </dl>
-        <div class="info-links">
-          <a href="/p/{{ slug }}/doc" data-dlg class="pd-link">{{ crate::web::icons::icon("doc")|safe }}<span>Project document</span>{% if !doc_line.is_empty() %}<span class="sub pd-rev">{{ doc_line }}</span>{% endif %}</a>
-          {% if let Some(u) = session_url %}<a href="{{ u }}" target="_blank" rel="noopener">{{ crate::web::icons::icon("session")|safe }}<span>Open the agent's session</span>{{ crate::web::icons::icon("out")|safe }}</a>{% endif %}
-          {% if let Some(c) = connect %}<form method="post" action="/p/{{ slug }}/setup-code" data-dlg><button class="linkish" type="submit">{{ crate::web::icons::icon("laptop")|safe }}<span>{% if c.folder.is_empty() %}Set up on a machine{% else %}Set up on another machine{% endif %}</span></button></form>{% endif %}
-          <a href="/p/{{ slug }}/settings" data-dlg>{{ crate::web::icons::icon("gear")|safe }}<span>Project settings</span></a>
-        </div>
-        {% if session_url.is_none() %}<p class="sub">The link to its Claude Code session shows up once the agent runs with <span class="mono">/remote-control</span>.</p>{% endif %}
-      </div>
-    </details>
     <details class="ov-fold" open>
       <summary class="ph"><span class="ofi">{{ crate::web::icons::icon("decision")|safe }}</span><h2 class="label" id="dec-h">Latest decisions</h2><span class="sub of-phone mono">{% for d in decisions %}{% if loop.index <= 3 %}{% if !loop.first %}, {% endif %}{{ d.short }}{% endif %}{% endfor %}</span><span class="grow"></span><a class="sub of-desk" href="/p/{{ slug }}?tab=decisions">All</a><span class="of-chev">{{ crate::web::icons::icon("chevron")|safe }}</span></summary>
       <div class="of-body">
@@ -121,32 +109,10 @@
 {% endif %}
 
 {% if tab == "plan" %}
-{# The Plan tab (the owner, 2026-11-18, D-219): the milestones as cards to pick from, the picked
-   one large; its steps as a rail; the picked step's board. A pick swaps #plan in place. #}
+{# The Plan tab (the owner, 2026-11-18, D-219; 2026-11-19, D-226): the milestone list to pick from,
+   its steps as a rail, the picked step's board. A pick swaps this area in place. #}
 <div class="plan" id="board">
-    <section class="ovp ms-panel" aria-labelledby="pms-h">
-      <div class="ph"><h2 class="label" id="pms-h">Milestones</h2><span class="sub">{{ ms_counts }}</span></div>
-      {% if ms_now.is_none() && ms_rows.is_empty() && ms_closed.is_empty() %}<p class="sub ovp-pad">The agent hasn't set milestones yet.</p>{% endif %}
-      {% if let Some(m) = ms_now %}
-      <div class="msa plan-card" aria-current="true">
-        <span class="msa-l"><span class="row wrap msa-top"><span class="mono k">{{ m.name }}</span><span class="chip{% if m.state == "under way" %} accent{% else if m.state == "closed" %} state-done{% endif %}">{{ m.state }}</span><span class="sub">{{ m.sub }}</span></span>
-          <h2 class="t">{{ m.title }}</h2></span>
-        <span class="msa-r"><span class="sub"><b>{{ m.done }}</b> of {{ m.total }} tasks{% if m.steps_total > 0 %} · {{ m.steps_done }} of {{ m.steps_total }} steps{% endif %}</span><span class="pbar" aria-hidden="true"><i style="width: {{ m.pct }}%"></i></span>{% if let Some(b) = board %}<span class="sub">{{ b.summary }}</span>{% endif %}</span>
-      </div>
-      {% endif %}
-      {% for r in ms_rows %}
-      <a class="msr {{ r.state }}{% if r.selected %} sel{% endif %}" href="{{ r.href }}" data-ms{% if r.selected %} aria-current="true"{% endif %}><span class="msr-i" aria-hidden="true"></span><span class="mono k">{{ r.name }}</span><span class="t">{{ r.title }}</span><span class="tg mono">{{ r.note }}</span></a>
-      {% endfor %}
-      {% if !ms_closed.is_empty() %}
-      <details class="ms-fold"{% if ms_closed_open %} open{% endif %}>
-        <summary><span class="msr-i done" aria-hidden="true"></span><span>{{ ms_closed.len() }} closed</span><span class="ks mono">{% for r in ms_closed %}{% if !loop.first %} · {% endif %}{{ r.name }}{% endfor %}</span><span class="sub mf-show">Show</span><span class="sub mf-hide">newest first</span><span class="of-chev">{{ crate::web::icons::icon("chevron")|safe }}</span></summary>
-        <div class="ms-scroll" role="list" aria-label="Closed milestones">
-          {% for r in ms_closed %}<a role="listitem" class="msr done{% if r.selected %} sel{% endif %}" href="{{ r.href }}" data-ms{% if r.selected %} aria-current="true"{% endif %}><span class="msr-i done" aria-hidden="true"></span><span class="mono k">{{ r.name }}</span><span class="t">{{ r.title }}</span><span class="tg mono">{{ r.note }}</span><span class="d sub">{{ r.date }}</span></a>{% endfor %}
-        </div>
-      </details>
-      {% endif %}
-      {% if loose_count > 0 %}<a class="msr loose{% if loose_selected %} sel{% endif %}" href="/p/{{ slug }}/plan/none" data-ms{% if loose_selected %} aria-current="true"{% endif %}><span class="loose-i" aria-hidden="true">{{ crate::web::icons::icon("inbox")|safe }}</span><span class="t">Without a milestone <span class="sub">· parked, no milestone yet</span></span><span class="tg mono">{{ loose_count }} task{% if loose_count != 1 %}s{% endif %}</span></a>{% endif %}
-    </section>
+    {% include "milestone_list.html" %}
 
     {% if let Some(b) = board %}
     {% if loose_selected %}<div class="sec"><h2>{{ b.title }}</h2><span class="sub">{{ b.summary }}</span></div>{% endif %}
@@ -162,6 +128,7 @@
         {% if let Some(st) = b.step %}
         <div class="step-line card"><span class="srail-i {{ st.class }}" aria-hidden="true"></span><span class="chip mono">{{ st.name }}</span><strong class="sl-t">{{ st.title }}</strong><span class="chip{% if st.class == "now" %} accent{% else if st.class == "done" %} state-done{% endif %}">{% if st.class == "now" %}under way{% else if st.class == "done" %}done{% else %}next{% endif %}</span><span class="sub sl-sub">{{ st.sub }}</span><a class="btn sm ghost step-open" href="{{ st.url }}">{% if st.class == "done" %}Summary{% else %}Open step{% endif %}{{ crate::web::icons::icon("out")|safe }}</a></div>
         {% endif %}
+        {% if b.empty %}<div class="card pad ml-nothing"><h3>Nothing on the board yet</h3><p class="sub">It has no steps and no tasks. When the agent starts it, its steps show here as a rail and its tasks on the board.</p></div>{% else %}
         <div class="bchips" role="tablist" aria-label="Columns">{% for col in b.columns %}<button type="button" role="tab" data-col="{{ loop.index0 }}"{% if loop.index0 == b.first_col %} aria-selected="true" class="on"{% endif %}>{{ col.title }} <span class="mono">{{ col.count }}</span></button>{% endfor %}</div>
         <div class="board fixed" data-show="{{ b.first_col }}">
           {% for col in b.columns %}
@@ -177,6 +144,7 @@
           </div>
           {% endfor %}
         </div>
+        {% endif %}
       </div>
     </div>
     {% endif %}

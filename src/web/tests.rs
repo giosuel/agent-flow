@@ -600,9 +600,11 @@ async fn the_overview_puts_questions_first_and_folds_closed_milestones() {
     let page = s.http.get(s.url("/p/vinculum")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
     assert!(page.contains("Waiting on you") && page.contains("Take A") && page.contains("qopt rec"), "{page}");
     assert!(page.contains(r#"name="next" value="/p/vinculum?answered=Q-1""#), "{page}");
-    // The overview shows the milestone under way and links to Plan for the rest (D-220).
-    assert!(page.contains(r#"class="msa"#) && page.contains("Work M2") && !page.contains("Work M3"), "{page}");
-    assert!(page.contains("1 under way · 1 planned · 1 closed · Plan") && page.contains("Open in Plan"), "{page}");
+    // The overview has the milestone list in its own order, the one under way open (D-226).
+    assert!(page.contains("1 done · 1 under way · 1 planned") && page.contains("Open in Plan"), "{page}");
+    let (m1, m2, m3) = (page.find("Work M1").unwrap(), page.find("Work M2").unwrap(), page.find("Work M3").unwrap());
+    assert!(m1 < m2 && m2 < m3, "done, under way, planned");
+    assert!(page.contains(r#"<details class="ml-done" data-ml-done>"#), "the done ones folded on the overview");
     assert!(!page.contains("Open questions"), "the old card at the bottom is gone");
     // One click answers, and the overview says so.
     let res = s
@@ -626,12 +628,16 @@ async fn the_overview_puts_questions_first_and_folds_closed_milestones() {
         .await
         .unwrap();
     assert!(page.contains("Answered Q-1") && !page.contains("Waiting on you"), "{page}");
-    // Plan: the milestone under way large, the others as rows, the closed ones folded (D-219).
+    // Plan: the same list, the done ones listed (in its scroll box), the one under way picked.
     let plan = owner_page(&s, &cookie, "/p/vinculum/plan").await;
-    assert!(plan.contains("plan-card") && plan.contains("Work M3") && plan.contains("1 closed"), "{plan}");
-    // A closed milestone picked is the large card; the path names it (D-222).
+    assert!(plan.contains(r#"<details class="ml-done" open data-ml-done>"#), "{plan}");
+    assert!(
+        plan.contains(r#"class="ml-row now picked open" href="/p/vinculum/plan/M2" data-ms aria-current="true""#),
+        "{plan}"
+    );
+    // A closed milestone picked stays in its place, lit; the path ends at Plan (D-225).
     let plan = owner_page(&s, &cookie, "/p/vinculum/plan/M1").await;
-    assert!(plan.contains(r#"<span class="chip state-done">closed</span>"#), "{plan}");
+    assert!(plan.contains(r#"class="ml-row done picked open" href="/p/vinculum/plan/M1""#), "{plan}");
     assert!(plan.contains(r#"<span aria-current="page" title="Plan">Plan</span>"#), "the path ends at Plan: {plan}");
 }
 

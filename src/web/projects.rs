@@ -554,31 +554,25 @@ struct QCard {
 }
 
 /// The milestone under way, large at the top of the overview's list.
-struct MsNow {
+struct MsItem {
     name: String,
     title: String,
     href: String,
-    sub: String,
-    /// "under way", "planned", "closed": the Plan tab's large card is the picked milestone.
-    state: &'static str,
-    /// The step under way: name and title.
-    step: Option<(String, String)>,
-    done: usize,
-    total: usize,
-    steps_done: usize,
-    steps_total: usize,
+    /// done, now (under way), up (planned) or empty (planned, no tasks yet).
+    kind: &'static str,
+    /// "25 of 31 tasks · 3 of 5 steps · step D", "no tasks yet".
+    counts: String,
     pct: usize,
-}
-
-/// A planned, other active, or closed milestone: one row.
-struct MsRow {
-    name: String,
-    title: String,
-    href: String,
-    note: String,
-    state: &'static str,
-    date: String,
-    selected: bool,
+    /// The release it ends with, or its state.
+    tag: String,
+    /// On Plan: the milestone the board shows.
+    picked: bool,
+    /// Shown open: on the overview the ones under way, on Plan the picked one.
+    open: bool,
+    /// "Step D · Screens in …".
+    step: String,
+    /// "since 6 Nov · estimated 279 h · 17 h of agent time".
+    sub: String,
 }
 
 struct StepView {
@@ -619,6 +613,8 @@ struct Board {
     rail: Vec<RailStep>,
     /// The picked step, described above the board.
     step: Option<StepView>,
+    /// A milestone with no steps and no tasks: "Nothing on the board yet" instead of columns.
+    empty: bool,
     columns: Vec<Column>,
     /// The column shown first on the phone.
     first_col: usize,
@@ -726,7 +722,6 @@ fn external_rows(c: &Connection, all: &[Record], now: i64) -> anyhow::Result<(Ve
 }
 
 struct AgentCard {
-    machine: String,
     model: String,
     working_on: String,
     seen: String,
@@ -806,13 +801,10 @@ struct ProjectPage {
     headline: String,
     tab: String,
     about: Vec<MetaRow>,
-    /// The overview's milestone list (D-198): the one under way, the planned (and other active)
-    /// ones, and the closed ones folded, newest first.
-    ms_now: Option<MsNow>,
-    ms_rows: Vec<MsRow>,
-    ms_closed: Vec<MsRow>,
-    /// The closed ones start open when the board shows one of them.
-    ms_closed_open: bool,
+    /// The milestone list (D-226): the done ones (folded on the overview and the phone), then
+    /// those under way and the planned ones, in their order.
+    ms_done: Vec<MsItem>,
+    ms_list: Vec<MsItem>,
     /// "Without a milestone": how many tasks, and whether the board shows them (D-218).
     loose_count: usize,
     loose_selected: bool,
@@ -1144,7 +1136,6 @@ fn build_project_page(
             .or_else(|| current_milestone(&ms))
             .cloned()
     };
-    let now_ms_id = current_milestone(&ms).map(|m| m.id);
     // Open questions that block a task, for "blocked by Q-31" on its card.
     let mut blockers: HashMap<i64, Vec<(String, String)>> = HashMap::new();
     {
@@ -1192,85 +1183,124 @@ fn build_project_page(
     };
     let tasks: Vec<&Record> = all.iter().filter(|r| r.kind == Kind::Task).collect();
 
-    // The milestones (the owner, 2026-11-18, D-219–D-221): the overview shows the one under way
-    // with a link to Plan; the Plan tab shows them all as cards on top, the picked one large.
+    // The milestones (the owner, 2026-11-19, D-226): one list in their own order on the overview
+    // and on Plan: the done ones first, then those under way, then the planned ones. On the
+    // overview the ones under way are open; on Plan the picked one is, lit in its place.
     let plan = tab == "plan";
     let ms_href = |name: &str| format!("/p/{}/plan/{name}", p.slug);
-    let selected = |m: &Milestone| current.as_ref().is_some_and(|c| c.id == m.id);
     let top: Vec<&Milestone> = ms.iter().filter(|m| m.parent_id.is_none() && m.archived_at.is_none()).collect();
-    let card = |m: &Milestone| {
+    let item = |m: &Milestone| -> anyhow::Result<MsItem> {
         let ids = projects::with_steps(&ms, m.id);
-        let mine: Vec<&&Record> = tasks.iter().filter(|t| t.milestone_id.is_some_and(|x| ids.contains(&x))).collect();
-        let done = mine.iter().filter(|t| t.state == "done").count();
-        let counted = mine.iter().filter(|t| !matches!(t.state.as_str(), "skipped" | "archived")).count();
+        let mine: Vec<&Record> =
+            tasks.iter().copied().filter(|t| t.milestone_id.is_some_and(|x| ids.contains(&x))).collect();
+        let counted: Vec<&Record> =
+            mine.iter().copied().filter(|t| !matches!(t.state.as_str(), "skipped" | "archived")).collect();
+        let done = counted.iter().filter(|t| t.state == "done").count();
         let steps: Vec<&Milestone> =
             ms.iter().filter(|s| s.parent_id == Some(m.id) && s.archived_at.is_none()).collect();
-        let mut sub = Vec::new();
-        if let Some(t) = m.started_at {
-            sub.push(format!("since {}", tz.day(t)));
-        }
-        if let Some(t) = m.closed_at {
-            sub.push(format!("closed {}", tz.day(t)));
-        }
-        sub.push(if m.tag.is_empty() { "ends with a tag".into() } else { format!("ends with {}", m.tag) });
-        MsNow {
+        let steps_done = steps.iter().filter(|s| s.state == "closed").count();
+        let step_now =
+            steps.iter().find(|s| s.state == "active").or_else(|| steps.iter().find(|s| s.state != "closed")).copied();
+        let kind = match m.state.as_str() {
+            "closed" => "done",
+            "active" => "now",
+            _ if counted.is_empty() && steps.is_empty() => "empty",
+            _ => "up",
+        };
+        let plural_steps = |n: usize| if n == 1 { "1 step".to_owned() } else { format!("{n} steps") };
+        let counts = match kind {
+            "done" => {
+                let mut c = plural(counted.len() as i64, "task", "tasks");
+                if let Some(t) = m.closed_at {
+                    c.push_str(&format!(" · {}", tz.day(t)));
+                }
+                c
+            }
+            "now" => {
+                let mut c = format!("{done} of {} tasks", counted.len());
+                if !steps.is_empty() {
+                    c.push_str(&format!(" · {steps_done} of {} steps", steps.len()));
+                }
+                if let Some(s) = step_now {
+                    c.push_str(&format!(" · step {}", s.name));
+                }
+                c
+            }
+            "empty" => "no tasks yet".into(),
+            _ => {
+                let mut c = plural(counted.len() as i64, "task", "tasks");
+                if !steps.is_empty() {
+                    c.push_str(&format!(" · {}", plural_steps(steps.len())));
+                }
+                c
+            }
+        };
+        let picked = plan && current.as_ref().is_some_and(|c| c.id == m.id);
+        let open = if plan { picked } else { kind == "now" };
+        // What an open row says: the step under way, then since when, the totals, the release.
+        let (step, sub) = if open {
+            let step = step_now.map(|s| format!("Step {} · {}", s.name, s.title)).unwrap_or_default();
+            let mut sub = Vec::new();
+            if let Some(t) = m.started_at {
+                sub.push(format!("since {}", tz.day(t)));
+            }
+            let est: i64 = counted.iter().map(|t| crate::times::estimate_min(t)).sum();
+            if est > 0 {
+                sub.push(format!("estimated {}", crate::times::fmt_min(est)));
+            }
+            let spent = crate::times::times_of(c, &p.slug, &counted, now)?.total_ms;
+            if spent > 0 {
+                sub.push(format!("{} of agent time", crate::times::fmt_ms(spent)));
+            }
+            if kind == "empty" {
+                sub.push("not planned in detail yet: the agent adds its steps and tasks when it comes up".into());
+            }
+            (step, sub.join(" · "))
+        } else {
+            (String::new(), String::new())
+        };
+        Ok(MsItem {
             name: m.name.clone(),
             title: m.title.clone(),
             href: ms_href(&m.name),
-            sub: sub.join(" · "),
-            state: match m.state.as_str() {
-                "active" => "under way",
-                "closed" => "closed",
-                _ => "planned",
+            kind,
+            counts,
+            pct: if kind == "done" { 100 } else { (done * 100).checked_div(counted.len()).unwrap_or(0) },
+            tag: match (kind, m.tag.as_str()) {
+                ("done" | "now", t) if !t.is_empty() => t.to_owned(),
+                ("done", _) => "done".into(),
+                ("now", _) => "under way".into(),
+                _ => "planned".into(),
             },
-            step: steps.iter().find(|s| s.state == "active").map(|s| (s.name.clone(), s.title.clone())),
-            done,
-            total: counted,
-            steps_done: steps.iter().filter(|s| s.state == "closed").count(),
-            steps_total: steps.len(),
-            pct: (done * 100).checked_div(counted).unwrap_or(0),
-        }
+            picked,
+            open,
+            step,
+            sub,
+        })
     };
-    let ms_now = if plan {
-        current.as_ref().map(card)
-    } else {
-        top.iter().find(|m| Some(m.id) == now_ms_id && m.state == "active").map(|m| card(m))
-    };
-    let ms_row = |m: &Milestone| MsRow {
-        name: m.name.clone(),
-        title: m.title.clone(),
-        href: ms_href(&m.name),
-        note: match m.state.as_str() {
-            "active" => "under way".into(),
-            "closed" => m.tag.clone(),
-            _ => "planned".into(),
-        },
-        state: match m.state.as_str() {
-            "active" => "now",
-            "closed" => "done",
-            _ => "up",
-        },
-        date: m.closed_at.map(|t| tz.day(t)).unwrap_or_default(),
-        selected: selected(m),
-    };
-    let shown = |m: &Milestone| ms_now.as_ref().is_none_or(|n| n.name != m.name);
-    let ms_rows: Vec<MsRow> = top.iter().filter(|m| m.state != "closed" && shown(m)).map(|m| ms_row(m)).collect();
-    let mut closed: Vec<&&Milestone> = top.iter().filter(|m| m.state == "closed" && shown(m)).collect();
-    closed.sort_by_key(|m| std::cmp::Reverse((m.closed_at.unwrap_or(0), (m.position * 1000.0) as i64)));
-    let ms_closed: Vec<MsRow> = closed.iter().map(|m| ms_row(m)).collect();
+    let mut ms_done: Vec<MsItem> = Vec::new();
+    let mut ms_list: Vec<MsItem> = Vec::new();
+    for m in top.iter().filter(|m| m.state == "closed") {
+        ms_done.push(item(m)?);
+    }
+    for m in top.iter().filter(|m| m.state == "active") {
+        ms_list.push(item(m)?);
+    }
+    for m in top.iter().filter(|m| !matches!(m.state.as_str(), "active" | "closed")) {
+        ms_list.push(item(m)?);
+    }
     let ms_counts = {
         let active = top.iter().filter(|m| m.state == "active").count();
         let planned = top.iter().filter(|m| !matches!(m.state.as_str(), "active" | "closed")).count();
-        let closed = top.iter().filter(|m| m.state == "closed").count();
         let mut parts = Vec::new();
+        if !ms_done.is_empty() {
+            parts.push(format!("{} done", ms_done.len()));
+        }
         if active > 0 {
             parts.push(format!("{active} under way"));
         }
         if planned > 0 {
             parts.push(format!("{planned} planned"));
-        }
-        if closed > 0 {
-            parts.push(format!("{closed} closed"));
         }
         parts.join(" · ")
     };
@@ -1413,6 +1443,7 @@ fn build_project_page(
             } else {
                 String::new()
             },
+            empty: cur.is_some() && steps.is_empty() && all_mine.is_empty(),
             rail,
             step: step_line,
             columns,
@@ -1614,12 +1645,10 @@ fn build_project_page(
         headline,
         tab: tab.into(),
         about,
-        ms_now,
-        ms_rows,
-        ms_closed_open: ms_closed.iter().any(|r| r.selected),
+        ms_done,
+        ms_list,
         loose_count,
         loose_selected: loose_chosen,
-        ms_closed,
         ms_counts,
         qcards,
         server: if tab == "overview" {
@@ -1629,7 +1658,6 @@ fn build_project_page(
         },
         board,
         agent: AgentCard {
-            machine: if p.agent.machine.is_empty() { "–".into() } else { p.agent.machine.clone() },
             model: [p.agent.model.as_str(), p.agent.effort.as_str()]
                 .iter()
                 .filter(|s| !s.is_empty())
