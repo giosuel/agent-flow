@@ -2,7 +2,7 @@
 {% block title %}{{ name }} · {{ project_name }}{% endblock %}
 {% block content %}
 <div class="head">
-  <div class="crumb-row"><nav class="crumbs" aria-label="Back"><a class="crumb-back" href="{{ back }}">{{ crate::web::icons::icon("back")|safe }}<span>{{ project_name }}</span></a><span class="crumb-where">Step</span></nav></div>
+  <div class="crumb-row">{% include "path.html" %}</div>
   <p class="row wrap"><span class="mono sub">{{ project_slug }} · {% if !milestone.is_empty() %}{{ milestone }} / {% endif %}{{ name }}</span><span class="chip{% if state == "concluded" %} state-done{% else if state == "active" %} accent{% endif %}">{{ state }}</span><span class="sub">{{ when }}</span></p>
   <h1 class="rec-title">{{ title }}</h1>
 </div>
