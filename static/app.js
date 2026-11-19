@@ -437,10 +437,14 @@ document.addEventListener("click", async (e) => {
     const next = doc.getElementById("board");
     if (!next) throw new Error("no board");
     board.replaceWith(next);
-    for (const m of document.querySelectorAll("a[data-ms]")) {
-      const on = m === a;
-      m.classList.toggle("sel", on);
-      if (on) m.setAttribute("aria-current", "true"); else m.removeAttribute("aria-current");
+    // On the overview the link stays and is marked; on Plan the whole area was swapped and the new
+    // one marks itself.
+    if (document.contains(a)) {
+      for (const m of document.querySelectorAll("a[data-ms]")) {
+        const on = m === a;
+        m.classList.toggle("sel", on);
+        if (on) m.setAttribute("aria-current", "true"); else m.removeAttribute("aria-current");
+      }
     }
     history.replaceState(history.state, "", a.href.replace(/#.*$/, ""));
     document.dispatchEvent(new CustomEvent("af:content", { detail: next }));
@@ -448,6 +452,14 @@ document.addEventListener("click", async (e) => {
     location.href = a.href;
   }
 });
+
+// Plan (the owner, 2026-11-18, D-219): on the phone the step rail starts folded to the picked step.
+const foldRail = (root) => {
+  if (!window.matchMedia("(max-width: 700px)").matches) return;
+  for (const d of root.querySelectorAll("details[data-srail]")) d.open = false;
+};
+document.addEventListener("DOMContentLoaded", () => foldRail(document));
+document.addEventListener("af:content", (e) => foldRail(e.detail));
 
 // Project tabs on the phone switch in place (the owner, 2026-11-12: "on mobile clicking a tab in a
 // project page doesn't add navigation and instead just switches tabs"): the tab's page is fetched,

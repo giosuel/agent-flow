@@ -600,8 +600,9 @@ async fn the_overview_puts_questions_first_and_folds_closed_milestones() {
     let page = s.http.get(s.url("/p/vinculum")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
     assert!(page.contains("Waiting on you") && page.contains("Take A") && page.contains("qopt rec"), "{page}");
     assert!(page.contains(r#"name="next" value="/p/vinculum?answered=Q-1""#), "{page}");
-    assert!(page.contains(r#"class="msa"#) && page.contains("Work M2") && page.contains("1 closed"), "{page}");
-    assert!(page.contains("1 under way · 1 planned · 1 closed"), "{page}");
+    // The overview shows the milestone under way and links to Plan for the rest (D-220).
+    assert!(page.contains(r#"class="msa"#) && page.contains("Work M2") && !page.contains("Work M3"), "{page}");
+    assert!(page.contains("1 under way · 1 planned · 1 closed · Plan") && page.contains("Open in Plan"), "{page}");
     assert!(!page.contains("Open questions"), "the old card at the bottom is gone");
     // One click answers, and the overview says so.
     let res = s
@@ -625,10 +626,14 @@ async fn the_overview_puts_questions_first_and_folds_closed_milestones() {
         .await
         .unwrap();
     assert!(page.contains("Answered Q-1") && !page.contains("Waiting on you"), "{page}");
-    // A closed milestone's board opens the fold.
-    let page =
-        s.http.get(s.url("/p/vinculum?ms=M1")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
-    assert!(page.contains(r#"<details class="ms-fold" open>"#), "{page}");
+    // Plan: the milestone under way large, the others as rows, the closed ones folded (D-219).
+    let plan = owner_page(&s, &cookie, "/p/vinculum/plan").await;
+    assert!(plan.contains("plan-card") && plan.contains("Work M3") && plan.contains("1 closed"), "{plan}");
+    // A closed milestone picked is the large card; the path names it (D-222).
+    let plan = owner_page(&s, &cookie, "/p/vinculum/plan/M1").await;
+    assert!(plan.contains(r#"<span class="chip state-done">closed</span>"#), "{plan}");
+    assert!(plan.contains(r#"<span aria-current="page" title="M1 · Work M1">"#), "{plan}");
+    assert!(plan.contains(r#"<a href="/p/vinculum/plan" title="Plan">Plan</a>"#), "{plan}");
 }
 
 /// M13: a status line's sample makes the Usage page's plan card, and the chart counts cost.
@@ -709,7 +714,8 @@ async fn the_owner_answers_on_the_page_and_the_agent_reads_it() {
     for path in [
         "/projects",
         "/p/vinculum",
-        "/p/vinculum?ms=none",
+        "/p/vinculum/plan/none",
+        "/p/vinculum/plan",
         "/p/vinculum?tab=decisions",
         "/p/vinculum?tab=questions",
         "/p/vinculum/Q-1",
@@ -985,9 +991,10 @@ async fn owner_page(s: &TestServer, cookie: &str, path: &str) -> String {
     s.http.get(s.url(path)).header(COOKIE, cookie).send().await.unwrap().text().await.unwrap()
 }
 
-/// The step bar's link to the step the board shows (D-218).
+/// Plan's link to the step the board shows (D-219).
 fn step_bar_link(html: &str) -> String {
-    let at = html.find(r#"class="sb-link" href=""#).expect("a step bar") + r#"class="sb-link" href=""#.len();
+    let at = html.find(r#"class="btn sm ghost step-open" href=""#).expect("a step line")
+        + r#"class="btn sm ghost step-open" href=""#.len();
     html[at..].split('"').next().unwrap().to_owned()
 }
 
@@ -2003,7 +2010,7 @@ async fn steps_run_on_batches_blocks_and_conclusions() {
     assert_eq!(k1["doing"].as_array().unwrap().len(), 2);
     // The overview's board shows the block; the step, opened from the step bar, the rest.
     let cookie = s.owner_cookie().await;
-    let overview = owner_page(&s, &cookie, "/p/vinculum?ms=M4&step=K1").await;
+    let overview = owner_page(&s, &cookie, "/p/vinculum/plan/M4?step=K1").await;
     assert!(overview.contains("blocked by Q-1"), "{overview}");
     let step = owner_page(&s, &cookie, &step_bar_link(&overview)).await;
     assert!(step.contains("added · your feedback · from B-3") && step.contains("skipped: churn"), "{step}");
@@ -2038,11 +2045,11 @@ async fn steps_run_on_batches_blocks_and_conclusions() {
     let (ok, r) = call("add_task", json!({"title": "Windows parity", "state": "parked", "estimate": "2 d"})).await;
     assert!(ok, "{r}");
     assert!(!call("add_task", json!({"title": "Loose", "estimate": "1 h"})).await.0);
-    let overview = owner_page(&s, &cookie, "/p/vinculum").await;
-    assert!(overview.contains("Without a milestone") && overview.contains("?ms=none#board"), "a row of its own");
-    let loose = owner_page(&s, &cookie, "/p/vinculum?ms=none").await;
+    let plan = owner_page(&s, &cookie, "/p/vinculum/plan").await;
+    assert!(plan.contains("Without a milestone") && plan.contains("/p/vinculum/plan/none"), "a row of its own");
+    let loose = owner_page(&s, &cookie, "/p/vinculum/plan/none").await;
     assert!(loose.contains("Without a milestone") && loose.contains("Windows parity"), "{loose}");
-    assert!(!loose.contains("class=\"sb-link\""), "no steps, no step bar");
+    assert!(!loose.contains("data-srail"), "no steps, no rail");
     // A review is a step: reviewers and commit, findings ranked, one skipped.
     assert!(
         !call(
@@ -2060,7 +2067,7 @@ async fn steps_run_on_batches_blocks_and_conclusions() {
         {"title": "Big thing", "estimate": "2 h", "source": "review", "importance": "high"},
         {"title": "Churn", "state": "skipped", "reason": "no behaviour change", "importance": "low", "source": "review"}]})).await;
     assert!(ok, "{r}");
-    let overview = owner_page(&s, &cookie, "/p/vinculum?ms=M4&step=K9").await;
+    let overview = owner_page(&s, &cookie, "/p/vinculum/plan/M4?step=K9").await;
     assert!(overview.contains("End-of-M4 review"), "{overview}");
     let page = owner_page(&s, &cookie, &step_bar_link(&overview)).await;
     assert!(page.contains("abc1234"), "{page}");
@@ -2499,7 +2506,7 @@ async fn answers_make_scoped_decisions_and_releases_bring_their_tag_button() {
     .await;
     assert!(ok, "{n}");
     assert!(!call("add_note", json!({"name": "x", "category": "x", "text": "x", "record": "NOPE"})).await.0);
-    let overview = owner_page(&s, &cookie, "/p/vinculum?ms=M4&step=R9").await;
+    let overview = owner_page(&s, &cookie, "/p/vinculum/plan/M4?step=R9").await;
     let step = owner_page(&s, &cookie, &step_bar_link(&overview)).await;
     assert!(step.contains("Reports and notes") && step.contains("Review report R1"), "{step}");
     assert!(call("conclude_step", json!({"step": "R9", "summary": "Reviewed."})).await.0);
@@ -2657,13 +2664,17 @@ async fn the_demo_project_shows_on_every_tab() {
     let data = s.state.config.data_dir();
     s.state.db.call(move |c| crate::demo::create(c, &data)).await.unwrap();
     let cookie = s.owner_cookie().await;
-    for tab in ["", "?ms=none", "?tab=questions", "?tab=prs", "?tab=builds", "?tab=decisions", "?tab=screenshots"] {
+    for tab in
+        ["", "/plan", "/plan/none", "?tab=questions", "?tab=prs", "?tab=builds", "?tab=decisions", "?tab=screenshots"]
+    {
         let res = s.http.get(s.url(&format!("/p/lumen-demo{tab}"))).header(COOKIE, &cookie).send().await.unwrap();
         assert_eq!(res.status(), StatusCode::OK, "{tab}");
     }
-    // The Tasks tab went (D-218): its old links open the overview.
+    // The Tasks tab went (D-218): its old links open Plan, and so do the overview's old board links.
     let old = s.http.get(s.url("/p/lumen-demo?tab=tasks")).header(COOKIE, &cookie).send().await.unwrap();
-    assert_eq!(old.headers()[LOCATION], "/p/lumen-demo");
+    assert_eq!(old.headers()[LOCATION], "/p/lumen-demo/plan");
+    let old = s.http.get(s.url("/p/lumen-demo?ms=M3&step=K2")).header(COOKIE, &cookie).send().await.unwrap();
+    assert_eq!(old.headers()[LOCATION], "/p/lumen-demo/plan/M3?step=K2");
     let shots = s.http.get(s.url("/p/lumen-demo?tab=screenshots")).header(COOKIE, &cookie).send().await.unwrap();
     assert!(shots.text().await.unwrap().contains("Album sidebar, variant A"));
     let img = s.http.get(s.url("/p/lumen-demo/S-1/image")).header(COOKIE, &cookie).send().await.unwrap();
