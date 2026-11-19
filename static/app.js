@@ -456,8 +456,17 @@ document.addEventListener("click", async (e) => {
 // Plan (the owner, 2026-11-18, D-219; 2026-11-19, D-226): the milestone list scrolls to the picked
 // milestone, the one before it just above; on the phone there's no scroll box, the done ones and
 // the step rail start folded (unless the picked one is among them).
+// A fade on each side of the list's box with more to scroll to.
+const fadeList = (box) => {
+  box.classList.toggle("more-up", box.scrollTop > 2);
+  box.classList.toggle("more-down", box.scrollTop + box.clientHeight < box.scrollHeight - 2);
+};
 const foldRail = (root) => {
   for (const box of root.querySelectorAll(".ml-plan [data-ml]")) {
+    if (!box.dataset.fade) {
+      box.dataset.fade = "1";
+      box.addEventListener("scroll", () => fadeList(box), { passive: true });
+    }
     const picked = box.querySelector(".ml-row.picked");
     if (picked && box.scrollHeight > box.clientHeight) {
       // The row before it, among the rows shown (the done ones sit in their own fold).
@@ -465,6 +474,7 @@ const foldRail = (root) => {
       const before = rows[rows.indexOf(picked) - 1];
       box.scrollTop = Math.max(0, picked.offsetTop - (before ? before.offsetHeight : 0) - 4);
     }
+    fadeList(box);
   }
   if (!window.matchMedia("(max-width: 700px)").matches) return;
   for (const d of root.querySelectorAll("details[data-srail]")) d.open = false;
