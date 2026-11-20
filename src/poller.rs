@@ -55,6 +55,7 @@ pub async fn poll_once(state: &AppState) -> anyhow::Result<()> {
             warn(state, &p.slug, format!("GitHub poll of {} failed: {e:#}", p.repo)).await;
         }
     }
+    check_pushed_tags(state).await?;
     check_releases(state).await
 }
 
@@ -121,6 +122,58 @@ pub fn notify_ready(state: &AppState, project_name: &str, pr: &records::Record) 
             tag: Some(pr.ref_id.clone()),
         },
     );
+}
+
+/// Waiting releases whose tag is on GitHub already (pushed by hand, outside AgentFlow): marked
+/// tagged like after their button, so the button can't be pressed into a collision (the
+/// consultant, 2026-11-19: Imaginarium's R-1 still waited after the owner pushed its tag).
+pub async fn check_pushed_tags(state: &AppState) -> anyhow::Result<()> {
+    let waiting = state
+        .db
+        .call(|c| {
+            let list = records::query(
+                c,
+                &Query { kinds: vec![Kind::Release], states: vec!["waiting".into()], limit: 0, ..Default::default() },
+            )?;
+            let mut out = Vec::new();
+            for r in list.into_iter().filter(|r| !r.str("tag").is_empty()) {
+                let repo = projects::get_by_id(c, r.project_id)?.repo.trim().to_owned();
+                if projects::looks_like_repo(&repo) {
+                    out.push((repo, r));
+                }
+            }
+            Ok(out)
+        })
+        .await?;
+    for (repo, r) in waiting {
+        let tag = r.str("tag").to_owned();
+        match state.github.tag_exists(&repo, &tag).await {
+            Ok(false) => {}
+            Ok(true) => {
+                state
+                    .db
+                    .call(move |c| {
+                        // Still waiting: a press may have finished meanwhile.
+                        let r = records::get(c, r.id)?;
+                        if r.state == "waiting" {
+                            crate::actions::mark_tagged(c, &r, prs::GITHUB)?;
+                            records::event(
+                                c,
+                                Some(r.project_id),
+                                Some(r.id),
+                                "release.tagged",
+                                &format!("{tag} is on GitHub already (pushed outside AgentFlow): marked tagged"),
+                                prs::GITHUB,
+                            )?;
+                        }
+                        Ok(())
+                    })
+                    .await?;
+            }
+            Err(e) => warn(state, &r.project, format!("checking tag {tag} of {repo} failed: {e:#}")).await,
+        }
+    }
+    Ok(())
 }
 
 /// Releases whose PRs are all merged now: tell the owner once.
