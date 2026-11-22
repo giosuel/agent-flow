@@ -17,14 +17,14 @@ use crate::{actions, prs};
 pub struct UpdatePr {
     /// The PR's number on GitHub, in your project's repository.
     pub number: i64,
-    /// True when it's ready for the owner to merge; false takes that back.
-    pub ready: Option<bool>,
+    /// Not taken any more: whether a PR is ready is GitHub's draft flag (the owner, 2026-11-22,
+    /// D-233). Kept out of the schema, and refused with that hint if an agent still sends it.
+    #[serde(default)]
+    #[schemars(skip)]
+    pub ready: Option<serde_json::Value>,
     /// Tasks this PR carries out, e.g. ["T-14"].
     #[serde(default)]
     pub implements: Vec<String>,
-    /// A line for the PR's history.
-    #[serde(default)]
-    pub note: String,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -96,9 +96,10 @@ pub struct ButtonId {
 #[tool_router(router = pr_tools, vis = "pub(super)")]
 impl FlowMcp {
     #[tool(
-        description = "A PR that isn't a draft on GitHub is ready to merge by itself; use this to mark one not ready \
-        (or ready again), or to say which tasks it carries out when its branch isn't theirs. AgentFlow picks up PRs \
-        from your repository by itself; this also adds one it hasn't seen yet."
+        description = "Say which tasks a PR carries out, when its branch isn't theirs. AgentFlow picks up PRs from your \
+        repository by itself; this also adds one it hasn't seen yet. Whether a PR is ready is GitHub's alone: a draft \
+        isn't, anything else is. To hold one back, make it a draft (`gh pr ready --undo <n>`); `gh pr ready <n>` \
+        makes it ready again."
     )]
     async fn update_pr(
         &self,
@@ -112,6 +113,12 @@ impl FlowMcp {
             self.state.db.call(move |c| target_project(c, &a, None, true)).await
         };
         let outcome = async {
+            if p.ready.is_some() {
+                anyhow::bail!(
+                    "a PR's readiness is GitHub's draft flag: `gh pr ready --undo {n}` holds it back, `gh pr ready {n}` makes it ready",
+                    n = p.number
+                );
+            }
             let project = project?;
             if project.repo.is_empty() {
                 anyhow::bail!("your project has no repository yet; set it with update_project");
@@ -119,38 +126,28 @@ impl FlowMcp {
             // Fetch it now, so a brand-new PR is there without waiting for the poller.
             let info = self.state.github.pr(&project.repo, p.number).await?;
             crate::poller::apply(&self.state, &project, &project.repo, info).await?;
-            let (proj, name) = (project.clone(), project.name.clone());
-            let (r, newly_ready) = self
+            let proj = project.clone();
+            let r = self
                 .state
                 .db
                 .call(move |c| {
                     let tx = c.transaction()?;
-                    let mut r = records::find(
+                    let r = records::find(
                         &tx,
                         &records::RecordRef { project: Some(proj.slug.clone()), kind: Kind::Pr, number: p.number },
                         None,
                     )?;
-                    let was = prs::merge_ready(&r).is_ok();
-                    if let Some(ready) = p.ready {
-                        r = prs::set_ready(&tx, &r, ready, &p.note, &a.name())?;
-                    }
                     for t in &p.implements {
                         let task = records::find_str(&tx, t, Some(&proj.slug))?;
                         records::link(&tx, &r, &task, "implements", &a.name())?;
                     }
                     let r = records::get(&tx, r.id)?;
                     tx.commit()?;
-                    let now = prs::merge_ready(&r).is_ok();
-                    Ok((r, !was && now))
+                    Ok(r)
                 })
                 .await?;
-            if newly_ready {
-                crate::poller::notify_ready(&self.state, &name, &r);
-            }
             let why = prs::merge_ready(&r).err();
-            Ok(Outcome::new(
-                json!({"id": r.ref_id, "state": r.state, "ready": r.data.get("ready"), "not_mergeable_because": why}),
-            )
+            Ok(Outcome::new(json!({"id": r.ref_id, "state": r.state, "not_mergeable_because": why}))
             .summary(format!("PR {} updated", r.short_id()))
             .project(r.project.clone())
             .target(r.ref_id))

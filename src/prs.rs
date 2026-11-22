@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 
 use rusqlite::Connection;
-use serde_json::{Map, Value, json};
+use serde_json::{Map, Value};
 
 use crate::github::PrInfo;
 use crate::projects::Project;
@@ -231,11 +231,6 @@ fn ready_with(pr: &Record, ci_matters: bool) -> Result<(), String> {
     if pr.str("mergeable") == "conflicting" {
         return Err("has conflicts".into());
     }
-    // Ready unless the agent said it isn't: GitHub's draft flag says the rest (Imaginarium's agent,
-    // 2026-11-12: "a non-draft PR is ready and a draft isn't").
-    if pr.data.get("ready").and_then(Value::as_bool) == Some(false) {
-        return Err("the agent marked it not ready".into());
-    }
     if ci_matters && pr.str("ci") == "pending" {
         return Err("CI still running".into());
     }
@@ -373,14 +368,6 @@ pub fn chain_to(conn: &Connection, order: &[Ordered], number: i64) -> anyhow::Re
         steps.push(ChainStep { number: n, action: a });
     }
     Ok(Ok(steps))
-}
-
-/// The agent marks its PR ready for the owner (or not), optionally saying which tasks it carries out.
-pub fn set_ready(conn: &Connection, pr: &Record, ready: bool, note: &str, author: &str) -> anyhow::Result<Record> {
-    let mut data = Map::new();
-    data.insert("ready".into(), json!(ready));
-    let (r, _) = records::update(conn, pr, author, Patch { data, note: note.into(), ..Default::default() })?;
-    Ok(r)
 }
 
 /// Every PR the release waits for is merged.
@@ -570,12 +557,14 @@ mod tests {
                 merge_order(c, p.id)?.iter().map(|o| (o.record.number, o.after)).collect();
             assert_eq!(order, [(48, None), (49, Some(48)), (50, Some(49)), (51, None)]);
 
-            // Ready once it isn't a draft, unless the agent says it isn't; then CI and conflicts decide.
+            // Ready once it isn't a draft on GitHub (the only say in it, D-233); then CI and conflicts decide.
             let r48 = records::find_str(c, "v/PR-48", None)?;
             assert!(merge_ready(&r48).is_ok());
-            let r48 = set_ready(c, &r48, false, "waiting for the review agent", "v")?;
-            assert_eq!(merge_ready(&r48).unwrap_err(), "the agent marked it not ready");
-            let r48 = set_ready(c, &r48, true, "ready for review", "v")?;
+            let mut draft = pr(48, "main", "b48");
+            draft.draft = true;
+            let (r48, _) = sync(c, &p, "o/r", &draft, "poller")?;
+            assert_eq!(merge_ready(&r48).unwrap_err(), "still a draft");
+            let (r48, _) = sync(c, &p, "o/r", &pr(48, "main", "b48"), "poller")?;
             assert!(merge_ready(&r48).is_ok());
             let mut failing = pr(48, "main", "b48");
             failing.ci = "failing".into();
@@ -589,7 +578,6 @@ mod tests {
             merged.state = "merged".into();
             let (r, res) = sync(c, &p, "o/r", &merged, "poller")?;
             assert!(res.merged && r.state == "merged");
-            assert_eq!(r.data["ready"], true, "the agent's fields survive a sync");
             let order: Vec<i64> = merge_order(c, p.id)?.iter().map(|o| o.record.number).collect();
             assert_eq!(order, [49, 50, 51]);
             Ok(())

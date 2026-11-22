@@ -268,7 +268,6 @@ pub fn create(c: &mut Connection, data_dir: &Path) -> anyhow::Result<String> {
             ci: "passing".into(),
         };
         let (r, _) = crate::prs::sync(c, &projects::get_by_id(c, p.id)?, REPO, &info, SLUG)?;
-        let r = if state == "open" && !draft { crate::prs::set_ready(c, &r, true, "", SLUG)? } else { r };
         if state == "open" && !draft {
             let command = format!("echo 'Demo: nothing is merged (PR #{n} of {REPO}).'");
             let b = crate::actions::NewButton {

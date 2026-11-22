@@ -594,8 +594,6 @@ mod tests {
         assert!(err.contains("unlocks once T-1 is done"), "{err}");
         db.call(move |c| {
             records::update(c, &task, "v", records::Patch { state: Some("done".into()), ..Default::default() })?;
-            let r = records::find_str(c, "v/PR-48", None)?;
-            crate::prs::set_ready(c, &r, true, "", "v")?;
             Ok(())
         })
         .await
