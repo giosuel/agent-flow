@@ -2,13 +2,18 @@
 {% block title %}Log{% endblock %}
 {% block scripts %}<script src="/static/log.js?v={{ nav.version }}" defer></script>{% endblock %}
 {% block content %}
-<div class="head log-head"><h1>Log</h1>
-  <div class="row">{% if live %}<button class="btn sm ghost" type="button" id="live" data-q="{{ q }}" data-range="{{ range }}" data-after="{{ latest }}">{{ crate::web::icons::icon("pause")|safe }}<span>Pause</span></button>{% endif %}</div>
-</div>
+<div class="head log-head"><h1>Log</h1></div>
 
-<nav class="ltabs" aria-label="Categories">
-  {% for t in tabs %}<a href="{{ t.href }}"{% if t.on %} class="on" aria-current="true"{% endif %}>{{ crate::web::icons::icon(t.icon)|safe }}<span>{{ t.label }}</span><span class="mono n">{{ t.count }}</span></a>{% endfor %}
-</nav>
+{# One card from the categories down to the last row (the owner, 2026-11-23, "Log: a connected
+   top", LogPanel): the categories are its header, Live and Pause at its right end; search, filters
+   and the time range its second band; the chart and the rows follow. #}
+<section class="card lpanel" aria-labelledby="lp-h">
+<div class="lbar">
+  <nav class="ltabs" aria-label="Categories">
+    {% for t in tabs %}<a href="{{ t.href }}"{% if t.on %} class="on" aria-current="true"{% endif %}>{{ crate::web::icons::icon(t.icon)|safe }}<span>{{ t.label }}</span><span class="mono n">{{ t.count }}</span></a>{% endfor %}
+  </nav>
+  {% if live %}<div class="lright"><span class="livedot" id="livedot">Live</span><button class="btn sm ghost" type="button" id="live" data-q="{{ q }}" data-range="{{ range }}" data-after="{{ latest }}">{{ crate::web::icons::icon("pause")|safe }}<span>Pause</span></button></div>{% endif %}
+</div>
 
 <form method="get" action="/log" class="ltool">
   <label class="lsearch">{{ crate::web::icons::icon("search")|safe }}<span class="vh">Search</span><input name="q" value="{{ q }}" placeholder="Search the text, or a query like actor:imaginarium -action:read" autocomplete="off"></label>
@@ -22,8 +27,7 @@
   {% if let Some(r) = reset %}<a class="sub" href="{{ r }}">Clear</a>{% endif %}
 </form>
 
-<section class="card lpanel" aria-labelledby="lp-h">
-  <div class="lp-top"><h2 id="lp-h">{{ total }} entr{% if total == 1 %}y{% else %}ies{% endif %} · {{ span }}{% if live %} <span class="livedot" id="livedot">Live</span>{% endif %}</h2><span class="sub">newest first · {{ tz }} · click a bar to zoom in</span></div>
+  <div class="lp-top"><h2 id="lp-h">{{ total }} entr{% if total == 1 %}y{% else %}ies{% endif %} · {{ span }}</h2><span class="sub">newest first · {{ tz }} · click a bar to zoom in</span></div>
   <div class="hist" role="img" aria-label="Entries over time">{% for b in bars %}<a href="{{ b.href }}" data-tip="{{ b.label }}" aria-label="{{ b.label }}"><i style="height: {{ b.height }}%"></i></a>{% endfor %}</div>
   <div class="axis sub mono">{% for a in axis %}<span>{{ a }}</span>{% endfor %}</div>
   <div class="lhead" aria-hidden="true"><span>Time</span><span>Category</span><span>Actor</span><span>Project</span><span>What</span><span>Severity</span></div>
