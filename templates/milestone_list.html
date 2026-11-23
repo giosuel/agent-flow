@@ -8,11 +8,11 @@
   <div class="ml-scroll" data-ml>
     {% if !ms_done.is_empty() %}
     <details class="ml-done"{% if tab == "plan" %} open{% endif %} data-ml-done>
-      <summary class="ml-row done"><span class="ml-i done" aria-hidden="true"></span><span class="mono k">{{ ms_done.len() }} done</span><span class="ks mono">{% for m in ms_done.iter().rev() %}{% if !loop.first %} · {% endif %}{{ m.name }}{% endfor %}</span><span class="sub ml-show">Show</span>{{ crate::web::icons::icon("chevron")|safe }}</summary>
+      <summary class="ml-row done"><span class="ml-i done" aria-hidden="true" title="Done"></span><span class="mono k">{{ ms_done.len() }} done</span><span class="ks mono">{% for m in ms_done.iter().rev() %}{% if !loop.first %} · {% endif %}{{ m.name }}{% endfor %}</span><span class="sub ml-show">Show</span>{{ crate::web::icons::icon("chevron")|safe }}</summary>
       {% for m in ms_done %}{% include "milestone_row.html" %}{% endfor %}
     </details>
     {% endif %}
     {% for m in ms_list %}{% include "milestone_row.html" %}{% endfor %}
-    {% if loose_count > 0 %}<a class="ml-row loose{% if loose_selected %} picked{% endif %}" href="/p/{{ slug }}/plan/none"{% if tab == "plan" %} data-ms{% endif %}{% if loose_selected %} aria-current="true"{% endif %}><span class="ml-i loose" aria-hidden="true">{{ crate::web::icons::icon("inbox")|safe }}</span><span class="mono k">–</span><span class="t">Without a milestone <span class="sub">· parked</span></span><span class="sub c">{{ loose_count }} task{% if loose_count != 1 %}s{% endif %}</span><span class="pbar none" aria-hidden="true"></span><span class="tg"></span>{{ crate::web::icons::icon("chevron")|safe }}</a>{% endif %}
+    {% if loose_count > 0 %}<a class="ml-row loose{% if loose_selected %} picked{% endif %}" href="/p/{{ slug }}/plan/none"{% if tab == "plan" %} data-ms{% endif %}{% if loose_selected %} aria-current="true"{% endif %}><span class="ml-i loose" aria-hidden="true" title="Tasks without a milestone">{{ crate::web::icons::icon("inbox")|safe }}</span><span class="mono k">–</span><span class="t">Without a milestone <span class="sub">· parked</span></span><span class="sub c">{{ loose_count }} task{% if loose_count != 1 %}s{% endif %}</span><span class="pbar none" aria-hidden="true"></span><span class="tg"></span>{{ crate::web::icons::icon("chevron")|safe }}</a>{% endif %}
   </div>
 </section>
