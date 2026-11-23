@@ -861,7 +861,10 @@ mod tests {
             projects: Vec::new(),
         };
         let html = ServersCard { servers: vec![server], notice: None }.render().unwrap();
-        assert!(html.contains(r#"<details class="sl-item">"#) && !html.contains(r#"<details class="sl-item" open>"#), "{html}");
+        assert!(
+            html.contains(r#"<details class="sl-item">"#) && !html.contains(r#"<details class="sl-item" open>"#),
+            "{html}"
+        );
         // The limits' number fields carry our own steppers.
         assert_eq!(html.matches(r#"<span class="numf"><input"#).count(), 5, "{html}");
         assert_eq!(html.matches(r#"data-step="-1" aria-label="One less""#).count(), 5);
