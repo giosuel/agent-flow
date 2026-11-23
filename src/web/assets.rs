@@ -30,7 +30,6 @@ const ASSETS: &[Asset] = &[
     asset!("machine.js", "text/javascript; charset=utf-8"),
     asset!("remote.js", "text/javascript; charset=utf-8"),
     asset!("nav.js", "text/javascript; charset=utf-8"),
-    asset!("bar.js", "text/javascript; charset=utf-8"),
     asset!("passkey.js", "text/javascript; charset=utf-8"),
     asset!("settings.js", "text/javascript; charset=utf-8"),
     asset!("icons/apple-touch-icon.png", "image/png"),

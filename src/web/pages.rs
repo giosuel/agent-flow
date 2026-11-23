@@ -65,11 +65,6 @@ pub struct NavProject {
     pub slug: String,
     pub name: String,
     pub online: bool,
-    /// Its open questions, PRs and things to test: the counts on its tabs when the bar shows the
-    /// project remembered on a page outside it (static/bar.js).
-    pub questions: i64,
-    pub prs: i64,
-    pub tests: i64,
 }
 
 /// One of the project's tabs in the desktop bar.
@@ -133,6 +128,61 @@ pub struct Nav {
     pub here: Option<Here>,
 }
 
+/// The cookie that keeps the project last opened (the owner, 2026-11-23: "lets do cookie"): on
+/// the pages outside the projects the desktop bar shows it, drawn here, so nothing flashes.
+pub const PROJECT_COOKIE: &str = "af_project";
+
+tokio::task_local! {
+    /// The project the request's cookie keeps, for `nav`.
+    static KEPT_PROJECT: Option<String>;
+}
+
+/// Around the owner's page requests: hands `nav` the kept project, and keeps the project a page
+/// belongs to (`/p/<slug>…`) once it has loaded. The projects list (/projects, "All projects" in
+/// the switcher) forgets it.
+pub async fn keep_project(
+    State(state): State<AppState>,
+    req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> Response {
+    let owner = req.extensions().get::<Actor>().is_some_and(|a| a.is_owner());
+    if !owner || req.method() != axum::http::Method::GET {
+        return next.run(req).await;
+    }
+    let kept = CookieJar::from_headers(req.headers()).get(PROJECT_COOKIE).map(|c| c.value().to_owned());
+    let path = req.uri().path();
+    let opened = path
+        .strip_prefix("/p/")
+        .map(|rest| rest.split('/').next().unwrap_or_default().to_owned())
+        .filter(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_'));
+    let forget = path == "/projects";
+    let mut res = KEPT_PROJECT.scope(kept.clone(), next.run(req)).await;
+    if !res.status().is_success() {
+        return res;
+    }
+    let cookie = match (opened, forget) {
+        (Some(slug), _) if kept.as_deref() != Some(slug.as_str()) => Cookie::build((PROJECT_COOKIE, slug))
+            .path("/")
+            .http_only(true)
+            .secure(state.config.is_https())
+            .same_site(SameSite::Lax)
+            .max_age(time::Duration::days(365))
+            .build(),
+        (None, true) if kept.is_some() => Cookie::build((PROJECT_COOKIE, ""))
+            .path("/")
+            .http_only(true)
+            .secure(state.config.is_https())
+            .same_site(SameSite::Lax)
+            .max_age(time::Duration::ZERO)
+            .build(),
+        _ => return res,
+    };
+    if let Ok(v) = header::HeaderValue::from_str(&cookie.to_string()) {
+        res.headers_mut().append(header::SET_COOKIE, v);
+    }
+    res
+}
+
 /// The navigation with the live "waiting on you" count, for every page.
 pub async fn nav(state: &AppState, actor: &Actor, active: &str) -> Nav {
     let mut n = Nav::new(active);
@@ -143,31 +193,20 @@ pub async fn nav(state: &AppState, actor: &Actor, active: &str) -> Nav {
         n.projects = state
             .db
             .call(move |c| {
-                let mut open = std::collections::HashMap::<(i64, String), i64>::new();
-                let mut q = c.prepare(
-                    "SELECT project_id, kind, count(*) FROM records \
-                     WHERE state = 'open' AND kind IN ('question', 'pr', 'test') GROUP BY 1, 2",
-                )?;
-                for row in q.query_map([], |r| Ok(((r.get(0)?, r.get(1)?), r.get(2)?)))? {
-                    let (k, n) = row?;
-                    open.insert(k, n);
-                }
-                let n = |id: i64, kind: &str| open.get(&(id, kind.to_owned())).copied().unwrap_or(0);
                 Ok(crate::projects::list(c)?
                     .into_iter()
                     .filter(|p| p.status != "archived")
-                    .map(|p| NavProject {
-                        online: p.agent.online(now),
-                        questions: n(p.id, "question"),
-                        prs: n(p.id, "pr"),
-                        tests: n(p.id, "test"),
-                        slug: p.slug,
-                        name: p.name,
-                    })
+                    .map(|p| NavProject { online: p.agent.online(now), slug: p.slug, name: p.name })
                     .collect())
             })
             .await
             .unwrap_or_default();
+        // Outside the projects (their pages are under "/projects"), the bar shows the project
+        // last opened, with its tabs, none of them lit.
+        let kept = KEPT_PROJECT.try_with(|k| k.clone()).ok().flatten();
+        if let Some(slug) = kept.filter(|k| active != "/projects" && n.projects.iter().any(|p| &p.slug == k)) {
+            n = n.in_project(state, &slug, "").await;
+        }
     }
     n
 }
@@ -231,17 +270,6 @@ impl Nav {
     /// The page is the list of projects (or a page under it that isn't one project's).
     pub fn on_projects(&self) -> bool {
         self.items.iter().any(|i| i.href == "/projects" && i.active)
-    }
-
-    /// A page outside the projects: the bar shows the project last opened, kept in the browser's
-    /// local storage (the owner, 2026-11-23), with these tabs (static/bar.js).
-    pub fn remembers_project(&self) -> bool {
-        self.here.is_none() && !self.on_projects() && !self.projects.is_empty()
-    }
-
-    /// The project page's tabs (key, label), for static/bar.js.
-    pub fn bar_tabs(&self) -> &'static [(&'static str, &'static str)] {
-        super::projects::TABS
     }
 
     /// The page belongs to the project `slug`, under its tab `tab` (a key of the project page's
