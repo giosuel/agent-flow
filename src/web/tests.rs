@@ -2043,7 +2043,21 @@ async fn usage_and_machine_pages_show_the_counts() {
     };
     let html = get("/usage").await.text().await.unwrap();
     assert!(html.contains("imaginarium") && html.contains("1.2 M"), "{html}");
-    assert!(get("/usage?tab=tasks").await.text().await.unwrap().contains("Not in a task"));
+    // One page (D-238): no Overview | Tasks tabs; the tasks are a card, all of them a dialog.
+    assert!(!html.contains(r#"<nav class="tabs" aria-label="Usage">"#), "{html}");
+    assert!(html.contains(r#"<h2 id="tasks-h">Tasks by cost</h2>"#), "{html}");
+    assert!(html.contains("No tokens are counted against a task yet"), "{html}");
+    assert!(html.contains(r#""Not in a task" $"#), "{html}");
+    assert!(html.contains(r#"<a class="tk-all" href="/usage/tasks" data-dlg>"#), "{html}");
+    assert!(html.contains(r#"href="/usage?days=14#tasks-h""#), "{html}");
+    let all = get("/usage/tasks").await.text().await.unwrap();
+    assert!(all.contains("<div data-dlg-content class=\"tasks-all\">") && all.contains("Not in a task"), "{all}");
+    assert!(all.contains("in the last 7 days"), "{all}");
+    assert!(get("/usage/tasks?days=14").await.text().await.unwrap().contains("in the last 14 days"));
+    // The old Tasks tab's address leads there.
+    let old = get("/usage?tab=tasks&days=14").await;
+    assert!(old.status().is_redirection());
+    assert_eq!(old.headers()[reqwest::header::LOCATION], "/usage/tasks?days=14");
     // Days are the browser's: today's call is on today's local date at UTC+14 and at UTC−11 alike.
     for zone in ["Pacific/Kiritimati", "Pacific/Pago_Pago"] {
         let day = crate::tz::Tz::named(zone).unwrap().date(crate::util::now_ms());

@@ -8,12 +8,7 @@
     <span class="sub">newest call {{ newest }}</span>
     <button class="reload-btn" type="submit"{% if reading %} disabled aria-label="Reading the transcripts" title="Reading the transcripts…"{% else %} aria-label="Reload" title="Read the transcripts now (they are read every five minutes), for tokens and conversations"{% endif %}>{{ crate::web::icons::icon("refresh")|safe }}</button></form>
 </div>
-<nav class="tabs" aria-label="Usage">
-  <a href="/usage"{% if tab == "overview" %} class="on" aria-current="page"{% endif %}>Overview</a>
-  <a href="/usage?tab=tasks"{% if tab == "tasks" %} class="on" aria-current="page"{% endif %}>Tasks</a>
-</nav>
-
-{% if tab == "overview" %}
+{# One page, no Overview | Tasks tabs: the tasks are a card, all of them a dialog (D-238). #}
 <section class="card plan-card" aria-labelledby="plan-h">
   <div class="plan-h"><h2 id="plan-h">Plan</h2>{% if !plan_seen.is_empty() %}<span class="sub">from a status line {{ plan_seen }}</span>{% endif %}<span class="grow"></span>{% if !est_rows.is_empty() %}<a class="sub" href="#est-h">How big a window is</a>{% endif %}</div>
   {% if meters.is_empty() %}
@@ -42,7 +37,7 @@
     <span class="row wrap">
       {% if zoomed %}<a class="sub" href="/usage{% for (k, _, on) in metrics %}{% if *on && !k.is_empty() %}?metric={{ k }}{% endif %}{% endfor %}">← Back to 14 days</a>{% endif %}
       <span class="ranges" role="group" aria-label="What to count">
-        {% for (k, name, on) in metrics %}<a class="rng{% if *on %} on{% endif %}" href="/usage?{{ day_q }}{% if !k.is_empty() %}metric={{ k }}{% endif %}"{% if *on %} aria-current="true"{% endif %}>{{ name }}</a>{% endfor %}
+        {% for (k, name, on) in metrics %}<a class="rng{% if *on %} on{% endif %}" href="/usage?{{ day_q }}{{ keep_days }}{% if !k.is_empty() %}metric={{ k }}{% endif %}"{% if *on %} aria-current="true"{% endif %}>{{ name }}</a>{% endfor %}
       </span>
     </span>
   </div>
@@ -85,6 +80,25 @@
   {% endif %}
 </section>
 
+<div class="usage-pair">
+<section class="card pad stack tk-card" aria-labelledby="tasks-h">
+  <div class="sec wrap"><div class="tk-title"><h2 id="tasks-h">Tasks by cost</h2><span class="sub">last {{ days }} days</span></div>
+    <span class="ranges" role="group" aria-label="Window">
+      <a class="rng{% if days == 7 %} on{% endif %}" href="/usage?{{ keep_day_metric }}days=7#tasks-h"{% if days == 7 %} aria-current="true"{% endif %}>7 days</a>
+      <a class="rng{% if days == 14 %} on{% endif %}" href="/usage?{{ keep_day_metric }}days=14#tasks-h"{% if days == 14 %} aria-current="true"{% endif %}>14 days</a>
+    </span>
+  </div>
+  {% if top_tasks.is_empty() %}
+  <p class="sub">{% if not_in_task.is_empty() %}No tokens in the last {{ days }} days.{% else %}No tokens are counted against a task yet: they are once an agent creates or updates its tasks through AgentFlow while it works. Until then everything is under "Not in a task".{% endif %}</p>
+  {% else %}
+  <div class="table-wrap"><table class="table nums tk-table">
+    <thead><tr><th scope="col">Task</th><th scope="col" class="hide-phone tk-l">Worked</th><th scope="col" class="hide-phone">New tokens</th><th scope="col">Cost</th></tr></thead>
+    <tbody>{% for t in top_tasks %}<tr><th scope="row"><a href="{{ t.url }}"><span class="mono sub">{{ t.id }}</span> {{ t.title }}</a></th><td class="sub hide-phone tk-l">{{ t.worked }}</td><td class="hide-phone">{{ t.t.new_tokens }}</td><td><span class="tk-cost"><strong>{{ t.t.cost }}</strong><span class="cbar" aria-hidden="true"><i style="width: {{ t.bar }}%; --c: {{ t.color }}"></i></span></span></td></tr>{% endfor %}</tbody>
+  </table></div>
+  {% endif %}
+  <div class="tk-foot"><span class="sub">{% if tasks_more > 0 %}{{ tasks_more }} more task{% if tasks_more != 1 %}s{% endif %}{% if !not_in_task.is_empty() %} · {% endif %}{% endif %}{% if !not_in_task.is_empty() %}"Not in a task" {{ not_in_task }}{% endif %}</span>
+    <a class="tk-all" href="/usage/tasks{% if days == 14 %}?days=14{% endif %}" data-dlg>{% if tasks_total == 1 %}The task{% else if tasks_total == 0 %}Open the list{% else %}All {{ tasks_total }} tasks{% endif %}{{ crate::web::icons::icon("chevron")|safe }}</a></div>
+</section>
 {% if !est_rows.is_empty() %}
 <section class="card pad stack" aria-labelledby="est-h">
   <div class="sec"><h2 id="est-h">How big a window is</h2><span class="sub">finished 5-hour windows, newest first</span></div>
@@ -97,26 +111,5 @@
   <p class="sub">Claude on your other devices (claude.ai, a laptop) uses the same plan but isn't counted here: while you use it, a window looks smaller than it is.</p>
 </section>
 {% endif %}
-{% else %}
-<section class="card pad stack" aria-labelledby="tasks-h">
-  <div class="sec wrap"><div class="stack-sm"><h2 id="tasks-h">Tasks by tokens</h2><span class="sub">{{ tasks.len() }} with tokens in the last {{ days }} days, most first</span></div>
-    <span class="ranges" role="group" aria-label="Window">
-      <a class="rng{% if days == 7 %} on{% endif %}" href="/usage?tab=tasks&amp;days=7">7 days</a>
-      <a class="rng{% if days == 14 %} on{% endif %}" href="/usage?tab=tasks">14 days</a>
-    </span>
-  </div>
-  {% if !any_task %}<p class="notice">No tokens are counted against a task yet: they are once an agent creates or updates its tasks through AgentFlow while it works. Until then everything is under "Not in a task".</p>{% endif %}
-  {% if !tasks.is_empty() %}
-  <div class="table-wrap"><table class="table nums tasks-usage">
-    <thead><tr><th scope="col">Task</th>{% if show_status %}<th scope="col" class="hide-phone">Status</th>{% endif %}<th scope="col" class="hide-phone">Worked</th><th scope="col" class="hide-phone">Calls</th><th scope="col" class="hide-phone">Input</th><th scope="col" class="hide-phone">Cache write</th><th scope="col" class="hide-phone">Output</th><th scope="col">New tokens</th><th scope="col">Cache reads</th><th scope="col">Cost</th>{% if show_estimate %}<th scope="col" class="hide-phone">Estimate</th>{% endif %}</tr></thead>
-    <tbody>{% for t in tasks %}
-      <tr><th scope="row"><details><summary><span class="swatch" style="--c: {{ t.color }}"></span>{% if !t.url.is_empty() %}<a href="{{ t.url }}"><span class="mono sub">{{ t.id }}</span> {{ t.title }}</a>{% else %}{{ t.title }} <span class="sub">· {{ t.project }}</span>{% endif %}</summary>
-        <p class="sub">Main session {{ t.main }} · subagents {{ t.subagents }}</p><p class="sub only-phone">{{ t.worked }} · {{ t.t.calls }} calls</p></details></th>
-        {% if show_status %}<td class="hide-phone">{{ t.status }}</td>{% endif %}<td class="sub hide-phone">{{ t.worked }}</td><td class="hide-phone">{{ t.t.calls }}</td><td class="hide-phone">{{ t.t.input }}</td><td class="hide-phone">{{ t.t.cache_write }}</td><td class="hide-phone">{{ t.t.output }}</td><td><strong>{{ t.t.new_tokens }}</strong></td><td>{{ t.t.cache_read }}</td><td><strong>{{ t.t.cost }}</strong></td>{% if show_estimate %}<td class="sub hide-phone">{{ t.estimate }}</td>{% endif %}</tr>
-    {% endfor %}</tbody>
-  </table></div>
-  {% endif %}
-  <p class="sub">A session's tokens go to the task its agent last worked on through AgentFlow, and a subagent's to the task its session was on when it started the subagent. Work outside any task is listed as "Not in a task". Counted: every session on this machine. Claude Code deletes transcripts after 30 days, so AgentFlow keeps its own counts.</p>
-</section>
-{% endif %}
+</div>
 {% endblock %}

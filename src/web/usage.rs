@@ -1,9 +1,10 @@
 //! The Usage page: token counts per day (an hour per bar when a day is opened), one line per
-//! agent, a table per project, and a Tasks tab with each task's tokens.
+//! agent, a table per project, and the tasks that cost most, all of them in a dialog
+//! (`/usage/tasks`).
 
 use askama::Template;
 use axum::extract::{Query, State};
-use axum::response::Response;
+use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::get;
 use axum::{Extension, Router};
 use serde::Deserialize;
@@ -18,11 +19,15 @@ use crate::usage::{self, Tokens, short};
 use crate::util::now_ms;
 
 pub fn routes() -> Router<AppState> {
-    Router::new().route("/usage", get(page)).route("/transcripts/read", axum::routing::post(read_now))
+    Router::new()
+        .route("/usage", get(page))
+        .route("/usage/tasks", get(all_tasks))
+        .route("/transcripts/read", axum::routing::post(read_now))
 }
 
 #[derive(Deserialize, Default)]
 struct UsageQuery {
+    /// "tasks": the old Tasks tab, now `/usage/tasks`.
     tab: Option<String>,
     /// "2026-11-10": that day's hours instead of 14 days.
     day: Option<String>,
@@ -30,8 +35,13 @@ struct UsageQuery {
     /// owner, 2026-11-17: "lets make \"new tokens\" the default view, and add cost and \"total
     /// tokens\" as other options").
     metric: Option<String>,
-    /// Tasks tab: 7 or 14 days.
+    /// The tasks' window: 7 days, or 14.
     days: Option<i64>,
+}
+
+/// The tasks' window: the last 7 days unless 14 are asked for.
+fn task_days(q: Option<i64>) -> i64 {
+    if q == Some(14) { 14 } else { 7 }
 }
 
 struct Legend {
@@ -157,6 +167,11 @@ struct EstRow {
 }
 
 struct TaskRow {
+    /// Counted against a task, not "Not in a task".
+    in_task: bool,
+    usd: f64,
+    /// Its cost against the most any row costs, in % (the bar beside the cost).
+    bar: u32,
     id: String,
     url: String,
     title: String,
@@ -182,7 +197,6 @@ struct UsagePage {
     nav: Nav,
     /// The transcripts are being read right now.
     reading: bool,
-    tab: String,
     newest: String,
     tiles: Vec<Tile>,
     chart_title: String,
@@ -198,12 +212,16 @@ struct UsagePage {
     lines_max: String,
     projects: Vec<ProjectRow>,
     range: String,
-    tasks: Vec<TaskRow>,
-    /// Some token counts against a task (not only "Not in a task").
-    any_task: bool,
-    show_status: bool,
-    show_estimate: bool,
+    /// The tasks that cost most in the window (the card), and what the card doesn't show.
+    top_tasks: Vec<TaskRow>,
+    tasks_total: usize,
+    tasks_more: usize,
+    not_in_task: String,
     days: i64,
+    /// Keeps the opened day and the metric while switching the tasks' window, and the tasks'
+    /// window while switching the metric.
+    keep_day_metric: String,
+    keep_days: String,
     empty: bool,
     /// The chart's metric, as the switch shows it: (key, name, on).
     metrics: Vec<(&'static str, &'static str, bool)>,
@@ -231,17 +249,19 @@ async fn page(
     let fortnight_days = tz.days(now, 14);
     let today = fortnight_days[13];
     let end = fortnight_days[14];
-    let tab = if q.tab.as_deref() == Some("tasks") { "tasks" } else { "overview" }.to_owned();
+    if q.tab.as_deref() == Some("tasks") {
+        let days = q.days.map(|d| format!("?days={}", task_days(Some(d)))).unwrap_or_default();
+        return Ok(Redirect::to(&format!("/usage/tasks{days}")).into_response());
+    }
     let metric_kind = Metric::parse(q.metric.as_deref());
     let day = q.day.as_deref().and_then(|s| tz.parse_day(s)).filter(|d| *d <= today);
-    let days = if q.days == Some(7) { 7 } else { 14 };
+    let days = task_days(q.days);
     // A bar per local hour of an opened day (23 or 25 when the clocks change), else per day.
     let bounds = match day {
         Some(d) => tz.hours(d),
         None => fortnight_days.clone(),
     };
     let n = bounds.len() - 1;
-    let task_from = fortnight_days[14 - days as usize];
     let fortnight_from = fortnight_days[0];
     let bounds_q = bounds.clone();
     let data = state
@@ -250,23 +270,15 @@ async fn page(
             let projects = crate::projects::list(c)?;
             let buckets = usage::buckets(c, &bounds_q)?;
             let per_project = usage::per_project(c, bounds_q[0], bounds_q[bounds_q.len() - 1])?;
-            let tasks = usage::per_task(c, task_from, end)?;
-            let mut task_records = Vec::new();
-            for t in &tasks {
-                task_records.push(match t.task_id {
-                    Some(id) => Some(records::get(c, id)?),
-                    None => None,
-                });
-            }
             let today_total = usage::per_project(c, today, end)?;
             let fortnight = usage::per_project(c, fortnight_from, end)?;
             let newest: Option<i64> = c.query_row("SELECT max(at) FROM usage", [], |r| r.get(0))?;
             let week = usage::per_project(c, fortnight_days[7], end)?;
             let plan = plan_data(c, now, bounds_q[0], bounds_q[bounds_q.len() - 1])?;
-            Ok((projects, buckets, per_project, tasks, task_records, today_total, fortnight, newest, week, plan))
+            Ok((projects, buckets, per_project, today_total, fortnight, newest, week, plan))
         })
         .await?;
-    let (projects, buckets, per_project, tasks, task_records, today_total, fortnight, newest, week, plan) = data;
+    let (projects, buckets, per_project, today_total, fortnight, newest, week, plan) = data;
 
     let slugs: Vec<String> = projects.iter().map(|p| p.slug.clone()).collect();
     let colors = charts::colors(&slugs);
@@ -389,43 +401,27 @@ async fn page(
         .collect();
     project_rows.sort_by(|a, b| (a.name == "Other").cmp(&(b.name == "Other")).then(a.name.cmp(&b.name)));
 
-    let task_rows: Vec<TaskRow> = tasks
-        .iter()
-        .zip(&task_records)
-        .map(|(t, r)| {
-            let (project, color) = name_of(t.project_id);
-            let worked = if tz.date(t.first_at) == tz.date(t.last_at) {
-                format!("{} {}–{}", tz.date(t.first_at), tz.hm(t.first_at), tz.hm(t.last_at))
-            } else {
-                format!("{} – {}", tz.date(t.first_at), tz.date(t.last_at))
-            };
-            let total = t.total();
-            TaskRow {
-                id: r.as_ref().map(|r| r.short_id()).unwrap_or_default(),
-                url: r.as_ref().map(|r| r.url()).unwrap_or_default(),
-                title: r.as_ref().map(|r| r.title.clone()).unwrap_or_else(|| "Not in a task".into()),
-                project,
-                color,
-                status: r.as_ref().map(|r| r.state.clone()).unwrap_or_default(),
-                worked,
-                estimate: r
-                    .as_ref()
-                    .filter(|r| r.kind == Kind::Task)
-                    .map(|r| r.str("estimate").to_owned())
-                    .unwrap_or_default(),
-                t: Cells::of(&total),
-                main: format!("{} new · {} calls", short(t.main.new_tokens()), t.main.calls),
-                subagents: format!("{} new · {} calls", short(t.subagents.new_tokens()), t.subagents.calls),
-            }
-        })
-        .collect();
+    // The card: the six tasks that cost most; "Not in a task" only as a sum under them.
+    let (in_task, outside): (Vec<TaskRow>, Vec<TaskRow>) =
+        task_rows(&state, &tz, now, days).await?.into_iter().partition(|t| t.in_task);
+    let tasks_total = in_task.len();
+    let mut top_tasks: Vec<TaskRow> = in_task.into_iter().take(6).collect();
+    set_bars(&mut top_tasks);
+    let not_in_task =
+        if outside.is_empty() { String::new() } else { crate::prices::dollars(outside.iter().map(|t| t.usd).sum()) };
 
     let day_q = day.map(|d| format!("day={}&", tz.date(d))).unwrap_or_default();
+    let keep_day_metric = format!(
+        "{day_q}{}",
+        match metric_kind.key() {
+            "" => String::new(),
+            k => format!("metric={k}&"),
+        }
+    );
     let (meters, est_rows, est_median) = plan_view(&plan, now, &tz);
     render(UsagePage {
         reading: super::READING.load(std::sync::atomic::Ordering::Relaxed),
         nav: nav(&state, &actor, "/usage").await,
-        tab,
         newest: newest.map(|t| crate::util::ago(t, now)).unwrap_or_else(|| "not yet".into()),
         tiles,
         chart_title: match day {
@@ -447,11 +443,13 @@ async fn page(
             Some(d) => tz.date(d),
             None => "14 days".into(),
         },
-        any_task: task_rows.iter().any(|t| !t.url.is_empty()),
-        show_status: task_rows.iter().any(|t| !t.status.is_empty()),
-        show_estimate: task_rows.iter().any(|t| !t.estimate.is_empty()),
-        tasks: task_rows,
+        tasks_more: tasks_total.saturating_sub(top_tasks.len()),
+        tasks_total,
+        not_in_task,
+        top_tasks,
         days,
+        keep_day_metric,
+        keep_days: if days == 14 { "days=14&".into() } else { String::new() },
         metrics: [Metric::New, Metric::Total, Metric::Cache, Metric::Cost]
             .iter()
             .map(|m| (m.key(), m.name(), *m == metric_kind))
@@ -471,6 +469,111 @@ async fn page(
         est_rows,
         est_median,
         unpriced: window.unpriced,
+    })
+}
+
+/// Every task with tokens in the last `days` days, the costliest first, then what was "Not in a
+/// task" (one row per project), with their bars set against the costliest row.
+async fn task_rows(state: &AppState, tz: &Tz, now: i64, days: i64) -> AppResult<Vec<TaskRow>> {
+    let bounds = tz.days(now, days as usize);
+    let (from, to) = (bounds[0], bounds[bounds.len() - 1]);
+    let (projects, tasks, records) = state
+        .db
+        .call(move |c| {
+            let projects = crate::projects::list(c)?;
+            let tasks = usage::per_task(c, from, to)?;
+            let mut records = Vec::new();
+            for t in &tasks {
+                records.push(match t.task_id {
+                    Some(id) => Some(records::get(c, id)?),
+                    None => None,
+                });
+            }
+            Ok((projects, tasks, records))
+        })
+        .await?;
+    let slugs: Vec<String> = projects.iter().map(|p| p.slug.clone()).collect();
+    let colors = charts::colors(&slugs);
+    let mut rows: Vec<TaskRow> = tasks
+        .iter()
+        .zip(&records)
+        .map(|(t, r)| {
+            let (project, color) = match t.project_id.and_then(|id| projects.iter().position(|p| p.id == id)) {
+                Some(i) => (projects[i].name.clone(), colors[i]),
+                None => ("Other".into(), charts::OTHER),
+            };
+            let worked = if tz.date(t.first_at) == tz.date(t.last_at) {
+                format!("{} {}–{}", tz.date(t.first_at), tz.hm(t.first_at), tz.hm(t.last_at))
+            } else {
+                format!("{} – {}", tz.date(t.first_at), tz.date(t.last_at))
+            };
+            let total = t.total();
+            TaskRow {
+                in_task: r.is_some(),
+                usd: total.usd(),
+                bar: 0,
+                id: r.as_ref().map(|r| r.short_id()).unwrap_or_default(),
+                url: r.as_ref().map(|r| r.url()).unwrap_or_default(),
+                title: r.as_ref().map(|r| r.title.clone()).unwrap_or_else(|| "Not in a task".into()),
+                project,
+                color,
+                status: r.as_ref().map(|r| r.state.clone()).unwrap_or_default(),
+                worked,
+                estimate: r
+                    .as_ref()
+                    .filter(|r| r.kind == Kind::Task)
+                    .map(|r| r.str("estimate").to_owned())
+                    .unwrap_or_default(),
+                t: Cells::of(&total),
+                main: format!("{} new · {} calls", short(t.main.new_tokens()), t.main.calls),
+                subagents: format!("{} new · {} calls", short(t.subagents.new_tokens()), t.subagents.calls),
+            }
+        })
+        .collect();
+    // Tasks first, by cost (the owner, 2026-11-23, Q-5: "Tasks by cost"); "Not in a task" last.
+    rows.sort_by(|a, b| b.in_task.cmp(&a.in_task).then(b.usd.total_cmp(&a.usd)));
+    set_bars(&mut rows);
+    Ok(rows)
+}
+
+/// Each row's bar: its cost against the costliest row's, at least a sliver when it cost anything.
+fn set_bars(rows: &mut [TaskRow]) {
+    let max = rows.iter().map(|t| t.usd).fold(0.0, f64::max);
+    for t in rows {
+        t.bar = if max > 0.0 && t.usd > 0.0 { ((t.usd / max * 100.0).round() as u32).max(2) } else { 0 };
+    }
+}
+
+#[derive(Template)]
+#[template(path = "usage_tasks.html")]
+struct TasksPage {
+    nav: Nav,
+    days: i64,
+    tasks: Vec<TaskRow>,
+    /// How many are tasks (not "Not in a task").
+    in_task: usize,
+    show_status: bool,
+    show_estimate: bool,
+}
+
+/// All tasks by cost: the Usage page opens it as a dialog (data-dlg); a page of its own without
+/// scripts or when linked to.
+async fn all_tasks(
+    State(state): State<AppState>,
+    Extension(actor): Extension<Actor>,
+    Query(q): Query<UsageQuery>,
+    tz: Tz,
+) -> AppResult<Response> {
+    actor.require_owner()?;
+    let days = task_days(q.days);
+    let tasks = task_rows(&state, &tz, now_ms(), days).await?;
+    render(TasksPage {
+        nav: nav(&state, &actor, "/usage").await,
+        days,
+        in_task: tasks.iter().filter(|t| t.in_task).count(),
+        show_status: tasks.iter().any(|t| !t.status.is_empty()),
+        show_estimate: tasks.iter().any(|t| !t.estimate.is_empty()),
+        tasks,
     })
 }
 
