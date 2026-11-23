@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "table.html" as tbl %}
 {% block title %}Machine{% endblock %}
 {% block scripts %}<script src="/static/machine.js?v={{ nav.version }}" defer></script>{% endblock %}
 {% block content %}
@@ -26,9 +27,9 @@
       <div class="chart"><span class="y-max mono sub">{{ mem_max }}</span><span class="y-zero mono sub">0</span>{{ mem|safe }}<div class="x-labels edges mono sub" aria-hidden="true">{% for l in x_labels %}<span>{{ l }}</span>{% endfor %}</div></div></div>
   </div>
   {% endif %}
-  <div class="table-wrap"><table class="table nums">
-    <thead><tr><th scope="col">Agent</th><th scope="col" class="hide-phone">CPU-hours today</th><th scope="col">Peak memory today</th><th scope="col">Now</th></tr></thead>
-    <tbody>{% for a in agents %}<tr><th scope="row"><span class="swatch" style="--c: {{ a.color }}"></span>{{ a.name }}</th><td class="hide-phone">{{ a.cpu_hours }}</td><td>{{ a.peak }}</td><td class="sub">{{ a.now }}</td></tr>{% endfor %}
+  <div class="table-wrap"><table class="table nums" data-sortable>
+    <thead><tr>{% call tbl::th("Agent", "text", "", "") %}{% endcall %}{% call tbl::th("CPU-hours today", "num", "hide-phone", "") %}{% endcall %}{% call tbl::th("Peak memory today", "num", "", "") %}{% endcall %}{% call tbl::th("Now", "text", "", "") %}{% endcall %}</tr></thead>
+    <tbody>{% for a in agents %}<tr><th scope="row"><span class="swatch" style="--c: {{ a.color }}"></span>{{ a.name }}</th><td class="hide-phone" data-v="{{ a.v.0 }}">{{ a.cpu_hours }}</td><td data-v="{{ a.v.1 }}">{{ a.peak }}</td><td class="sub">{{ a.now }}</td></tr>{% endfor %}
     {% if agents.is_empty() %}<tr><td colspan="4" class="sub">Nothing measured today yet.</td></tr>{% endif %}</tbody>
   </table></div>
   <p class="sub">Usage counts per agent session and everything it starts (builds, tests, dev servers), matched to a project by the directory the session runs in. Other is everything else: the system, services and other users. Agents on other machines show in the project list; this page only measures this one.</p>

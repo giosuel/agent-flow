@@ -67,6 +67,8 @@ struct Cells {
     cache_read: String,
     /// At API prices; "–" when none of it has a price.
     cost: String,
+    /// The numbers, to sort by.
+    raw: Tokens,
 }
 
 impl Cells {
@@ -79,6 +81,7 @@ impl Cells {
             new_tokens: short(t.new_tokens()),
             cache_read: short(t.cache_read),
             cost: cost_of(t),
+            raw: *t,
         }
     }
 }
@@ -157,6 +160,8 @@ struct Meter {
 
 /// A finished 5-hour window in "How big a window is".
 struct EstRow {
+    /// Raw values to sort by: when it started, % used, cost, cost per 1%, new tokens per 1%.
+    v: (i64, f64, f64, f64, f64),
     day: String,
     span: String,
     used: String,
@@ -170,6 +175,8 @@ struct TaskRow {
     /// Counted against a task, not "Not in a task".
     in_task: bool,
     usd: f64,
+    /// The last call counted against it.
+    last_at: i64,
     /// Its cost against the most any row costs, in % (the bar beside the cost).
     bar: u32,
     id: String,
@@ -511,6 +518,7 @@ async fn task_rows(state: &AppState, tz: &Tz, now: i64, days: i64) -> AppResult<
             TaskRow {
                 in_task: r.is_some(),
                 usd: total.usd(),
+                last_at: t.last_at,
                 bar: 0,
                 // With the project: every project has its own T-7.
                 id: r.as_ref().map(|r| format!("{}/{}", r.project, r.short_id())).unwrap_or_default(),
@@ -551,9 +559,10 @@ fn set_bars(rows: &mut [TaskRow]) {
 struct TasksPage {
     nav: Nav,
     days: i64,
+    /// The tasks, last worked on first.
     tasks: Vec<TaskRow>,
-    /// How many are tasks (not "Not in a task").
-    in_task: usize,
+    /// "Not in a task", one row per project, under them.
+    outside: Vec<TaskRow>,
     show_status: bool,
     show_estimate: bool,
 }
@@ -568,14 +577,18 @@ async fn all_tasks(
 ) -> AppResult<Response> {
     actor.require_owner()?;
     let days = task_days(q.days);
-    let tasks = task_rows(&state, &tz, now_ms(), days).await?;
+    let (mut tasks, outside): (Vec<TaskRow>, Vec<TaskRow>) =
+        task_rows(&state, &tz, now_ms(), days).await?.into_iter().partition(|t| t.in_task);
+    // Last worked on first, like every table (the owner, 2026-11-23: "by default tables are
+    // sorted by "last entry" or "last chanbged""); a click on Cost sorts by cost.
+    tasks.sort_by_key(|t| std::cmp::Reverse(t.last_at));
     render(TasksPage {
         nav: nav(&state, &actor, "/usage").await,
         days,
-        in_task: tasks.iter().filter(|t| t.in_task).count(),
         show_status: tasks.iter().any(|t| !t.status.is_empty()),
         show_estimate: tasks.iter().any(|t| !t.estimate.is_empty()),
         tasks,
+        outside,
     })
 }
 
@@ -674,6 +687,7 @@ fn plan_view(p: &PlanData, now: i64, tz: &Tz) -> (Vec<Meter>, Vec<EstRow>, (Stri
         .filter(|(w, _)| w.peak >= 1.0)
         .take(6)
         .map(|(w, t)| EstRow {
+            v: (w.start, w.peak, t.usd(), t.usd() / w.peak.max(1.0), t.new_tokens() as f64 / w.peak.max(1.0)),
             day: tz.date(w.start),
             span: format!("{}–{}", tz.hm(w.start), tz.hm(w.end)),
             used: format!("{:.0}%", w.peak),

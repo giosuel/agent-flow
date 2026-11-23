@@ -309,6 +309,8 @@ pub struct JobRow {
     pub label: String,
     pub time: String,
     pub sent: String,
+    /// Seconds it ran and bytes sent, to sort by (-1: not yet).
+    pub v: (i64, i64),
 }
 
 pub struct ServerView {
@@ -376,6 +378,10 @@ pub fn job_row(j: &Job) -> JobRow {
         label,
         time: took(j),
         sent: bytes(j.sent_bytes),
+        v: (
+            j.started_at.map(|s| (j.finished_at.unwrap_or_else(now_ms) - s) / 1000).unwrap_or(-1),
+            j.sent_bytes.unwrap_or(-1),
+        ),
     }
 }
 

@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "table.html" as tbl %}
 {% block title %}{{ name }} · {{ project_name }}{% endblock %}
 {% block content %}
 <div class="head">
@@ -30,10 +31,10 @@
   <section class="stack-sm" aria-labelledby="tasks-h">
     <div class="sec"><h2 class="label" id="tasks-h">{% if review.is_some() %}Findings, by importance{% else %}Estimated and actual{% endif %}</h2><span class="sub">{{ rows.len() }} task{% if rows.len() != 1 %}s{% endif %}{% if added_count > 0 %}, {{ added_count }} added during the step{% endif %}</span></div>
     {% if rows.is_empty() %}<p class="sub">No tasks.</p>{% else %}
-    <div class="table-wrap"><table class="cmp"><thead><tr><th>#</th>{% if review.is_some() %}<th>Importance</th>{% endif %}<th>Task</th><th></th><th>Estimate</th><th>Took</th></tr></thead><tbody>
-    {% for t in rows %}<tr><td class="sub mono">{{ t.n }}</td>{% if review.is_some() %}<td>{% if !t.importance.is_empty() %}<span class="imp {{ t.importance }}">{{ t.importance }}</span>{% endif %}</td>{% endif %}<td><span class="mono sub">{{ t.short }}</span> <a href="{{ t.url }}">{{ t.title }}</a>{% if !t.added.is_empty() && review.is_none() %} <span class="addtag">{{ t.added }}</span>{% endif %}{% if !t.skip_reason.is_empty() %}<span class="sub skip-why">skipped: {{ t.skip_reason }}</span>{% endif %}</td><td><span class="chip state-{{ t.state }}">{{ t.state }}</span></td><td class="m">{{ t.est }}</td><td class="m{% if t.over %} over{% endif %}{% if t.under %} under{% endif %}">{{ t.took }}</td></tr>{% endfor %}
-    <tr class="tot"><td></td>{% if review.is_some() %}<td></td>{% endif %}<td>Together</td><td></td><td class="m">{{ est_total }}</td><td class="m">{{ took_total }}</td></tr>
-    </tbody></table></div>
+    <div class="table-wrap"><table class="cmp" data-sortable><thead><tr>{% call tbl::th("#", "num", "", "ascending") %}{% endcall %}{% if review.is_some() %}{% call tbl::th("Importance", "num", "", "") %}{% endcall %}{% endif %}{% call tbl::th("Task", "text", "", "") %}{% endcall %}{% call tbl::th("State", "text", "", "") %}{% endcall %}{% call tbl::th("Estimate", "num", "", "") %}{% endcall %}{% call tbl::th("Took", "num", "", "") %}{% endcall %}</tr></thead><tbody>
+    {% for t in rows %}<tr><td class="sub mono">{{ t.n }}</td>{% if review.is_some() %}<td data-v="{% if t.importance == "high" %}3{% else if t.importance == "medium" %}2{% else if t.importance == "low" %}1{% else %}0{% endif %}">{% if !t.importance.is_empty() %}<span class="imp {{ t.importance }}">{{ t.importance }}</span>{% endif %}</td>{% endif %}<td data-v="{{ t.title }}"><span class="mono sub">{{ t.short }}</span> <a href="{{ t.url }}">{{ t.title }}</a>{% if !t.added.is_empty() && review.is_none() %} <span class="addtag">{{ t.added }}</span>{% endif %}{% if !t.skip_reason.is_empty() %}<span class="sub skip-why">skipped: {{ t.skip_reason }}</span>{% endif %}</td><td><span class="chip state-{{ t.state }}">{{ t.state }}</span></td><td class="m" data-v="{{ t.v.0 }}">{{ t.est }}</td><td class="m{% if t.over %} over{% endif %}{% if t.under %} under{% endif %}" data-v="{{ t.v.1 }}">{{ t.took }}</td></tr>{% endfor %}
+    </tbody><tfoot><tr class="tot"><td></td>{% if review.is_some() %}<td></td>{% endif %}<td>Together</td><td></td><td class="m">{{ est_total }}</td><td class="m">{{ took_total }}</td></tr>
+    </tfoot></table></div>
     <p class="sub">Took: time in doing, counted from the tasks' state changes; time when several were in doing at once counts once and is split between them. Blocked, review and time the agent was away don't count.{% if !biggest_miss.is_empty() %} Biggest miss: {{ biggest_miss }}.{% endif %}</p>
     {% endif %}
   </section>

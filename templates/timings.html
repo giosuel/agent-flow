@@ -1,6 +1,7 @@
 <section class="stack-sm" aria-labelledby="timings-h">
   <h2 class="label" id="timings-h">Timings</h2>
-  <div class="table-wrap"><table class="timing"><thead><tr><th>What</th><th>On</th><th>Where</th><th>Wall</th><th>CPU</th><th>Peak memory</th><th>When</th></tr></thead><tbody>
-  {% for t in timings %}<tr{% if t.failed %} class="failed"{% endif %}><td><span class="mono">{{ t.what }}</span>{% if t.failed %} <span class="chip warn">failed</span>{% endif %}</td><td class="mono sub">{{ t.on }}</td><td>{{ t.place }}</td><td class="m">{{ t.wall }}</td><td class="m">{{ t.cpu }}</td><td class="m">{{ t.peak }}</td><td class="sub">{{ t.when }}</td></tr>{% endfor %}
+  {% import "table.html" as tbl %}
+  <div class="table-wrap"><table class="timing" data-sortable><thead><tr>{% call tbl::th("What", "text", "", "") %}{% endcall %}{% call tbl::th("On", "text", "", "") %}{% endcall %}{% call tbl::th("Where", "text", "", "") %}{% endcall %}{% call tbl::th("Wall", "num", "", "") %}{% endcall %}{% call tbl::th("CPU", "num", "", "") %}{% endcall %}{% call tbl::th("Peak memory", "num", "", "") %}{% endcall %}{% call tbl::th("When", "num", "", "descending") %}{% endcall %}</tr></thead><tbody>
+  {% for t in timings %}<tr{% if t.failed %} class="failed"{% endif %}><td data-v="{{ t.what }}"><span class="mono">{{ t.what }}</span>{% if t.failed %} <span class="chip warn">failed</span>{% endif %}</td><td class="mono sub">{{ t.on }}</td><td>{{ t.place }}</td><td class="m" data-v="{{ t.v.0 }}">{{ t.wall }}</td><td class="m" data-v="{{ t.v.1 }}">{{ t.cpu }}</td><td class="m" data-v="{{ t.v.2 }}">{{ t.peak }}</td><td class="sub" data-v="{{ t.v.3 }}">{{ t.when }}</td></tr>{% endfor %}
   </tbody></table></div>
 </section>

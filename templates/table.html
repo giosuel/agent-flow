@@ -1,0 +1,11 @@
+{# The table component (the owner, 2026-11-23: "make one table component and reuse that everywhere
+   where there is a table"). A table marked data-sortable sorts by a click on a header made with
+   th(): the first click sorts by the column (numbers and dates high first, text A–Z), the second
+   turns it around, the third goes back to the order the page came in, which is the default: the
+   newest first where the rows have a time. A cell's data-v is its value for sorting (its text
+   otherwise); rows in tfoot (totals) stay put. static/app.js does the sorting.
+   th(label, kind, class, default): kind is "num" or "text"; default is "descending" or
+   "ascending" on the column the rows come sorted by, empty on the others. #}
+{% macro th(label, kind, cls, default) %}<th scope="col"{% if !cls.is_empty() %} class="{{ cls }}"{% endif %}{% if !default.is_empty() %} aria-sort="{{ default }}" data-default="{{ default }}"{% endif %}><button type="button" class="th-sort" data-sort="{{ kind }}">{{ label }}<span class="sort-i" aria-hidden="true"></span></button></th>{% endmacro %}
+{# The same header for a grid of rows (role=row) instead of a <table>: the Notes tab. #}
+{% macro ch(label, kind, default) %}<span role="columnheader"{% if !default.is_empty() %} aria-sort="{{ default }}" data-default="{{ default }}"{% endif %}><button type="button" class="th-sort nh" data-sort="{{ kind }}">{{ label }}<span class="sort-i" aria-hidden="true"></span></button></span>{% endmacro %}
