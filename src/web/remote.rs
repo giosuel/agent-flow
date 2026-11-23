@@ -835,3 +835,32 @@ pub async fn remove_server(
         .await;
     Ok(back_to_card("removed"))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Build servers start folded, even a lone one (the owner, 2026-11-23).
+    #[test]
+    fn a_lone_builder_starts_folded() {
+        let server = ServerSetting {
+            name: "HEADQUARTERS".into(),
+            waiting: false,
+            online: true,
+            state: "online · builder 0.0.0-dev".into(),
+            machine: "32 threads · 92 GB".into(),
+            running: 1,
+            queued: 0,
+            facts: Vec::new(),
+            jobs: Vec::new(),
+            min_threads: String::new(),
+            min_memory: String::new(),
+            reserve_memory: String::new(),
+            keep_days: 7,
+            slots: 1,
+            projects: Vec::new(),
+        };
+        let html = ServersCard { servers: vec![server], notice: None }.render().unwrap();
+        assert!(html.contains(r#"<details class="sl-item">"#) && !html.contains(r#"<details class="sl-item" open>"#), "{html}");
+    }
+}
