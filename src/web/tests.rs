@@ -596,9 +596,24 @@ async fn the_overview_puts_questions_first_and_folds_closed_milestones() {
         json!({"title": "A or B?", "options": [{"title": "Take A"}, {"title": "Take B"}], "recommended": 2}),
     )
     .await;
+    // Five answers: the card shows three, the recommended fifth among them (D-234).
+    mcp_tool(
+        &s,
+        &token,
+        &sess,
+        "ask_question",
+        json!({"title": "Which?", "options": [{"title": "Opt one"}, {"title": "Opt two"}, {"title": "Opt three"}, {"title": "Opt four"}, {"title": "Opt five"}], "recommended": 5}),
+    )
+    .await;
     let cookie = s.owner_cookie().await;
     let page = s.http.get(s.url("/p/vinculum")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
     assert!(page.contains("Waiting on you") && page.contains("Take A") && page.contains("qopt rec"), "{page}");
+    assert!(page.contains("data-qpage") && page.contains(r#"<div class="qpager" hidden>"#), "{page}");
+    assert!(page.contains("Opt one") && page.contains("Opt two") && page.contains("Opt five"), "{page}");
+    assert!(
+        !page.contains("Opt three") && !page.contains("Opt four") && page.contains("2 more, or your own"),
+        "{page}"
+    );
     assert!(page.contains(r#"name="next" value="/p/vinculum?answered=Q-1""#), "{page}");
     // The overview has the milestone list in its own order, the one under way open (D-226).
     assert!(page.contains("1 done · 1 under way · 1 planned") && page.contains("Open in Plan"), "{page}");
@@ -627,7 +642,10 @@ async fn the_overview_puts_questions_first_and_folds_closed_milestones() {
         .text()
         .await
         .unwrap();
-    assert!(page.contains("Answered Q-1") && !page.contains("Waiting on you"), "{page}");
+    assert!(
+        page.contains("Answered Q-1") && !page.contains(r#"id="qt-Q-1""#) && page.contains(r#"id="qt-Q-2""#),
+        "{page}"
+    );
     // Plan: the same list, the done ones listed (in its scroll box), the one under way picked.
     let plan = owner_page(&s, &cookie, "/p/vinculum/plan").await;
     assert!(plan.contains(r#"<details class="ml-done" open data-ml-done>"#), "{plan}");
