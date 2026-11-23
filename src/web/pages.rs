@@ -65,6 +65,11 @@ pub struct NavProject {
     pub slug: String,
     pub name: String,
     pub online: bool,
+    /// Its open questions, PRs and things to test: the counts on its tabs when the bar shows the
+    /// project remembered on a page outside it (static/bar.js).
+    pub questions: i64,
+    pub prs: i64,
+    pub tests: i64,
 }
 
 /// One of the project's tabs in the desktop bar.
@@ -138,10 +143,27 @@ pub async fn nav(state: &AppState, actor: &Actor, active: &str) -> Nav {
         n.projects = state
             .db
             .call(move |c| {
+                let mut open = std::collections::HashMap::<(i64, String), i64>::new();
+                let mut q = c.prepare(
+                    "SELECT project_id, kind, count(*) FROM records \
+                     WHERE state = 'open' AND kind IN ('question', 'pr', 'test') GROUP BY 1, 2",
+                )?;
+                for row in q.query_map([], |r| Ok(((r.get(0)?, r.get(1)?), r.get(2)?)))? {
+                    let (k, n) = row?;
+                    open.insert(k, n);
+                }
+                let n = |id: i64, kind: &str| open.get(&(id, kind.to_owned())).copied().unwrap_or(0);
                 Ok(crate::projects::list(c)?
                     .into_iter()
                     .filter(|p| p.status != "archived")
-                    .map(|p| NavProject { online: p.agent.online(now), slug: p.slug, name: p.name })
+                    .map(|p| NavProject {
+                        online: p.agent.online(now),
+                        questions: n(p.id, "question"),
+                        prs: n(p.id, "pr"),
+                        tests: n(p.id, "test"),
+                        slug: p.slug,
+                        name: p.name,
+                    })
                     .collect())
             })
             .await
@@ -209,6 +231,17 @@ impl Nav {
     /// The page is the list of projects (or a page under it that isn't one project's).
     pub fn on_projects(&self) -> bool {
         self.items.iter().any(|i| i.href == "/projects" && i.active)
+    }
+
+    /// A page outside the projects: the bar shows the project last opened, kept in the browser's
+    /// local storage (the owner, 2026-11-23), with these tabs (static/bar.js).
+    pub fn remembers_project(&self) -> bool {
+        self.here.is_none() && !self.on_projects() && !self.projects.is_empty()
+    }
+
+    /// The project page's tabs (key, label), for static/bar.js.
+    pub fn bar_tabs(&self) -> &'static [(&'static str, &'static str)] {
+        super::projects::TABS
     }
 
     /// The page belongs to the project `slug`, under its tab `tab` (a key of the project page's

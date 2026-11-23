@@ -1036,16 +1036,24 @@ async fn the_bar_shows_the_project_its_tabs_and_the_global_pages() {
     let page = owner_page(&s, &cookie, "/p/vinculum?tab=decisions").await;
     let bar = &page[page.find("<header").unwrap()..page.find("</header>").unwrap()];
     assert!(bar.contains(r#"<summary class="pswitch-btn"><span>vinculum</span>"#), "{bar}");
-    assert!(bar.contains(r#"href="/p/vinculum" aria-current="page""#), "the project is checked in the switcher");
+    assert!(bar.contains(r#"href="/p/vinculum" data-slug="vinculum" data-q="1" data-pr="0" data-t="0" aria-current="page""#), "the project is checked in the switcher");
     assert!(bar.contains(r#"<a href="/p/vinculum?tab=decisions" class="on" aria-current="page">Decisions</a>"#));
     assert!(bar.contains(r#"Questions<span class="mono n y">1</span>"#), "the open question is counted");
     assert!(bar.contains(r#"href="/p/vinculum/settings" data-dlg>Settings"#));
     assert!(bar.contains(r#"aria-label="Usage" data-name="Usage""#), "global pages are icons");
+    assert!(bar.contains(r#"<details class="pswitch" data-menu data-here="vinculum">"#), "bar.js remembers it");
+    assert!(!bar.contains("data-bar-tabs"), "nothing to restore inside a project");
 
     let usage = owner_page(&s, &cookie, "/usage").await;
     let bar = &usage[usage.find("<header").unwrap()..usage.find("</header>").unwrap()];
     assert!(bar.contains("<span>All projects</span>"));
     assert!(!bar.contains("btabs"), "no project tabs on a global page");
+    // The project last opened comes back from local storage (static/bar.js), with these tabs
+    // and the counts on its switcher entry.
+    assert!(bar.contains(r#"<template data-bar-tabs><a data-key="overview">Overview</a>"#), "{bar}");
+    assert!(bar.contains(r#"href="/p/vinculum" data-slug="vinculum" data-q="1" data-pr="0" data-t="0""#), "{bar}");
+    assert!(bar.contains(r#"<script src="/static/bar.js?v="#), "{bar}");
+    assert_eq!(s.http.get(s.url("/static/bar.js")).send().await.unwrap().status(), StatusCode::OK);
     assert!(bar.contains(r#"<a href="/usage" class="on" aria-current="page">"#));
     assert!(bar.contains("<span>Usage</span>"), "the current page's icon carries its name");
 }
