@@ -473,7 +473,7 @@ async fn page(
 }
 
 /// Every task with tokens in the last `days` days, the costliest first, then what was "Not in a
-/// task" (one row per project), with their bars set against the costliest row.
+/// task" (one row per project), with their bars set.
 async fn task_rows(state: &AppState, tz: &Tz, now: i64, days: i64) -> AppResult<Vec<TaskRow>> {
     let bounds = tz.days(now, days as usize);
     let (from, to) = (bounds[0], bounds[bounds.len() - 1]);
@@ -512,7 +512,8 @@ async fn task_rows(state: &AppState, tz: &Tz, now: i64, days: i64) -> AppResult<
                 in_task: r.is_some(),
                 usd: total.usd(),
                 bar: 0,
-                id: r.as_ref().map(|r| r.short_id()).unwrap_or_default(),
+                // With the project: every project has its own T-7.
+                id: r.as_ref().map(|r| format!("{}/{}", r.project, r.short_id())).unwrap_or_default(),
                 url: r.as_ref().map(|r| r.url()).unwrap_or_default(),
                 title: r.as_ref().map(|r| r.title.clone()).unwrap_or_else(|| "Not in a task".into()),
                 project,
@@ -536,11 +537,12 @@ async fn task_rows(state: &AppState, tz: &Tz, now: i64, days: i64) -> AppResult<
     Ok(rows)
 }
 
-/// Each row's bar: its cost against the costliest row's, at least a sliver when it cost anything.
+/// Each task's bar: its cost against the costliest task's, at least a sliver when it cost
+/// anything. "Not in a task" gets none: it would dwarf the tasks.
 fn set_bars(rows: &mut [TaskRow]) {
-    let max = rows.iter().map(|t| t.usd).fold(0.0, f64::max);
+    let max = rows.iter().filter(|t| t.in_task).map(|t| t.usd).fold(0.0, f64::max);
     for t in rows {
-        t.bar = if max > 0.0 && t.usd > 0.0 { ((t.usd / max * 100.0).round() as u32).max(2) } else { 0 };
+        t.bar = if t.in_task && max > 0.0 && t.usd > 0.0 { ((t.usd / max * 100.0).round() as u32).max(2) } else { 0 };
     }
 }
 

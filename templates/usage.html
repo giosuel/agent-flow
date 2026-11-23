@@ -97,7 +97,7 @@
   </table></div>
   {% endif %}
   <div class="tk-foot"><span class="sub">{% if tasks_more > 0 %}{{ tasks_more }} more task{% if tasks_more != 1 %}s{% endif %}{% if !not_in_task.is_empty() %} · {% endif %}{% endif %}{% if !not_in_task.is_empty() %}"Not in a task" {{ not_in_task }}{% endif %}</span>
-    <a class="tk-all" href="/usage/tasks{% if days == 14 %}?days=14{% endif %}" data-dlg>{% if tasks_total == 1 %}The task{% else if tasks_total == 0 %}Open the list{% else %}All {{ tasks_total }} tasks{% endif %}{{ crate::web::icons::icon("chevron")|safe }}</a></div>
+    <a class="tk-all" href="/usage/tasks{% if days == 14 %}?days=14{% endif %}" data-dlg>{% if tasks_total > 1 %}All {{ tasks_total }} tasks{% else %}Show all{% endif %}{{ crate::web::icons::icon("chevron")|safe }}</a></div>
 </section>
 {% if !est_rows.is_empty() %}
 <section class="card pad stack" aria-labelledby="est-h">

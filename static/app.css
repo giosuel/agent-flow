@@ -2112,3 +2112,4 @@ html.no-scroll { overflow: hidden; }
   .only-phone.tk-ph { display: block; margin-top: 2px; font-size: 13px; }
   .cbar { width: 40px; }
 }
+.cbar.cbar-none { visibility: hidden; }
