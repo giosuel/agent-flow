@@ -2,12 +2,11 @@
 {% block title %}Conversations{% endblock %}
 {% block content %}
 {# Reworked 2026-11-18: a toolbar like the Log's (D-207); three panes: pairs, their conversations by day, one conversation (D-210). #}
-<div class="head cv-top">
-  <div><h1>Conversations</h1>
-  <p class="status-line">What sessions tell each other, and what their subagents were told and reported, from the Claude Code transcripts.</p></div>
+<div class="head head-row cv-top">
+  <h1>Conversations</h1>
   <form method="post" action="/transcripts/read" class="row reload-form"><input type="hidden" name="next" value="{{ here }}">
     {% if !refreshed.is_empty() %}<span class="sub">{{ refreshed }}</span>{% endif %}
-    {% if can_reload %}<button class="btn ghost sm" type="submit"{% if reading %} disabled{% endif %}>{% if reading %}Reading the transcripts…{% else %}Reload{% endif %}</button>{% endif %}</form>
+    {% if can_reload %}<button class="reload-btn" type="submit"{% if reading %} disabled aria-label="Reading the transcripts" title="Reading the transcripts…"{% else %} aria-label="Reload" title="Read the transcripts now (they are read every five minutes), for tokens and conversations"{% endif %}>{{ crate::web::icons::icon("refresh")|safe }}</button>{% endif %}</form>
 </div>
 
 <form method="get" action="/conversations" class="ltool cvtool">

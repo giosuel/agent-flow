@@ -695,6 +695,9 @@ async fn the_usage_page_shows_the_plan_and_the_cost() {
         .unwrap();
     assert_eq!(res.status(), StatusCode::FORBIDDEN, "only a project's status line sends them");
     let page = get("/usage").await;
+    // No subtitle saying what the page is; Reload is an icon on the right (the owner, 2026-11-23).
+    assert!(page.contains(r#"<button class="reload-btn" type="submit""#) && page.contains("newest call"), "{page}");
+    assert!(!page.contains("Tokens and their cost at API prices"), "the subtitle is gone");
     assert!(page.contains("42%") && page.contains("81%") && page.contains("mp-bar"), "{page}");
     assert!(page.contains(r#"class="warn""#), "the week is past 80%: {page}");
     assert!(page.contains("pct-marks"), "the strip under the bars: {page}");

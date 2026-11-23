@@ -1070,7 +1070,14 @@ a.blk.q:hover { text-decoration: underline; }
 .scope-form .scope-pick select { flex: 1 1 auto; min-width: 0; }
 
 /* The Reload button under a page's heading; conversation groups in the list. */
-.reload-form { margin-top: 8px; gap: 10px; }
+/* A page's title with its few controls on the right (Usage, Conversations). */
+.head.head-row { flex-direction: row; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.reload-form { gap: 12px; align-items: center; }
+.reload-btn { display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; min-height: 0; padding: 0; border: 1px solid var(--border); border-radius: 8px; background: none; color: var(--ink2); cursor: pointer; }
+.reload-btn:hover { color: var(--ink); border-color: #5B4A99; background: var(--soft); }
+.reload-btn .i { width: 18px; height: 18px; }
+.reload-btn:disabled { cursor: default; color: var(--muted); }
+.reload-btn:disabled .i { animation: spin 1.2s linear infinite; }
 .conv-group { padding: 10px 14px 4px; margin: 0; }
 .msg-fold > summary { cursor: pointer; list-style: none; }
 .msg-fold > summary::-webkit-details-marker { display: none; }
@@ -1822,9 +1829,9 @@ html.no-scroll { overflow: hidden; }
 .rng { white-space: nowrap; }
 
 /* Conversations (the owner, 2026-11-18): a toolbar like the Log's, one conversation at a time. */
-.cv-top { flex-direction: row; justify-content: space-between; align-items: flex-end; gap: 16px; flex-wrap: wrap; }
+.cv-top { gap: 16px; }
 .show-all { color: var(--hover); text-decoration: underline; font-size: 14px; white-space: nowrap; }
-.cv-top h1 { margin-bottom: 4px; }
+
 .cv-top .reload-form { gap: 10px; align-items: center; }
 .cvwho .dd-menu { min-width: 380px; max-height: 460px; }
 .dd-label { margin: 6px 10px 4px; }

@@ -1,12 +1,12 @@
 {% extends "base.html" %}
 {% block title %}Usage{% endblock %}
 {% block content %}
-<div class="head">
+{# No subtitle saying what the page is; Reload is an icon on the right (the owner, 2026-11-23). #}
+<div class="head head-row">
   <h1>Usage</h1>
-  <p class="status-line">Tokens and their cost at API prices, from the Claude Code transcripts, subagents included; the plan's usage from the agents' status lines. Newest call {{ newest }}.</p>
-  <form method="post" action="/transcripts/read" class="row wrap reload-form"><input type="hidden" name="next" value="/usage">
-    <button class="btn ghost sm" type="submit"{% if reading %} disabled{% endif %}>{% if reading %}Reading the transcripts…{% else %}Reload{% endif %}</button>
-    <span class="sub">Read every five minutes; Reload reads them now, for tokens and conversations.</span></form>
+  <form method="post" action="/transcripts/read" class="row reload-form"><input type="hidden" name="next" value="/usage">
+    <span class="sub">newest call {{ newest }}</span>
+    <button class="reload-btn" type="submit"{% if reading %} disabled aria-label="Reading the transcripts" title="Reading the transcripts…"{% else %} aria-label="Reload" title="Read the transcripts now (they are read every five minutes), for tokens and conversations"{% endif %}>{{ crate::web::icons::icon("refresh")|safe }}</button></form>
 </div>
 <nav class="tabs" aria-label="Usage">
   <a href="/usage"{% if tab == "overview" %} class="on" aria-current="page"{% endif %}>Overview</a>
