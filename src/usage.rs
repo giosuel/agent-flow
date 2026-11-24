@@ -206,6 +206,11 @@ pub struct Read {
 }
 
 impl Read {
+    /// How many messages between sessions the round holds (for its log entry).
+    pub fn messages(&self) -> usize {
+        self.log.msgs.len()
+    }
+
     /// A round a project sent (`flow sync`): what it stores is the project's own. Its Remote
     /// Control links count as the project's checkout and folder (so they never show for another
     /// project), only Claude Code's own links are kept, and nothing is dated in the future.

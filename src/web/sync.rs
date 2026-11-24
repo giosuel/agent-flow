@@ -90,6 +90,8 @@ async fn upload(
     };
     let mut read = b.read;
     read.path = key.clone();
+    let messages = read.messages();
+    let file = b.file.rsplit('/').next().unwrap_or("").to_owned();
     let from = b.from;
     let stored = state
         .db
@@ -110,7 +112,25 @@ async fn upload(
         })
         .await;
     match stored {
-        Ok(Ok((calls, offset))) => Json(json!({"calls": calls, "offset": offset})).into_response(),
+        Ok(Ok((calls, offset))) => {
+            // One entry for a round that brought something, none for an empty one.
+            if calls > 0 || messages > 0 {
+                let what = match (calls, messages) {
+                    (c, 0) => format!("{c} call{}", if c == 1 { "" } else { "s" }),
+                    (0, m) => format!("{m} message{}", if m == 1 { "" } else { "s" }),
+                    (c, m) => format!("{c} calls, {m} messages"),
+                };
+                let e = crate::activity::Entry::new(
+                    &actor,
+                    crate::activity::Via::Api,
+                    crate::activity::Action::Write,
+                    format!("flow sync: {what} from {file}"),
+                )
+                .project(slug.clone());
+                crate::activity::write(&state.db, e).await;
+            }
+            Json(json!({"calls": calls, "offset": offset})).into_response()
+        }
         Ok(Err(offset)) => (
             StatusCode::CONFLICT,
             Json(json!({"error": "the server is elsewhere in this file; ask for its offset again", "offset": offset})),
