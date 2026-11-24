@@ -1,5 +1,5 @@
 //! Build servers: agents run builds and tests on a stronger machine (the owner's workstation, over
-//! WireGuard) with `agentflow remote -- <command>`. AgentFlow does the work, over ssh: it brings the
+//! WireGuard) with `flow remote -- <command>`. AgentFlow does the work, over ssh: it brings the
 //! project's work folder there up to date, queues and starts the job when the machine has room, streams
 //! its output to the agent, the job's page and the Log, and brings files back.
 //!

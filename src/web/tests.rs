@@ -721,7 +721,7 @@ async fn a_build_goes_from_agent_to_owner_and_feedback_comes_back() {
     let other = s.token(TokenKind::Project, Some("vinculum")).await;
     let device = s.token(TokenKind::Device, None).await;
 
-    // A folder with an app and a data file, packed like `agentflow publish` does.
+    // A folder with an app and a data file, packed like `flow publish` does.
     let src = tempfile::tempdir().unwrap();
     std::fs::write(src.path().join("run.sh"), b"#!/bin/sh\necho hi\n").unwrap();
     use std::os::unix::fs::PermissionsExt;
@@ -761,7 +761,7 @@ async fn a_build_goes_from_agent_to_owner_and_feedback_comes_back() {
         .await
         .unwrap();
     assert_eq!(res["number"], 1, "{res}");
-    assert_eq!(res["run"], "flow-run imaginarium 1");
+    assert_eq!(res["run"], "flow run imaginarium 1");
 
     // The owner's machine lists it and gets the same bytes back.
     let list: Value =
@@ -799,7 +799,7 @@ async fn a_build_goes_from_agent_to_owner_and_feedback_comes_back() {
     assert!(page.contains("imaginarium: 2 to test"), "the Dashboard's To test group");
     let page =
         s.http.get(s.url("/p/imaginarium/B-1")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
-    assert!(!page.contains("How did it go?") && page.contains("flow-run imaginarium 1"));
+    assert!(!page.contains("How did it go?") && page.contains("flow run imaginarium 1"));
     let try_it = page.find("aria-labelledby=\"try-h\"").unwrap();
     let list = page.find("To test in this build").unwrap();
     assert!(try_it < list, "Try it comes first");
@@ -878,7 +878,7 @@ async fn a_build_goes_from_agent_to_owner_and_feedback_comes_back() {
     );
     let _ = pictures;
 
-    // A Windows build: not for flow-run, a download on its page, with what it needs.
+    // A Windows build: not for flow run, a download on its page, with what it needs.
     let exe = tempfile::tempdir().unwrap();
     std::fs::write(exe.path().join("lumen.exe"), b"MZ fake exe").unwrap();
     let mut wtar = Vec::new();
@@ -904,7 +904,7 @@ async fn a_build_goes_from_agent_to_owner_and_feedback_comes_back() {
     assert_eq!(w["platform"], "windows-x86_64");
     let cookie = s.owner_cookie().await;
     let page = s.http.get(s.url(&format!("/p/imaginarium/B-{n}"))).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
-    assert!(page.contains("Windows · x86_64") && page.contains("/download") && page.contains("Vulkan") && !page.contains(&format!("flow-run imaginarium {n}")), "{page}");
+    assert!(page.contains("Windows · x86_64") && page.contains("/download") && page.contains("Vulkan") && !page.contains(&format!("flow run imaginarium {n}")), "{page}");
     let file = s.http.get(s.url(&format!("/p/imaginarium/B-{n}/download"))).header(COOKIE, &cookie).send().await.unwrap();
     assert!(file.headers()["content-disposition"].to_str().unwrap().contains("lumen.exe"));
     assert_eq!(file.bytes().await.unwrap().as_ref(), b"MZ fake exe");
@@ -1865,7 +1865,7 @@ fn git_in(dir: &std::path::Path, args: &[&str]) -> String {
     String::from_utf8_lossy(&out.stdout).trim().to_owned()
 }
 
-/// The commits on top of `base` in `work`, as `agentflow contribute` sends them.
+/// The commits on top of `base` in `work`, as `flow contribute` sends them.
 fn bundle_b64(work: &std::path::Path, base: &str) -> String {
     use base64::Engine as _;
     let file = work.join("draft.bundle");
@@ -2422,15 +2422,21 @@ async fn agents_can_go_ahead_with_a_default_while_a_question_waits() {
 }
 
 #[tokio::test]
-async fn devices_download_the_program_for_flow_run() {
-    let s = TestServer::start().await;
-    let res = s.http.get(s.url("/download/agentflow")).send().await.unwrap();
+async fn devices_download_flow() {
+    let dir = tempfile::tempdir().unwrap();
+    let flow = dir.path().join("flow");
+    std::fs::write(&flow, b"\x7fELF flow").unwrap();
+    let f = flow.clone();
+    let s = TestServer::start_with(move |c, _| c.flow_bin = f.display().to_string()).await;
+    let res = s.http.get(s.url("/download/flow")).send().await.unwrap();
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
     let device = s.token(TokenKind::Device, None).await;
-    let res = s.http.get(s.url("/download/agentflow")).bearer_auth(&device).send().await.unwrap();
-    assert_eq!(res.status(), StatusCode::OK);
-    let bytes = res.bytes().await.unwrap();
-    assert_eq!(&bytes[..4], b"\x7fELF", "the program itself");
+    for path in ["/download/flow", "/download/agentflow"] {
+        let res = s.http.get(s.url(path)).bearer_auth(&device).send().await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK, "{path}");
+        assert!(res.headers()["content-disposition"].to_str().unwrap().contains("\"flow\""));
+        assert_eq!(res.bytes().await.unwrap().as_ref(), b"\x7fELF flow", "flow, not the server");
+    }
 }
 
 /// The owner, 2026-11-12: agents "freely add/edit/delete(archive)" milestones, steps, tasks,
@@ -2638,7 +2644,7 @@ async fn questions_and_decisions_have_scopes() {
     assert!(h["new_project_decisions"].to_string().contains("New rule"), "{h}");
 }
 
-/// `agentflow hello` for a SessionStart hook: the hello tool's reply over the API, news marked
+/// `flow hello` for a SessionStart hook: the hello tool's reply over the API, news marked
 /// read, the last session details kept when left out; only for a project's agent.
 #[tokio::test]
 async fn hello_over_the_api_for_a_session_start_hook() {

@@ -1,4 +1,4 @@
-//! Notes over HTTP: agents upload files (`agentflow note`), pages offer them for download.
+//! Notes over HTTP: agents upload files (`flow note`), pages offer them for download.
 
 use axum::body::Bytes;
 use axum::extract::{DefaultBodyLimit, Path, Query, State};

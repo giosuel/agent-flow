@@ -1,4 +1,4 @@
-//! Screenshots over HTTP: agents upload them (`agentflow screenshot`), pages show them.
+//! Screenshots over HTTP: agents upload them (`flow screenshot`), pages show them.
 
 use axum::body::Bytes;
 use axum::extract::{DefaultBodyLimit, Path, Query, State};

@@ -5,7 +5,10 @@ records its tasks, decisions, questions, pull requests and builds in AgentFlow o
 answers questions, merges, tags and gives feedback from a web page that also works as a home-screen
 app on the phone. Everything that happens is logged.
 
-One Rust binary holds the server, the web app, the MCP endpoint and the command-line tools. Data
+Two Rust programs: `agentflow` is the server (the web app, the MCP endpoint, its setup), a background
+program started by systemd; `flow` is the command people and agents type (builds, the agents'
+commands). `agentflow hello`, `news` and the other client commands from before still work for one
+release: the server hands them to `flow`. Data
 lives in SQLite in `~/.local/state/agentflow/`.
 
 ## Build and run
@@ -40,11 +43,11 @@ agents' process folders. Admin commands then run as the server's user:
 `sudo -u agentflow agentflow --config /etc/agentflow/config.toml admin login-link`.
 
 **Packages.** `scripts/deb.sh` makes a `.deb` from a release binary, and `packaging/arch/PKGBUILD`
-builds the AUR package from a release tag. Both install the binary, the two services and the user;
+builds the AUR package from a release tag. Both install the two programs (`agentflow`, `flow`), the two services and the user;
 then run `sudo agentflow setup …` as above (no `install` step needed).
 
-**As one user (a personal machine).** `scripts/install.sh` builds a release binary, installs it as
-`~/.local/bin/agentflow` and runs it as a systemd user service (`packaging/agentflow.service`).
+**As one user (a personal machine).** `scripts/install.sh` builds the release programs, installs them as
+`~/.local/bin/agentflow` and `~/.local/bin/flow` and runs it as a systemd user service (`packaging/agentflow.service`).
 Everything runs as you, so agents running as you can read its files.
 
 ## Configuration
@@ -71,7 +74,7 @@ hands_socket = "/run/agentflow-hands/hands.sock"  # as its own user: the agents'
 external_token_file = "~/.config/gh/external-token"  # public_repo token; used only on the owner's Send
 git_host = "https://github.com"             # where drafts' repositories are fetched and pushed
 
-[[build_servers]]                           # machines agents build and test on (agentflow remote)
+[[build_servers]]                           # machines agents build and test on (flow remote)
 name = "headquarters"
 ssh = "headquarters"                        # a Host from ~/.ssh/config, or user@host
 root = "agentflow"                          # its work folders, in that user's home
@@ -126,7 +129,7 @@ folder, letting Claude fetch the token itself so it never sits in `~/.claude.jso
 
 ```sh
 claude mcp add-json agentflow '{"type": "http", "url": "https://flow.example/mcp",
-  "headersHelper": "agentflow mcp-headers --token-file ~/.config/agentflow/tokens/<project>.token"}'
+  "headersHelper": "flow mcp-headers --token-file ~/.config/agentflow/tokens/<project>.token"}'
 ```
 
 Start the agent in that folder with `env AGENTFLOW_TOKEN_FILE=~/.config/agentflow/tokens/<project>.token
@@ -140,14 +143,14 @@ as its own Unix user is the stronger fence.
 
 ## Builds
 
-Agents publish test builds with `agentflow publish <file-or-folder> --product <name> --summary …
+Agents publish test builds with `flow publish <file-or-folder> --product <name> --summary …
 [--entry …] [--feature "Title: what to try"]…`; the owner runs them on any machine with
-`flow-run <product> [number]` (the same program, linked as `flow-run`), which downloads the build once, checks every file against
+`flow run <product> [number]`, which downloads the build once, checks every file against
 its checksum and starts it. A build with features waits for feedback on its page.
 
 ## Screenshots
 
-Agents upload screenshots with `agentflow screenshot <file> --name "…" --category "…"
+Agents upload screenshots with `flow screenshot <file> --name "…" --category "…"
 [--description "…"] [--record T-12]`: PNG, JPEG or WebP up to 10 MB. The category is free text
 (test build, mockup, spike test, bug, …). Each one is a record (`S-4`) on the project's Screenshots
 tab, which can filter by category, and opens full size on its own page. With `--record` it's linked
@@ -157,7 +160,7 @@ to that task, build or question and listed there too. The images are in `<data_d
 
 Agents never post or push to other people's repositories themselves. They draft: `agentflow
 contribute pr --repo <owner/name> --base main --branch <name> --title "…" --body-file <file>` in
-their checkout sends the commits on top of that branch (as a git bundle), `agentflow contribute
+their checkout sends the commits on top of that branch (as a git bundle), `flow contribute
 issue|comment|commits` the rest, and the MCP tool `draft_contribution` does issues and comments.
 AgentFlow reads the commits into a repository of its own (`<data_dir>/outgoing/`) and shows the
 owner the diff it computed, the text and a few checks (their PR template's headings, Claude
@@ -171,7 +174,7 @@ presses Send and never shown or logged.
 
 ## Build servers
 
-Agents run builds and tests on a stronger machine with `agentflow remote -- cargo build --release`
+Agents run builds and tests on a stronger machine with `flow remote -- cargo build --release`
 (`--fetch target/release/app` brings files back, `--gpu` waits for an idle GPU). AgentFlow does the
 work over ssh. Each project has one work folder there: the commit goes over with git (only new
 objects), then every file is compared by content with rsync, so only what changed is sent and
@@ -187,7 +190,7 @@ from `~/.ssh/config`); AgentFlow can make a key for it and shows the one line to
 `authorized_keys` (with `restrict`). **Check** shows whether it has Rust and sccache, **Set up
 Rust** and **Install sccache** do that in the background, and **Limits** sets when jobs start and
 pause. Each project picks its build server in its own Settings; a project without one builds
-where its agent is (`agentflow remote` exits with 75). Servers in `config.toml` are added at start.
+where its agent is (`flow remote` exits with 75). Servers in `config.toml` are added at start.
 
 For the low priority to hold against the machine's own user, give the build user's slice a low
 weight once (as root there): `systemctl set-property user-<uid>.slice CPUWeight=10 IOWeight=10`.

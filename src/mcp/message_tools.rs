@@ -25,7 +25,7 @@ pub struct TrackContribution {
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct DraftContribution {
     /// "issue" (a new issue on their repository) or "comment" (on a PR or issue already sent).
-    /// A PR or new commits need your commits: use the `agentflow contribute pr|commits` command.
+    /// A PR or new commits need your commits: use the `flow contribute pr|commits` command.
     #[serde(rename = "type")]
     pub kind: String,
     /// Their repository, e.g. "ophymx/formulary" (issue).
@@ -60,7 +60,7 @@ impl FlowMcp {
     #[tool(description = "Draft an issue for someone else's repository, or a comment on a PR or issue already sent. \
         Never post or push to other people's repositories yourself: the owner reads the draft in AgentFlow, may edit \
         it, and presses Send; it's then posted as them. Their Send, \"Ask for changes\" (with a note) or Drop comes \
-        back to you as news. For a PR or new commits, use the `agentflow contribute pr|commits` command.")]
+        back to you as news. For a PR or new commits, use the `flow contribute pr|commits` command.")]
     async fn draft_contribution(
         &self,
         Extension(parts): Extension<Parts>,
@@ -71,7 +71,7 @@ impl FlowMcp {
         let outcome = async {
             if !matches!(p.kind.trim(), "issue" | "comment") {
                 anyhow::bail!(
-                    "this tool drafts an issue or a comment; a PR or new commits go through `agentflow contribute`"
+                    "this tool drafts an issue or a comment; a PR or new commits go through `flow contribute`"
                 );
             }
             let d = crate::outgoing::DraftIn {

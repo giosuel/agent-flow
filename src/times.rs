@@ -5,7 +5,7 @@
 //! left in doing overnight doesn't count as work. Within a step, time when several tasks are in
 //! doing at once is counted once for the step and split evenly among them (Imaginarium's agent:
 //! weighting by estimate would hide the misses the comparison is there to show). Timings (wall,
-//! CPU, peak memory of a build or test) are logged by `agentflow time`, `log_timing` and remote
+//! CPU, peak memory of a build or test) are logged by `flow time`, `log_timing` and remote
 //! builds, on a task, a step or a PR; they replace the timings in PR bodies.
 
 use std::collections::HashMap;
@@ -48,7 +48,7 @@ pub fn doing_spans(conn: &Connection, task: &Record, now: i64) -> anyhow::Result
 }
 
 /// When the project's agent was around: each of its calls counts for an hour, and a build or test
-/// it ran (`agentflow time`, a build server job) for as long as it ran.
+/// it ran (`flow time`, a build server job) for as long as it ran.
 pub fn present_spans(conn: &Connection, slug: &str, from: i64, to: i64) -> anyhow::Result<Vec<Span>> {
     let mut stmt = conn.prepare(
         "SELECT at FROM log WHERE project = ?1 AND actor_kind = 'project' AND at >= ?2 AND at <= ?3 ORDER BY at",

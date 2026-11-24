@@ -169,7 +169,7 @@ pub const UNREAD_PAGE: i64 = 200;
 
 /// Reads the news: unread events by others, oldest first, and moves the bookmark past them, so
 /// each comes once, whichever way it reaches the agent (since_last_check, a write call's reply,
-/// `agentflow news`).
+/// `flow news`).
 pub fn read_news(conn: &Connection, project_id: i64, slug: &str) -> anyhow::Result<Vec<Event>> {
     let events = unread(conn, project_id, slug)?;
     if let Some(last) = events.last() {

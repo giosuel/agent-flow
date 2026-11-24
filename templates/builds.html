@@ -1,6 +1,6 @@
 {# The Machine page's Build servers section; the page fetches it again every 5 seconds. #}
 <section class="card pad stack" aria-labelledby="bs-h" id="builds">
-  <div class="sec wrap"><h2 id="bs-h">Build servers</h2><span class="sub">agents run builds and tests there with <span class="mono">agentflow remote</span></span></div>
+  <div class="sec wrap"><h2 id="bs-h">Build servers</h2><span class="sub">agents run builds and tests there with <span class="mono">flow remote</span></span></div>
   {% for s in servers %}
   <div class="bs-head"><span class="dot{% if s.online %} ok{% endif %}" aria-hidden="true"></span><h3>{{ s.name }}</h3><span class="sub mono">{{ s.ssh }}</span><span class="sub">{{ s.line }}</span><span class="grow"></span>
     {% if is_owner %}<form method="post" action="/machine/servers/{{ s.name }}/{% if s.paused %}resume{% else %}pause{% endif %}"><button class="btn sm ghost" type="submit">{% if s.paused %}Resume builds{% else %}Pause builds{% endif %}</button></form>{% endif %}

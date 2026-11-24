@@ -14,7 +14,7 @@ pub enum Actor {
         session_id: i64,
         method: String,
     },
-    /// One of the owner's machines: the CLI, flow-run.
+    /// One of the owner's machines: the CLI, flow run.
     Device {
         token_id: i64,
         name: String,

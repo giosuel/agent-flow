@@ -1,6 +1,6 @@
 {# The Settings page's Build servers card. #}
 <section class="card pad stack" aria-labelledby="s-builds" id="s-builds">
-  <div class="sec"><h2 id="s-builds">Build servers</h2><span class="sub">machines agents build and test on with <span class="mono">agentflow remote</span></span></div>
+  <div class="sec"><h2 id="s-builds">Build servers</h2><span class="sub">machines agents build and test on with <span class="mono">flow remote</span></span></div>
   {% if let Some((ok, text)) = notice %}<p class="notice{% if *ok %} ok{% else %} warn{% endif %}" role="status">{{ text }}</p>{% endif %}
   {% for s in servers %}
   <div class="bsrv stack-sm">

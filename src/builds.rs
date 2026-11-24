@@ -1,7 +1,7 @@
 //! Test builds for the owner, folded in from viber-run (the owner, 2026-11-07: "integrate
 //! viber-run into agent flow and then rewrite the viber-run client CLI to talk to the agent flow
 //! server instead"). An agent publishes a build as a tar archive; AgentFlow checks it and keeps
-//! the archive as it came; the owner's `flow-run` downloads, verifies and starts it.
+//! the archive as it came; the owner's `flow run` downloads, verifies and starts it.
 //!
 //! Like viber-run: each product's builds are numbered and numbers are never reused; a build never
 //! changes once published; its name is `<date>-<time>-<topic>-<commit>`.
@@ -37,7 +37,7 @@ pub struct Manifest {
 }
 
 /// What a build runs on, e.g. "linux-x86_64" or "windows-x86_64" (Imaginarium's agent, 2026-11-12:
-/// a Windows exe mustn't be offered to flow-run on Linux). Older builds without one are Linux.
+/// a Windows exe mustn't be offered to flow run on Linux). Older builds without one are Linux.
 pub const DEFAULT_PLATFORM: &str = "linux-x86_64";
 
 pub fn check_platform(p: &str) -> anyhow::Result<()> {

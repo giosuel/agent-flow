@@ -118,7 +118,7 @@ pub struct AddNote {
     /// What it is, in a few words, e.g. "Loro depends on the unmaintained im crate".
     pub name: String,
     /// A category of your choosing, e.g. "known issue", "technical note", "morning report",
-    /// "estimate". Keep using the same ones. For files, use the `agentflow note <file>` command.
+    /// "estimate". Keep using the same ones. For files, use the `flow note <file>` command.
     pub category: String,
     /// The note itself, Markdown.
     pub text: String,
@@ -135,7 +135,7 @@ pub struct UpdateNote {
     pub id: String,
     pub name: Option<String>,
     pub category: Option<String>,
-    /// A text note's new text (a file gets a new version with `agentflow note --replaces N-4`).
+    /// A text note's new text (a file gets a new version with `flow note --replaces N-4`).
     pub text: Option<String>,
     /// When it comes back; empty stops it coming back.
     pub resurface: Option<String>,
@@ -990,7 +990,7 @@ impl FlowMcp {
     }
 
     #[tool(description = "Log how long a build or test took (wall, CPU, peak memory), on a task, a step or a PR. \
-        Easier: run it through `agentflow time [--on T-12] -- <command>`, which measures and logs it for you. These \
+        Easier: run it through `flow time [--on T-12] -- <command>`, which measures and logs it for you. These \
         replace the timings in PR bodies.")]
     async fn log_timing(
         &self,
@@ -1027,7 +1027,7 @@ impl FlowMcp {
     }
 
     #[tool(description = "Write a short note: a known issue, a technical note, an estimate, anything worth keeping \
-        that isn't a task or a decision. Files (reports, plans, benchmarks, logs) go up with `agentflow note <file> \
+        that isn't a task or a decision. Files (reports, plans, benchmarks, logs) go up with `flow note <file> \
         --name … --category …`. A note can come back to you in hello: on a date, or until you resolve it.")]
     async fn add_note(
         &self,
@@ -1044,10 +1044,10 @@ impl FlowMcp {
                 let project = target_project(&tx, &a, None, true)?;
                 let category = crate::screenshots::category(&p.category)?;
                 if p.text.trim().is_empty() {
-                    anyhow::bail!("a text note needs its text; a file goes up with `agentflow note <file>`");
+                    anyhow::bail!("a text note needs its text; a file goes up with `flow note <file>`");
                 }
                 if p.text.len() > 64 * 1024 {
-                    anyhow::bail!("that's long for a text note; upload it as a file with `agentflow note <file>`");
+                    anyhow::bail!("that's long for a text note; upload it as a file with `flow note <file>`");
                 }
                 let mut data = Map::new();
                 data.insert("category".into(), category.into());
@@ -1092,7 +1092,7 @@ impl FlowMcp {
                     anyhow::bail!("{} isn't a note", n.ref_id);
                 }
                 if p.text.is_some() && !n.str("ext").is_empty() {
-                    anyhow::bail!("{} is a file; upload a new version with `agentflow note <file> --replaces {}`", n.short_id(), n.short_id());
+                    anyhow::bail!("{} is a file; upload a new version with `flow note <file> --replaces {}`", n.short_id(), n.short_id());
                 }
                 if p.state.as_deref() == Some("resolved") && p.note.trim().is_empty() {
                     anyhow::bail!("say why it's resolved, in note");
@@ -1128,7 +1128,7 @@ impl FlowMcp {
     }
 
     #[tool(description = "Change a screenshot: a mockup's state (proposed, approved, built), the design link, its \
-        name or description. Upload screenshots with `agentflow screenshot` (for a mockup: --design-url and --state).")]
+        name or description. Upload screenshots with `flow screenshot` (for a mockup: --design-url and --state).")]
     async fn update_screenshot(
         &self,
         Extension(parts): Extension<Parts>,

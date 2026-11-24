@@ -1,0 +1,44 @@
+//! AgentFlow's library: the server (`agentflow`), the client (`flow`) and, later, the builder
+//! (`agentflow-builder`) are thin programs on top of it.
+
+pub mod actions;
+pub mod activity;
+pub mod auth;
+pub mod backup;
+pub mod builds;
+pub mod cli;
+pub mod config;
+pub mod contributions;
+pub mod db;
+pub mod demo;
+pub mod github;
+pub mod guides;
+pub mod hands;
+pub mod hardening;
+pub mod logview;
+pub mod machine;
+pub mod markdown;
+pub mod mcp;
+pub mod notes;
+pub mod onboard;
+pub mod outgoing;
+pub mod passkey;
+pub mod poller;
+pub mod projectdoc;
+pub mod projects;
+pub mod sessionlog;
+pub mod prs;
+pub mod push;
+pub mod records;
+pub mod remote;
+pub mod screenshots;
+pub mod setup;
+pub mod steps;
+pub mod times;
+pub mod tokens;
+pub mod totest;
+pub mod tz;
+pub mod usage;
+pub mod util;
+pub mod waiting;
+pub mod web;

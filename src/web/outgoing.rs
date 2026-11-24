@@ -1,4 +1,4 @@
-//! Drafts for other people's repositories over HTTP: agents send them (`agentflow contribute`), the
+//! Drafts for other people's repositories over HTTP: agents send them (`flow contribute`), the
 //! owner sends, sends back or drops them from the contribution's page. See `crate::outgoing`.
 
 use axum::extract::{DefaultBodyLimit, Path, State};
@@ -81,7 +81,7 @@ pub fn tell_owner(state: &AppState, r: &records::Record) -> i64 {
     version
 }
 
-/// What `agentflow contribute commits` needs to know about a contribution.
+/// What `flow contribute commits` needs to know about a contribution.
 async fn about(
     State(state): State<AppState>,
     Extension(actor): Extension<Actor>,
