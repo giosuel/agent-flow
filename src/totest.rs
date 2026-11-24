@@ -22,7 +22,8 @@ pub fn check_category(c: &str) -> anyhow::Result<String> {
     Ok(c)
 }
 
-/// Adds something to test.
+/// Adds something to test; `build` is the build it comes with, if the agent says (an item without
+/// one goes with the first build published after it, see `build_of`).
 pub fn add(
     conn: &Connection,
     project_id: i64,
@@ -30,15 +31,24 @@ pub fn add(
     title: &str,
     how: &str,
     category: &str,
+    build: Option<&Record>,
 ) -> anyhow::Result<Record> {
     let category = check_category(category)?;
     let title = title.trim();
     if title.is_empty() || title.chars().count() > 200 {
         anyhow::bail!("say what to test in a line (up to 200 characters)");
     }
+    if let Some(b) = build
+        && (b.kind != Kind::Build || b.project_id != project_id)
+    {
+        anyhow::bail!("{} isn't one of this project's builds", b.ref_id);
+    }
     let mut data = Map::new();
     data.insert("category".into(), category.into());
-    records::create(
+    if let Some(b) = build {
+        data.insert("build".into(), b.short_id().into());
+    }
+    let r = records::create(
         conn,
         project_id,
         author,
@@ -50,7 +60,81 @@ pub fn add(
             data,
             ..Default::default()
         },
-    )
+    )?;
+    if let Some(b) = build {
+        records::link(conn, &r, b, "tests", author)?;
+    }
+    Ok(r)
+}
+
+/// The build an item came with: the one the agent named, else the first build published after the
+/// item was added (Q-8: "older items matched by publish time"); None before any. `builds` are the
+/// project's builds, oldest first; the answer is a build's short id, e.g. "B-67".
+pub fn build_of(item: &Record, builds: &[&Record]) -> Option<String> {
+    let named = item.str("build");
+    if !named.is_empty() {
+        return Some(named.to_owned());
+    }
+    builds.iter().find(|b| b.created_at >= item.created_at).map(|b| b.short_id())
+}
+
+/// The owner's verdict on one item, from a page: works (tested, done), problem (stays open with
+/// the problem in their words) or skip (dropped: they won't try it). The agent hears each.
+pub fn owner_mark(conn: &Connection, item: &Record, verdict: &str, note: &str) -> anyhow::Result<Record> {
+    if item.kind != Kind::Test {
+        anyhow::bail!("{} isn't something to test", item.ref_id);
+    }
+    if item.state != "open" {
+        anyhow::bail!("{} is {} already", item.ref_id, item.state);
+    }
+    let note = note.trim();
+    let mut data = Map::new();
+    let (state, history, news) = match verdict {
+        "works" => {
+            data.insert("result".into(), "works".into());
+            data.insert("tested_at".into(), now_ms().into());
+            data.insert("tested_by".into(), "owner".into());
+            if !note.is_empty() {
+                data.insert("owner_note".into(), note.into());
+            }
+            (
+                Some("tested".to_owned()),
+                "tested by the owner: works",
+                format!("Owner tested, works: {} {}", item.short_id(), item.title),
+            )
+        }
+        "problem" => {
+            if note.is_empty() {
+                anyhow::bail!("say what went wrong");
+            }
+            let mut problems = item.data.get("problems").and_then(Value::as_array).cloned().unwrap_or_default();
+            problems.push(json!({"at": now_ms(), "note": note, "by": "owner"}));
+            data.insert("problems".into(), Value::Array(problems));
+            (
+                None,
+                "the owner found a problem",
+                format!("Owner found a problem in {} {}: \"{note}\"", item.short_id(), item.title),
+            )
+        }
+        "skip" => {
+            data.insert("dropped_because".into(), "skipped by the owner".into());
+            (
+                Some("dropped".to_owned()),
+                "skipped by the owner",
+                format!("Owner skipped {} {}", item.short_id(), item.title),
+            )
+        }
+        _ => anyhow::bail!("the verdict is works, problem or skip"),
+    };
+    let news = if verdict == "works" && !note.is_empty() { format!("{news}. Note: \"{note}\"") } else { news };
+    let (r, _) = records::update(
+        conn,
+        item,
+        "owner",
+        Patch { state, data, quiet: true, note: history.into(), ..Default::default() },
+    )?;
+    records::event(conn, Some(item.project_id), Some(item.id), &format!("test.{verdict}"), &news, "owner")?;
+    Ok(r)
 }
 
 /// A project's open items, by category (in the order categories first appeared), oldest first.

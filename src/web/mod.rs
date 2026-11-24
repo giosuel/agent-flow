@@ -14,6 +14,7 @@ mod screenshots;
 mod sync;
 mod totest;
 pub use builds::notify_build;
+mod buildstab;
 mod buttons;
 mod charts;
 mod conversations;

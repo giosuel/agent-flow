@@ -1,0 +1,20 @@
+{# One thing to try (src/web/totest.rs Item), with the owner's verdict: Works, Problem (a note to
+   the agent; it stays open) or Skip (Q-8, S-40). Needs i, tt_slug, tt_back and tt_owner. #}
+<div class="item-row tt-row" id="tt-{{ i.short }}">
+  <div class="ttl">
+    <span class="tt-h"><span class="tt-t">{{ i.title }}</span> <a class="mono sub" href="{{ i.url }}">{{ i.short }}</a>{% if let Some((tone, text)) = i.chip %} <span class="chip {{ tone }}">{{ text }}</span>{% endif %}</span>
+    {% if !i.how.is_empty() %}<span class="sub">{{ i.how }}</span>{% endif %}
+    {% for p in i.problems %}<span class="tt-problem bad-text">{{ crate::web::icons::icon("close")|safe }}<span>Problem: {{ p }}</span></span>{% endfor %}
+  </div>
+  {% if !i.open %}<span class="chip{% if i.outcome.starts_with("works") %} ok{% else %} quiet{% endif %}">{{ i.outcome }}</span>
+  {% else if tt_owner %}
+  <div class="tt-acts">
+    <form method="post" action="/p/{{ tt_slug }}/{{ i.short }}/try"><input type="hidden" name="back" value="{{ tt_back }}"><button class="btn sm ok" type="submit" name="v" value="works">{{ crate::web::icons::icon("check")|safe }}Works</button></form>
+    <details class="dd"><summary class="btn sm danger">{{ crate::web::icons::icon("close")|safe }}Problem</summary>
+      <form method="post" action="/p/{{ tt_slug }}/{{ i.short }}/try" class="dd-menu end form"><input type="hidden" name="back" value="{{ tt_back }}"><input type="hidden" name="v" value="problem">
+        <label class="field">What went wrong?<textarea name="note" rows="3" required maxlength="2000" placeholder="In your words: the agent gets them as written"></textarea></label>
+        <button class="btn sm danger" type="submit">Tell the agent</button></form></details>
+    <form method="post" action="/p/{{ tt_slug }}/{{ i.short }}/try"><input type="hidden" name="back" value="{{ tt_back }}"><button class="btn sm quiet" type="submit" name="v" value="skip">Skip</button></form>
+  </div>
+  {% endif %}
+</div>

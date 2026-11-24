@@ -4,6 +4,7 @@ use std::collections::HashMap;
 
 use askama::Template;
 use axum::extract::{Path, Query, State};
+use axum::http::HeaderMap;
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use axum::{Extension, Form, Router};
@@ -33,14 +34,6 @@ pub fn routes() -> Router<AppState> {
         .route("/p/{slug}/status", post(set_status))
         .route("/p/{slug}/setup-code", post(setup_code))
         .route("/p/{slug}/settings", get(settings_page).post(save_settings))
-}
-
-fn tested_notice(n: usize) -> String {
-    if n == 0 {
-        "Nothing was ticked, so nothing was sent.".into()
-    } else {
-        format!("Sent: {n} tested, works. The agent hears which.")
-    }
 }
 
 /// The Settings tab's form: every detail an agent can set with update_project, the owner here (the
@@ -799,8 +792,7 @@ pub struct Connect {
 struct ProjectPage {
     /// The path at the top left: Projects / the project / the tab / the milestone / the step.
     path: Vec<super::pages::PathPart>,
-    /// The To test checklist (its tab), and how many are open (the tab's count).
-    to_test: Option<super::totest::View>,
+    /// How many things are open to try (the Builds tab's count).
     to_test_open: i64,
     /// The project document's revision and age, for the overview's link to it ("rev 14 · yesterday").
     doc_line: String,
@@ -840,8 +832,8 @@ struct ProjectPage {
     decisions: Vec<RecordRow>,
     /// The Decisions tab: open questions, filters and the timeline.
     dview: Option<super::decisions::DecisionsView>,
-    /// The Builds tab: every build, newest first.
-    builds: Vec<RecordRow>,
+    /// The Builds tab: the newest build, what to try, the earlier builds.
+    bview: Option<super::buildstab::BuildsView>,
     /// The Settings tab's form, filled with the project's details.
     /// The Screenshots tab: the shown ones (newest first), all of them, and the category filter.
     shots: Vec<ShotCard>,
@@ -882,9 +874,10 @@ async fn plan(
     slug: Path<String>,
     Query(mut q): Query<TabQuery>,
     tz: Tz,
+    headers: HeaderMap,
 ) -> AppResult<Response> {
     q.tab = Some("plan".into());
-    project(state, actor, slug, Query(q), tz).await
+    project(state, actor, slug, Query(q), tz, headers).await
 }
 
 async fn plan_of(
@@ -893,10 +886,11 @@ async fn plan_of(
     Path((slug, ms)): Path<(String, String)>,
     Query(mut q): Query<TabQuery>,
     tz: Tz,
+    headers: HeaderMap,
 ) -> AppResult<Response> {
     q.tab = Some("plan".into());
     q.ms = Some(ms);
-    project(state, actor, Path(slug), Query(q), tz).await
+    project(state, actor, Path(slug), Query(q), tz, headers).await
 }
 
 #[derive(Deserialize)]
@@ -911,8 +905,14 @@ struct TabQuery {
     cat: Option<String>,
     /// The Settings tab's outcome: saved, or why not.
     settings: Option<String>,
-    /// After Send on the To test list: how many were marked tested.
-    tested: Option<usize>,
+    /// After a verdict on something to try: "TT-5.works".
+    tried: Option<String>,
+    /// The Builds tab's search and filters (see `super::buildstab::Filter`), and every earlier build.
+    tq: Option<String>,
+    tcat: Option<String>,
+    tfrom: Option<String>,
+    tstate: Option<String>,
+    ball: Option<u8>,
     /// The milestone whose board the overview shows (its name); the current one if left out.
     ms: Option<String>,
     /// A step of that milestone the board shows alone (its name); the whole milestone if left out.
@@ -942,8 +942,8 @@ fn press_notice(q: &TabQuery) -> (Option<String>, bool) {
             false,
         );
     }
-    if let Some(n) = q.tested {
-        return (Some(tested_notice(n)), false);
+    if let Some(n) = q.tried.as_deref().and_then(super::totest::tried_notice) {
+        return (Some(n), false);
     }
     let merging = q
         .merging
@@ -975,7 +975,6 @@ pub(super) const TABS: &[(&str, &str)] = &[
     ("decisions", "Decisions"),
     ("prs", "Pull requests"),
     ("builds", "Builds"),
-    ("to-test", "To test"),
     ("screenshots", "Screenshots"),
     ("notes", "Notes"),
     ("settings", "Settings"),
@@ -987,11 +986,16 @@ async fn project(
     Path(slug): Path<String>,
     Query(q): Query<TabQuery>,
     tz: Tz,
+    headers: HeaderMap,
 ) -> AppResult<Response> {
     let (notice, notice_bad) = press_notice(&q);
     if q.tab.as_deref() == Some("settings") {
         let code = q.settings.as_deref().map(|c| format!("?settings={}", super::log::enc(c))).unwrap_or_default();
         return Ok(Redirect::to(&format!("/p/{slug}/settings{code}")).into_response());
+    }
+    // To test went into Builds (the owner, 2026-11-23, Q-6): its links open Builds.
+    if q.tab.as_deref() == Some("to-test") {
+        return Ok(Redirect::to(&format!("/p/{slug}?tab=builds")).into_response());
     }
     // Questions went into Decisions (the owner, 2026-11-23, Q-6): its links open Decisions.
     if q.tab.as_deref() == Some("questions") {
@@ -1013,6 +1017,7 @@ async fn project(
     let chosen_step = q.step.clone();
     let t = tab.clone();
     let tz_d = tz.clone();
+    let tz_b = tz.clone();
     let page = state
         .db
         .call(move |c| {
@@ -1068,6 +1073,29 @@ async fn project(
                 .call(move |c| {
                     let p = projects::require(c, &slug)?;
                     super::notes::view(c, &slug, p.id, &filter, now)
+                })
+                .await?,
+        );
+    }
+    if tab == "builds" {
+        let slug = page.slug.clone();
+        let filter = super::buildstab::Filter::new(
+            q.tq.as_deref(),
+            q.tcat.as_deref(),
+            q.tfrom.as_deref(),
+            q.tstate.as_deref(),
+            q.ball == Some(1),
+        );
+        let ua = headers.get(axum::http::header::USER_AGENT).and_then(|v| v.to_str().ok()).unwrap_or("");
+        let windows_first = ua.contains("Windows");
+        let is_owner = actor.is_owner();
+        let tz3 = tz_b;
+        page.bview = Some(
+            state
+                .db
+                .call(move |c| {
+                    let p = projects::require(c, &slug)?;
+                    super::buildstab::view(c, &slug, p.id, &filter, is_owner, windows_first, now, &tz3)
                 })
                 .await?,
         );
@@ -1550,38 +1578,6 @@ fn build_project_page(
         }
     }
 
-    // "1 works · 1 problem · 1 skipped" per build, from its feedback records.
-    let verdicts: HashMap<i64, String> = if tab == "builds" {
-        let mut by: HashMap<i64, (usize, usize, usize)> = HashMap::new();
-        for f in all.iter().filter(|f| f.kind == Kind::Feedback) {
-            let Some(b) = all.iter().find(|b| b.kind == Kind::Build && b.ref_id == f.str("build")) else { continue };
-            let e = by.entry(b.id).or_default();
-            match f.state.as_str() {
-                "works" => e.0 += 1,
-                "problem" => e.1 += 1,
-                "skipped" => e.2 += 1,
-                _ => {}
-            }
-        }
-        by.into_iter()
-            .map(|(id, (w, p, s))| {
-                let mut parts = Vec::new();
-                if w > 0 {
-                    parts.push(format!("{w} works"));
-                }
-                if p > 0 {
-                    parts.push(plural(p as i64, "problem", "problems"));
-                }
-                if s > 0 {
-                    parts.push(format!("{s} skipped"));
-                }
-                (id, parts.join(" · "))
-            })
-            .filter(|(_, s)| !s.is_empty())
-            .collect()
-    } else {
-        HashMap::new()
-    };
     let shots: Vec<ShotCard> = if tab == "screenshots" {
         let mut list: Vec<&Record> =
             all.iter().filter(|r| r.kind == Kind::Screenshot && r.state != "withdrawn").collect();
@@ -1600,47 +1596,14 @@ fn build_project_page(
     } else {
         Vec::new()
     };
-    let builds = if tab == "builds" {
-        let mut list: Vec<&Record> = all.iter().filter(|r| r.kind == Kind::Build).collect();
-        list.sort_by_key(|r| std::cmp::Reverse(r.number));
-        list.iter()
-            .map(|r| {
-                let waiting = r.data.get("ready_for_feedback").and_then(Value::as_bool).unwrap_or(false);
-                let mut sub = format!("{} · {}", r.str("name"), ago(r.created_at, now));
-                if waiting {
-                    sub.push_str(" · waiting for your feedback");
-                }
-                if let Some(v) = verdicts.get(&r.id) {
-                    sub.push_str(&format!(" · {v}"));
-                }
-                RecordRow::new(r, sub)
-            })
-            .collect()
-    } else {
-        Vec::new()
-    };
-
     let (external, external_done) = external_rows(c, &all, now)?;
-    let to_test = if tab == "to-test" {
-        Some(super::totest::view(
-            c,
-            p.id,
-            &p.slug,
-            super::totest::Place::Tab,
-            format!("/p/{}?tab=to-test", p.slug),
-            true,
-            now,
-        )?)
-    } else {
-        None
-    };
     Ok(ProjectPage {
         path: Vec::new(),
         to_test_open: crate::totest::open_count(c, p.id)?,
         doc_line: super::projectdoc::short_line(&crate::projectdoc::get(c, p.id)?, now_ms()),
         notes: None,
         dview: None,
-        to_test,
+        bview: None,
         external,
         external_done,
         session_url: crate::usage::session_link(c, p.id)?.map(|(u, _)| u),
@@ -1706,7 +1669,6 @@ fn build_project_page(
         },
         open_questions,
         decisions,
-        builds,
         shots_all: shots.len(),
         shots,
         shot_cats: Vec::new(),
@@ -1877,8 +1839,8 @@ struct RecordQuery {
     sent: Option<u8>,
     /// What happened to a draft for someone else's repository (sent, asked, dropped, …).
     draft: Option<String>,
-    /// After Send on the To test list.
-    tested: Option<usize>,
+    /// After a verdict on something to try: "TT-5.works".
+    tried: Option<String>,
 }
 
 async fn record(
@@ -1900,8 +1862,8 @@ async fn record(
     if let Some(b) = page.build.as_mut() {
         b.sent = q.sent == Some(1);
     }
-    if let Some(n) = q.tested {
-        page.draft_notice = Some((true, tested_notice(n)));
+    if let Some(n) = q.tried.as_deref().and_then(super::totest::tried_notice) {
+        page.draft_notice = Some((true, n));
     }
     render(page)
 }
@@ -1915,7 +1877,7 @@ fn record_tab(kind: Kind) -> Option<&'static str> {
         Kind::Pr => Some("prs"),
         Kind::Build | Kind::Feedback => Some("builds"),
         Kind::Screenshot => Some("screenshots"),
-        Kind::Test => Some("to-test"),
+        Kind::Test => Some("builds"),
         Kind::Note => Some("notes"),
         Kind::Release | Kind::Contribution => None,
     }

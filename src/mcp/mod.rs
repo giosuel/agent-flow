@@ -57,8 +57,9 @@ session or later go into AgentFlow that way, not into a scratchpad; refer to the
 owner can click. Subagents may run `flow note` too; AgentFlow marks those notes as a subagent's. Never post or push to other people's repositories yourself (PRs, \
 issues, comments, commits), even if a token would let you: draft them with `flow contribute pr|commits` or \
 `draft_contribution` (issue, comment), and the owner sends them from AgentFlow. When something is ready for the \
-owner to try, add it with `add_to_test` (a category of your choosing); open items come along with every release \
-and build until the owner tested them, and you mark what they tell you with `resolve_tests`. For heavy builds and \
+owner to try, add it with `add_to_test` (a category of your choosing, and the build it comes with); open items \
+come along with every release and build until the owner tried them: they mark each Works, Problem or Skip on the \
+Builds tab (you hear it as news), and you mark what they tell you with `resolve_tests`. For heavy builds and \
 tests, use the build server (hello's `builds` says which and whether it's online): `flow remote [--fetch \
 target/release/app] -- cargo build --release` runs it there and prints the output; exit code 75 means it's \
 offline, so build here; 78 means none is picked for your project and names the online ones for `--server`. \

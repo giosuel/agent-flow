@@ -9,7 +9,7 @@
 </div>
 <nav class="tabs proj-tabs" aria-label="Project">
   {% for (key, name) in tabs %}
-  <a href="/p/{{ slug }}{% if *key == "settings" %}/settings" data-dlg{% else if *key == "plan" %}/plan"{% else %}{% if *key != "overview" %}?tab={{ key }}{% endif %}"{% endif %}{% if tab == *key %} class="on" aria-current="page"{% endif %}>{% if *key == "prs" %}<span class="hide-phone">{{ name }}</span><span class="only-phone">PRs</span>{% else if *key == "screenshots" %}<span class="hide-phone">{{ name }}</span><span class="only-phone">Shots</span>{% else if *key == "to-test" %}<span class="hide-phone">{{ name }}</span><span class="only-phone">Test</span>{% else %}{{ name }}{% endif %}{% if *key == "decisions" && !open_questions.is_empty() %} <span class="count warn">{{ open_questions.len() }}</span>{% endif %}{% if *key == "prs" && prs_total > 0 %} <span class="count">{{ prs_total }}</span>{% endif %}{% if *key == "to-test" && to_test_open > 0 %} <span class="count warn">{{ to_test_open }}</span>{% endif %}</a>
+  <a href="/p/{{ slug }}{% if *key == "settings" %}/settings" data-dlg{% else if *key == "plan" %}/plan"{% else %}{% if *key != "overview" %}?tab={{ key }}{% endif %}"{% endif %}{% if tab == *key %} class="on" aria-current="page"{% endif %}>{% if *key == "prs" %}<span class="hide-phone">{{ name }}</span><span class="only-phone">PRs</span>{% else if *key == "screenshots" %}<span class="hide-phone">{{ name }}</span><span class="only-phone">Shots</span>{% else %}{{ name }}{% endif %}{% if *key == "decisions" && !open_questions.is_empty() %} <span class="count warn">{{ open_questions.len() }}</span>{% endif %}{% if *key == "prs" && prs_total > 0 %} <span class="count">{{ prs_total }}</span>{% endif %}{% if *key == "builds" && to_test_open > 0 %} <span class="count warn">{{ to_test_open }}</span>{% endif %}</a>
   {% endfor %}
 </nav>
 {% if let Some(n) = notice %}<p class="notice{% if notice_bad %} bad{% else %} ok{% endif %}" role="status">{% if notice_bad %}{{ crate::web::icons::icon("alert")|safe }}{% else %}{{ crate::web::icons::icon("check")|safe }}{% endif %}<span>{{ n }}</span></p>{% endif %}
@@ -152,7 +152,7 @@
 
 {% if tab == "notes" %}{% if let Some(nv) = notes %}{% include "notes_list.html" %}{% endif %}{% endif %}
 
-{% if let Some(tt) = to_test %}{% include "to_test.html" %}{% endif %}
+{% if tab == "builds" %}{% if let Some(bv) = bview %}{% include "builds_tab.html" %}{% endif %}{% endif %}
 
 {% if tab == "screenshots" %}
 <section class="stack" aria-label="Screenshots">
@@ -178,12 +178,6 @@
 {% endfor %}
 {% endif %}
 
-{% if tab == "builds" %}
-<section class="card pad stack">
-  {% if builds.is_empty() %}<p class="sub">No builds yet. The agent publishes them with <span class="mono">flow publish</span>.</p>{% endif %}
-  <ul class="rows">{% for b in builds %}<li class="item-row"><span class="mono sub id-col">{{ b.short }}</span><div class="ttl"><a href="{{ b.url }}">{{ b.title }}</a><span class="sub">{{ b.sub }}</span></div><span class="chip{% if b.state == "tried" %} ok{% endif %}">{{ b.state }}</span></li>{% endfor %}</ul>
-</section>
-{% endif %}
 
 {% if tab == "decisions" %}{% if let Some(dv) = dview %}{% include "decisions.html" %}{% endif %}{% endif %}
 {% endblock %}

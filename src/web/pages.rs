@@ -300,7 +300,8 @@ impl Nav {
                     // Decisions carries the questions waiting (Q-6).
                     "decisions" => (questions, true),
                     "prs" => (prs, false),
-                    "to-test" => (tests, true),
+                    // Builds carries the things to try (Q-6).
+                    "builds" => (tests, true),
                     _ => (0, false),
                 };
                 BarTab {

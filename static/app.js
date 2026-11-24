@@ -511,26 +511,6 @@ document.addEventListener("af:content", (e) => wireCopy(e.detail));
 })();
 
 
-// To test: count what's ticked; Send needs at least one.
-const wireToTest = (root) => {
-  for (const form of root.querySelectorAll("form[data-tt]")) {
-    const boxes = [...form.querySelectorAll("input[type=checkbox]")];
-    const count = form.querySelector("[data-tt-count]");
-    const send = form.querySelector("[data-tt-send]");
-    if (!count || !send) continue;
-    const update = () => {
-      const n = boxes.filter((b) => b.checked).length;
-      count.textContent = `${n} ticked`;
-      send.disabled = n === 0;
-      form.classList.toggle("tt-active", n > 0);
-    };
-    for (const b of boxes) b.addEventListener("change", update);
-    update();
-  }
-};
-document.addEventListener("DOMContentLoaded", () => wireToTest(document));
-document.addEventListener("af:content", (e) => wireToTest(e.detail));
-
 // Project overview: a milestone button swaps the board below it without reloading the page.
 document.addEventListener("click", async (e) => {
   const a = e.target.closest("a[data-ms]");

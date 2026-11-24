@@ -139,7 +139,7 @@ async fn step(
                 .filter(|r| r.kind == crate::records::Kind::Test && r.state == "open" && r.created_at >= from && r.created_at <= to)
                 .count();
             if tests > 0 {
-                with_owner.push(Link { short: String::new(), url: format!("/p/{}?tab=to-test", p.slug), title: format!("{tests} item{} to test", if tests == 1 { "" } else { "s" }), sub: String::new() });
+                with_owner.push(Link { short: String::new(), url: format!("/p/{}?tab=builds", p.slug), title: format!("{tests} item{} to test", if tests == 1 { "" } else { "s" }), sub: String::new() });
             }
             let review = if m.review.is_empty() {
                 None
