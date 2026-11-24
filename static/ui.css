@@ -586,6 +586,12 @@ html.dlg-on { overflow: hidden; }
 .pop .dlg-body { padding: 0; }
 @media (prefers-reduced-motion: reduce) { .dlg-back, .dlg, .pop, .pop-back { transition: none; } }
 
+/* Touch screens wider than a phone (an iPad): Safari zooms into a field under 16px there too, as on
+   the phone below (the rule #41 had, back in the library). */
+@media (pointer: coarse) {
+  input, select, textarea, .field > input, .field > select, .field > textarea { font-size: var(--fs-input); }
+}
+
 /* ---------------------------------------------------------------- The phone (one breakpoint: 700) */
 @media (max-width: 700px) {
   .fold .peek { display: none; }
