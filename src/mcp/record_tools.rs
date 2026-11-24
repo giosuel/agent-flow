@@ -19,8 +19,9 @@ use crate::util::{fmt_utc, now_ms};
 pub struct AddTask {
     /// Only for the consultant: which project.
     pub project: Option<String>,
-    /// The step (or milestone) it belongs to, e.g. "P9.3d" or "M4". Every task belongs to one.
-    pub milestone: String,
+    /// The step (or milestone) it belongs to, e.g. "P9.3d" or "M4". Only a parked task may have
+    /// none, for things not planned anywhere yet.
+    pub milestone: Option<String>,
     #[serde(flatten)]
     pub task: TaskItem,
 }
@@ -45,7 +46,8 @@ pub struct TaskItem {
     pub branch: Option<String>,
     #[serde(default)]
     pub tags: Vec<String>,
-    /// todo (default), doing, parked, or skipped (a finding you won't do; needs reason).
+    /// todo (default), doing, parked, skipped (a finding you won't do; needs reason), or done (work
+    /// finished before, brought in as history; no estimate needed).
     pub state: Option<String>,
     /// Why it's skipped.
     pub reason: Option<String>,
@@ -55,8 +57,8 @@ pub struct TaskItem {
 pub struct AddTasks {
     /// Only for the consultant: which project.
     pub project: Option<String>,
-    /// The step (or milestone) they belong to, e.g. "P9.3d".
-    pub milestone: String,
+    /// The step (or milestone) they belong to, e.g. "P9.3d". Left out only when all are parked.
+    pub milestone: Option<String>,
     /// The tasks, in the order you'll do them. All are added or none (with each problem listed).
     pub tasks: Vec<TaskItem>,
 }
@@ -349,14 +351,7 @@ fn brief(r: &Record) -> Value {
 }
 
 fn parse_date(s: &str) -> anyhow::Result<i64> {
-    let s = s.trim();
-    let f = time::macros::format_description!("[year]-[month]-[day]");
-    let fm = time::macros::format_description!("[year]-[month]-[day] [hour]:[minute]");
-    if let Ok(d) = time::PrimitiveDateTime::parse(s, &fm) {
-        return Ok((d.assume_utc().unix_timestamp_nanos() / 1_000_000) as i64);
-    }
-    let d = time::Date::parse(s, &f).map_err(|_| anyhow::anyhow!("dates look like 2026-11-06 or 2026-11-06 14:12"))?;
-    Ok((d.midnight().assume_utc().unix_timestamp_nanos() / 1_000_000) as i64)
+    crate::util::parse_day_or_time(s)
 }
 
 fn check_branch(b: &str) -> anyhow::Result<()> {
@@ -369,8 +364,8 @@ fn check_branch(b: &str) -> anyhow::Result<()> {
 /// Checks one task before it's added; the problem in words if it can't be.
 fn check_item(t: &TaskItem) -> Result<(), String> {
     let state = t.state.as_deref().unwrap_or("todo");
-    if !["todo", "doing", "parked", "skipped"].contains(&state) {
-        return Err(format!("state {state:?}: add tasks as todo, doing, parked or skipped (block them afterwards with update_task)"));
+    if !["todo", "doing", "parked", "skipped", "done"].contains(&state) {
+        return Err(format!("state {state:?}: add tasks as todo, doing, parked, skipped or done (block them afterwards with update_task)"));
     }
     if t.title.trim().is_empty() {
         return Err("a title".into());
@@ -379,6 +374,8 @@ fn check_item(t: &TaskItem) -> Result<(), String> {
         if t.reason.as_deref().map(str::trim).unwrap_or("").is_empty() {
             return Err("a reason it's skipped".into());
         }
+    } else if state == "done" && t.estimate.as_deref().map(str::trim).unwrap_or("").is_empty() {
+        // History: done before, no estimate to set against.
     } else {
         match t.estimate.as_deref().map(str::trim) {
             None | Some("") => return Err("an estimate, e.g. \"2 h\" or \"40 min\"".into()),
@@ -406,9 +403,12 @@ fn check_item(t: &TaskItem) -> Result<(), String> {
 
 /// Adds one checked task to a step. Added while the step is under way (and not said to be
 /// planned), it's marked added, with where it came from ("found" unless said).
-fn add_one(tx: &rusqlite::Connection, project_id: i64, m: &projects::Milestone, t: TaskItem, actor: &str) -> anyhow::Result<(Record, Vec<String>)> {
+fn add_one(tx: &rusqlite::Connection, project_id: i64, m: Option<&projects::Milestone>, t: TaskItem, actor: &str) -> anyhow::Result<(Record, Vec<String>)> {
     let state = t.state.clone().unwrap_or_else(|| "todo".into());
-    let under_way = m.state == "active";
+    if m.is_none() && state != "parked" {
+        anyhow::bail!("only a parked task can be without a step or milestone");
+    }
+    let under_way = m.is_some_and(|m| m.state == "active") && state != "done";
     let source = t.source.clone().unwrap_or_else(|| if under_way { "found".into() } else { "planned".into() });
     let mut data = Map::new();
     if let Some(e) = t.estimate.as_deref().map(str::trim).filter(|e| !e.is_empty()) {
@@ -441,7 +441,7 @@ fn add_one(tx: &rusqlite::Connection, project_id: i64, m: &projects::Milestone, 
             title: t.title,
             body: t.body,
             state: Some(state.clone()),
-            milestone_id: Some(m.id),
+            milestone_id: m.map(|m| m.id),
             tags: t.tags,
             data,
             ..Default::default()
@@ -568,12 +568,19 @@ impl FlowMcp {
             .call(move |c| {
                 let tx = c.transaction()?;
                 let project = target_project(&tx, &a, p.project.as_deref(), true)?;
-                let m = projects::find_milestone(&tx, project.id, &p.milestone)?;
-                if m.state == "closed" {
+                let m = match p.milestone.as_deref().map(str::trim).filter(|m| !m.is_empty()) {
+                    Some(name) => Some(projects::find_milestone(&tx, project.id, name)?),
+                    None => None,
+                };
+                let history = p.task.state.as_deref() == Some("done");
+                if let Some(m) = &m
+                    && m.state == "closed"
+                    && !history
+                {
                     anyhow::bail!("{} is concluded; add the task to a step that isn't", m.name);
                 }
                 check_item(&p.task).map_err(|e| anyhow::anyhow!("the task needs {e}"))?;
-                let (r, started) = add_one(&tx, project.id, &m, p.task, &a.name())?;
+                let (r, started) = add_one(&tx, project.id, m.as_ref(), p.task, &a.name())?;
                 tx.commit()?;
                 let mut reply = brief(&r);
                 if !started.is_empty() {
@@ -604,9 +611,16 @@ impl FlowMcp {
             .call(move |c| {
                 let tx = c.transaction()?;
                 let project = target_project(&tx, &a, p.project.as_deref(), true)?;
-                let m = projects::find_milestone(&tx, project.id, &p.milestone)?;
-                if m.state == "closed" {
-                    anyhow::bail!("{} is concluded; add the tasks to a step that isn't", m.name);
+                let m = match p.milestone.as_deref().map(str::trim).filter(|m| !m.is_empty()) {
+                    Some(name) => Some(projects::find_milestone(&tx, project.id, name)?),
+                    None => None,
+                };
+                let history = p.tasks.iter().all(|t| t.state.as_deref() == Some("done"));
+                if let Some(m) = &m
+                    && m.state == "closed"
+                    && !history
+                {
+                    anyhow::bail!("{} is concluded; add the tasks to a step that isn't (done tasks, as history, may go there)", m.name);
                 }
                 if p.tasks.is_empty() || p.tasks.len() > 100 {
                     anyhow::bail!("give 1 to 100 tasks");
@@ -624,18 +638,22 @@ impl FlowMcp {
                 let mut started_all = Vec::new();
                 // The step is under way once one of them starts; read it fresh for each.
                 for t in p.tasks {
-                    let m = projects::get_milestone(&tx, m.id)?;
-                    let (r, started) = add_one(&tx, project.id, &m, t, &a.name())?;
+                    let m = match &m {
+                        Some(m) => Some(projects::get_milestone(&tx, m.id)?),
+                        None => None,
+                    };
+                    let (r, started) = add_one(&tx, project.id, m.as_ref(), t, &a.name())?;
                     ids.push(r.short_id());
                     started_all.extend(started);
                 }
                 tx.commit()?;
                 let n = ids.len();
-                let mut reply = json!({"ids": ids, "milestone": m.name});
+                let name = m.as_ref().map(|m| m.name.clone()).unwrap_or_default();
+                let mut reply = json!({"ids": ids, "milestone": name});
                 if !started_all.is_empty() {
                     reply["started"] = started_all.into();
                 }
-                Ok(Outcome::new(reply).summary(format!("{n} tasks added to {}", m.name)).project(project.slug))
+                Ok(Outcome::new(reply).summary(format!("{n} tasks added to {}", if name.is_empty() { "no milestone" } else { name.as_str() })).project(project.slug))
             })
             .await;
         self.finish(&actor, "add_tasks", Action::Write, outcome).await

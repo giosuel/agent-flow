@@ -33,6 +33,8 @@ pub fn backup(conn: &Connection, data_dir: &Path, date: &str) -> anyhow::Result<
     let tmp = dir.join(format!(".flow-{date}.db.tmp"));
     let _ = std::fs::remove_file(&tmp);
     conn.execute("VACUUM INTO ?1", [tmp.to_string_lossy()])?;
+    // Only the server's user reads it, whatever the umask of whoever ran the backup.
+    std::fs::set_permissions(&tmp, std::os::unix::fs::PermissionsExt::from_mode(0o600))?;
     std::fs::rename(&tmp, &path)?;
     // Keep the newest ones; names sort by date.
     let mut all: Vec<PathBuf> = std::fs::read_dir(&dir)?

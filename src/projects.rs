@@ -509,6 +509,13 @@ pub struct MilestonePatch {
     pub reopened_because: Option<String>,
     /// Move it before this milestone (by name); "end" moves it to the end.
     pub move_before: Option<String>,
+    /// When it really started and ended, e.g. "2026-10-14" or "2026-10-14 09:30" (UTC): for
+    /// history brought in from elsewhere (an import).
+    pub started_at: Option<String>,
+    pub closed_at: Option<String>,
+    /// A concluded step's summary, for steps brought in from elsewhere (conclude_step writes it
+    /// for steps concluded here).
+    pub summary: Option<String>,
 }
 
 pub fn update_milestone(
@@ -560,6 +567,26 @@ pub fn update_milestone(
                 notes.push(format!("{col} changed"));
             }
         }
+    }
+    for (col, v) in [("started_at", &patch.started_at), ("closed_at", &patch.closed_at)] {
+        if let Some(v) = v.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
+            let at = crate::util::parse_day_or_time(v)?;
+            if at > now {
+                bail!("{col} is in the future");
+            }
+            if col == "closed_at" && m.state != "closed" && patch.state.as_deref() != Some("closed") {
+                bail!("closed_at is for a closed milestone (state closed)");
+            }
+            conn.execute(&format!("UPDATE milestones SET {col} = ?1 WHERE id = ?2"), params![at, m.id])?;
+            notes.push(format!("{col} set to {v}"));
+        }
+    }
+    if let Some(sum) = patch.summary.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        if m.state != "closed" && patch.state.as_deref() != Some("closed") {
+            bail!("a summary is for a concluded step (state closed); conclude_step concludes one");
+        }
+        conn.execute("UPDATE milestones SET summary = ?1 WHERE id = ?2", params![crate::activity::redact(sum), m.id])?;
+        notes.push("summary set".into());
     }
     if let Some(before) = &patch.move_before {
         let pos = if before.eq_ignore_ascii_case("end") {

@@ -1340,6 +1340,20 @@ async fn steps_run_on_batches_blocks_and_conclusions() {
     assert!(ok, "{c}");
     assert_eq!(c["moved"].as_array().unwrap().len(), 3);
     assert!(!call("add_task", json!({"milestone": "K1", "title": "Late", "estimate": "1 h"})).await.0);
+    // History brought in: done tasks may go into a concluded step, without estimates; the step
+    // and milestone keep their real dates and summary.
+    let (ok, r) = call("add_tasks", json!({"milestone": "K1", "tasks": [{"title": "Old work", "state": "done"}]})).await;
+    assert!(ok, "{r}");
+    let (ok, r) = call("update_milestone", json!({"milestone": "K1", "started_at": "2026-10-14", "closed_at": "2026-10-20 18:00", "summary": "Imported."})).await;
+    assert!(ok, "{r}");
+    assert!(!call("update_milestone", json!({"milestone": "K2", "closed_at": "2026-10-20"})).await.0, "only a closed one");
+    assert!(!call("update_milestone", json!({"milestone": "K1", "started_at": "2099-01-01"})).await.0, "not in the future");
+    // A parked task may have no milestone; nothing else may.
+    let (ok, r) = call("add_task", json!({"title": "Windows parity", "state": "parked", "estimate": "2 d"})).await;
+    assert!(ok, "{r}");
+    assert!(!call("add_task", json!({"title": "Loose", "estimate": "1 h"})).await.0);
+    let tasks = s.http.get(s.url("/p/vinculum?tab=tasks")).header(COOKIE, s.owner_cookie().await).send().await.unwrap().text().await.unwrap();
+    assert!(tasks.contains("Without a milestone") && tasks.contains("Windows parity"), "{tasks}");
     // A review is a step: reviewers and commit, findings ranked, one skipped.
     assert!(!call("add_milestone", json!({"name": "R1", "title": "Review", "review": {"reviewers": ["UX"], "commit": "abc1234"}})).await.0);
     let (ok, r) = call("add_milestone", json!({"name": "K9", "title": "End-of-M4 review", "step_of": "M4",
