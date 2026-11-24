@@ -1537,6 +1537,26 @@ html.no-scroll { overflow: hidden; }
 .qopt.rec .n { background: var(--chip-accent); color: var(--chip-accent-ink); }
 .qf { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: auto; flex-wrap: wrap; }
 .qmini { display: none; }
+/* Paging (D-234): one row a page on the desktop, five rows on the phone. */
+.qsec [hidden] { display: none !important; }
+.qpager { display: flex; align-items: center; gap: 8px; }
+.qpager-p { display: flex; align-items: center; justify-content: space-between; margin-top: 12px; }
+.qp-btn { display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); cursor: pointer; }
+.qp-btn:hover:not(:disabled) { border-color: var(--accent); background: var(--soft); }
+.qp-btn:disabled { opacity: .35; cursor: default; }
+.qp-prev .i { transform: rotate(180deg); }
+.qpager-p .qp-btn { width: 44px; height: 44px; }
+.qpager-p .qp-pos { font-size: 15px; }
+@media (min-width: 701px) {
+  /* Cards of one height: the title cut at three lines, an answer at two, the "blocks" line at one. */
+  .qh { flex-wrap: nowrap; white-space: nowrap; min-width: 0; }
+  .qh .chip, .qh .qid, .qwhen { flex: none; }
+  .qblocks { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .qt a, .qopt .t { display: -webkit-box; -webkit-box-orient: vertical; overflow: hidden; }
+  .qt a { -webkit-line-clamp: 3; }
+  .qopt .t { -webkit-line-clamp: 2; }
+  .qsec[data-paged] .qc { height: 318px; overflow: hidden; }
+}
 .ov-lay { display: grid; grid-template-columns: minmax(0, 1fr) 400px; gap: 22px; align-items: start; }
 .ov-main, .ov-side { display: flex; flex-direction: column; gap: 22px; min-width: 0; }
 .ovp, .ov-fold { border: 1px solid var(--line); border-radius: 12px; background: var(--panel); overflow: hidden; }
@@ -1689,6 +1709,9 @@ html.no-scroll { overflow: hidden; }
 @media (max-width: 700px) {
   .qsec { padding: 14px; }
   .qc.qc-more { display: none; }
+  .qmini > span { min-width: 0; }
+  .qmini .of-chev { flex: none; }
+  .qm-t { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
   .qmini { display: flex; align-items: center; gap: 10px; justify-content: space-between; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); text-decoration: none; font-size: 14px; line-height: 1.4; }
   .msa { grid-template-columns: 1fr; padding: 14px 16px; }
   .msa-r { align-items: flex-start; }

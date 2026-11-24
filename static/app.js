@@ -1096,3 +1096,58 @@ document.addEventListener("click", (e) => {
   else fold();
   document.fonts?.ready.then(fold);
 })();
+
+// The overview's questions, a page at a time (the owner, 2026-11-23, D-234): on the desktop one
+// row (as many as the grid has columns), on the phone the first question whole and five rows a
+// page. The page is kept in ?q=, and an answer comes back to it.
+(() => {
+  const sec = document.querySelector('[data-qpage]');
+  if (!sec) return;
+  const grid = sec.querySelector('.qgrid');
+  const top = sec.querySelector('.qpager'), bottom = sec.querySelector('.qpager-p');
+  const phone = matchMedia('(max-width: 700px)');
+  let page = Math.max(1, parseInt(new URLSearchParams(location.search).get('q'), 10) || 1);
+  const withPage = (href) => {
+    const u = new URL(href, location.href);
+    if (page > 1) u.searchParams.set('q', page); else u.searchParams.delete('q');
+    return u.pathname + u.search + u.hash;
+  };
+  function render() {
+    const cards = [...grid.querySelectorAll('article.qc')], rows = [...grid.querySelectorAll('.qmini')];
+    const items = phone.matches ? rows : cards;
+    (phone.matches ? cards : rows).forEach((e) => { e.hidden = false; });
+    grid.style.gridTemplateColumns = '';
+    const per = phone.matches ? 5 : Math.max(1, getComputedStyle(grid).gridTemplateColumns.split(' ').filter(Boolean).length);
+    if (items.length <= per) {
+      items.forEach((e) => { e.hidden = false; });
+      top.hidden = bottom.hidden = true;
+      delete sec.dataset.paged;
+      page = 1;
+    } else {
+      const pages = Math.ceil(items.length / per);
+      page = Math.min(Math.max(page, 1), pages);
+      items.forEach((e, i) => { e.hidden = Math.floor(i / per) + 1 !== page; });
+      // A last page with fewer questions keeps the columns' width.
+      if (!phone.matches) grid.style.gridTemplateColumns = `repeat(${per}, minmax(0, 1fr))`;
+      sec.dataset.paged = '';
+      const first = (page - 1) * per + 1, last = Math.min(page * per, items.length);
+      top.querySelector('.qp-range').textContent = `${first}–${last} of ${items.length} · page ${page} of ${pages}`;
+      bottom.querySelector('.qp-pos').textContent = `${page} / ${pages}`;
+      sec.querySelectorAll('.qp-prev').forEach((b) => { b.disabled = page === 1; });
+      sec.querySelectorAll('.qp-next').forEach((b) => { b.disabled = page === pages; });
+      top.hidden = phone.matches;
+      bottom.hidden = !phone.matches;
+    }
+    sec.querySelectorAll('input[name="next"]').forEach((i) => { i.value = withPage(i.value); });
+    history.replaceState(history.state, '', withPage(location.href));
+  }
+  sec.addEventListener('click', (e) => {
+    const b = e.target.closest('.qp-prev, .qp-next');
+    if (!b || b.disabled) return;
+    page += b.classList.contains('qp-next') ? 1 : -1;
+    render();
+  });
+  let raf = 0;
+  addEventListener('resize', () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(render); });
+  render();
+})();

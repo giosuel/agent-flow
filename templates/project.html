@@ -20,12 +20,14 @@
 <div class="ov ov2">
 {% if status == "archived" %}<p class="notice">Archived: it's out of the Dashboard and the project list. <a href="/p/{{ slug }}/settings" data-dlg>Restore it in Settings</a>.</p>{% endif %}
 {% if !qcards.is_empty() %}
-<section class="qsec" aria-labelledby="q-h">
-  <div class="qsec-h"><span class="qsec-ico">{{ crate::web::icons::icon("question")|safe }}</span><h2 id="q-h">Waiting on you</h2><span class="chip warn">{{ qcards.len() }} question{% if qcards.len() != 1 %}s{% endif %}</span><span class="grow"></span><a class="sub" href="/p/{{ slug }}?tab=questions">All questions</a></div>
+{# One row of questions a page, ‹ › to step (the owner, 2026-11-23, D-234); app.js pages them and
+   keeps the page in ?q=. Without scripts every question shows. #}
+<section class="qsec" aria-labelledby="q-h" data-qpage>
+  <div class="qsec-h"><span class="qsec-ico">{{ crate::web::icons::icon("question")|safe }}</span><h2 id="q-h">Waiting on you</h2><span class="chip warn">{{ qcards.len() }} question{% if qcards.len() != 1 %}s{% endif %}</span><span class="grow"></span><div class="qpager" hidden><span class="mono sub qp-range" aria-live="polite"></span><button type="button" class="qp-btn qp-prev" aria-label="Earlier questions">{{ crate::web::icons::icon("chevron")|safe }}</button><button type="button" class="qp-btn qp-next" aria-label="Later questions">{{ crate::web::icons::icon("chevron")|safe }}</button></div><a class="sub" href="/p/{{ slug }}?tab=questions">All questions</a></div>
   <div class="qgrid">
   {% for q in qcards %}
   <article class="qc{% if !loop.first %} qc-more{% endif %}" aria-labelledby="qt-{{ q.short }}">
-    <div class="qh"><a class="mono qid" href="{{ q.url }}">{{ q.short }}</a><span class="chip">{{ q.scope }}</span><span>{{ q.asked }}{% if !q.blocks.is_empty() %} · <span class="warn-text">blocks {% for (t, u) in q.blocks %}{% if !loop.first %}, {% endif %}<a class="warn-text" href="{{ u }}">{{ t }}</a>{% endfor %}</span>{% endif %}</span></div>
+    <div class="qh"><a class="mono qid" href="{{ q.url }}">{{ q.short }}</a><span class="chip">{{ q.scope }}</span><span class="qwhen">{{ q.asked }}</span>{% if !q.blocks.is_empty() %}<span class="warn-text qblocks">· blocks {% for (t, u) in q.blocks %}{% if !loop.first %}, {% endif %}<a class="warn-text" href="{{ u }}">{{ t }}</a>{% endfor %}</span>{% endif %}</div>
     <h3 class="qt" id="qt-{{ q.short }}"><a href="{{ q.url }}">{{ q.title }}</a></h3>
     {% if !q.options.is_empty() %}
     <div class="qopts" role="list" aria-label="Answers">
@@ -34,11 +36,12 @@
       {% endfor %}
     </div>
     {% endif %}
-    <div class="qf"><span class="sub">{% if q.options.is_empty() %}No options: answer in your own words{% else %}Pick one to answer{% endif %}</span><a class="sub" href="{{ q.url }}">{% if q.options.is_empty() %}Answer{% else %}or write your own{% endif %}</a></div>
+    <div class="qf"><span class="sub">{% if q.options.is_empty() %}No options: answer in your own words{% else %}Pick one to answer{% endif %}</span><a class="sub" href="{{ q.url }}">{% if q.options.is_empty() %}Answer{% else if q.more > 0 %}{{ q.more }} more, or your own{% else %}or write your own{% endif %}</a></div>
   </article>
-  {% if !loop.first %}<a class="qmini" href="{{ q.url }}"><span><span class="mono qid">{{ q.short }}</span> <span class="sub">· {{ q.scope }} · {{ q.asked }}</span><br>{{ q.title }}</span><span class="of-chev">{{ crate::web::icons::icon("chevron")|safe }}</span></a>{% endif %}
+  {% if !loop.first %}<a class="qmini" href="{{ q.url }}"><span><span class="mono qid">{{ q.short }}</span> <span class="sub">· {{ q.scope }} · {{ q.asked }}</span><br><span class="qm-t">{{ q.title }}</span></span><span class="of-chev">{{ crate::web::icons::icon("chevron")|safe }}</span></a>{% endif %}
   {% endfor %}
   </div>
+  <div class="qpager-p" hidden><button type="button" class="qp-btn qp-prev" aria-label="Earlier questions">{{ crate::web::icons::icon("chevron")|safe }}</button><span class="mono qp-pos" aria-live="polite"></span><button type="button" class="qp-btn qp-next" aria-label="Later questions">{{ crate::web::icons::icon("chevron")|safe }}</button></div>
 </section>
 {% endif %}
 

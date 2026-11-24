@@ -549,8 +549,25 @@ struct QCard {
     asked: String,
     blocks: Vec<(String, String)>,
     title: String,
-    /// (number, title, recommended)
+    /// (number, title, recommended): at most three, the recommended one among them.
     options: Vec<(usize, String, bool)>,
+    /// Options left off the card, answered on the question's page.
+    more: usize,
+}
+
+/// A card shows at most three answers, so every card has the same height (the owner,
+/// 2026-11-23, D-234); the recommended one stays among them.
+fn card_options(mut all: Vec<(usize, String, bool)>) -> (Vec<(usize, String, bool)>, usize) {
+    const SHOWN: usize = 3;
+    if all.len() <= SHOWN {
+        return (all, 0);
+    }
+    let more = all.len() - SHOWN;
+    if let Some(i) = all.iter().position(|o| o.2).filter(|&i| i >= SHOWN) {
+        all.swap(SHOWN - 1, i);
+    }
+    all.truncate(SHOWN);
+    (all, more)
 }
 
 /// The milestone under way, large at the top of the overview's list.
@@ -1518,15 +1535,8 @@ fn build_project_page(
     if tab == "overview" {
         for q in questions_all.iter().filter(|r| r.state == "open") {
             let rec = q.data.get("recommended").and_then(Value::as_u64).unwrap_or(0) as usize;
-            qcards.push(QCard {
-                short: q.short_id(),
-                url: q.url(),
-                scope: q.milestone.clone().unwrap_or_else(|| "project".into()),
-                asked: format!("asked {}", ago(q.created_at, now)),
-                blocks: crate::waiting::blocks(c, q)?,
-                title: q.title.clone(),
-                options: q
-                    .data
+            let (options, more) = card_options(
+                q.data
                     .get("options")
                     .and_then(Value::as_array)
                     .map(|opts| {
@@ -1538,6 +1548,16 @@ fn build_project_page(
                             .collect()
                     })
                     .unwrap_or_default(),
+            );
+            qcards.push(QCard {
+                short: q.short_id(),
+                url: q.url(),
+                scope: q.milestone.clone().unwrap_or_else(|| "project".into()),
+                asked: format!("asked {}", ago(q.created_at, now)),
+                blocks: crate::waiting::blocks(c, q)?,
+                title: q.title.clone(),
+                options,
+                more,
             });
         }
     }
