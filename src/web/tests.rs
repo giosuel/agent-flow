@@ -1536,6 +1536,43 @@ async fn answers_make_decisions_and_releases_bring_their_tag_button() {
     let (_, b) = call("hello", json!({"session": "V", "machine": "m", "model": "o", "effort": "h", "brief": true})).await;
     assert!(b.get("doc").is_none() && b.get("milestones").is_none() && b.get("where").is_some(), "{b}");
     assert!(!call("add_release", json!({"tag": "v1; rm -rf ~", "title": "x"})).await.0);
+    // A question holds a release's tag button until it's answered.
+    let rel = r["id"].as_str().unwrap().rsplit('/').next().unwrap().to_owned();
+    let (ok, q) = call("ask_question", json!({"title": "Tag name: v0.0.6-m5 or v0.1.0?", "blocks": [rel.clone()]})).await;
+    assert!(ok, "{q}");
+    let page = s.http.get(s.url(&format!("/p/vinculum/{rel}"))).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
+    assert!(page.contains("waits for the answer to Q-"), "{page}");
+
+    // Batches: decisions (one replacing an earlier one of the same batch), ADRs, to-test items.
+    let (ok, r) = call("record_decisions", json!({"decisions": [
+        {"title": "Merge commits", "owner_words": "merge, never squash", "source": "owner", "said_at": "2026-10-20"},
+        {"title": "Merge commits, branches deleted", "owner_words": "and delete the branches", "source": "owner", "supersedes": "#1"}]})).await;
+    assert!(ok, "{r}");
+    let first = r["ids"][0].as_str().unwrap().to_owned();
+    let (_, old) = call("get_record", json!({"id": first})).await;
+    assert_eq!(old["state"], "replaced", "{old}");
+    let (ok, err) = call("record_decisions", json!({"decisions": [{"title": "x", "owner_words": "y", "source": "owner"}, {"title": "z", "owner_words": "", "source": "owner"}]})).await;
+    assert!(!ok && err.as_str().unwrap().contains("#2"), "{err}");
+    assert!(call("add_adrs", json!({"adrs": [{"title": "Rendering", "repo": "giosuel/vinculum", "path": "docs/adr/0001.md"}, {"title": "Storage", "repo": "giosuel/vinculum", "path": "docs/adr/0002.md"}]})).await.0);
+    let (ok, r) = call("add_to_tests", json!({"items": [{"title": "Import", "category": "Import"}, {"title": "Export", "category": "Export"}]})).await;
+    assert!(ok && r["ids"].as_array().unwrap().len() == 2, "{r}");
+
+    // A note on a step; a step made a review later; where for a milestone whose steps are done.
+    assert!(call("add_milestone", json!({"name": "R9", "title": "Review", "step_of": "M4"})).await.0);
+    assert!(call("update_milestone", json!({"milestone": "R9", "review": {"reviewers": ["UX"], "commit": "abc1234"}})).await.0);
+    let (ok, n) = call("add_note", json!({"name": "Review report R1", "category": "review report", "text": "Findings…", "record": "R9"})).await;
+    assert!(ok, "{n}");
+    assert!(!call("add_note", json!({"name": "x", "category": "x", "text": "x", "record": "NOPE"})).await.0);
+    let tasks = s.http.get(s.url("/p/vinculum?tab=tasks")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
+    let at = tasks.find(">Review<").unwrap();
+    let url = tasks[at..].split("href=\"").nth(1).unwrap().split('"').next().unwrap().to_owned();
+    let step = s.http.get(s.url(&url)).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
+    assert!(step.contains("Reports and notes") && step.contains("Review report R1"), "{step}");
+    assert!(call("conclude_step", json!({"step": "R9", "summary": "Reviewed."})).await.0);
+    assert!(call("update_milestone", json!({"milestone": "M4", "state": "active"})).await.0);
+    let (_, h) = call("hello", json!({"session": "V", "machine": "m", "model": "o", "effort": "h", "brief": true})).await;
+    let w = h["where"].as_array().unwrap();
+    assert!(w.iter().any(|x| x["milestone"] == "M4" && x["hint"].as_str().unwrap().contains("every step is concluded")), "{h}");
 }
 
 #[tokio::test]

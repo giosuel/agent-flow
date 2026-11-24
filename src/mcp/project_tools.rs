@@ -91,6 +91,9 @@ pub struct UpdateMilestone {
     pub milestone: String,
     #[serde(flatten)]
     pub patch: MilestonePatch,
+    /// Makes it a review step, or changes its review details (reviewers, commit, the owner's
+    /// words, reports such as ["N-26"]).
+    pub review: Option<ReviewInfo>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -472,6 +475,19 @@ impl FlowMcp {
                 let project = target_project(&tx, &a, p.project.as_deref(), true)?;
                 let m = projects::find_milestone(&tx, project.id, &p.milestone)?;
                 let m = projects::update_milestone(&tx, &m, &p.patch, &a.name())?;
+                if let Some(r) = &p.review {
+                    if m.parent_id.is_none() {
+                        anyhow::bail!("a review is a step; {} is a milestone", m.name);
+                    }
+                    if r.reviewers.is_empty() || r.commit.trim().is_empty() {
+                        anyhow::bail!("a review step names its reviewers and the commit they review");
+                    }
+                    projects::set_review(
+                        &tx,
+                        &m,
+                        &json!({"reviewers": r.reviewers, "commit": r.commit.trim(), "owner_words": r.owner_words.trim(), "reports": r.reports}),
+                    )?;
+                }
                 tx.commit()?;
                 Ok(Outcome::new(json!({"milestone": m.name, "title": m.title, "state": m.state, "tag": m.tag}))
                     .summary(format!("milestone {} updated", m.name))

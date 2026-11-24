@@ -131,19 +131,20 @@ async fn upload(
                 )?;
                 return Ok(r);
             }
-            let shows = match q.record.trim() {
-                "" => None,
-                r => Some(
-                    records::try_find(c, &RecordRef::parse(r)?, Some(&project.slug))?
-                        .filter(|r| r.project_id == project.id)
-                        .ok_or_else(|| anyhow::anyhow!("{} has no record {r}", project.slug))?,
-                ),
-            };
+            // A record (T-12) or a step (P9.R): a note can belong to either.
+            let (shows, step) = crate::notes::target(c, &project, q.record.trim())?;
             let r = records::create(
                 c,
                 project.id,
                 &a.name(),
-                NewRecord { kind: Some(Kind::Note), title: name, body: q.description.trim().to_owned(), data, ..Default::default() },
+                NewRecord {
+                    kind: Some(Kind::Note),
+                    title: name,
+                    body: q.description.trim().to_owned(),
+                    milestone_id: step,
+                    data,
+                    ..Default::default()
+                },
             )?;
             let to = notes::path(&dd, &project.slug, r.number, &ext, 0);
             std::fs::create_dir_all(to.parent().unwrap_or(&dd))?;

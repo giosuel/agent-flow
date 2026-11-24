@@ -282,8 +282,14 @@ pub fn where_json(conn: &Connection, project_id: i64) -> anyhow::Result<Value> {
     sort_by_position(&mut tasks);
     let mut out = Vec::new();
     for m in ms.iter().filter(|m| m.state == "active") {
-        // A milestone with steps is shown through its steps.
-        if m.parent_id.is_none() && ms.iter().any(|s| s.parent_id == Some(m.id)) {
+        // A milestone with steps is shown through its steps; once they're all concluded, as itself,
+        // with what comes next.
+        let steps: Vec<&Milestone> = ms.iter().filter(|s| s.parent_id == Some(m.id)).collect();
+        if m.parent_id.is_none() && !steps.is_empty() {
+            if steps.iter().all(|s| s.state == "closed") {
+                out.push(json!({"milestone": m.name, "title": m.title, "doing": [], "next": null, "blocked": [],
+                    "hint": "every step is concluded: add the next step, or plan its release and tag (add_release)"}));
+            }
             continue;
         }
         let mine: Vec<&Record> = tasks.iter().filter(|t| t.milestone_id == Some(m.id)).collect();

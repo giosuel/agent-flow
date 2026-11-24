@@ -49,6 +49,29 @@ pub fn resurface(raw: &str) -> anyhow::Result<(Option<i64>, String)> {
     })
 }
 
+/// What a note belongs to: a record of the project ("T-12") or a step or milestone ("P9.R").
+pub fn target(
+    c: &rusqlite::Connection,
+    project: &crate::projects::Project,
+    what: &str,
+) -> anyhow::Result<(Option<crate::records::Record>, Option<i64>)> {
+    if what.is_empty() {
+        return Ok((None, None));
+    }
+    if let Ok(r) = crate::records::RecordRef::parse(what)
+        && let Some(rec) = crate::records::try_find(c, &r, Some(&project.slug))?
+    {
+        if rec.project_id != project.id {
+            bail!("{} belongs to another project", rec.ref_id);
+        }
+        return Ok((Some(rec), None));
+    }
+    match crate::projects::find_milestone(c, project.id, what) {
+        Ok(m) => Ok((None, Some(m.id))),
+        Err(_) => bail!("{} has no record or step {what:?}", project.slug),
+    }
+}
+
 /// Size as people read it.
 pub fn size(bytes: i64) -> String {
     if bytes >= 1024 * 1024 {
