@@ -22,10 +22,10 @@ use super::log::enc;
 use super::pages::{Nav, nav, render};
 use super::{AppResult, AppState};
 use crate::auth::Actor;
+use crate::markdown;
 use crate::sessionlog::{self, LogMsg, Thread};
 use crate::tz::Tz;
 use crate::util::{ago, now_ms};
-use crate::{markdown, records};
 
 pub fn routes() -> Router<AppState> {
     Router::new().route("/conversations", get(page))
@@ -230,13 +230,6 @@ struct WhoChoice {
     on: bool,
 }
 
-struct ContributionRow {
-    title: String,
-    url: String,
-    state: String,
-    project: String,
-}
-
 #[derive(Template)]
 #[template(path = "conversations.html")]
 struct ConversationsPage {
@@ -257,7 +250,6 @@ struct ConversationsPage {
     selected: Option<Selected>,
     /// Nothing logged at all (not just nothing matching).
     empty: bool,
-    contributions: Vec<ContributionRow>,
     /// A conversation was chosen (not just the newest shown): on the phone, the list steps aside.
     picked: bool,
     reading: bool,
@@ -322,18 +314,14 @@ async fn page(
         h.kind = "sub".into();
     }
     let q_terms = terms(&h.q);
-    let (pairs, subs, hits, contributions, names) = state
+    let (pairs, subs, hits, names) = state
         .db
         .call(move |c| {
             let names: HashMap<i64, String> = crate::projects::list(c)?.into_iter().map(|p| (p.id, p.name)).collect();
             let pairs = sessionlog::session_threads(c, 1000)?;
             let subs = sessionlog::subagent_threads(c, None, 5000)?;
             let hits = if q_terms.is_empty() { None } else { Some(sessionlog::search(c, &q_terms)?) };
-            let contributions = records::query(
-                c,
-                &records::Query { kinds: vec![records::Kind::Contribution], limit: 50, ..Default::default() },
-            )?;
-            Ok((pairs, subs, hits, contributions, names))
+            Ok((pairs, subs, hits, names))
         })
         .await?;
     let empty = pairs.is_empty() && subs.is_empty();
@@ -632,15 +620,6 @@ async fn page(
         rows,
         selected,
         empty,
-        contributions: contributions
-            .iter()
-            .map(|r| ContributionRow {
-                title: r.title.clone(),
-                url: r.str("url").to_owned(),
-                state: r.state.clone(),
-                project: r.project.clone(),
-            })
-            .collect(),
         picked,
         reading: super::READING.load(std::sync::atomic::Ordering::Relaxed),
         refreshed: match super::LAST_READ.load(std::sync::atomic::Ordering::Relaxed) {
