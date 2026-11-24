@@ -629,6 +629,46 @@ async fn the_overview_puts_questions_first_and_folds_closed_milestones() {
     assert!(page.contains(r#"<details class="ms-fold" open>"#), "{page}");
 }
 
+/// M13: a status line's sample makes the Usage page's plan card, and the chart counts cost.
+#[tokio::test]
+async fn the_usage_page_shows_the_plan_and_the_cost() {
+    let s = TestServer::start().await;
+    let token = s.token(TokenKind::Project, Some("vinculum")).await;
+    let cookie = s.owner_cookie().await;
+    let get = |path: &str| {
+        let req = s.http.get(s.url(path)).header(COOKIE, &cookie);
+        async move { req.send().await.unwrap().text().await.unwrap() }
+    };
+    assert!(get("/usage").await.contains("flow project setup"), "no samples yet: how to get them");
+    let soon = crate::util::now_ms() / 1000 + 3 * 3600;
+    let res = s
+        .http
+        .post(s.url("/api/usage/plan"))
+        .bearer_auth(&token)
+        .json(&json!({"rate_limits": {"five_hour": {"used_percentage": 42, "resets_at": soon}, "seven_day": {"used_percentage": 81, "resets_at": soon + 86400}}, "machine": "viber"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let res = s
+        .http
+        .post(s.url("/api/usage/plan"))
+        .header(COOKIE, &cookie)
+        .header(ORIGIN, &s.base)
+        .json(&json!({"rate_limits": {}}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::FORBIDDEN, "only a project's status line sends them");
+    let page = get("/usage").await;
+    assert!(page.contains("42%") && page.contains("81%") && page.contains("mp-bar"), "{page}");
+    assert!(page.contains(r#"class="warn""#), "the week is past 80%: {page}");
+    assert!(page.contains("pct-marks"), "the strip under the bars: {page}");
+    let page = get("/usage?metric=cost").await;
+    assert!(page.contains("Cost per day") && page.contains(r#"aria-current="true">Cost<"#), "{page}");
+    assert!(get("/usage?metric=total").await.contains("Total tokens per day"));
+}
+
 #[tokio::test]
 async fn the_owner_answers_on_the_page_and_the_agent_reads_it() {
     let s = TestServer::start().await;
