@@ -23,7 +23,7 @@
 {# One row of questions a page, ‹ › to step (the owner, 2026-11-23, D-234); app.js pages them and
    keeps the page in ?q=. Without scripts every question shows. #}
 <section class="qsec" aria-labelledby="q-h" data-qpage>
-  <div class="qsec-h"><span class="qsec-ico">{{ crate::web::icons::icon("question")|safe }}</span><h2 id="q-h">Waiting on you</h2><span class="chip warn">{{ qcards.len() }} question{% if qcards.len() != 1 %}s{% endif %}</span><span class="grow"></span><div class="qpager" hidden><span class="mono sub qp-range" aria-live="polite"></span><button type="button" class="qp-btn qp-prev" aria-label="Earlier questions">{{ crate::web::icons::icon("chevron")|safe }}</button><button type="button" class="qp-btn qp-next" aria-label="Later questions">{{ crate::web::icons::icon("chevron")|safe }}</button></div><a class="sub" href="/p/{{ slug }}?tab=questions">All questions</a></div>
+  <div class="qsec-h"><span class="qsec-ico">{{ crate::web::icons::icon("question")|safe }}</span><h2 id="q-h">Waiting on you</h2><span class="chip warn">{{ qcards.len() }} question{% if qcards.len() != 1 %}s{% endif %}</span><span class="grow"></span><div class="qpager" hidden><span class="mono sub qp-range" aria-live="polite"></span><button type="button" class="ibtn qp-prev" aria-label="Earlier questions">{{ crate::web::icons::icon("prev")|safe }}</button><button type="button" class="ibtn qp-next" aria-label="Later questions">{{ crate::web::icons::icon("chevron")|safe }}</button></div><a class="sub" href="/p/{{ slug }}?tab=questions">All questions</a></div>
   <div class="qgrid">
   {% for q in qcards %}
   <article class="qc{% if !loop.first %} qc-more{% endif %}" aria-labelledby="qt-{{ q.short }}">
@@ -41,7 +41,7 @@
   {% if !loop.first %}<a class="qmini" href="{{ q.url }}"><span><span class="mono qid">{{ q.short }}</span> <span class="sub">· {{ q.scope }} · {{ q.asked }}</span><br><span class="qm-t">{{ q.title }}</span></span><span class="of-chev">{{ crate::web::icons::icon("chevron")|safe }}</span></a>{% endif %}
   {% endfor %}
   </div>
-  <div class="qpager-p" hidden><button type="button" class="qp-btn qp-prev" aria-label="Earlier questions">{{ crate::web::icons::icon("chevron")|safe }}</button><span class="mono qp-pos" aria-live="polite"></span><button type="button" class="qp-btn qp-next" aria-label="Later questions">{{ crate::web::icons::icon("chevron")|safe }}</button></div>
+  <div class="qpager-p" hidden><button type="button" class="ibtn qp-prev" aria-label="Earlier questions">{{ crate::web::icons::icon("prev")|safe }}</button><span class="mono qp-pos" aria-live="polite"></span><button type="button" class="ibtn qp-next" aria-label="Later questions">{{ crate::web::icons::icon("chevron")|safe }}</button></div>
 </section>
 {% endif %}
 
@@ -95,7 +95,7 @@
     <details class="ov-fold" open>
       <summary class="ph"><span class="ofi">{{ crate::web::icons::icon("pr")|safe }}</span><h2 class="label" id="ext-h">External PRs / issues</h2><span class="sub of-phone">{{ external.len() }} open</span><span class="grow"></span><span class="of-chev">{{ crate::web::icons::icon("chevron")|safe }}</span></summary>
       <div class="of-body stack">
-      <ul class="rows">{% for e in external %}<li class="item-row ext-row"><span class="ext-ico ext-{{ e.icon }}">{{ crate::web::icons::icon(e.icon)|safe }}</span><div class="ttl"><a href="{{ e.url }}">{{ e.title }}</a><span class="sub">{{ e.sub }}</span></div>{% if let Some((cls, text)) = e.chip %}<span class="chip {{ cls }}">{{ text }}</span>{% endif %}{% if e.review %}<a class="btn sm ghost" href="{{ e.url }}">Review</a>{% endif %}</li>{% endfor %}</ul>
+      <ul class="rows">{% for e in external %}<li class="item-row ext-row"><span class="ext-ico ext-{{ e.icon }}">{{ crate::web::icons::icon(e.icon)|safe }}</span><div class="ttl"><a href="{{ e.url }}">{{ e.title }}</a><span class="sub">{{ e.sub }}</span></div>{% if let Some((cls, text)) = e.chip %}<span class="chip {{ cls }}">{{ text }}</span>{% endif %}{% if e.review %}<a class="btn sm secondary" href="{{ e.url }}">Review</a>{% endif %}</li>{% endfor %}</ul>
       {% if external.is_empty() %}<p class="sub">Nothing open.</p>{% endif %}
       <p class="sub">Watched every 30 minutes. Nothing is posted or pushed until you press Send on a draft.</p>
       {% if !external_done.is_empty() %}
@@ -129,7 +129,7 @@
       {% endif %}
       <div class="plan-board stack">
         {% if let Some(st) = b.step %}
-        <div class="step-line card"><span class="srail-i {{ st.class }}" aria-hidden="true"></span><span class="chip mono">{{ st.name }}</span><strong class="sl-t">{{ st.title }}</strong><span class="chip{% if st.class == "now" %} accent{% else if st.class == "done" %} state-done{% endif %}">{% if st.class == "now" %}under way{% else if st.class == "done" %}done{% else %}next{% endif %}</span><span class="sub sl-sub">{{ st.sub }}</span><a class="btn sm ghost step-open" href="{{ st.url }}">{% if st.class == "done" %}Summary{% else %}Open step{% endif %}{{ crate::web::icons::icon("out")|safe }}</a></div>
+        <div class="step-line card"><span class="srail-i {{ st.class }}" aria-hidden="true"></span><span class="chip mono">{{ st.name }}</span><strong class="sl-t">{{ st.title }}</strong><span class="chip{% if st.class == "now" %} accent{% else if st.class == "done" %} state-done{% endif %}">{% if st.class == "now" %}under way{% else if st.class == "done" %}done{% else %}next{% endif %}</span><span class="sub sl-sub">{{ st.sub }}</span><a class="btn sm secondary step-open" href="{{ st.url }}">{% if st.class == "done" %}Summary{% else %}Open step{% endif %}{{ crate::web::icons::icon("out")|safe }}</a></div>
         {% endif %}
         {% if b.empty %}<div class="card pad ml-nothing"><h3>Nothing on the board yet</h3><p class="sub">It has no steps and no tasks. When the agent starts it, its steps show here as a rail and its tasks on the board.</p></div>{% else %}
         <div class="bchips" role="tablist" aria-label="Columns">{% for col in b.columns %}<button type="button" role="tab" data-col="{{ loop.index0 }}"{% if loop.index0 == b.first_col %} aria-selected="true" class="on"{% endif %}>{{ col.title }} <span class="mono">{{ col.count }}</span></button>{% endfor %}</div>

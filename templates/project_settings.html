@@ -35,10 +35,10 @@
   <h2 id="arch-h">{% if status == "archived" %}Archived{% else %}Archive{% endif %}</h2>
   {% if status == "archived" %}
   <p class="sub">It's out of the Dashboard, the waiting count and the project list. Its page and records stay.</p>
-  <form method="post" action="/p/{{ slug }}/status"><input type="hidden" name="status" value="active"><button class="btn sm ghost" type="submit">Restore the project</button></form>
+  <form method="post" action="/p/{{ slug }}/status"><input type="hidden" name="status" value="active"><button class="btn sm secondary" type="submit">Restore the project</button></form>
   {% else %}
   <p class="sub">Done with it? Archiving takes it out of the Dashboard, the waiting count and the project list. Nothing is deleted, and you can restore it here.</p>
-  <form method="post" action="/p/{{ slug }}/status"><input type="hidden" name="status" value="archived"><button class="btn sm ghost" type="submit" data-confirm="Archive {{ name }}? It leaves the Dashboard and the project list. Nothing is deleted, and you can restore it here.">Archive the project</button></form>
+  <form method="post" action="/p/{{ slug }}/status"><input type="hidden" name="status" value="archived"><button class="btn sm secondary" type="submit" data-confirm="Archive {{ name }}? It leaves the Dashboard and the project list. Nothing is deleted, and you can restore it here.">Archive the project</button></form>
   {% endif %}
 </section>
 </div>

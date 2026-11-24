@@ -14,7 +14,7 @@
   <p class="notice{% if *ok %} ok{% else %} warn{% endif %}" role="status">{{ text }}</p>
   {% else if a.state == "pending" %}
   <form method="post" action="/approve/{{ a.code }}" class="approve-btns">
-    <button class="btn ghost" type="submit" name="decision" value="deny">Deny</button>
+    <button class="btn secondary" type="submit" name="decision" value="deny">Deny</button>
     <button class="btn" type="submit" name="decision" value="approve">Approve</button>
   </form>
   <p class="sub approve-foot">If you didn't start this, deny it.</p>

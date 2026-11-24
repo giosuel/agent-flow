@@ -1,0 +1,139 @@
+/* AgentFlow's UI library (M15, the owner, 2026-11-23: "build a library of UI components that can be
+   reused … and then I want to make sure that we reuse all these elements instead of writing new
+   ones from scratch"). Tokens first, then each component once. Pages build from these; app.css
+   only lays pages out. The look: canvas page "UI library" (S-48 to S-56). Change a component here
+   and every page changes with it. */
+
+@font-face { font-family: "IBM Plex Sans"; font-weight: 400; font-display: swap; src: url("fonts/plex-sans-400.woff2") format("woff2"); }
+@font-face { font-family: "IBM Plex Sans"; font-weight: 500; font-display: swap; src: url("fonts/plex-sans-500.woff2") format("woff2"); }
+@font-face { font-family: "IBM Plex Sans"; font-weight: 600; font-display: swap; src: url("fonts/plex-sans-600.woff2") format("woff2"); }
+@font-face { font-family: "IBM Plex Mono"; font-weight: 400; font-display: swap; src: url("fonts/plex-mono-400.woff2") format("woff2"); }
+@font-face { font-family: "IBM Plex Mono"; font-weight: 500; font-display: swap; src: url("fonts/plex-mono-500.woff2") format("woff2"); }
+
+/* ---------------------------------------------------------------- Tokens */
+:root {
+  /* Surfaces, darkest to lightest (true black with a soft violet accent, the owner's pick, 2026-11-07) */
+  --ground: #000000; --sunken: #0A0A0C; --band: #0C0C0F; --panel: #0F0F12; --hover-bg: #15151A; --chip: #1F1F25; --selected: #202028;
+  /* Lines: rows, cards, controls, the accent's */
+  --line2: #1C1C22; --line: #26262D; --border: #34343D; --accent-line: #5B4A99;
+  /* Ink */
+  --ink: #EDEDF0; --ink2: #C6C6CE; --muted: #8E8E9A; --dim: #55555F;
+  /* Accent */
+  --accent: #A78BFA; --accent-ink: #C4B5FD; --on-accent: #1A0F3A; --accent-bg: #1C1530; --accent-chip: #251B40; --accent-chip-ink: #D2C4FF; --accent-deep: #4C3D8A;
+  /* Status: fill, text, background, border per tone */
+  --ok: #4ADE80; --ok-ink: #86EFAC; --ok-bg: #0F2A1A; --ok-line: #1E4D30;
+  --warn: #FBBF24; --warn-ink: #FCD34D; --warn-bg: #33270A; --warn-line: #4A3A12;
+  --bad: #F87171; --bad-ink: #FCA5A5; --bad-bg: #3A1414; --bad-line: #5A2330;
+  --info: #60A5FA; --info-ink: #93C5FD; --info-bg: #0F1E33; --info-line: #1E3A5F;
+  /* Charts: one colour per project, fixed (charts.rs) */
+  --cat-1: #3987E5; --cat-2: #D95926; --cat-3: #199E70; --cat-4: #9085E9; --cat-5: #D55181; --cat-other: #6E6E7A;
+  /* Elevation and focus */
+  --shadow-pop: 0 16px 40px rgba(0, 0, 0, .55); --shadow-dialog: 0 24px 80px rgba(0, 0, 0, .6); --scrim: rgba(0, 0, 0, .62);
+  --focus-ring: 0 0 0 3px rgba(167, 139, 250, .32); --bad-ring: 0 0 0 3px rgba(248, 113, 113, .28);
+  /* Type: 9 sizes */
+  --fs-micro: 11px; --fs-label: 12px; --fs-sub: 13px; --fs-sm: 14px; --fs-body: 15px; --fs-h3: 16px; --fs-h2: 18px; --fs-h1: 24px; --fs-display: 30px;
+  --sans: "IBM Plex Sans", system-ui, sans-serif; --mono: "IBM Plex Mono", ui-monospace, monospace;
+  /* Spacing: 4 px base, a 2 px half step */
+  --sp-0_5: 2px; --sp-1: 4px; --sp-1_5: 6px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 20px; --sp-6: 24px; --sp-8: 32px; --sp-12: 48px;
+  /* Radii */
+  --r-xs: 4px; --r-sm: 6px; --r-md: 8px; --r-lg: 12px; --r-xl: 16px; --r-pill: 999px;
+  /* Sizes: two control heights, one icon button, four icon sizes */
+  --h-md: 44px; --h-sm: 36px; --ib: 36px; --ic-xs: 14px; --ic-sm: 16px; --ic: 18px; --ic-lg: 22px;
+  /* Names from before the library, until their pages move over (M15.4) */
+  --header: var(--sunken); --code: var(--sunken); --inset: var(--sunken); --nav-active: var(--selected); --nav-ink: var(--ink2);
+  --hover: var(--accent-ink); --soft: var(--accent-bg); --chip-accent: var(--accent-chip); --chip-accent-ink: var(--accent-chip-ink);
+  color-scheme: dark;
+}
+
+/* ---------------------------------------------------------------- Base */
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--ground); color: var(--ink); font: var(--fs-body)/1.5 var(--sans); min-height: 100vh; display: flex; flex-direction: column; }
+a { color: var(--accent); }
+a:hover { color: var(--accent-ink); }
+h1, h2, h3 { margin: 0; font-weight: 600; }
+h1 { font-size: var(--fs-display); letter-spacing: -0.01em; }
+h2 { font-size: var(--fs-h2); }
+h3 { font-size: var(--fs-h3); }
+p { margin: 0; }
+code, pre, .mono { font-family: var(--mono); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.skip { position: absolute; left: -9999px; }
+.skip:focus { left: 12px; top: 12px; z-index: 10; background: var(--panel); padding: 8px 12px; border-radius: var(--r-sm); }
+.vh { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+/* Text roles */
+.sub { font-size: var(--fs-sub); color: var(--muted); }
+.label { font-size: var(--fs-label); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+.t-display { font-size: var(--fs-display); font-weight: 600; letter-spacing: -.01em; line-height: 1.1; }
+.t-num { font-family: var(--mono); font-size: var(--fs-display); font-weight: 500; letter-spacing: -.01em; line-height: 1.1; }
+.t-h1 { font-size: var(--fs-h1); font-weight: 600; line-height: 1.25; }
+.t-h2 { font-size: var(--fs-h2); font-weight: 600; line-height: 1.3; }
+.t-h3 { font-size: var(--fs-h3); font-weight: 600; line-height: 1.35; }
+.t-sm { font-size: var(--fs-sm); }
+.t-micro { font-size: var(--fs-micro); font-weight: 500; }
+
+/* Layout: a row and a stack */
+.grow { flex: 1 1 0; }
+.row { display: flex; align-items: center; gap: 10px; }
+.stack { display: flex; flex-direction: column; gap: var(--sp-3); }
+.row.wrap { flex-wrap: wrap; }
+.row.wrap input { flex: 1 1 200px; }
+.stack-sm { display: flex; flex-direction: column; gap: var(--sp-2); }
+.stack-lg { display: flex; flex-direction: column; gap: var(--sp-6); }
+
+/* ---------------------------------------------------------------- Icon (icons.rs only) */
+.i { width: var(--ic); height: var(--ic); fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+.i.xs { width: var(--ic-xs); height: var(--ic-xs); }
+.i.sm { width: var(--ic-sm); height: var(--ic-sm); }
+.i.lg { width: var(--ic-lg); height: var(--ic-lg); }
+
+/* ---------------------------------------------------------------- Button: four variants, two sizes
+   primary (one per view) · secondary (other actions) · quiet (changes nothing: Cancel, Close)
+   · danger (removes, revokes, signs out) · danger-solid (only the confirm of a confirm dialog) */
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: var(--sp-2); min-height: var(--h-md); padding: 0 18px; border-radius: var(--r-md); border: 1px solid var(--accent); background: var(--accent); color: var(--on-accent); font: inherit; font-weight: 600; line-height: 1.2; white-space: nowrap; cursor: pointer; text-decoration: none; }
+.btn .i { width: var(--ic-sm); height: var(--ic-sm); }
+.btn:hover { background: var(--accent-ink); border-color: var(--accent-ink); color: var(--on-accent); }
+.btn.sm { min-height: var(--h-sm); padding: 0 14px; font-size: var(--fs-sm); }
+.btn.secondary { background: var(--panel); border-color: var(--accent-line); color: var(--accent-ink); }
+.btn.secondary:hover { background: var(--accent-bg); border-color: var(--accent); color: var(--accent-ink); }
+.btn.quiet { background: transparent; border-color: var(--border); color: var(--ink2); font-weight: 500; }
+.btn.quiet:hover { background: var(--hover-bg); color: var(--ink); }
+.btn.danger { background: var(--panel); border-color: var(--bad-line); color: var(--bad-ink); }
+.btn.danger:hover { background: var(--bad-bg); border-color: var(--bad); color: var(--bad-ink); }
+.btn.danger-solid { background: var(--bad); border-color: var(--bad); color: #1A0505; }
+.btn.danger-solid:hover { background: var(--bad-ink); border-color: var(--bad-ink); color: #1A0505; }
+.btn.wide { width: 100%; }
+.btn[disabled], .btn[disabled]:hover { background: var(--panel); border-color: var(--line); color: var(--dim); cursor: default; }
+
+/* Icon button: one square, bordered; bare inside fields, bars and dialog heads */
+.ibtn { display: inline-grid; place-items: center; width: var(--ib); height: var(--ib); flex: none; padding: 0; border-radius: var(--r-md); border: 1px solid var(--line); background: transparent; color: var(--muted); font: inherit; cursor: pointer; text-decoration: none; position: relative; }
+.ibtn:hover { color: var(--ink); background: var(--hover-bg); border-color: var(--border); }
+.ibtn.on { color: var(--accent-ink); border-color: var(--accent-line); background: var(--accent-bg); }
+.ibtn.flat { border-color: transparent; }
+.ibtn.flat:hover { background: var(--chip); border-color: transparent; }
+.ibtn.done { color: var(--ok); }
+.ibtn[disabled], .ibtn.off { color: var(--dim); border-color: var(--line2); background: transparent; cursor: default; pointer-events: none; }
+.ibtn.flat[disabled], .ibtn.flat.off { border-color: transparent; }
+.ibtn[disabled] .i { opacity: .6; }
+.ibtn.busy .i { animation: spin 1.2s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Text actions: links that act */
+.act { color: var(--accent); text-decoration: none; font-weight: 500; }
+.act:hover { color: var(--accent-ink); text-decoration: underline; }
+.act.subtle { color: var(--muted); font-weight: 400; text-decoration: underline; }
+.act.subtle:hover { color: var(--ink); }
+button.act { background: none; border: 0; padding: 0; font: inherit; cursor: pointer; }
+
+/* Copy field: a command or token with the copy icon in its corner (app.js adds the button) */
+.cmd { display: block; margin: 0; padding: 10px 12px; background: var(--sunken); color: var(--ink); border: 1px solid var(--line); border-radius: var(--r-md); font: var(--fs-sub)/1.5 var(--mono); overflow-x: auto; white-space: pre; }
+.copy-wrap { position: relative; }
+.copy-wrap .cmd { padding-right: 48px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.copy-wrap > .ibtn { position: absolute; top: 5px; right: 5px; width: 34px; height: 34px; }
+
+/* ---------------------------------------------------------------- The phone (one breakpoint: 700) */
+@media (max-width: 700px) {
+  .btn.sm { min-height: var(--h-md); }
+  .ibtn { width: 44px; height: 44px; }
+}

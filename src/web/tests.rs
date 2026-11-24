@@ -696,7 +696,7 @@ async fn the_usage_page_shows_the_plan_and_the_cost() {
     assert_eq!(res.status(), StatusCode::FORBIDDEN, "only a project's status line sends them");
     let page = get("/usage").await;
     // No subtitle saying what the page is; Reload is an icon on the right (the owner, 2026-11-23).
-    assert!(page.contains(r#"<button class="reload-btn" type="submit""#) && page.contains("newest call"), "{page}");
+    assert!(page.contains(r#"<button class="ibtn" type="submit""#) && page.contains("newest call"), "{page}");
     assert!(!page.contains("Tokens and their cost at API prices"), "the subtitle is gone");
     assert!(page.contains("42%") && page.contains("81%") && page.contains("mp-bar"), "{page}");
     assert!(page.contains(r#"class="warn""#), "the week is past 80%: {page}");
@@ -1118,8 +1118,8 @@ async fn owner_page(s: &TestServer, cookie: &str, path: &str) -> String {
 
 /// Plan's link to the step the board shows (D-219).
 fn step_bar_link(html: &str) -> String {
-    let at = html.find(r#"class="btn sm ghost step-open" href=""#).expect("a step line")
-        + r#"class="btn sm ghost step-open" href=""#.len();
+    let at = html.find(r#"class="btn sm secondary step-open" href=""#).expect("a step line")
+        + r#"class="btn sm secondary step-open" href=""#.len();
     html[at..].split('"').next().unwrap().to_owned()
 }
 
@@ -4243,4 +4243,75 @@ async fn a_builders_token_is_only_for_building() {
     let res =
         s.http.post(s.url("/api/builders/blobs")).bearer_auth(&token).json(&json!({"shas": []})).send().await.unwrap();
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+}
+
+/// The UI library (M15): pages load its stylesheet first and carry the icon sprite scripts draw
+/// from, and the button and icon-button kinds it replaced are gone from templates and scripts.
+#[test]
+fn the_ui_library_replaced_the_old_buttons() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let base = std::fs::read_to_string(root.join("templates/base.html")).unwrap();
+    let ui = base.find("/static/ui.css").expect("ui.css linked");
+    assert!(ui < base.find("/static/app.css").unwrap(), "the library first, page layouts after");
+    assert!(base.contains("icons::sprite()"));
+    // A page's stylesheet lays pages out; it never redefines a library component (the library's
+    // `.bare` once met the sign-in page's `.bare` and grew the copy button by 48 px).
+    let app = std::fs::read_to_string(root.join("static/app.css")).unwrap();
+    let ui = std::fs::read_to_string(root.join("static/ui.css")).unwrap();
+    let class_of = |l: &str| -> Option<String> {
+        let rest = l.trim_start().strip_prefix('.')?;
+        Some(rest.split(|c: char| !(c.is_ascii_alphanumeric() || c == '-' || c == '_')).next()?.to_owned())
+    };
+    let roots: std::collections::BTreeSet<String> = ui.lines().filter_map(class_of).collect();
+    for line in app.lines() {
+        if let Some(class) = class_of(line) {
+            assert!(!roots.contains(&class), "app.css redefines the library's .{class}: {line}");
+        }
+    }
+    let gone = [
+        "ghost",
+        "solid-danger",
+        "icon-only",
+        "reload-btn",
+        "qp-btn",
+        "pg-btn",
+        "copy-btn",
+        "rdlg-btn",
+        "link-btn",
+        "class=\"dlb",
+    ];
+    for dir in ["templates", "static"] {
+        for entry in std::fs::read_dir(root.join(dir)).unwrap() {
+            let path = entry.unwrap().path();
+            if !matches!(path.extension().and_then(|e| e.to_str()), Some("html" | "js" | "css")) {
+                continue;
+            }
+            let text = std::fs::read_to_string(&path).unwrap();
+            for old in gone {
+                assert!(!text.contains(old), "{} still uses {old}", path.display());
+            }
+            if path.extension().is_some_and(|e| e == "js") {
+                assert!(
+                    !text.contains(">×<") && !text.contains(">‹<"),
+                    "{}: icons come from the sprite",
+                    path.display()
+                );
+            }
+        }
+    }
+}
+
+/// The library's catalogue: the owner's, every component drawn with ui.css itself.
+#[tokio::test]
+async fn the_ui_catalogue_shows_the_library() {
+    let s = TestServer::start().await;
+    let cookie = s.owner_cookie().await;
+    let page = owner_page(&s, &cookie, "/ui").await;
+    assert!(page.contains("<h1>UI library</h1>"), "{page}");
+    assert!(page.contains(r#"<button type="button" class="btn danger-solid">Delete</button>"#), "{page}");
+    assert!(page.contains(r#"class="ibtn busy" disabled"#), "{page}");
+    assert!(page.contains(r#"<symbol id="i-close" viewBox="0 0 24 24">"#), "the sprite: {page}");
+    assert!(page.contains(r#"title="close">"#) && page.contains(r#"title="alert">"#), "every icon: {page}");
+    let res = s.http.get(s.url("/ui")).send().await.unwrap();
+    assert_ne!(res.status(), reqwest::StatusCode::OK, "not without signing in");
 }

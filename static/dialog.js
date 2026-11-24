@@ -36,8 +36,8 @@
     box.innerHTML = `<div class="rdlg" role="dialog" aria-modal="true" aria-labelledby="rdlg-title">
       <div class="rdlg-grab" aria-hidden="true"></div>
       <div class="rdlg-head"><span class="sub" id="rdlg-title"></span><span class="grow"></span>
-        <span class="rdlg-nav"><button type="button" class="rdlg-btn" data-step="-1" aria-label="Previous">‹</button><button type="button" class="rdlg-btn" data-step="1" aria-label="Next">›</button></span>
-        <button type="button" class="rdlg-btn rdlg-x" aria-label="Close">×</button></div>
+        <span class="rdlg-nav"><button type="button" class="ibtn" data-step="-1" aria-label="Previous"><svg class="i" aria-hidden="true"><use href="#i-prev"/></svg></button><button type="button" class="ibtn" data-step="1" aria-label="Next"><svg class="i" aria-hidden="true"><use href="#i-chevron"/></svg></button></span>
+        <button type="button" class="ibtn rdlg-x" aria-label="Close"><svg class="i" aria-hidden="true"><use href="#i-close"/></svg></button></div>
       <div class="rdlg-body"></div></div>`;
     box.addEventListener("click", (e) => {
       if (e.target === box || e.target.closest(".rdlg-x")) close();

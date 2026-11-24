@@ -12,6 +12,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="AgentFlow">
+<link rel="stylesheet" href="/static/ui.css?v={{ nav.version }}">
 <link rel="stylesheet" href="/static/app.css?v={{ nav.version }}">
 <script src="/static/nav.js?v={{ nav.version }}"></script>
 <script src="/static/app.js?v={{ nav.version }}" defer></script>
@@ -21,6 +22,7 @@
 {% block scripts %}{% endblock %}
 </head>
 <body>
+{{ crate::web::icons::sprite()|safe }}
 <a class="skip" href="#main">Skip to content</a>
 {# The header (the owner, 2026-11-19, D-232): on the desktop one bar with the project switcher,
    the project's tabs and the global pages as icons, the current one a pill with its name. The
@@ -54,8 +56,8 @@
       {% endif %}{% endfor %}
     </nav>
     <span class="vsep" aria-hidden="true"></span>
-    <a class="icon-btn bell" href="/notifications" aria-label="Notifications{% if nav.unread > 0 %}, {{ nav.unread }} new{% endif %}" aria-haspopup="dialog" data-bell>{{ crate::web::icons::icon("bell")|safe }}{% if nav.unread > 0 %}<b class="bell-badge">{% if nav.unread > 99 %}99+{% else %}{{ nav.unread }}{% endif %}</b>{% endif %}</a>
-    <a class="icon-btn" href="/settings" aria-label="Settings" data-settings aria-haspopup="dialog"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"></path></svg></a>
+    <a class="ibtn flat icon-btn bell" href="/notifications" aria-label="Notifications{% if nav.unread > 0 %}, {{ nav.unread }} new{% endif %}" aria-haspopup="dialog" data-bell>{{ crate::web::icons::icon("bell")|safe }}{% if nav.unread > 0 %}<b class="bell-badge">{% if nav.unread > 99 %}99+{% else %}{{ nav.unread }}{% endif %}</b>{% endif %}</a>
+    <a class="ibtn flat icon-btn" href="/settings" aria-label="Settings" data-settings aria-haspopup="dialog">{{ crate::web::icons::icon("gear")|safe }}</a>
   </div>
 </header>
 {% if let Some((href, label)) = nav.back %}<a class="back-bar" href="{{ href }}" data-nav="back">{{ crate::web::icons::icon("back")|safe }}<span>{{ label }}</span></a>{% endif %}
@@ -65,6 +67,6 @@
 <nav class="tabbar" aria-label="Main">
   {% for t in nav.tabs %}<a href="{{ t.href }}"{% if t.active %} class="on" aria-current="page"{% endif %}>{{ t.icon|safe }}<span>{{ t.name }}</span>{% if t.href == "/" && nav.waiting > 0 %}<b class="badge" aria-label="{{ nav.waiting }} waiting">{{ nav.waiting }}</b>{% endif %}</a>{% endfor %}
 </nav>
-<footer class="foot"><span class="mono">AgentFlow {{ nav.version }}</span><form method="post" action="/logout"><button class="link-btn" type="submit">Sign out</button></form></footer>
+<footer class="foot"><span class="mono">AgentFlow {{ nav.version }}</span><form method="post" action="/logout"><button class="act subtle" type="submit">Sign out</button></form></footer>
 </body>
 </html>
