@@ -2010,8 +2010,41 @@ async fn notes_are_files_or_text_and_come_back() {
     let cookie = s.owner_cookie().await;
     let tab =
         s.http.get(s.url("/p/vinculum?tab=notes")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
-    assert!(tab.contains("Morning report") && tab.contains("morning report") && tab.contains("1 resolved"), "{tab}");
-    assert!(tab.contains("comes back when Loro updates") || tab.contains("2 versions"), "{tab}");
+    assert!(
+        tab.contains("Morning report") && tab.contains("morning report") && tab.contains("1 resolved hidden"),
+        "{tab}"
+    );
+    assert!(
+        !tab.contains("Loro needs im") && tab.contains("Comes back 2099-01-01"),
+        "resolved notes are hidden: {tab}"
+    );
+    assert!(tab.contains(r#"nic t-violet"#) && tab.contains(r#"nic t-teal"#), "icons by file type: {tab}");
+    // Search and filters like the Log (the owner, 2026-11-18).
+    let notes = |q: &'static str| {
+        let (s, cookie) = (&s, cookie.clone());
+        async move {
+            s.http
+                .get(s.url(&format!("/p/vinculum?tab=notes&{q}")))
+                .header(COOKIE, &cookie)
+                .send()
+                .await
+                .unwrap()
+                .text()
+                .await
+                .unwrap()
+        }
+    };
+    let t = notes("nq=loro&nstate=all").await;
+    assert!(t.contains("<mark>Loro</mark> needs im") && !t.contains("x-wing pin"), "{t}");
+    let t = notes("nq=is:resolved").await;
+    assert!(t.contains("Loro needs im") && !t.contains("Later"), "{t}");
+    let t = notes("nkind=file").await;
+    assert!(t.contains("Morning report") && !t.contains("x-wing pin") && t.contains("md · "), "{t}");
+    let t = notes("ncat=known+issue").await;
+    assert!(t.contains("x-wing pin") && !t.contains(">Morning report<"), "{t}");
+    assert!(t.contains(r#"href="/p/vinculum?tab=notes""#), "Clear: {t}");
+    let t = notes("nq=%3Cscript").await;
+    assert!(!t.contains("<script>alert") && t.contains("Nothing matches"), "{t}");
     let page = s.http.get(s.url("/p/vinculum/N-1")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
     assert!(page.contains("<li>T-5</li>") && page.contains("v1"), "the newest version rendered: {page}");
     // Opened directly (a link in a notification, a reload), it's its project's page with the note

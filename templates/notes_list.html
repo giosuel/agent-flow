@@ -1,9 +1,32 @@
-<section class="card pad stack" aria-labelledby="notes-h" id="notes">
-  <div class="sec"><h2 id="notes-h">Notes</h2><span class="sub">files and short notes the agent hands in: reports, plans, estimates, known issues</span></div>
-  {% if nv.pills.len() > 1 %}<nav class="pills" aria-label="Categories">{% for (cat, href, n, on) in nv.pills %}<a href="{{ href }}"{% if *on %} class="on" aria-current="true"{% endif %}>{{ cat }} <span class="mono">{{ n }}</span></a>{% endfor %}</nav>{% endif %}
-  {% if nv.current.is_empty() %}<p class="sub">No notes yet. Agents add files with <span class="mono">flow note &lt;file&gt;</span> and short notes with <span class="mono">add_note</span>.</p>{% endif %}
-  <ul class="notes">{% for n in nv.current %}{% include "note_row.html" %}{% endfor %}</ul>
-  {% if !nv.resolved.is_empty() %}
-  <details><summary class="sub">{{ nv.resolved.len() }} resolved</summary><ul class="notes">{% for n in nv.resolved %}{% include "note_row.html" %}{% endfor %}</ul></details>
+{# The Notes tab like the Log (the owner, 2026-11-18): search and filters on top, one table, an icon
+   per file type. #}
+<form method="get" action="/p/{{ slug }}" class="ltool ntool" id="notes">
+  <input type="hidden" name="tab" value="notes">
+  {% for (k, v) in nv.keep %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
+  <label class="lsearch{% if !nv.q.is_empty() %} set{% endif %}">{{ crate::web::icons::icon("search")|safe }}<span class="vh">Search notes</span><input name="nq" value="{{ nv.q }}" placeholder="Search titles and text, or a query like category:plan is:file" autocomplete="off"></label>
+  <details class="dd ncats{% if nv.cat_label != "All" %} set{% endif %}"><summary><span class="sub">Category</span> {{ nv.cat_label }}</summary>
+    <div class="dd-menu">
+      {% if nv.cats.len() > 6 %}<label class="lsearch dd-find">{{ crate::web::icons::icon("search")|safe }}<span class="vh">Find a category</span><input type="search" placeholder="Find a category" data-find autocomplete="off"></label>{% endif %}
+      {% for (c, n, href, on) in nv.cats %}<a href="{{ href }}" class="ck{% if *on %} on{% endif %}" data-name="{{ c }}"{% if *on %} aria-current="true"{% endif %}><span class="box" aria-hidden="true">{% if *on %}{{ crate::web::icons::icon("check")|safe }}{% endif %}</span><span class="grow">{{ c }}</span><span class="mono sub">{{ n }}</span></a>{% endfor %}
+      {% if nv.cats.is_empty() %}<p class="sub dd-none">No categories yet.</p>{% endif %}
+      {% if nv.cat_label != "All" %}<div class="dd-foot"><a href="{{ nv.cats_clear }}">Clear</a></div>{% endif %}
+    </div>
+  </details>
+  <details class="dd{% if nv.kind_label != "Files and notes" %} set{% endif %}"><summary><span class="sub">Kind</span> {{ nv.kind_label }}</summary>
+    <div class="dd-menu">{% for (label, n, href, on) in nv.kinds %}<a href="{{ href }}"{% if *on %} class="on" aria-current="true"{% endif %}><span>{{ label }}</span><span class="mono sub">{{ n }}</span></a>{% endfor %}</div>
+  </details>
+  <details class="dd{% if nv.state_label != "Current" %} set{% endif %}"><summary><span class="sub">State</span> {{ nv.state_label }}</summary>
+    <div class="dd-menu">{% for (label, n, href, on) in nv.states %}<a href="{{ href }}"{% if *on %} class="on" aria-current="true"{% endif %}><span>{{ label }}</span><span class="mono sub">{{ n }}</span></a>{% endfor %}</div>
+  </details>
+  <div class="ranges" role="group" aria-label="Added">{% for (label, _n, href, on) in nv.ranges %}<a class="rng{% if *on %} on{% endif %}" href="{{ href }}"{% if *on %} aria-current="true"{% endif %}>{{ label }}</a>{% endfor %}</div>
+  {% if let Some(r) = nv.reset %}<a class="sub" href="{{ r }}">Clear</a>{% endif %}
+</form>
+<section class="card lpanel npanel" aria-labelledby="notes-h">
+  <div class="lp-top"><h2 id="notes-h"><span class="label">Notes</span> <span class="sub">{{ nv.summary }}</span></h2><span class="sub hide-phone">files and short notes the agent hands in</span></div>
+  {% if nv.none %}<p class="sub lempty">No notes yet. Agents add files with <span class="mono">flow note &lt;file&gt;</span> and short notes with <span class="mono">add_note</span>.</p>
+  {% else %}
+  {% if !nv.rows.is_empty() %}<div class="nhead" aria-hidden="true"><span></span><span>Title</span><span>Category</span><span>Comes back to the agent</span><span>Type</span><span>Added</span><span></span></div>{% endif %}
+  <ul class="plain nrows">{% for n in nv.rows %}{% include "note_row.html" %}{% endfor %}</ul>
   {% endif %}
+  {% if !nv.foot.is_empty() %}<p class="sub nfoot">{{ nv.foot }}</p>{% endif %}
 </section>
