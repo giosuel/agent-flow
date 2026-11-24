@@ -116,10 +116,55 @@ pub fn ready_in_order(o: &Ordered) -> Result<(), String> {
     Ok(())
 }
 
+/// The line that ends a release's message in its Push tag command. A message never contains it,
+/// so nothing in the message can end the heredoc early.
+const MESSAGE_END: &str = "AGENTFLOW_RELEASE_MESSAGE";
+
+/// A release's tag message (the owner, 2026-11-24, D-254: the title and notes in the command
+/// itself, shown whole in the confirmation): the title, a blank line, the notes. git shows it as
+/// the annotated tag's message, and the release workflow turns it into the GitHub release's notes.
+pub fn tag_message(title: &str, notes: &str) -> String {
+    let notes = notes.trim();
+    if notes.is_empty() { title.trim().to_owned() } else { format!("{}\n\n{notes}", title.trim()) }
+}
+
+/// The message fits the command the owner reads whole (40 lines, 2,000 characters in all).
+pub fn check_tag_message(message: &str) -> anyhow::Result<()> {
+    if message.lines().any(|l| l.trim() == MESSAGE_END) {
+        anyhow::bail!("the notes can't have a line {MESSAGE_END}");
+    }
+    if message.lines().count() > 32 || message.chars().count() > 1500 {
+        anyhow::bail!(
+            "the title and notes go into the Push tag command, which the owner reads whole: at most 32 lines and \
+             1,500 characters (a first paragraph, then a short list)"
+        );
+    }
+    if message.contains("\n\n\n") || message.lines().any(|l| l.contains(&" ".repeat(24)) || l.contains("\t\t\t")) {
+        anyhow::bail!(
+            "the notes: no runs of blank lines or long runs of spaces; the confirmation shows them as written"
+        );
+    }
+    if message.chars().any(|c| c.is_control() && c != '\n') {
+        anyhow::bail!("the notes: plain text, no control characters");
+    }
+    Ok(())
+}
+
 /// A release's tag through GitHub's API (the owner, 2026-11-13: the server needs no project
-/// folder): an annotated tag `tag` on main's newest commit. Tag and repository are checked values
-/// (letters, digits and `._-+`; owner/name).
-pub fn tag_command(repo: &str, tag: &str) -> String {
+/// folder): an annotated tag `tag` on main's newest commit, its message the release's title and
+/// notes (D-254). Tag and repository are checked values (letters, digits and `._-+`; owner/name);
+/// the message goes in a quoted heredoc, so the shell takes it as it is.
+pub fn tag_command(repo: &str, tag: &str, message: &str) -> String {
+    format!(
+        "sha=$(gh api repos/{repo}/git/ref/heads/main --jq .object.sha) && \\\n\
+         msg=$(cat <<'{MESSAGE_END}'\n{message}\n{MESSAGE_END}\n) && \\\n\
+         obj=$(gh api -X POST repos/{repo}/git/tags -f tag={tag} -f message=\"$msg\" -f object=\"$sha\" -f type=commit --jq .sha) && \\\n\
+         gh api -X POST repos/{repo}/git/refs -f ref=refs/tags/{tag} -f sha=\"$obj\" --jq .ref"
+    )
+}
+
+/// The command of releases planned before D-254: the tag's name was its message.
+fn tag_command_bare(repo: &str, tag: &str) -> String {
     format!(
         "sha=$(gh api repos/{repo}/git/ref/heads/main --jq .object.sha) && \\\n\
          obj=$(gh api -X POST repos/{repo}/git/tags -f tag={tag} -f message={tag} -f object=\"$sha\" -f type=commit --jq .sha) && \\\n\
@@ -148,11 +193,23 @@ pub fn is_server_command(cmd: &str) -> bool {
             && ["merge", "squash", "rebase"].contains(&m);
     }
     let between = |a: &str, b: &str| cmd.split_once(a).and_then(|(_, r)| r.split_once(b)).map(|(x, _)| x.to_owned());
-    match (between("gh api repos/", "/git/ref/heads/main"), between(" -f tag=", " ")) {
-        (Some(repo), Some(tag)) => {
-            crate::projects::looks_like_repo(&repo) && safe(&repo) && safe(&tag) && cmd == tag_command(&repo, &tag)
-        }
-        _ => false,
+    // The tag from the last line, after the message.
+    let tag = cmd.rsplit_once(" -f ref=refs/tags/").and_then(|(_, r)| r.split_once(' ')).map(|(t, _)| t.to_owned());
+    let (Some(repo), Some(tag)) = (between("gh api repos/", "/git/ref/heads/main"), tag) else {
+        return false;
+    };
+    if !(crate::projects::looks_like_repo(&repo) && safe(&repo) && safe(&tag)) {
+        return false;
+    }
+    if cmd == tag_command_bare(&repo, &tag) {
+        return true;
+    }
+    // The message is whatever stands between the heredoc's lines; the rest must be exactly ours.
+    let start = format!("<<'{MESSAGE_END}'\n");
+    let end = format!("\n{MESSAGE_END}\n)");
+    match cmd.split_once(&start).and_then(|(_, r)| r.split_once(&end)) {
+        Some((message, _)) => check_tag_message(message).is_ok() && cmd == tag_command(&repo, &tag, message),
+        None => false,
     }
 }
 
@@ -455,10 +512,55 @@ mod tests {
     fn only_agentflows_own_commands_get_the_token() {
         assert!(is_server_command(&merge_command("giosuel/agent-flow", 79, "merge")));
         assert!(is_server_command(&merge_command("giosuel/agent-flow", 3, "squash")));
-        assert!(is_server_command(&tag_command("giosuel/agent-flow", "v0.0.11")));
+        assert!(is_server_command(&tag_command("giosuel/agent-flow", "v0.0.11", "v0.0.11")));
+        assert!(is_server_command(&tag_command_bare("giosuel/agent-flow", "v0.0.11")), "releases planned before D-254");
+        // The title and notes (D-254): taken as written, in a quoted heredoc.
+        let msg =
+            tag_message("AgentFlow 0.1.0", "The first release.\n\n- Questions $(id) and `whoami`\n- -f tag=x ' \" ;");
+        assert!(check_tag_message(&msg).is_ok(), "{msg}");
+        let cmd = tag_command("giosuel/agent-flow", "v0.1.0", &msg);
+        assert!(is_server_command(&cmd), "{cmd}");
+        assert!(
+            cmd.lines().count() <= 40
+                && cmd.contains("msg=$(cat <<'AGENTFLOW_RELEASE_MESSAGE'\nAgentFlow 0.1.0\n\nThe first")
+        );
+        assert!(!is_server_command(
+            &cmd.replace("\nAGENTFLOW_RELEASE_MESSAGE\n)", "\nAGENTFLOW_RELEASE_MESSAGE\n);id")
+        ));
+        let sneaky = tag_command(
+            "giosuel/agent-flow",
+            "v1",
+            "x\nAGENTFLOW_RELEASE_MESSAGE\n) && id && msg=$(cat <<'AGENTFLOW_RELEASE_MESSAGE'\ny",
+        );
+        assert!(!is_server_command(&sneaky), "a message can't end the heredoc");
+        assert!(check_tag_message("x\nAGENTFLOW_RELEASE_MESSAGE").is_err());
+        assert!(check_tag_message(&"a line\n".repeat(40)).is_err(), "the owner reads all of it");
+        assert_eq!(tag_message("  Title ", "  "), "Title");
+        // Run for real by bash, with a gh that writes down what it was given: the message arrives as written.
+        let dir = tempfile::tempdir().unwrap();
+        let gh = dir.path().join("gh");
+        let log = dir.path().join("log");
+        std::fs::write(
+            &gh,
+            format!(
+                "#!/bin/bash\nfor a in \"$@\"; do case \"$a\" in message=*) printf '%s' \"${{a#message=}}\" > {}; esac; done\necho abc123\n",
+                log.display()
+            ),
+        )
+        .unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&gh, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let out = std::process::Command::new("bash")
+            .arg("-c")
+            .arg(&cmd)
+            .env("PATH", format!("{}:/usr/bin:/bin", dir.path().display()))
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        assert_eq!(std::fs::read_to_string(&log).unwrap(), msg, "the tag's message is the title and notes, untouched");
         assert!(!is_server_command("gh pr merge 79 -R giosuel/agent-flow --merge --delete-branch; env"));
-        assert!(!is_server_command(&format!("{}; curl x", tag_command("giosuel/agent-flow", "v1"))));
-        assert!(!is_server_command(&tag_command("giosuel/agent-flow", "v1;id")));
+        assert!(!is_server_command(&format!("{}; curl x", tag_command("giosuel/agent-flow", "v1", "v1"))));
+        assert!(!is_server_command(&tag_command("giosuel/agent-flow", "v1;id", "v1")));
         assert!(!is_server_command("cargo build"));
     }
     use crate::github::fake::pr;
