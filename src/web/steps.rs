@@ -103,7 +103,7 @@ async fn step(
             let all = crate::records::query(c, &crate::records::Query { project_id: Some(p.id), limit: 0, ..Default::default() })?;
             let decisions: Vec<Link> = all
                 .iter()
-                .filter(|r| r.kind == crate::records::Kind::Decision)
+                .filter(|r| r.kind == crate::records::Kind::Decision && r.state != "archived")
                 .filter(|r| {
                     let at = r.data.get("said_at").and_then(serde_json::Value::as_i64).unwrap_or(r.created_at);
                     at >= from && at <= to

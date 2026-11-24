@@ -670,6 +670,8 @@ struct ProjectPage {
     agent: AgentCard,
     open_questions: Vec<RecordRow>,
     decisions: Vec<RecordRow>,
+    /// Put away in a cleanup: folded away on the Decisions tab.
+    decisions_archived: Vec<RecordRow>,
     groups: Vec<TaskGroup>,
     questions: Vec<RecordRow>,
     /// The Builds tab: every build, newest first.
@@ -1068,8 +1070,13 @@ fn build_project_page(
     let mut questions_all: Vec<&Record> = all.iter().filter(|r| r.kind == Kind::Question).collect();
     questions_all.sort_by_key(|r| std::cmp::Reverse(r.number));
 
+    let decisions_archived: Vec<RecordRow> = if tab == "decisions" {
+        decisions_all.iter().filter(|r| r.state == "archived").map(|r| row(r)).collect()
+    } else {
+        Vec::new()
+    };
     let decisions: Vec<RecordRow> = match tab {
-        "decisions" => decisions_all.iter().map(|r| row(r)).collect(),
+        "decisions" => decisions_all.iter().filter(|r| r.state != "archived").map(|r| row(r)).collect(),
         _ => decisions_all.iter().filter(|r| r.state == "current").take(5).map(|r| row(r)).collect(),
     };
     let open_questions = questions_all.iter().filter(|r| r.state == "open").map(|r| row(r)).collect();
@@ -1369,6 +1376,7 @@ fn build_project_page(
         },
         open_questions,
         decisions,
+        decisions_archived,
         groups,
         questions,
         builds,

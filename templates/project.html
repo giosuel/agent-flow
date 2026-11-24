@@ -231,6 +231,11 @@
 <section class="card pad stack">
   {% if decisions.is_empty() %}<p class="sub">No decisions recorded yet.</p>{% endif %}
   <ul class="rows">{% for d in decisions %}<li class="item-row"><span class="mono sub id-col">{{ d.short }}</span><div class="ttl"><a href="{{ d.url }}">{{ d.title }}</a><span class="sub">{{ d.sub }}</span></div></li>{% endfor %}</ul>
+  {% if !decisions_archived.is_empty() %}
+  <details><summary class="sub">{{ decisions_archived.len() }} archived in a cleanup</summary>
+    <ul class="rows">{% for d in decisions_archived %}<li class="item-row"><span class="mono sub id-col">{{ d.short }}</span><div class="ttl"><a href="{{ d.url }}">{{ d.title }}</a><span class="sub">{{ d.sub }}</span></div></li>{% endfor %}</ul>
+  </details>
+  {% endif %}
 </section>
 {% endif %}
 

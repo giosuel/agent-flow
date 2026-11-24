@@ -142,6 +142,25 @@ pub struct UpdateNote {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct UpdateDecision {
+    /// The decision, e.g. "D-112".
+    pub id: String,
+    pub title: Option<String>,
+    /// Why, and what it means in practice.
+    pub body: Option<String>,
+    /// The owner's words, verbatim: only to correct a quote that was recorded wrong.
+    pub owner_words: Option<String>,
+    /// When they said it, e.g. "2026-11-06 14:12" (UTC).
+    pub said_at: Option<String>,
+    pub tags: Option<Vec<String>>,
+    /// "archived" puts it away (a duplicate, a mistake, no longer worth keeping); "current" brings
+    /// an archived one back. Nothing is deleted: it stays findable, with its history.
+    pub state: Option<String>,
+    /// Why: the owner's request this is part of. Kept in the decision's history.
+    pub reason: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct AnswerQuestion {
     /// The question, e.g. "Q-12".
     pub id: String,
@@ -919,6 +938,72 @@ impl FlowMcp {
             })
             .await;
         self.finish(&actor, "answer_question", Action::Write, outcome).await
+    }
+
+    #[tool(description = "Clean up a decision, when the owner asks you to (the owner, 2026-11-12: \"as some kind of \
+        cleanup if I request it\"): fix its title, why, tags, a wrongly recorded quote or date, or archive it (a \
+        duplicate or a mistake; state \"archived\", hidden from the lists, never deleted). A change of mind isn't a \
+        cleanup: record the new decision with supersedes. Every change keeps the old text in the history, with your \
+        reason.")]
+    async fn update_decision(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(p): Parameters<UpdateDecision>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let actor = actor_of(&parts);
+        let a = actor.clone();
+        let outcome = self
+            .state
+            .db
+            .call(move |c| {
+                let tx = c.transaction()?;
+                let d = writable(&tx, &a, &p.id)?;
+                if d.kind != Kind::Decision {
+                    anyhow::bail!("{} isn't a decision", d.ref_id);
+                }
+                if p.reason.trim().is_empty() {
+                    anyhow::bail!("reason: say why (the owner's request this belongs to)");
+                }
+                if let Some(st) = &p.state
+                    && !["archived", "current"].contains(&st.as_str())
+                {
+                    anyhow::bail!("state: archived, or current to bring it back (a replaced one stays replaced)");
+                }
+                if p.state.as_deref() == Some("current") && d.state != "archived" {
+                    anyhow::bail!("{} is {}, not archived", d.short_id(), d.state);
+                }
+                let mut data = Map::new();
+                if let Some(w) = p.owner_words.as_deref().map(str::trim) {
+                    if w.is_empty() {
+                        anyhow::bail!("owner_words can't be empty; archive the decision instead");
+                    }
+                    data.insert("owner_words".into(), w.into());
+                }
+                if let Some(at) = &p.said_at {
+                    data.insert("said_at".into(), parse_date(at)?.into());
+                }
+                let (d, changed) = records::update(
+                    &tx,
+                    &d,
+                    &a.name(),
+                    Patch {
+                        title: p.title,
+                        body: p.body,
+                        state: p.state,
+                        tags: p.tags,
+                        data,
+                        note: format!("cleanup: {}", p.reason.trim()),
+                        ..Default::default()
+                    },
+                )?;
+                tx.commit()?;
+                Ok(Outcome::new(json!({"id": d.ref_id, "state": d.state, "changed": changed}))
+                    .summary(format!("decision {} {}", d.short_id(), if d.state == "archived" { "archived" } else { "updated" }))
+                    .project(d.project.clone())
+                    .target(d.ref_id))
+            })
+            .await;
+        self.finish(&actor, "update_decision", Action::Write, outcome).await
     }
 
     #[tool(description = "Change a task, or several at once with ids: its state (todo, doing, review, done, blocked, \
