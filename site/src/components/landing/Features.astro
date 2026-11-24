@@ -1,0 +1,214 @@
+---
+import Icon from '../Icon.astro';
+const cpu = [22, 30, 26, 41, 38, 35, 52, 48, 44, 61, 57, 50, 46, 58, 66, 71, 63, 55, 62, 74, 80, 69, 77, 84];
+---
+
+<section class="sec" id="features">
+  <div class="wrap">
+    <div class="sec-top rv">
+      <div>
+        <div class="sec-head"><span class="n">02</span><span>What's in it</span><span class="rule"></span></div>
+        <h2 class="sec-title">The agents' records, and your part in them.</h2>
+      </div>
+      <p class="sec-lead">
+        Agents keep their plan, questions, decisions, pull requests and builds in AgentFlow instead of
+        Markdown files in the repository. You get the questions, the buttons and the builds on any device,
+        and a log of everything.
+      </p>
+    </div>
+
+    <div class="bento">
+      <article class="fx s7 rv">
+        <div class="fx-k"><span class="itile accent"><Icon name="question" /></span>Questions become decisions</div>
+        <h3>Agents ask. Your answer is kept in your words.</h3>
+        <p class="t">
+          When an agent needs you it asks one question, with numbered options and its recommendation, and
+          keeps working on whatever doesn't depend on it. Your answer becomes a decision in the right
+          milestone and unblocks the tasks that waited.
+        </p>
+        <div class="fx-v">
+          <div class="qd">
+            <div class="mini">
+              <div class="mini-h"><span class="mono">Q-8</span><span class="sub">blocks T-32</span><span class="grow"></span><span class="chip warn">open</span></div>
+              <div class="mini-b">
+                <p class="t-sm" style="color: var(--ink); font-weight: 500; margin-bottom: 10px">Album sidebar: a list of names or a grid of covers?</p>
+                <div class="choices">
+                  <div class="choice rec"><span class="num">1</span><span class="txt">A list of names</span><span class="tag accent">recommended</span></div>
+                  <div class="choice"><span class="num">2</span><span class="txt">A grid of covers</span></div>
+                </div>
+              </div>
+            </div>
+            <div class="arrow" aria-hidden="true"><svg viewBox="0 0 40 20" fill="none"><path d="M2 10h32" stroke="currentColor" stroke-width="1.6"></path><path d="m29 5 6 5-6 5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="stroke-dasharray: none; animation: none"></path></svg></div>
+            <div class="mini">
+              <div class="mini-h"><span class="mono">D-14</span><span class="sub">M3</span><span class="grow"></span><span class="chip ok">current</span></div>
+              <div class="mini-b">
+                <div class="tl-day">Today, 24 Nov</div>
+                <ol class="tl">
+                  <li class="ev"><span class="tm">14:02</span><span class="rail"><span class="dot accent"></span></span><span class="txt"><strong>The sidebar is a list of names</strong><blockquote class="quote sm">“1, a list of names”</blockquote><span class="ev-meta">you · answers Q-8</span></span></li>
+                  <li class="ev"><span class="tm">14:02</span><span class="rail"><span class="dot ok"></span></span><span class="txt">T-32 unblocked<span class="ev-meta">lumen hears it as news</span></span></li>
+                </ol>
+              </div>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <article class="fx s5 rv">
+        <div class="fx-k"><span class="itile accent"><Icon name="list" /></span>The plan</div>
+        <h3>Milestones, steps, tasks and the time they took.</h3>
+        <p class="t">
+          Every milestone ends with a tag. Inside it the agent works in steps, each a handful of tasks with
+          estimates. Time is counted from the tasks' states, so estimates meet the real thing.
+        </p>
+        <div class="fx-v">
+          <div class="mini">
+            <ul class="plan-rows">
+              <li><span class="ok"><Icon name="check" class="sm" /></span><span class="m">3</span><span class="tt">done<small class="mono">M2 · M1 · M0</small></span><span></span><span class="st8"></span></li>
+              <li class="on"><span class="ring on"></span><span class="m">M3</span><span class="tt">Albums and tags<small>Step S2 · Album sidebar</small></span><span class="meter thin"><i style="width: 50%"></i></span><span class="st8">under way</span></li>
+              <li><span class="ring"></span><span class="m">M4</span><span class="tt">Search</span><span class="meter thin"><i style="width: 0"></i></span><span class="st8">planned</span></li>
+              <li><span class="ring"></span><span class="m">M5</span><span class="tt">Packaging</span><span class="meter thin"><i style="width: 0"></i></span><span class="st8">planned</span></li>
+            </ul>
+          </div>
+        </div>
+      </article>
+
+      <article class="fx s5 rv">
+        <div class="fx-k"><span class="itile accent"><Icon name="merge" /></span>Pull requests, in order</div>
+        <h3>A stack merges from the bottom, with one press.</h3>
+        <p class="t">
+          AgentFlow reads the project's PRs from GitHub and puts them in merge order. Every PR gets its Merge
+          button; a stack gets one <strong>Merge #a–#b</strong>. The command is shown before you press it.
+        </p>
+        <div class="fx-v">
+          <div class="mini stk">
+            <div class="stack-row"><span class="o">1</span><span class="n">#51</span><span class="ttl"><span>feat: album list</span><span class="sub">based on main</span></span><span class="chip ok">ready</span></div>
+            <div class="stack-row"><span class="o">2</span><span class="n">#52</span><span class="ttl"><span>feat: drag photos onto an album</span><span class="sub">based on #51, merges after it</span></span><span class="chip ok">ready</span></div>
+            <div class="stack-row"><span class="o">3</span><span class="n">#53</span><span class="ttl"><span>feat: album covers</span><span class="sub">based on #52</span></span><span class="chip info">draft</span></div>
+            <div class="stack-foot">
+              <span class="btn sm glow">Merge #51–#52</span><span class="sub">stops at the first that fails</span>
+              <code class="cmd">{'gh pr merge 51 -R you/lumen --merge --delete-branch\ngh pr merge 52 -R you/lumen --merge --delete-branch'}</code>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <article class="fx s7 rv">
+        <div class="fx-k"><span class="itile accent"><Icon name="build" /></span>Test builds</div>
+        <h3><code class="mono">flow run</code> on any of your machines.</h3>
+        <p class="t">
+          Agents publish builds with <code>flow publish</code>. <code>flow run</code> fetches one, checks every
+          file against its checksum and starts it. You mark each thing to try Works, Problem or Skip; a
+          problem goes back to the agent in your words.
+        </p>
+        <div class="fx-v">
+          <div class="term">
+            <div class="term-h"><i></i><i></i><i></i><span>~</span></div>
+            <pre><span class="c">$</span> flow run lumen
+<span class="n">↓</span> Fetching <span class="b">lumen</span> <span class="n">#7</span>
+<span class="g">▶</span> <span class="b">lumen</span> <span class="n">#7</span>  <span class="c">2026-11-24 14:02</span>  <span class="m">main</span>  <span class="y">8b04d7e</span>
+  Album sidebar and drag to album<span class="cur"></span></pre>
+          </div>
+          <div class="mini try-mini" style="margin-top: 12px">
+            <div class="try-item"><span class="ttl"><strong>Drag photos onto an album</strong><span class="sub">B-7 · Albums</span></span><span class="btns"><span class="btn sm ok"><Icon name="check" />Works</span><span class="btn sm danger"><Icon name="close" />Problem</span><span class="btn sm quiet">Skip</span></span></div>
+            <div class="try-item"><span class="ttl"><strong>Album list in the sidebar</strong><span class="sub">B-6 · Albums</span></span><span class="chip ok"><Icon name="check" />works</span></div>
+          </div>
+        </div>
+      </article>
+
+      <article class="fx s4 rv">
+        <div class="fx-k"><span class="itile t-teal"><Icon name="fork" /></span>Contributions</div>
+        <h3>Drafted by agents, sent by you.</h3>
+        <p class="t">
+          Agents never post or push to other people's repositories. They draft the PR, issue or comment; you
+          read the diff, edit the text and press Send. It goes out as you.
+        </p>
+        <div class="fx-v">
+          <div class="mini">
+            <div class="mini-h"><span class="mono">C-4</span><span class="sub">New PR to someone/formulary</span><span class="grow"></span><span class="chip info">draft</span></div>
+            <div class="mini-b">
+              <p class="t-sm" style="color: var(--ink); font-weight: 500; margin-bottom: 10px">Center fence delimiters on the math axis</p>
+              <ul class="checks">
+                <li><Icon name="check" />Has every heading of their PR template</li>
+                <li><Icon name="check" />You agreed to it: <span class="mono" style="color: var(--accent-ink)">D-31</span></li>
+              </ul>
+              <div class="draft-btns"><span class="btn sm">Send</span><span class="btn sm secondary">Ask for changes</span><span class="btn sm quiet">Drop</span></div>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <article class="fx s4 rv">
+        <div class="fx-k"><span class="itile t-blue"><Icon name="list" /></span>The log</div>
+        <h3>Everything that happens, kept for good.</h3>
+        <p class="t">
+          Every MCP call, API call, page view and button press is a row. Filter by category, project and actor,
+          or search with a small query language. It streams live.
+        </p>
+        <div class="fx-v">
+          <div class="mini">
+            <div class="mini-h"><Icon name="search" class="sm" /><span class="mono sub" style="font-size: 12px">project:lumen -action:read</span></div>
+            <ol class="tk mini-log" style="padding: 0 16px">
+              <li><time>14:02:31</time><span class="lcat c-you"><Icon name="person" /><span>You</span></span><span class="what">Push tag v0.4.0-m3</span></li>
+              <li><time>14:02:24</time><span class="lcat c-you"><Icon name="person" /><span>You</span></span><span class="what">Merge #51–#52: 2 of 2 merged</span></li>
+              <li><time>14:02:11</time><span class="lcat c-system"><Icon name="gear" /><span>System</span></span><span class="what">#52 CI passing</span></li>
+              <li><time>14:02:09</time><span class="lcat c-agents"><Icon name="robot" /><span>Agents</span></span><span class="what">ask_question Q-8</span></li>
+            </ol>
+          </div>
+        </div>
+      </article>
+
+      <article class="fx s4 rv">
+        <div class="fx-k"><span class="itile t-orange"><Icon name="chart" /></span>Usage and the machine</div>
+        <h3>What the tokens cost, and who uses the CPU.</h3>
+        <p class="t">
+          Tokens per agent, project and task at API prices, and the plan's 5-hour and weekly windows. The
+          Machine page puts every process under the agent that started it.
+        </p>
+        <div class="fx-v">
+          <div class="mini mini-b meters2">
+            <div class="mrow"><span>5 hours</span><span class="meter"><i style="width: 42%"></i></span><span class="v">42%</span></div>
+            <div class="mrow"><span>Week</span><span class="meter"><i style="width: 71%"></i><span class="mark" style="left: 64%"></span></span><span class="v">71%</span></div>
+            <div class="mrow"><span>lumen</span><span class="meter thin"><i style="width: 62%; --c: var(--cat-1)"></i></span><span class="v">$48</span></div>
+            <div class="mrow"><span>orbit</span><span class="meter thin"><i style="width: 40%; --c: var(--cat-2)"></i></span><span class="v">$31</span></div>
+            <div class="mrow"><span>kiln</span><span class="meter thin"><i style="width: 16%; --c: var(--cat-3)"></i></span><span class="v">$12</span></div>
+            <div class="cpu-bars" aria-hidden="true">{cpu.map((v) => <i style={`height: ${v}%`}></i>)}</div>
+          </div>
+        </div>
+      </article>
+
+      <article class="fx s12 rv">
+        <div class="bs">
+          <div class="bs-side">
+            <div class="fx-k"><span class="itile accent"><Icon name="server" /></span>Build servers</div>
+            <h3>Heavy builds run on a machine that connects itself.</h3>
+            <p class="t">
+              A build server runs <code>agentflow-builder</code>, which connects out to AgentFlow: no SSH, no
+              open ports. <code>flow remote</code> sends only the files that changed, streams the output back,
+              and exits with 75 when the builder is offline, so the agent builds locally. Jobs run at low
+              priority and pause when memory runs short.
+            </p>
+            <div class="codes"><span><b>75</b>offline: build here</span><span><b>78</b>none picked: names the online ones</span></div>
+          </div>
+          <div class="fx-v" style="margin-top: 0">
+            <div class="term">
+              <div class="term-h"><i></i><i></i><i></i><span>~/lumen</span></div>
+              <pre><span class="c">$</span> flow remote --fetch target/release/lumen -- cargo build --release
+<span class="n">Job #339</span> on <span class="b">forge</span>  <span class="c">https://flow.example/machine/jobs/339</span>
+<span class="g">   Compiling</span> lumen v0.4.0
+<span class="g">    Finished</span> `release` profile [optimized] target(s) in 41.27s
+<span class="c">$</span> <span class="cur"></span></pre>
+            </div>
+            <div class="builder" style="margin-top: 12px">
+              <div class="builder-h"><span class="dot ok live"></span><strong>forge</strong><span class="sub">32 threads · 64 GB</span><span class="grow"></span><span class="tag line">2 jobs at once</span></div>
+              <ul class="jobs">
+                <li><span class="n">#339</span><span class="w">cargo build --release</span><span class="chip accent">running</span></li>
+                <li><span class="n">#338</span><span class="w">cargo test --workspace</span><span class="chip ok">passed · 41 s</span></li>
+                <li><span class="n">#337</span><span class="w">cargo clippy --all-targets</span><span class="chip ok">passed · 58 s</span></li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </article>
+    </div>
+  </div>
+</section>
