@@ -1363,16 +1363,18 @@ ol.lrows { padding: 0; margin: 0; list-style: none; gap: 0; }
    with its name; the bell and settings after a divider. The phone keeps its own navigation. */
 .pswitch, .btabs, .btabs-more, .vsep { display: none; }
 @media (min-width: 701px) {
-  .top { position: relative; z-index: 15; border-bottom: 1px solid var(--line2); }
+  /* The bar like the website's landing nav (the owner, 2026-11-24, D-257: "similar but different
+     colors and no borders"): black under a soft violet light, no line, no boxes, quiet links. */
+  body { background: radial-gradient(900px 420px at 80% -10%, var(--glow-a), transparent 70%) no-repeat, radial-gradient(700px 380px at 8% -6%, var(--glow-b), transparent 70%) no-repeat, var(--ground); }
+  .top { position: relative; z-index: 15; background: transparent; }
   .top-in { flex-wrap: nowrap; align-items: stretch; gap: 18px; }
   .top-in > * { align-self: center; }
   .top .brand span { display: none; }
   .pswitch { display: block; position: relative; flex: none; }
-  .pswitch-btn { list-style: none; display: inline-flex; align-items: center; gap: 8px; height: 40px; max-width: 280px; padding: 0 10px 0 12px; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--panel); color: var(--ink); font-weight: 600; font-size: var(--fs-body); white-space: nowrap; cursor: pointer; }
+  .pswitch-btn { list-style: none; display: inline-flex; align-items: center; gap: 8px; height: 40px; max-width: 280px; padding: 0 10px 0 12px; border-radius: var(--r-md); color: var(--ink); font-weight: 600; font-size: var(--fs-body); white-space: nowrap; cursor: pointer; }
   .pswitch-btn::-webkit-details-marker, .btabs-more > summary::-webkit-details-marker { display: none; }
   .pswitch-btn > span:first-child { overflow: hidden; text-overflow: ellipsis; }
-  .pswitch-btn:hover { border-color: var(--border); background: var(--hover-bg); }
-  .pswitch[open] > .pswitch-btn, .pswitch-btn.on { border-color: var(--accent-line); background: var(--accent-bg); }
+  .pswitch-btn:hover, .pswitch[open] > .pswitch-btn, .pswitch-btn.on { background: var(--hover-bg); }
   .chev-d { display: inline-flex; color: var(--muted); }
   .chev-d .i { width: var(--ic-sm); height: var(--ic-sm); rotate: 90deg; }
   .bmenu { position: absolute; top: calc(100% + 8px); left: 0; z-index: 30; min-width: 220px; display: flex; flex-direction: column; gap: 1px; padding: 6px; box-sizing: border-box; background: var(--panel); border: 1px solid var(--border); border-radius: var(--r-lg); box-shadow: var(--shadow-pop); }
@@ -1388,10 +1390,12 @@ ol.lrows { padding: 0; margin: 0; list-style: none; gap: 0; }
   .bmi > span:first-of-type { overflow: hidden; text-overflow: ellipsis; }
   .bmi .dot, .bmi .count { margin-left: auto; }
   .bmi[hidden], .btabs > a[hidden] { display: none; }
-  .btabs { display: flex; align-self: stretch; flex: 0 1 auto; min-width: 0; overflow: hidden; margin-left: 6px; }
-  .btabs-more > summary { display: flex; align-items: center; gap: 6px; padding: 0 13px; box-shadow: inset 0 -2px 0 transparent; color: var(--ink2); font-weight: 500; white-space: nowrap; }
-  .btabs-more > summary:hover { color: var(--ink); }
-  .btabs-more.on > summary { color: var(--ink); box-shadow: inset 0 -2px 0 var(--accent); }
+  .btabs { display: flex; align-self: stretch; align-items: center; gap: 2px; flex: 0 1 auto; min-width: 0; overflow: hidden; margin-left: 6px; }
+  .btabs > a { min-height: 36px; padding: 0 12px; border-radius: var(--r-md); box-shadow: none; font-size: var(--fs-sm); }
+  .btabs > a:hover { background: var(--hover-bg); }
+  .btabs > a.on { background: var(--hover-bg); box-shadow: none; }
+  .btabs-more > summary { display: flex; align-items: center; gap: 6px; align-self: center; min-height: 36px; padding: 0 12px; border-radius: var(--r-md); color: var(--ink2); font-size: var(--fs-sm); font-weight: 500; white-space: nowrap; }
+  .btabs-more > summary:hover, .btabs-more.on > summary { color: var(--ink); background: var(--hover-bg); }
   .btabs-more { display: flex; position: relative; align-self: stretch; flex: none; margin-left: -18px; }
   .btabs-more > summary { list-style: none; cursor: pointer; gap: 4px; }
   .btabs-more .bmenu { top: 100%; }
@@ -1399,12 +1403,13 @@ ol.lrows { padding: 0; margin: 0; list-style: none; gap: 0; }
   .gnav { flex: none; flex-wrap: nowrap; gap: 2px; }
   .gnav a { position: relative; display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 38px; min-width: 38px; padding: 0 9px; box-sizing: border-box; border: 1px solid transparent; border-radius: var(--r-md); color: var(--nav-ink); }
   .gnav a .i { width: var(--ic); height: var(--ic); }
-  .gnav a.on { padding: 0 12px 0 10px; border-color: var(--accent-line); background: var(--accent-bg); color: var(--ink); font-size: var(--fs-sm); font-weight: 600; }
+  .gnav a:hover { background: var(--hover-bg); color: var(--ink); }
+  .gnav a.on { padding: 0 12px 0 10px; background: var(--hover-bg); color: var(--ink); font-size: var(--fs-sm); font-weight: 600; }
   .gnav a.on .i { width: var(--ic); height: var(--ic); color: var(--accent); }
   .gbadge { position: absolute; top: 0; right: -3px; }
   .gnav a.on .gbadge { position: static; }
   .gnav a[data-name]:hover::after, .gnav a[data-name]:focus-visible::after { content: attr(data-name); position: absolute; top: calc(100% + 6px); left: 50%; transform: translateX(-50%); z-index: 31; padding: 4px 9px; border-radius: 6px; background: var(--ink); color: var(--sunken); font-size: var(--fs-sub); font-weight: 500; white-space: nowrap; pointer-events: none; }
-  .vsep { display: block; flex: none; width: 1px; height: 22px; background: var(--line); }
+  .vsep { display: block; flex: none; width: 4px; }
   /* In a project the bar names it and holds its tabs: the page's own title and tabs are the phone's. */
   .proj-head { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   .proj-tabs { display: none; }
