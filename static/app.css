@@ -719,3 +719,10 @@ body { box-sizing: border-box; min-height: 100vh; min-height: 100dvh; }
      (a 430 px iPhone left the guide list 380 px wide, short of the right edge). */
   .split.guides .split-side, .split.conv .split-side, .split.guides .split-main, .split.conv .split-main { flex: none; width: 100%; max-width: none; }
 }
+
+/* iPhone Safari zooms into a field whose text is smaller than 16px when it's tapped, and stays
+   zoomed (the owner, 2026-11-11: "sometimes on the phone, when i click into an input field, it
+   zooms the screen in a little, why?"). Every field gets 16px on phones and tablets. */
+@media (max-width: 700px), (pointer: coarse) {
+  input:not([type=checkbox]):not([type=radio]), select, textarea { font-size: 16px !important; }
+}
