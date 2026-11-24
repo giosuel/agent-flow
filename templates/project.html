@@ -9,7 +9,7 @@
 </div>
 <nav class="tabs proj-tabs" aria-label="Project">
   {% for (key, name) in tabs %}
-  <a href="/p/{{ slug }}{% if *key == "settings" %}/settings" data-dlg{% else if *key == "plan" %}/plan"{% else %}{% if *key != "overview" %}?tab={{ key }}{% endif %}"{% endif %}{% if tab == *key %} class="on" aria-current="page"{% endif %}>{% if *key == "prs" %}<span class="hide-phone">{{ name }}</span><span class="only-phone">PRs</span>{% else if *key == "screenshots" %}<span class="hide-phone">{{ name }}</span><span class="only-phone">Shots</span>{% else %}{{ name }}{% endif %}{% if *key == "decisions" && !open_questions.is_empty() %} <span class="count warn">{{ open_questions.len() }}</span>{% endif %}{% if *key == "prs" && prs_total > 0 %} <span class="count">{{ prs_total }}</span>{% endif %}{% if *key == "builds" && to_test_open > 0 %} <span class="count warn">{{ to_test_open }}</span>{% endif %}</a>
+  <a href="/p/{{ slug }}{% if *key == "settings" %}/settings" data-dlg{% else if *key == "plan" %}/plan"{% else %}{% if *key != "overview" %}?tab={{ key }}{% endif %}"{% endif %}{% if tab == *key %} class="on" aria-current="page"{% endif %}>{% if *key == "prs" %}<span class="hide-phone">{{ name }}</span><span class="only-phone">PRs</span>{% else if *key == "screenshots" %}<span class="hide-phone">{{ name }}</span><span class="only-phone">Shots</span>{% else %}{{ name }}{% endif %}{% if *key == "questions" && !open_questions.is_empty() %} <span class="count warn">{{ open_questions.len() }}</span>{% endif %}{% if *key == "prs" && prs_total > 0 %} <span class="count">{{ prs_total }}</span>{% endif %}{% if *key == "builds" && to_test_open > 0 %} <span class="count warn">{{ to_test_open }}</span>{% endif %}</a>
   {% endfor %}
 </nav>
 {% if let Some(n) = notice %}<p class="notice{% if notice_bad %} bad{% else %} ok{% endif %}" role="status">{% if notice_bad %}{{ crate::web::icons::icon("alert")|safe }}{% else %}{{ crate::web::icons::icon("check")|safe }}{% endif %}<span>{{ n }}</span></p>{% endif %}
@@ -24,7 +24,7 @@
 {# One row of questions a page, ‹ › to step (the owner, 2026-11-23, D-234); app.js pages them and
    keeps the page in ?q=. Without scripts every question shows. #}
 <section class="qsec" aria-labelledby="q-h" data-qpage>
-  <div class="qsec-h"><span class="qsec-ico">{{ crate::web::icons::icon("question")|safe }}</span><h2 id="q-h">Waiting on you</h2><span class="chip warn">{{ qcards.len() }} question{% if qcards.len() != 1 %}s{% endif %}</span><span class="grow"></span><div class="qpager" hidden><span class="mono sub qp-range" aria-live="polite"></span><button type="button" class="ibtn qp-prev" aria-label="Earlier questions">{{ crate::web::icons::icon("prev")|safe }}</button><button type="button" class="ibtn qp-next" aria-label="Later questions">{{ crate::web::icons::icon("chevron")|safe }}</button></div><a class="sub" href="/p/{{ slug }}?tab=decisions">All questions</a></div>
+  <div class="qsec-h"><span class="qsec-ico">{{ crate::web::icons::icon("question")|safe }}</span><h2 id="q-h">Waiting on you</h2><span class="chip warn">{{ qcards.len() }} question{% if qcards.len() != 1 %}s{% endif %}</span><span class="grow"></span><div class="qpager" hidden><span class="mono sub qp-range" aria-live="polite"></span><button type="button" class="ibtn qp-prev" aria-label="Earlier questions">{{ crate::web::icons::icon("prev")|safe }}</button><button type="button" class="ibtn qp-next" aria-label="Later questions">{{ crate::web::icons::icon("chevron")|safe }}</button></div><a class="sub" href="/p/{{ slug }}?tab=questions">All questions</a></div>
   <div class="qgrid">
   {% for q in qcards %}
   <article class="qc{% if !loop.first %} qc-more{% endif %}" aria-labelledby="qt-{{ q.short }}">
@@ -80,7 +80,7 @@
     </details>
     {% endfor %}
     <details class="ov-fold" open>
-      <summary class="card-head"><span class="ofi">{{ crate::web::icons::icon("decision")|safe }}</span><h2 id="dec-h">Latest decisions</h2><span class="sub of-phone mono">{% for d in decisions %}{% if loop.index <= 3 %}{% if !loop.first %}, {% endif %}{{ d.short }}{% endif %}{% endfor %}</span><span class="grow"></span><a class="act of-desk" href="/p/{{ slug }}?tab=decisions">All</a><span class="of-chev">{{ crate::web::icons::icon("chevron")|safe }}</span></summary>
+      <summary class="card-head"><span class="ofi">{{ crate::web::icons::icon("decision")|safe }}</span><h2 id="dec-h">Latest decisions</h2><span class="sub of-phone mono">{% for d in decisions %}{% if loop.index <= 3 %}{% if !loop.first %}, {% endif %}{{ d.short }}{% endif %}{% endfor %}</span><span class="grow"></span><a class="act of-desk" href="/p/{{ slug }}?tab=questions">All</a><span class="of-chev">{{ crate::web::icons::icon("chevron")|safe }}</span></summary>
       <div class="of-body rows flush">
         {% if decisions.is_empty() %}<p class="empty-in">No decisions recorded yet.</p>{% endif %}
         {% for d in decisions %}<a class="item-row dense dec-row" href="{{ d.url }}"><span class="ttl"><span class="sub mono">{{ d.id }} · {{ d.sub }}</span><span>{{ d.title }}</span></span></a>{% endfor %}
@@ -179,5 +179,5 @@
 {% endif %}
 
 
-{% if tab == "decisions" %}{% if let Some(dv) = dview %}{% include "decisions.html" %}{% endif %}{% endif %}
+{% if tab == "questions" %}{% if let Some(dv) = dview %}{% include "decisions.html" %}{% endif %}{% endif %}
 {% endblock %}

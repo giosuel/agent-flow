@@ -1,5 +1,6 @@
-//! The Decisions tab with the questions merged in (the owner, 2026-11-23, Q-6: "i like the idea to
-//! merge questions and decisions"; Q-8, D-247: built as drawn on S-38 and S-39). The open
+//! The Questions tab: questions and decisions as one (the owner, 2026-11-23, Q-6: "i like the idea
+//! to merge questions and decisions"; Q-8, D-247: built as drawn on S-38 and S-39; called Questions,
+//! 2026-11-24, D-250). The open
 //! questions come first, answered in place; under them the decisions, filtered like the Log and
 //! Notes (search, Scope, State, time range, Clear) and shown as a timeline by day that quotes the
 //! owner. A replaced decision folds under the one that replaced it.
@@ -48,7 +49,7 @@ impl Filter {
     /// The tab's address with these filters.
     pub fn href(&self, slug: &str) -> String {
         use super::log::enc;
-        let mut u = format!("/p/{slug}?tab=decisions");
+        let mut u = format!("/p/{slug}?tab=questions");
         if !self.q.is_empty() {
             u += &format!("&dq={}", enc(&self.q));
         }
@@ -505,9 +506,9 @@ mod tests {
     #[test]
     fn filters_round_trip_through_the_address() {
         let f = Filter::new(Some("cookie"), Some("project|M14"), Some("all"), Some("7d"));
-        assert_eq!(f.href("x"), "/p/x?tab=decisions&dq=cookie&dscope=project%7CM14&dstate=all&drange=7d");
+        assert_eq!(f.href("x"), "/p/x?tab=questions&dq=cookie&dscope=project%7CM14&dstate=all&drange=7d");
         let g = Filter::new(None, None, Some("bogus"), Some("1y"));
         assert_eq!(g, Filter::default());
-        assert_eq!(g.href("x"), "/p/x?tab=decisions");
+        assert_eq!(g.href("x"), "/p/x?tab=questions");
     }
 }

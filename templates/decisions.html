@@ -1,7 +1,8 @@
 {% import "ui.html" as ui %}
-{# The Decisions tab with the questions merged in (the owner, 2026-11-23, Q-6, Q-8; S-38, S-39):
-   open questions on top, answered in place; then the decisions under the app's filter band, as a
-   timeline by day quoting the owner. src/web/decisions.rs builds it. #}
+{# The Questions tab, questions and decisions as one (the owner, 2026-11-23, Q-6, Q-8; S-38, S-39;
+   called Questions, D-250): open questions on top, answered in place, or plainly none (D-249); then
+   the decisions under the app's filter band, as a timeline by day quoting the owner.
+   src/web/decisions.rs builds it. #}
 {% if !dv.questions.is_empty() %}
 <section class="qsec qfull" aria-labelledby="dq-h" data-qpage="cards">
   <div class="qsec-h"><span class="qsec-ico">{{ crate::web::icons::icon("question")|safe }}</span><h2 id="dq-h">Waiting on you</h2><span class="chip warn">{{ dv.questions.len() }} question{% if dv.questions.len() != 1 %}s{% endif %}</span><span class="grow"></span><span class="sub hide-phone">an answer becomes a decision below, quoting you</span><div class="qpager" hidden><span class="mono sub qp-range" aria-live="polite"></span><button type="button" class="ibtn qp-prev" aria-label="Earlier questions">{{ crate::web::icons::icon("prev")|safe }}</button><button type="button" class="ibtn qp-next" aria-label="Later questions">{{ crate::web::icons::icon("chevron")|safe }}</button></div></div>
@@ -17,11 +18,13 @@
   </div>
   <div class="qpager-p" hidden><button type="button" class="ibtn qp-prev" aria-label="Earlier questions">{{ crate::web::icons::icon("prev")|safe }}</button><span class="mono qp-pos" aria-live="polite"></span><button type="button" class="ibtn qp-next" aria-label="Later questions">{{ crate::web::icons::icon("chevron")|safe }}</button></div>
 </section>
+{% else %}
+<p class="notice" role="status">{{ crate::web::icons::icon("check")|safe }}<span><strong>No open questions.</strong> When the agent asks one, it waits here, and your answer becomes a decision below.</span></p>
 {% endif %}
 
 <section class="card lpanel" aria-labelledby="dec-h">
 <form method="get" action="/p/{{ slug }}" class="toolbar" id="decided">
-  <input type="hidden" name="tab" value="decisions">
+  <input type="hidden" name="tab" value="questions">
   {% for (k, v) in dv.keep %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
   <label class="search{% if !dv.q.is_empty() %} set{% endif %}">{{ crate::web::icons::icon("search")|safe }}<span class="vh">Search decisions</span><input name="dq" value="{{ dv.q }}" placeholder="Search decisions, your words too" autocomplete="off"></label>
   <details class="dd{% if dv.scope_set %} set{% endif %}"><summary><span class="sub">Scope</span> {{ dv.scope_label }}</summary>

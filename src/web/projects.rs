@@ -965,14 +965,15 @@ fn press_notice(q: &TabQuery) -> (Option<String>, bool) {
     }
 }
 
-/// The project page's tabs, in order. Questions went into Decisions (the owner, 2026-11-23, Q-6).
+/// The project page's tabs, in order. Questions and Decisions are one tab, called Questions (the
+/// owner, 2026-11-23, Q-6; 2026-11-24, D-250).
 /// `?ms=none`: the board of the tasks without a milestone.
 const LOOSE: &str = "none";
 
 pub(super) const TABS: &[(&str, &str)] = &[
     ("overview", "Overview"),
     ("plan", "Plan"),
-    ("decisions", "Decisions"),
+    ("questions", "Questions"),
     ("prs", "Pull requests"),
     ("builds", "Builds"),
     ("screenshots", "Screenshots"),
@@ -997,9 +998,9 @@ async fn project(
     if q.tab.as_deref() == Some("to-test") {
         return Ok(Redirect::to(&format!("/p/{slug}?tab=builds")).into_response());
     }
-    // Questions went into Decisions (the owner, 2026-11-23, Q-6): its links open Decisions.
-    if q.tab.as_deref() == Some("questions") {
-        return Ok(Redirect::to(&format!("/p/{slug}?tab=decisions")).into_response());
+    // Decisions is part of the Questions tab (the owner, 2026-11-24, D-250): its links open it.
+    if q.tab.as_deref() == Some("decisions") {
+        return Ok(Redirect::to(&format!("/p/{slug}?tab=questions")).into_response());
     }
     // The Tasks tab went (the owner, 2026-11-18, D-218): its links open Plan.
     if q.tab.as_deref() == Some("tasks") {
@@ -1100,7 +1101,7 @@ async fn project(
                 .await?,
         );
     }
-    if tab == "decisions" {
+    if tab == "questions" {
         let slug = page.slug.clone();
         let filter = super::decisions::Filter::new(
             q.dq.as_deref(),
@@ -1872,8 +1873,7 @@ async fn record(
 fn record_tab(kind: Kind) -> Option<&'static str> {
     match kind {
         Kind::Task => Some("plan"),
-        Kind::Question => Some("decisions"),
-        Kind::Decision | Kind::Adr => Some("decisions"),
+        Kind::Question | Kind::Decision | Kind::Adr => Some("questions"),
         Kind::Pr => Some("prs"),
         Kind::Build | Kind::Feedback => Some("builds"),
         Kind::Screenshot => Some("screenshots"),
