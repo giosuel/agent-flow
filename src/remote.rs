@@ -493,6 +493,13 @@ pub fn check_server(b: &BuildServer) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// The builder whose name is this one in any case, as it's written.
+pub fn same_name(conn: &Connection, name: &str) -> anyhow::Result<Option<String>> {
+    Ok(conn
+        .query_row("SELECT name FROM build_servers WHERE lower(name) = lower(?1) LIMIT 1", [name], |r| r.get(0))
+        .optional()?)
+}
+
 /// Whether a builder has a token it can connect with.
 pub fn has_token(conn: &Connection, name: &str) -> anyhow::Result<bool> {
     Ok(conn.query_row(
