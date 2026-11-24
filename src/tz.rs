@@ -71,6 +71,11 @@ impl Tz {
         self.at(ms).strftime("%Y-%m-%d").to_string()
     }
 
+    /// "6 Nov", a day in a list.
+    pub fn day(&self, ms: i64) -> String {
+        self.at(ms).strftime("%-d %b").to_string()
+    }
+
     /// "Mon 10", a day's bar label.
     pub fn day_label(&self, ms: i64) -> String {
         self.at(ms).strftime("%a %-d").to_string()
