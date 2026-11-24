@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "ui.html" as ui %}
 {% block title %}{{ short }} · {{ project_name }}{% endblock %}
 {% block content %}
 <div class="head">
@@ -143,18 +144,7 @@
       {% if let Some(d) = going_ahead %}<p class="notice" role="status">The agent is going ahead with <strong>{{ d }}</strong> meanwhile, built so it's easy to change. Pick it to confirm, or another (or your own words) to change course.</p>{% endif %}
       {% if can_answer %}
       {# Pick an option or write your own answer, never both; nothing is sent until Send answer. #}
-      <form method="post" action="/p/{{ project_slug }}/{{ short }}/answer" class="stack answer-form" data-answer>
-        {% if !options.is_empty() %}
-        <fieldset class="opts"><legend class="vh">Options</legend>
-        {% for o in options %}
-          <label class="opt"><input type="radio" name="option" value="{{ o.n }}"><span class="mono opt-n">{{ o.n }}</span><span class="opt-t"><strong>{{ o.title }}{% if o.recommended %} <span class="chip accent">Recommended</span>{% endif %}</strong>{% if !o.detail.is_empty() %}<span class="sub">{{ o.detail }}</span>{% endif %}</span></label>
-        {% endfor %}
-        </fieldset>
-        {% endif %}
-        <label class="vh" for="words">Answer in your own words</label>
-        <textarea id="words" name="words" rows="3" placeholder="{% if options.is_empty() %}Your answer{% else %}Or answer in your own words instead{% endif %}"></textarea>
-        <div><button class="btn send" type="submit">Send answer</button></div>
-      </form>
+      {% call ui::choices("/p/{}/{}/answer"|format(project_slug, short), "", options.as_slice(), true, "words") %}{% endcall %}
       {% else %}
         {% if !options.is_empty() %}
         <ol class="plain opts-ro">{% for o in options %}<li class="{% if o.chosen %}chosen{% endif %}"><span class="mono">{{ o.n }}</span> {{ o.title }}{% if o.recommended %} <span class="chip">recommended</span>{% endif %}{% if o.chosen %} <span class="chip ok">chosen</span>{% endif %}</li>{% endfor %}</ol>

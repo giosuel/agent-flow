@@ -607,7 +607,10 @@ async fn the_overview_puts_questions_first_and_folds_closed_milestones() {
     .await;
     let cookie = s.owner_cookie().await;
     let page = s.http.get(s.url("/p/vinculum")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
-    assert!(page.contains("Waiting on you") && page.contains("Take A") && page.contains("qopt rec"), "{page}");
+    assert!(
+        page.contains("Waiting on you") && page.contains("Take A") && page.contains(r#"class="choice rec""#),
+        "{page}"
+    );
     assert!(page.contains("data-qpage") && page.contains(r#"<div class="qpager" hidden>"#), "{page}");
     assert!(page.contains("Opt one") && page.contains("Opt two") && page.contains("Opt five"), "{page}");
     assert!(

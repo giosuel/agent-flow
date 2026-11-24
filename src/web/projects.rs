@@ -552,20 +552,20 @@ struct QCard {
     blocks: Vec<(String, String)>,
     title: String,
     /// (number, title, recommended): at most three, the recommended one among them.
-    options: Vec<(usize, String, bool)>,
+    options: Vec<super::uilib::Choice>,
     /// Options left off the card, answered on the question's page.
     more: usize,
 }
 
 /// A card shows at most three answers, so every card has the same height (the owner,
 /// 2026-11-23, D-234); the recommended one stays among them.
-fn card_options(mut all: Vec<(usize, String, bool)>) -> (Vec<(usize, String, bool)>, usize) {
+fn card_options(mut all: Vec<super::uilib::Choice>) -> (Vec<super::uilib::Choice>, usize) {
     const SHOWN: usize = 3;
     if all.len() <= SHOWN {
         return (all, 0);
     }
     let more = all.len() - SHOWN;
-    if let Some(i) = all.iter().position(|o| o.2).filter(|&i| i >= SHOWN) {
+    if let Some(i) = all.iter().position(|o| o.recommended).filter(|&i| i >= SHOWN) {
         all.swap(SHOWN - 1, i);
     }
     all.truncate(SHOWN);
@@ -1544,8 +1544,11 @@ fn build_project_page(
                     .map(|opts| {
                         opts.iter()
                             .enumerate()
-                            .map(|(i, o)| {
-                                (i + 1, o.get("title").and_then(Value::as_str).unwrap_or("").to_owned(), rec == i + 1)
+                            .map(|(i, o)| super::uilib::Choice {
+                                n: i + 1,
+                                title: o.get("title").and_then(Value::as_str).unwrap_or("").to_owned(),
+                                detail: String::new(),
+                                recommended: rec == i + 1,
                             })
                             .collect()
                     })

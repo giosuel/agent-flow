@@ -217,16 +217,6 @@ ul.plain, ol.plain { margin: 0; padding-left: 18px; display: flex; flex-directio
 .prose pre { background: var(--code); border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; overflow-x: auto; }
 .prose table { border-collapse: collapse; }
 .prose td, .prose th { border: 1px solid var(--line); padding: 4px 8px; }
-.opts { border: 0; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: 10px; }
-.opt { display: flex; align-items: flex-start; gap: 12px; min-height: 48px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); cursor: pointer; }
-.opt:hover { border-color: var(--accent); }
-/* "Recommended" is the chip; the chosen option is the one that stands out. */
-.opt input { position: absolute; opacity: 0; }
-.opt:has(input:checked) { border-color: var(--accent); background: var(--chip-accent); box-shadow: 0 0 0 1px var(--accent) inset; }
-.opt:has(input:checked) .opt-n { color: var(--hover); }
-.opt:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
-.opt-n { color: var(--accent); }
-.opt-t { display: flex; flex-direction: column; gap: 2px; }
 .opts-ro li.chosen { color: var(--ink); font-weight: 500; }
 ol.history { padding-left: 0; list-style: none; font-size: 14px; color: var(--ink2); }
 /* A record's History: folded to one line, opened a timeline by day (the owner, 2026-11-18). */
@@ -276,7 +266,6 @@ ol.history { padding-left: 0; list-style: none; font-size: 14px; color: var(--in
 .ftitle a { color: var(--ink); text-decoration: none; }
 .ftitle a:hover { color: var(--hover); }
 .clamp { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
-button.opt { font: inherit; color: var(--ink); text-align: left; width: 100%; }
 .card.list { overflow: hidden; }
 .grp { padding: 10px 20px 6px; font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); font-weight: 600; border-top: 1px solid var(--line); }
 .grp:first-child { border-top: 0; }
@@ -623,7 +612,6 @@ body { box-sizing: border-box; min-height: 100vh; min-height: 100dvh; }
 .tip-none { color: var(--muted); }
 .strip span:hover, .hist a:hover i { opacity: 1; }
 /* The answer form: Send stays dimmed until an option or an answer is given. */
-.answer-row input { flex: 1; min-width: 200px; }
 @media (max-width: 700px) {
   /* Guides on the phone: the list of files and "Pull requests" first; either opens on its own screen. */
   .split.guides:not(.picked) > .split-main { display: none; }
@@ -1310,13 +1298,6 @@ html.no-scroll { overflow: hidden; }
 .qt { margin: 0; font-size: 15px; font-weight: 600; line-height: 1.4; }
 .qt a { color: var(--ink); text-decoration: none; }
 .qt a:hover { color: var(--hover); }
-.qopts { display: flex; flex-direction: column; gap: 6px; }
-.qopts form { margin: 0; }
-.qopt { width: 100%; display: grid; grid-template-columns: 26px minmax(0, 1fr) auto; gap: 10px; align-items: center; min-height: 44px; padding: 4px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--inset); color: var(--ink); font: inherit; font-size: 14px; line-height: 1.35; text-align: left; cursor: pointer; }
-.qopt:hover { border-color: var(--accent); background: var(--soft); }
-.qopt .n { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 6px; background: var(--chip); font-size: 12px; color: var(--ink2); }
-.qopt.rec { border-color: #4B3D80; }
-.qopt.rec .n { background: var(--chip-accent); color: var(--chip-accent-ink); }
 .qf { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: auto; flex-wrap: wrap; }
 .qmini { display: none; }
 /* Paging (D-234): one row a page on the desktop, five rows on the phone. */
@@ -1329,10 +1310,11 @@ html.no-scroll { overflow: hidden; }
   .qh { flex-wrap: nowrap; white-space: nowrap; min-width: 0; }
   .qh .chip, .qh .qid, .qwhen { flex: none; }
   .qblocks { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-  .qt a, .qopt .t { display: -webkit-box; -webkit-box-orient: vertical; overflow: hidden; }
+  .qt a, .qc .choice .txt { display: -webkit-box; -webkit-box-orient: vertical; overflow: hidden; }
   .qt a { -webkit-line-clamp: 3; }
-  .qopt .t { -webkit-line-clamp: 2; }
-  .qsec[data-paged] .qc { height: 318px; overflow: hidden; }
+  .qc .choice .txt { -webkit-line-clamp: 2; }
+  /* Room for three answers and Send answer (the answer control, M15). */
+  .qsec[data-paged] .qc { height: 380px; overflow: hidden; }
 }
 .ov-lay { display: grid; grid-template-columns: minmax(0, 1fr) 400px; gap: 22px; align-items: start; }
 .ov-main, .ov-side { display: flex; flex-direction: column; gap: 22px; min-width: 0; }
@@ -1864,6 +1846,7 @@ html.no-scroll { overflow: hidden; }
 .spec-row .smp.swatches { align-items: flex-start; }
 .spec-row .smp > .cmd { flex: 1; }
 .spec-row .wh { font-size: var(--fs-sub); color: var(--muted); }
+.spec-row .nm .wh { margin-top: var(--sp-2); font-family: var(--sans); }
 .swatch-c { display: inline-flex; flex-direction: column; gap: var(--sp-1); width: 118px; }
 .swatch-c .b, .tone-set .b { height: 40px; border-radius: var(--r-md); border: 1px solid var(--border); }
 .swatch-c .k { font: var(--fs-micro) var(--mono); color: var(--ink2); }

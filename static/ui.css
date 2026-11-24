@@ -272,6 +272,24 @@ input[type=checkbox]:disabled, input[type=radio]:disabled { background-color: va
 .dot.accent { background: var(--accent); } .dot.info { background: var(--info); } .dot.quiet { background: var(--muted); }
 .dot.live { box-shadow: 0 0 0 3px rgba(74, 222, 128, .18); }
 
+/* ---------------------------------------------------------------- Answer a question: ui::choices
+   One row per option with its Answer button (the recommended one filled), then your own words. */
+.choices { display: flex; flex-direction: column; gap: var(--sp-2); margin: 0; }
+.choice-list { display: flex; flex-direction: column; gap: var(--sp-2); border: 0; margin: 0; padding: 0; min-width: 0; }
+.choice { position: relative; display: flex; align-items: center; gap: var(--sp-3); min-height: 48px; margin: 0; padding: var(--sp-2) var(--sp-3); border: 1px solid var(--line); border-radius: var(--r-md); background: var(--sunken); cursor: pointer; }
+.choice input { position: absolute; opacity: 0; pointer-events: none; }
+.choice:hover { border-color: var(--border); background: var(--hover-bg); }
+.choice:has(input:checked) { border-color: var(--accent); background: var(--accent-bg); box-shadow: 0 0 0 1px var(--accent); }
+.choice:has(input:checked) .num { background: var(--accent); color: var(--on-accent); }
+.choice:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+.choice .num { width: 26px; height: 26px; flex: none; border-radius: var(--r-sm); display: grid; place-items: center; background: var(--chip); font: 500 var(--fs-sub) var(--mono); color: var(--ink2); }
+.choice .txt { flex: 1; min-width: 0; font-size: var(--fs-sm); color: var(--ink); }
+.choice .txt .sub { display: block; }
+.choice.rec { border-color: var(--accent-line); background: var(--accent-bg); }
+.choice.rec .num { background: var(--accent-chip); color: var(--accent-chip-ink); }
+.choice-own { display: flex; gap: var(--sp-2); justify-content: flex-end; }
+.choice-own input { flex: 1; min-width: 0; }
+
 /* Copy field: a command or token with the copy icon in its corner (app.js adds the button) */
 .cmd { display: block; margin: 0; padding: 10px 12px; background: var(--sunken); color: var(--ink); border: 1px solid var(--line); border-radius: var(--r-md); font: var(--fs-sub)/1.5 var(--mono); overflow-x: auto; white-space: pre; }
 .copy-wrap { position: relative; }
