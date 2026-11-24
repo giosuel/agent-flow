@@ -1412,8 +1412,8 @@ ol.lrows { padding: 0; margin: 0; list-style: none; gap: 0; }
   .vsep { display: block; flex: none; width: 4px; }
   /* In a project the bar names it and holds its tabs: the page's own title and tabs are the phone's.
      Its path stays, as on a record's page (the owner, 2026-11-24: "lets add this navigation to every
-     project page"). */
-  .proj-head > :not(.crumb-row) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+     project page"), and so does its title (the tab's name). */
+  .proj-head > :not(.crumb-row, h1) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   .proj-tabs { display: none; }
 }
 
