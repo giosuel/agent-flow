@@ -717,20 +717,6 @@ pub struct Check {
     pub link: Option<(String, String)>,
 }
 
-/// Words that mark Claude's attribution, which the owner leaves off other people's repositories.
-const ATTRIBUTION: &[&str] = &[
-    "co-authored-by: claude",
-    "claude-session:",
-    "generated with [claude code",
-    "generated with claude code",
-    "noreply@anthropic.com",
-];
-
-pub fn has_attribution(text: &str) -> bool {
-    let t = text.to_lowercase();
-    ATTRIBUTION.iter().any(|w| t.contains(w))
-}
-
 /// Headings of their template that the text doesn't have.
 pub fn missing_headings(template: &str, body: &str) -> Vec<String> {
     let body = body.to_lowercase();
@@ -745,12 +731,6 @@ pub fn missing_headings(template: &str, body: &str) -> Vec<String> {
 
 pub fn checks(conn: &Connection, r: &Record, p: &Pending<'_>) -> anyhow::Result<Vec<Check>> {
     let mut out = Vec::new();
-    let commits: Vec<Commit> = p
-        .data
-        .get("code")
-        .and_then(|c| c.get("commits"))
-        .and_then(|c| serde_json::from_value(c.clone()).ok())
-        .unwrap_or_default();
     if let Some(t) = r.data.get("template").and_then(|t| t.get("text")).and_then(Value::as_str)
         && p.kind == DraftType::Pr
     {
@@ -766,20 +746,8 @@ pub fn checks(conn: &Connection, r: &Record, p: &Pending<'_>) -> anyhow::Result<
             link: None,
         });
     }
-    let in_commits = commits.iter().any(|c| has_attribution(&format!("{}\n{}", c.subject, c.body)));
-    let in_text = has_attribution(p.body) || (p.kind.is_new() && has_attribution(p.title));
-    out.push(Check {
-        ok: !in_commits && !in_text,
-        text: match (in_text, in_commits) {
-            (false, false) => "No Claude attribution in the text or the commits".into(),
-            (true, false) => "The text has Claude attribution (you leave it off other people's repositories)".into(),
-            (false, true) => {
-                "A commit message has Claude attribution (you leave it off other people's repositories)".into()
-            }
-            (true, true) => "The text and a commit message have Claude attribution".into(),
-        },
-        link: None,
-    });
+    // No check of Claude's attribution: that's the standard of the user's own agent, which they
+    // override in its configuration if they want (the owner, 2026-11-24, D-252).
     let agreed = p.data.get("agreed").and_then(Value::as_str).unwrap_or("");
     if p.kind.is_new() {
         let found = if agreed.is_empty() {
@@ -960,7 +928,7 @@ impl Poster for GhPoster {
         }
         if self.token_file.trim().is_empty() {
             bail!(
-                "sending isn't set up: external_token_file in AgentFlow's config names the token for other people's repositories"
+                "sending isn't set up: add the token for other people's repositories in Settings › GitHub (or name its file as external_token_file in AgentFlow's config)"
             );
         }
         let path = crate::util::expand_home(self.token_file.trim());
@@ -1269,10 +1237,7 @@ mod tests {
     }
 
     #[test]
-    fn attribution_and_template_headings() {
-        assert!(has_attribution("Fix\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"));
-        assert!(has_attribution("🤖 Generated with [Claude Code](https://claude.com/claude-code)"));
-        assert!(!has_attribution("Center fences on the axis"));
+    fn template_headings() {
         let t = "## Summary\n\nWhat it does\n\n## Testing\n\n<!-- how -->\n";
         assert_eq!(missing_headings(t, "## Summary\nIt centers them."), ["Testing"]);
         assert!(missing_headings(t, "## summary\nx\n## testing\ny").is_empty());
