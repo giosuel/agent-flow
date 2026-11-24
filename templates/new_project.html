@@ -23,12 +23,12 @@
   <form method="post" action="/projects/new" class="stack" aria-labelledby="form-h">
     <h2 id="form-h" class="vh">The project</h2>
     <div class="form-grid">
-      <label>Name (required)<input name="name" required maxlength="60" value="{{ name }}" placeholder="e.g. Speculum"></label>
-      <label class="span-all">What it is<input name="description" maxlength="300" value="{{ description }}" placeholder="e.g. Screenshot and screen recording tool for Hyprland"></label>
-      <label>Tech stack<input name="stack" value="{{ stack }}" placeholder="e.g. Rust, Slint"></label>
-      <label>Target platform<input name="platform" value="{{ platform }}" placeholder="e.g. Linux · Hyprland"></label>
-      <label>Model<select name="model">{% for m in ["Claude Opus 5.5", "Claude Sonnet 5.5", "Claude Fable 5.1"] %}<option{% if *m == model %} selected{% endif %}>{{ m }}</option>{% endfor %}</select></label>
-      <label>Effort<select name="effort">{% for e in ["high", "medium", "low"] %}<option{% if *e == effort %} selected{% endif %}>{{ e }}</option>{% endfor %}</select></label>
+      <label class="field">Name<input name="name" required maxlength="60" value="{{ name }}" placeholder="e.g. Speculum"></label>
+      <label class="field span-all"><span>What it is <span class="optional">optional</span></span><input name="description" maxlength="300" value="{{ description }}" placeholder="e.g. Screenshot and screen recording tool for Hyprland"></label>
+      <label class="field"><span>Tech stack <span class="optional">optional</span></span><input name="stack" value="{{ stack }}" placeholder="e.g. Rust, Slint"></label>
+      <label class="field"><span>Target platform <span class="optional">optional</span></span><input name="platform" value="{{ platform }}" placeholder="e.g. Linux · Hyprland"></label>
+      <label class="field">Model<select name="model">{% for m in models %}<option{% if *m == model %} selected{% endif %}>{{ m }}</option>{% endfor %}</select></label>
+      <label class="field">Effort<select name="effort">{% for e in efforts %}<option{% if *e == effort %} selected{% endif %}>{{ e }}</option>{% endfor %}</select></label>
     </div>
     <p class="sub">It gets an empty M0 and a setup code: on the machine, <span class="mono">flow project setup</span> in its folder with that code sets it up there.</p>
     <div><button class="btn" type="submit">Create it here</button></div>

@@ -1,3 +1,4 @@
+{% import "ui.html" as ui %}
 {# The Settings dialog's Build servers section: a list, each builder a row that opens (the owner,
    2026-11-17, D-190, the "Build servers and clients" mockups); all folded, even a lone one (the owner, 2026-11-23). #}
 <section aria-labelledby="h-sec">
@@ -34,15 +35,15 @@
           <h3 class="label">Limits</h3>
           <form method="post" action="/settings/build-servers/{{ s.name }}/limits" class="lim-form">
             <div class="lim-row"><label class="lim-t" for="sl-{{ s.name }}"><strong>Jobs of one project at once</strong><span class="sub">Each in a work folder of its own; the first build in a new one is a full build.</span></label>
-              <div class="lim-c"><span class="numf"><input id="sl-{{ s.name }}" class="num" name="slots" type="number" min="1" max="8" step="1" value="{{ s.slots }}"><span class="numf-b"><button type="button" tabindex="-1" data-step="1" aria-label="One more">{{ crate::web::icons::icon("chevron")|safe }}</button><button type="button" tabindex="-1" data-step="-1" aria-label="One less">{{ crate::web::icons::icon("chevron")|safe }}</button></span></span><span class="unit">jobs</span></div></div>
+              <div class="lim-c">{% call ui::number("sl", s.name, "slots", "1", "8", s.slots) %}{% endcall %}<span class="unit">jobs</span></div></div>
             <div class="lim-row"><label class="lim-t" for="mt-{{ s.name }}"><strong>Start another job when</strong><span class="sub">at least this many threads are free…</span></label>
-              <div class="lim-c"><span class="numf"><input id="mt-{{ s.name }}" class="num" name="min_threads" type="number" min="0" step="1" value="{{ s.min_threads }}"><span class="numf-b"><button type="button" tabindex="-1" data-step="1" aria-label="One more">{{ crate::web::icons::icon("chevron")|safe }}</button><button type="button" tabindex="-1" data-step="-1" aria-label="One less">{{ crate::web::icons::icon("chevron")|safe }}</button></span></span><span class="unit">threads</span></div></div>
+              <div class="lim-c">{% call ui::number("mt", s.name, "min_threads", "0", "", s.min_threads) %}{% endcall %}<span class="unit">threads</span></div></div>
             <div class="lim-row"><label class="lim-t" for="mm-{{ s.name }}"><strong>…and</strong><span class="sub">at least this much memory is free.</span></label>
-              <div class="lim-c"><span class="numf"><input id="mm-{{ s.name }}" class="num" name="min_memory_gb" type="number" min="0" step="1" value="{{ s.min_memory }}"><span class="numf-b"><button type="button" tabindex="-1" data-step="1" aria-label="One more">{{ crate::web::icons::icon("chevron")|safe }}</button><button type="button" tabindex="-1" data-step="-1" aria-label="One less">{{ crate::web::icons::icon("chevron")|safe }}</button></span></span><span class="unit">GB</span></div></div>
+              <div class="lim-c">{% call ui::number("mm", s.name, "min_memory_gb", "0", "", s.min_memory) %}{% endcall %}<span class="unit">GB</span></div></div>
             <div class="lim-row"><label class="lim-t" for="rm-{{ s.name }}"><strong>Pause jobs when free memory drops below</strong><span class="sub">They go on when there's room again.</span></label>
-              <div class="lim-c"><span class="numf"><input id="rm-{{ s.name }}" class="num" name="reserve_memory_gb" type="number" min="0" step="1" value="{{ s.reserve_memory }}"><span class="numf-b"><button type="button" tabindex="-1" data-step="1" aria-label="One more">{{ crate::web::icons::icon("chevron")|safe }}</button><button type="button" tabindex="-1" data-step="-1" aria-label="One less">{{ crate::web::icons::icon("chevron")|safe }}</button></span></span><span class="unit">GB</span></div></div>
+              <div class="lim-c">{% call ui::number("rm", s.name, "reserve_memory_gb", "0", "", s.reserve_memory) %}{% endcall %}<span class="unit">GB</span></div></div>
             <div class="lim-row"><label class="lim-t" for="kd-{{ s.name }}"><strong>Delete a project's folders unused for</strong><span class="sub">Its work folders and builds there.</span></label>
-              <div class="lim-c"><span class="numf"><input id="kd-{{ s.name }}" class="num" name="keep_days" type="number" min="1" step="1" value="{{ s.keep_days }}"><span class="numf-b"><button type="button" tabindex="-1" data-step="1" aria-label="One more">{{ crate::web::icons::icon("chevron")|safe }}</button><button type="button" tabindex="-1" data-step="-1" aria-label="One less">{{ crate::web::icons::icon("chevron")|safe }}</button></span></span><span class="unit">days</span></div></div>
+              <div class="lim-c">{% call ui::number("kd", s.name, "keep_days", "1", "", s.keep_days) %}{% endcall %}<span class="unit">days</span></div></div>
             <div class="lim-save"><button class="btn sm" type="submit">Save limits</button></div>
           </form>
           <h3 class="label">Name</h3>

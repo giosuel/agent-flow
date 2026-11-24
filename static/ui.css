@@ -41,6 +41,9 @@
   --h-md: 44px; --h-sm: 36px; --ib: 36px; --ic-xs: 14px; --ic-sm: 16px; --ic: 18px; --ic-lg: 22px;
   /* Names from before the library, until their pages move over (M15.4) */
   --header: var(--sunken); --code: var(--sunken); --inset: var(--sunken); --nav-active: var(--selected); --nav-ink: var(--ink2);
+  /* The select's caret and the checkbox's tick (icons.rs's caret and check, drawn in --muted and --on-accent) */
+  --caret: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238E8E9A' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m7 10 5 5 5-5'/%3E%3C/svg%3E");
+  --tick: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%231A0F3A' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m5 12 5 5 9-10'/%3E%3C/svg%3E");
   --hover: var(--accent-ink); --soft: var(--accent-bg); --chip-accent: var(--accent-chip); --chip-accent-ink: var(--accent-chip-ink);
   color-scheme: dark;
 }
@@ -126,6 +129,69 @@ code, pre, .mono { font-family: var(--mono); }
 .act.subtle:hover { color: var(--ink); }
 button.act { background: none; border: 0; padding: 0; font: inherit; cursor: pointer; }
 
+/* ---------------------------------------------------------------- Field: one height, one focus ring, one error
+   A field is a label with its control, help under it and an error under that:
+   <label class="field">Name <span class="optional">optional</span><input …><span class="help">…</span></label>
+   Errors: aria-invalid="true" on the control and <span class="err">what to do</span>. */
+input, textarea, select { font: inherit; background: var(--sunken); color: var(--ink); border: 1px solid var(--border); border-radius: var(--r-md); min-height: var(--h-md); padding: 0 12px; }
+input:not([type=checkbox]):not([type=radio]):not([type=file]), select { height: var(--h-md); line-height: normal; }
+textarea { padding: 10px 12px; resize: vertical; line-height: 1.5; }
+textarea.mono, textarea.mono-text { font: var(--fs-sub)/1.55 var(--mono); }
+input::placeholder, textarea::placeholder { color: var(--dim); opacity: 1; }
+input:focus, textarea:focus, select:focus { outline: none; border-color: var(--accent); box-shadow: var(--focus-ring); }
+input[aria-invalid=true], textarea[aria-invalid=true], select[aria-invalid=true] { border-color: var(--bad); }
+input[aria-invalid=true]:focus, textarea[aria-invalid=true]:focus { box-shadow: var(--bad-ring); }
+input:disabled, textarea:disabled, select:disabled { background: var(--panel); border-color: var(--line); color: var(--dim); cursor: default; }
+select { appearance: none; -webkit-appearance: none; padding-right: 38px; cursor: pointer; background-image: var(--caret); background-repeat: no-repeat; background-position: right 12px center; background-size: 16px 16px; }
+.field { display: flex; flex-direction: column; gap: var(--sp-1_5); min-width: 0; font-size: var(--fs-sm); font-weight: 500; color: var(--ink2); }
+.field > input, .field > select, .field > textarea { width: 100%; font-size: var(--fs-body); font-weight: 400; color: var(--ink); }
+.field .optional { color: var(--muted); font-weight: 400; }
+.help { font-size: var(--fs-sub); font-weight: 400; color: var(--muted); }
+.err { display: flex; align-items: center; gap: var(--sp-1_5); font-size: var(--fs-sub); font-weight: 400; color: var(--bad-ink); }
+.err .i { width: var(--ic-sm); height: var(--ic-sm); }
+
+/* Search: an icon, the field, a ring when focused; .set while it filters; .sm inside menus */
+.search { flex: 1 1 360px; display: flex; align-items: center; gap: var(--sp-2); min-height: var(--h-md); padding: 0 12px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--sunken); min-width: 0; }
+.search .i { width: var(--ic-sm); height: var(--ic-sm); color: var(--muted); }
+.search input { flex: 1; min-width: 0; height: auto; min-height: 0; border: 0; background: none; padding: 0; box-shadow: none; }
+.search input:focus { box-shadow: none; }
+.search:focus-within { border-color: var(--accent); box-shadow: var(--focus-ring); }
+.search.set { border-color: var(--accent-line); background: var(--accent-bg); }
+.search.sm { flex: none; min-height: var(--h-sm); }
+
+/* Number: the field with its own steppers (app.js steps within min and max) */
+.numf { position: relative; display: inline-flex; flex: none; }
+.numf .num { width: 96px; padding-right: 36px; text-align: right; appearance: textfield; -moz-appearance: textfield; }
+.numf .num::-webkit-inner-spin-button, .numf .num::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.numf-b { position: absolute; top: 5px; bottom: 5px; right: 5px; width: 24px; display: flex; flex-direction: column; gap: 2px; }
+.numf-b button { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; padding: 0; border: 0; border-radius: var(--r-xs); background: var(--chip); color: var(--muted); cursor: pointer; }
+.numf-b button:hover { background: var(--accent-chip); color: var(--accent-chip-ink); }
+.numf-b button:active { background: var(--accent-bg); color: var(--ink); }
+.numf-b button:disabled { opacity: .35; cursor: default; background: var(--chip); color: var(--muted); }
+.numf-b .i { width: 12px; height: 12px; }
+.numf-b [data-step="1"] .i { rotate: -90deg; }
+.numf-b [data-step="-1"] .i { rotate: 90deg; }
+
+/* Checkbox and radio: one look, also in menus */
+input[type=checkbox], input[type=radio] { appearance: none; -webkit-appearance: none; width: 18px; height: 18px; min-height: 0; margin: 0; padding: 0; flex: none; border: 1.5px solid var(--border); border-radius: 5px; background: var(--sunken) center / 12px no-repeat; cursor: pointer; vertical-align: middle; }
+input[type=radio] { border-radius: 50%; }
+input[type=checkbox]:checked { background-color: var(--accent); border-color: var(--accent); background-image: var(--tick); }
+input[type=radio]:checked { border-color: var(--accent); box-shadow: inset 0 0 0 4px var(--sunken); background-color: var(--accent); }
+input[type=checkbox]:focus, input[type=radio]:focus { box-shadow: none; }
+input[type=checkbox]:disabled, input[type=radio]:disabled { background-color: var(--panel); border-color: var(--line); cursor: default; }
+.check { display: inline-flex; align-items: center; gap: 10px; min-height: var(--h-sm); font-size: var(--fs-sm); color: var(--ink2); cursor: pointer; }
+
+/* Switch: a checkbox with role="switch" (the owner, 2026-11-17: "lets make the consultant switch into
+   an actually toggle"); the checkbox stays for keyboards and screen readers. */
+.switch { position: relative; flex: none; width: 46px; height: 26px; cursor: pointer; }
+.switch input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
+.switch span { position: absolute; inset: 0; pointer-events: none; border-radius: var(--r-pill); background: var(--chip); border: 1px solid var(--border); transition: background .15s, border-color .15s; }
+.switch span::after { content: ""; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: var(--muted); transition: transform .15s, background .15s; }
+.switch input:checked + span { background: var(--accent); border-color: var(--accent); }
+.switch input:checked + span::after { transform: translateX(20px); background: var(--on-accent); }
+.switch input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
+.switch input:disabled + span { opacity: .4; }
+
 /* Copy field: a command or token with the copy icon in its corner (app.js adds the button) */
 .cmd { display: block; margin: 0; padding: 10px 12px; background: var(--sunken); color: var(--ink); border: 1px solid var(--line); border-radius: var(--r-md); font: var(--fs-sub)/1.5 var(--mono); overflow-x: auto; white-space: pre; }
 .copy-wrap { position: relative; }
@@ -134,6 +200,9 @@ button.act { background: none; border: 0; padding: 0; font: inherit; cursor: poi
 
 /* ---------------------------------------------------------------- The phone (one breakpoint: 700) */
 @media (max-width: 700px) {
+  input, select, textarea { font-size: 16px; }
+  .field > input, .field > select, .field > textarea { font-size: 16px; }
+  .search { flex-basis: 100%; }
   .btn.sm { min-height: var(--h-md); }
   .ibtn { width: 44px; height: 44px; }
 }

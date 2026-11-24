@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "ui.html" as ui %}
 {% block title %}UI library{% endblock %}
 {% block content %}
 {# The UI library's catalogue (M15): every token and component, drawn with static/ui.css itself.
@@ -49,6 +50,23 @@
 <section class="card spec" aria-labelledby="ui-copy">
   <div class="spec-h"><h2 class="label" id="ui-copy">Copy field</h2></div>
   <div class="spec-row wide"><div class="nm"><b>Command</b>pre.cmd</div><div class="smp"><pre class="cmd mono">curl -fsSL https://flow.giosuel.io/install.sh | sh</pre></div></div>
+</section>
+</div>
+<div class="uicat-cols">
+<section class="card spec" aria-labelledby="ui-field">
+  <div class="spec-h"><h2 class="label" id="ui-field">Field</h2><span class="sub">one height, one focus ring, one error</span></div>
+  <div class="spec-row"><div class="nm"><b>Text field</b>label.field</div><div class="smp"><label class="field ui-w">Name<input value="Vinculum"></label><label class="field ui-w"><span>GitHub repository <span class="optional">optional</span></span><input placeholder="owner/name, e.g. giosuel/vinculum"><span class="help">Its pull requests show here once set.</span></label></div><div class="wh">Label above, help under; mark what's optional</div></div>
+  <div class="spec-row"><div class="nm"><b>Error</b>aria-invalid · .err</div><div class="smp"><label class="field ui-w">Slug<input value="vinculum!" aria-invalid="true" aria-describedby="ui-err"><span class="err" id="ui-err">{{ crate::web::icons::icon("alert")|safe }}Only letters, digits and - in a slug</span></label></div><div class="wh">Says what to do</div></div>
+  <div class="spec-row"><div class="nm"><b>Disabled</b>:disabled</div><div class="smp"><label class="field ui-w">Folder<input value="~/vinculum" disabled></label></div><div class="wh">Tab to a field to see its focus ring</div></div>
+  <div class="spec-row"><div class="nm"><b>Textarea</b>textarea · .mono</div><div class="smp"><label class="field ui-wide">What it is<textarea rows="2">Settings app for Hyprland: displays, sound, input, network and keybinds in one window.</textarea></label></div><div class="wh">Mono for code and documents</div></div>
+  <div class="spec-row"><div class="nm"><b>Select</b>select</div><div class="smp"><label class="field ui-w">Model<select><option>Claude Opus 5.5</option><option>Claude Sonnet 5.5</option></select></label></div><div class="wh">Model and Effort, everywhere a list</div></div>
+</section>
+<section class="card spec" aria-labelledby="ui-pick">
+  <div class="spec-h"><h2 class="label" id="ui-pick">Search, number, choices</h2></div>
+  <div class="spec-row"><div class="nm"><b>Search</b>.search · .set · .sm</div><div class="smp"><label class="search">{{ crate::web::icons::icon("search")|safe }}<span class="vh">Search</span><input placeholder="Search the text, or a query like actor:vinculum"></label><label class="search set ui-w">{{ crate::web::icons::icon("search")|safe }}<span class="vh">Search</span><input value="flaky"></label><label class="search sm ui-w">{{ crate::web::icons::icon("search")|safe }}<span class="vh">Find</span><input placeholder="Find a scope"></label></div><div class="wh">Log, Notes, Conversations; .set while it filters, .sm in menus</div></div>
+  <div class="spec-row"><div class="nm"><b>Number</b>ui::number</div><div class="smp">{% call ui::number("ui", "a", "jobs", "1", "8", 3) %}{% endcall %}{% call ui::number("ui", "b", "max", "1", "8", 8) %}{% endcall %}</div><div class="wh">Its own steppers; the end disables its button</div></div>
+  <div class="spec-row"><div class="nm"><b>Checkbox, radio</b>input</div><div class="smp"><label class="check"><input type="checkbox" checked>Project-wide</label><label class="check"><input type="checkbox">M13</label><label class="check"><input type="checkbox" disabled>Archived</label><label class="check"><input type="radio" name="ui-r" checked>Day</label><label class="check"><input type="radio" name="ui-r">Milestone</label></div><div class="wh">One look, also in menus</div></div>
+  <div class="spec-row"><div class="nm"><b>Switch</b>.switch</div><div class="smp"><label class="switch"><input type="checkbox" role="switch" checked aria-label="On"><span></span></label><label class="switch"><input type="checkbox" role="switch" aria-label="Off"><span></span></label></div><div class="wh">Saves at once (Settings)</div></div>
 </section>
 </div>
 <section class="card spec" aria-labelledby="ui-icons">

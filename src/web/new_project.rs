@@ -36,6 +36,21 @@ struct NewForm {
     effort: String,
 }
 
+/// The models and efforts a project's agent can run with: one list for Add project and Project
+/// settings (a select in both, the review N-19 #2.10).
+pub const MODELS: &[&str] = &["Claude Opus 5.5", "Claude Sonnet 5.5", "Claude Fable 5.1"];
+pub const EFFORTS: &[&str] = &["high", "medium", "low"];
+
+/// The list to pick from, with `current` added when it's set and not in the list (a project set
+/// up with another model keeps it).
+pub fn choices(list: &[&str], current: &str) -> Vec<String> {
+    let mut out: Vec<String> = list.iter().map(|s| s.to_string()).collect();
+    if !current.is_empty() && !list.contains(&current) {
+        out.push(current.to_owned());
+    }
+    out
+}
+
 #[derive(Template)]
 #[template(path = "new_project.html")]
 struct NewProjectPage {
@@ -48,6 +63,8 @@ struct NewProjectPage {
     platform: String,
     model: String,
     effort: String,
+    models: Vec<String>,
+    efforts: Vec<String>,
 }
 
 fn page(state: &AppState, nav: Nav, f: &NewForm, error: Option<String>) -> AppResult<Response> {
@@ -61,6 +78,8 @@ fn page(state: &AppState, nav: Nav, f: &NewForm, error: Option<String>) -> AppRe
         platform: f.platform.clone(),
         model: if f.model.is_empty() { "Claude Opus 5.5".into() } else { f.model.clone() },
         effort: if f.effort.is_empty() { "high".into() } else { f.effort.clone() },
+        models: choices(MODELS, &f.model),
+        efforts: choices(EFFORTS, &f.effort),
     })
 }
 
@@ -129,4 +148,16 @@ async fn create(
         public_url: state.config.public_url.trim_end_matches('/').to_owned(),
         minutes: onboard::SETUP_CODE_MINUTES,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn a_model_outside_the_list_stays_pickable() {
+        assert_eq!(super::choices(super::MODELS, "Claude Opus 5.5"), super::MODELS);
+        let mut with = super::MODELS.to_vec();
+        with.push("Claude Opus 4.8");
+        assert_eq!(super::choices(super::MODELS, "Claude Opus 4.8"), with);
+        assert_eq!(super::choices(super::EFFORTS, ""), super::EFFORTS, "nothing set adds nothing");
+    }
 }
