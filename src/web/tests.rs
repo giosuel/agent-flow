@@ -2078,6 +2078,16 @@ async fn notes_are_files_or_text_and_come_back() {
     assert!(!note.contains("<title>N-1") && !note.contains("<li>T-5</li>"), "the project's page, not the note's");
     let settings = direct("/settings?s=clients").await.unwrap().text().await.unwrap();
     assert!(settings.contains(r#"data-open-dlg="settings" data-open-url="/settings?s=clients" data-open-from="/""#));
+    // The bell's panel and project settings are dialogs only (the owner, 2026-11-18).
+    let bell = direct("/notifications").await.unwrap().text().await.unwrap();
+    assert!(bell.contains(r#"data-open-dlg="ntf" data-open-url="/notifications" data-open-from="/""#));
+    let set = direct("/p/vinculum/settings").await.unwrap().text().await.unwrap();
+    assert!(set.contains(r#"data-open-dlg="dlg" data-open-url="/p/vinculum/settings" data-open-from="/p/vinculum""#));
+    let old = s.http.get(s.url("/p/vinculum?tab=settings")).header(COOKIE, &cookie).send().await.unwrap();
+    assert_eq!(old.headers()[LOCATION], "/p/vinculum/settings");
+    let page =
+        s.http.get(s.url("/p/vinculum/settings")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
+    assert!(page.contains("data-dlg-content") && page.contains("Archive the project"), "{page}");
     let f = s.http.get(s.url("/p/vinculum/N-2/file")).header(COOKIE, &cookie).send().await.unwrap();
     assert_eq!(f.headers()[CONTENT_TYPE], "application/octet-stream");
     assert!(f.headers()["content-disposition"].to_str().unwrap().starts_with("attachment"));
@@ -2435,7 +2445,7 @@ async fn projects_are_archived_and_restored() {
     assert!(!list.contains("/p/vinculum\"") && list.contains("1 archived"), "{list}");
     assert!(get("/projects?archived=1").await.contains("/p/vinculum\""));
     assert!(get("/p/vinculum").await.contains("Restore it in Settings"));
-    assert!(get("/p/vinculum?tab=settings").await.contains("Restore the project"));
+    assert!(get("/p/vinculum/settings").await.contains("Restore the project"));
     // Only the owner, and only these two.
     let res = s
         .http
@@ -2499,16 +2509,15 @@ async fn the_owner_edits_a_projects_details() {
             res.headers()[LOCATION].to_str().unwrap().to_owned()
         }
     };
-    assert_eq!(save(vec![]).await, "/p/vinculum?tab=settings&settings=saved");
+    assert_eq!(save(vec![]).await, "/p/vinculum/settings?settings=saved");
     let p = s.state.db.call(|c| crate::projects::require(c, "vinculum")).await.unwrap();
     assert_eq!((p.name.as_str(), p.repo.as_str()), ("Lituus", "giosuel/vinculum"));
     // Stack and rules live in the project document now; the form doesn't touch them.
     assert!(p.stack.is_empty() && p.pm_rules.is_empty());
     assert_eq!(p.ports, ["21300 demo"]);
-    assert_eq!(save(vec![("name", " ")]).await, "/p/vinculum?tab=settings&settings=name");
-    assert_eq!(save(vec![("repo", "not a repo")]).await, "/p/vinculum?tab=settings&settings=repo");
-    let page =
-        s.http.get(s.url("/p/vinculum?tab=settings&settings=repo")).header(COOKIE, &cookie).send().await.unwrap();
+    assert_eq!(save(vec![("name", " ")]).await, "/p/vinculum/settings?settings=name");
+    assert_eq!(save(vec![("repo", "not a repo")]).await, "/p/vinculum/settings?settings=repo");
+    let page = s.http.get(s.url("/p/vinculum/settings?settings=repo")).header(COOKIE, &cookie).send().await.unwrap();
     let html = page.text().await.unwrap();
     assert!(html.contains("owner/name") && html.contains(r#"value="Lituus""#), "{html}");
     // Only the owner.
@@ -3034,16 +3043,8 @@ async fn builders_are_taken_over_and_picked_per_project() {
     .await
     .unwrap();
     // A project picks it in its Settings; the Settings card lists the project.
-    let page = s
-        .http
-        .get(s.url("/p/vinculum?tab=settings"))
-        .header(COOKIE, &cookie)
-        .send()
-        .await
-        .unwrap()
-        .text()
-        .await
-        .unwrap();
+    let page =
+        s.http.get(s.url("/p/vinculum/settings")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
     assert!(page.contains("<option value=\"hq\""));
     let form = vec![
         ("name", "Vinculum".into()),

@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Settings · {{ name }}{% endblock %}
+{% block content %}
+{# Project settings as a dialog over the project page (the owner, 2026-11-18, D-205). #}
+<div data-dlg-content class="stack">
+<div class="head"><h1>{{ name }}: settings</h1></div>
+{% if let Some(n) = notice %}<p class="notice{% if notice_bad %} warn{% else %} ok{% endif %}" role="status">{{ n }}</p>{% endif %}
+<form method="post" action="/p/{{ slug }}/settings" class="card pad stack" aria-labelledby="set-h">
+  <h2 id="set-h">Details</h2>
+  <p class="sub">The same details the project's agent sets with <span class="mono">update_project</span>; it sees your changes the next time it checks. The project's id, <span class="mono">{{ slug }}</span>, stays as it is: every record and link uses it.</p>
+  <div class="form-grid">
+    <label>Name<input name="name" required maxlength="60" value="{{ edit.name }}"></label>
+    <label>GitHub repository<input name="repo" value="{{ edit.repo }}" placeholder="owner/name, edit.g. giosuel/vinculum"><span class="sub">Its pull requests show here once set.</span></label>
+    <label class="span-all">What it is<input name="description" maxlength="300" value="{{ edit.description }}"></label>
+    <label>Folder<input name="checkout" value="{{ edit.checkout }}" placeholder="edit.g. ~/vinculum"></label>
+    <label>Machine<input name="machine" value="{{ edit.machine }}" placeholder="edit.g. giosuel.ch"></label>
+    <label>Model<input name="model" value="{{ edit.model }}" placeholder="edit.g. Claude Opus 5.5" list="models"></label>
+    <label>Effort<input name="effort" value="{{ edit.effort }}" placeholder="edit.g. high" list="efforts"></label>
+    <label>Build product<input name="build_product" value="{{ edit.build_product }}" placeholder="{{ slug }}"><span class="sub">The name test builds go under; empty means the id.</span></label>
+    <label>How PRs merge<select name="merge_method">
+      {% for (v, t) in [("merge", "A merge commit"), ("squash", "Squash"), ("rebase", "Rebase")] %}<option value="{{ v }}"{% if edit.merge_method == *v %} selected{% endif %}>{{ t }}</option>{% endfor %}
+    </select><span class="sub">Every PR of the repository gets a Merge button that merges this way and deletes the branch.</span></label>
+    <label>Build server<select name="build_server">
+      <option value=""{% if edit.build_server.is_empty() %} selected{% endif %}>None: builds where the agent is</option>
+      {% for b in edit.servers %}<option value="{{ b }}"{% if *b == edit.build_server %} selected{% endif %}>{{ b }}</option>{% endfor %}
+    </select><span class="sub">Where <span class="mono">flow remote</span> runs its builds and tests. Add machines in <a href="/settings?s=builders">Settings</a>.</span></label>
+    <p class="sub span-all">Tech stack, platform, git and project rules are in the <a href="/p/{{ slug }}/doc" data-dlg>project document</a>.</p>
+    <label class="span-all">Ports<textarea name="ports" rows="2" placeholder="One per line, edit.g. 5173 vite">{{ edit.ports }}</textarea></label>
+  </div>
+  <datalist id="models"><option value="Claude Opus 5.5"><option value="Claude Sonnet 5.5"><option value="Claude Fable 5.1"></datalist>
+  <datalist id="efforts"><option value="high"><option value="medium"><option value="low"></datalist>
+  <div><button class="btn" type="submit">Save</button></div>
+</form>
+<section class="card pad stack-sm" aria-labelledby="arch-h">
+  <h2 id="arch-h">{% if status == "archived" %}Archived{% else %}Archive{% endif %}</h2>
+  {% if status == "archived" %}
+  <p class="sub">It's out of the Dashboard, the waiting count and the project list. Its page and records stay.</p>
+  <form method="post" action="/p/{{ slug }}/status"><input type="hidden" name="status" value="active"><button class="btn sm ghost" type="submit">Restore the project</button></form>
+  {% else %}
+  <p class="sub">Done with it? Archiving takes it out of the Dashboard, the waiting count and the project list. Nothing is deleted, and you can restore it here.</p>
+  <form method="post" action="/p/{{ slug }}/status"><input type="hidden" name="status" value="archived"><button class="btn sm ghost" type="submit" data-confirm="Archive {{ name }}? It leaves the Dashboard and the project list. Nothing is deleted, and you can restore it here.">Archive the project</button></form>
+  {% endif %}
+</section>
+</div>
+{% endblock %}
