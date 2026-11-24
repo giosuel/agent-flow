@@ -42,14 +42,17 @@ pub struct AddRelease {
     /// PRs that must be merged before tagging, e.g. ["PR-48", "PR-57"].
     #[serde(default)]
     pub waits_for: Vec<String>,
-    /// Release notes or what the tag closes, in Markdown.
+    /// Release notes, in Markdown: a first paragraph, then a short `- ` list. They're the tag's
+    /// message with the title (at most 32 lines and 1,500 characters in all, since the owner reads
+    /// the whole command), and a release workflow turns them into the GitHub release's notes.
     #[serde(default)]
     pub body: String,
     /// The milestone this tag closes, e.g. "M4".
     pub milestone: Option<String>,
-    /// Its "Push tag" button comes by itself (an annotated tag on origin/main, run in the
-    /// project's folder, unlocked once every PR it waits for is merged). false: you add your own
-    /// with add_button, e.g. to tag another branch.
+    /// Its "Push tag" button comes by itself: an annotated tag on main's newest commit, made
+    /// through GitHub's API (no project folder needed), with the title and notes as its message;
+    /// unlocked once every PR it waits for is merged. false: you add your own with add_button,
+    /// e.g. to tag another branch.
     pub tag_button: Option<bool>,
 }
 
@@ -259,7 +262,7 @@ impl FlowMcp {
                 // Everything still to test comes along (the owner, 2026-11-11).
                 let to_test = crate::totest::attach_to_release(&tx, &r, &a.name())?;
                 // Its Push tag button, so the agent doesn't write it by hand (Imaginarium's agent,
-                // 2026-11-12); it needs the project's folder.
+                // 2026-11-12); GitHub's API makes the tag, so no folder is needed.
                 let mut button = Value::Null;
                 if p.tag_button.unwrap_or(true) {
                     let proj = crate::projects::get_by_id(&tx, project.id)?;
