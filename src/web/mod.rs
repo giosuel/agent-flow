@@ -211,6 +211,7 @@ fn dialog_parent(uri: &axum::http::Uri) -> Option<(String, &'static str)> {
     };
     match parts.as_slice() {
         ["", "p", slug, r] if record(r) => Some((format!("/p/{slug}"), "rec")),
+        ["", "p", slug, "doc"] => Some((format!("/p/{slug}"), "dlg")),
         ["", "p", slug, "steps", n] if !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()) => {
             Some((format!("/p/{slug}"), "rec"))
         }

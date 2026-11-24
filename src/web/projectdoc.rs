@@ -1,35 +1,38 @@
-//! The project document on the project's Notes tab, laid out like the Guides (the owner,
-//! 2026-11-12: "make it look the same as the global notes"): a card per section with a pencil, the
-//! whole document editable too, and its history. See `crate::projectdoc`.
+//! The project document as a dialog over the project's overview (the owner, 2026-11-18: "move the
+//! project document out of this section completely and put it into a dialog that can be opened
+//! from the project overview"): its sections with contents beside them, its history, and the
+//! whole document edited as Markdown with a preview ("lets not do edit by section, just the whole
+//! document"). A save over a newer version merges by section (D-201). See `crate::projectdoc`.
 
-use axum::extract::{Path, State};
+use askama::Template;
+use axum::extract::{Path, Query, State};
+use axum::http::header;
 use axum::response::{IntoResponse, Redirect, Response};
-use axum::routing::post;
-use axum::{Extension, Form, Router};
-use rusqlite::Connection;
+use axum::routing::{get, post};
+use axum::{Extension, Form, Json, Router};
 use serde::Deserialize;
 
+use super::pages::{Nav, nav, render};
 use super::{AppResult, AppState, ClientIp};
 use crate::activity::{self, Action, Entry, Via};
 use crate::auth::Actor;
 use crate::projectdoc;
 use crate::tz::Tz;
+use crate::util::now_ms;
 
 pub fn routes() -> Router<AppState> {
-    Router::new().route("/p/{slug}/doc", post(save))
+    Router::new()
+        .route("/p/{slug}/doc", get(page).post(save))
+        .route("/p/{slug}/doc/preview", post(preview))
+        .route("/p/{slug}/doc/rev", get(rev))
 }
 
 pub struct SectionView {
     pub index: usize,
     pub title: String,
+    /// The text before the first heading has no heading of its own.
+    pub intro: bool,
     pub html: String,
-}
-
-pub struct Editing {
-    /// The section's index, or None for the whole document.
-    pub section: Option<usize>,
-    pub label: String,
-    pub text: String,
 }
 
 pub struct RevRow {
@@ -39,96 +42,154 @@ pub struct RevRow {
     pub what: String,
 }
 
-pub struct DocView {
-    pub rev: i64,
-    pub line: String,
-    pub version: String,
-    pub bytes: String,
-    pub sections: Vec<SectionView>,
-    pub editing: Option<Editing>,
-    pub history: Vec<RevRow>,
+/// A section both changed, offered to pick: its title, the agent's version (Markdown, for the
+/// editor, and rendered), and whether the owner's text still has it.
+pub struct ConflictView {
+    pub title: String,
+    pub theirs: String,
+    pub theirs_html: String,
+    pub mine_kept: bool,
+}
+
+pub struct Editor {
+    pub text: String,
+    pub base_rev: i64,
+    pub preview_html: String,
+    pub conflicts: Vec<ConflictView>,
+    /// Who saved the version merged in, for the conflict banner.
+    pub other: String,
+}
+
+#[derive(Template)]
+#[template(path = "project_doc.html")]
+struct DocPage {
+    nav: Nav,
+    slug: String,
+    name: String,
+    owner: bool,
+    rev: i64,
+    line: String,
+    bytes: String,
+    sections: Vec<SectionView>,
+    editor: Option<Editor>,
+    history: Vec<RevRow>,
     /// An older revision being looked at: (rev, its sections).
-    pub old: Option<(i64, Vec<SectionView>)>,
-    pub notice: Option<(bool, String)>,
+    old: Option<(i64, Vec<SectionView>)>,
+    notice: Option<(bool, String)>,
 }
 
-/// What the Notes tab asks for: a section to edit ("2" or "all"), the history, an old revision.
-pub struct Ask<'a> {
-    pub edit: Option<&'a str>,
-    pub history: bool,
-    pub rev: Option<i64>,
-    pub outcome: Option<&'a str>,
-}
-
-fn section_views(text: &str) -> Vec<SectionView> {
+pub fn section_views(text: &str) -> Vec<SectionView> {
     projectdoc::sections(text)
         .into_iter()
         .enumerate()
         .map(|(index, (title, body))| {
-            // The heading is the card's label; the rest is the card.
-            let rest =
-                if body.starts_with("## ") { body.split_once('\n').map(|x| x.1).unwrap_or("") } else { body.as_str() };
-            SectionView { index, title, html: crate::markdown::to_html(rest) }
+            let intro = !body.starts_with("## ");
+            let rest = if intro { body.as_str() } else { body.split_once('\n').map(|x| x.1).unwrap_or("") };
+            SectionView { index, title, intro, html: crate::markdown::to_html(rest) }
         })
         .collect()
 }
 
-pub fn view(c: &Connection, project_id: i64, ask: &Ask, tz: &Tz, now: i64) -> anyhow::Result<DocView> {
-    let d = projectdoc::get(c, project_id)?;
-    let parts = projectdoc::sections(&d.text);
-    let editing = match ask.edit {
-        Some("all") => Some(Editing { section: None, label: "the whole document".into(), text: d.text.clone() }),
-        Some(i) => i.parse::<usize>().ok().and_then(|i| {
-            parts.get(i).map(|(t, body)| Editing {
-                section: Some(i),
-                label: t.clone(),
-                text: body.trim_end().to_owned(),
-            })
-        }),
-        None => None,
-    };
-    let history = if ask.history {
-        projectdoc::revisions(c, project_id, 50)?
-            .into_iter()
-            .map(|r| RevRow { rev: r.rev, when: tz.short(r.at), who: r.author, what: r.what })
-            .collect()
+fn line(d: &projectdoc::Doc, now: i64) -> String {
+    if d.rev == 0 {
+        String::new()
     } else {
-        Vec::new()
-    };
-    let old = match ask.rev {
-        Some(r) if r > 0 && r < d.rev => projectdoc::revision_text(c, project_id, r)?.map(|t| (r, section_views(&t))),
-        _ => None,
-    };
-    let notice = ask.outcome.map(|o| match o {
-        "saved" => (true, "Saved. The agent reads it at the start of its next session.".to_owned()),
-        "same" => (true, "Nothing changed.".to_owned()),
-        "stale" => (false, "The document changed while you were editing (the agent may have edited it). Nothing was saved; here it is as it is now.".to_owned()),
-        "big" => (false, format!("That would make it bigger than {} KB, which is read at the start of every session. Nothing was saved.", projectdoc::MAX_BYTES / 1024)),
+        format!("rev {} · edited {} by {}", d.rev, crate::util::ago(d.updated_at, now), d.author)
+    }
+}
+
+/// "rev 14 · yesterday", for the overview's link.
+pub fn short_line(d: &projectdoc::Doc, now: i64) -> String {
+    if d.rev == 0 { String::new() } else { format!("rev {} · {}", d.rev, crate::util::ago(d.updated_at, now)) }
+}
+
+#[derive(Deserialize, Default)]
+struct DocQuery {
+    edit: Option<u8>,
+    history: Option<u8>,
+    rev: Option<i64>,
+    /// How a save went: saved, same, big; `taken` names the agent's sections merged in.
+    done: Option<String>,
+    taken: Option<String>,
+}
+
+fn notice(done: Option<&str>, taken: Option<&str>, agent: &str) -> Option<(bool, String)> {
+    let taken = taken.filter(|t| !t.is_empty());
+    done.map(|o| match (o, taken) {
+        ("saved", Some(t)) => (
+            true,
+            format!("Saved, with {agent}'s newer version of {t}. {agent} hears of your edit with its next call."),
+        ),
+        ("saved", None) => (true, format!("Saved. {agent} hears of your edit with its next call.")),
+        ("same", _) => (true, "Nothing changed.".to_owned()),
         _ => (false, "That didn't work; nothing was saved.".to_owned()),
+    })
+}
+
+async fn page(
+    State(state): State<AppState>,
+    Extension(actor): Extension<Actor>,
+    Path(slug): Path<String>,
+    Query(q): Query<DocQuery>,
+    tz: Tz,
+) -> AppResult<Response> {
+    let owner = actor.is_owner();
+    let now = now_ms();
+    let s = slug.clone();
+    let (p, d, history, old) = state
+        .db
+        .call(move |c| {
+            let p = crate::projects::require(c, &s)?;
+            let d = projectdoc::get(c, p.id)?;
+            let history = if q.history == Some(1) {
+                projectdoc::revisions(c, p.id, 50)?
+                    .into_iter()
+                    .map(|r| RevRow { rev: r.rev, when: tz.short(r.at), who: r.author, what: r.what })
+                    .collect()
+            } else {
+                Vec::new()
+            };
+            let old = match q.rev {
+                Some(r) if r > 0 && r < d.rev => projectdoc::revision_text(c, p.id, r)?.map(|t| (r, section_views(&t))),
+                _ => None,
+            };
+            Ok((p, d, history, old))
+        })
+        .await?;
+    let editor = (owner && q.edit == Some(1)).then(|| Editor {
+        preview_html: crate::markdown::to_html(&d.text),
+        text: d.text.clone(),
+        base_rev: d.rev,
+        conflicts: Vec::new(),
+        other: String::new(),
     });
-    Ok(DocView {
+    render(DocPage {
+        nav: nav(&state, &actor, "/projects").await,
+        notice: notice(q.done.as_deref(), q.taken.as_deref(), &p.slug),
+        slug: p.slug,
+        name: p.name,
+        owner,
         rev: d.rev,
-        line: if d.rev == 0 {
-            String::new()
-        } else {
-            format!("rev {} · edited {} by {} ({})", d.rev, crate::util::ago(d.updated_at, now), d.author, d.what)
-        },
-        version: d.version(),
+        line: line(&d, now),
         bytes: format!("{:.1} KB of {} KB", d.text.len() as f64 / 1024.0, projectdoc::MAX_BYTES / 1024),
         sections: section_views(&d.text),
-        editing,
+        editor,
         history,
         old,
-        notice,
     })
 }
 
 #[derive(Deserialize)]
 struct SaveForm {
-    #[serde(default)]
-    section: String,
-    version: String,
+    /// The revision the owner started from.
+    base_rev: i64,
     text: String,
+}
+
+enum Saved {
+    Done(&'static str, String, String),
+    Big(projectdoc::Doc),
+    Conflicts(projectdoc::Doc, projectdoc::Merged),
 }
 
 async fn save(
@@ -140,53 +201,150 @@ async fn save(
 ) -> AppResult<Response> {
     actor.require_owner()?;
     let s = slug.clone();
+    let mine = f.text.replace("\r\n", "\n");
+    let mine2 = mine.clone();
     let res = state
         .db
         .call(move |c| {
-            let Some(p) = crate::projects::get(c, &s)? else { anyhow::bail!("no project") };
-            let old = projectdoc::get(c, p.id)?;
-            if old.version() != f.version {
-                return Ok(("stale", p.id, String::new()));
-            }
-            let (text, what) = match f.section.trim().parse::<usize>() {
-                Ok(i) => {
-                    let parts = projectdoc::sections(&old.text);
-                    let Some((title, _)) = parts.get(i) else { anyhow::bail!("no such section") };
-                    // The owner's text replaces the section as written, heading and all.
-                    let mut out = String::new();
-                    for (j, (_, body)) in parts.iter().enumerate() {
-                        if j == i {
-                            let t = f.text.trim_end();
-                            if !t.is_empty() {
-                                out.push_str(t);
-                                out.push_str("\n\n");
-                            }
-                        } else {
-                            out.push_str(body);
-                        }
-                    }
-                    (out, format!("section {title}"))
+            let p = crate::projects::require(c, &s)?;
+            let cur = projectdoc::get(c, p.id)?;
+            let (text, taken) = if f.base_rev == cur.rev {
+                (mine2, Vec::new())
+            } else {
+                // The agent (or another tab) saved meanwhile: merge by section.
+                let base = if f.base_rev <= 0 {
+                    String::new()
+                } else {
+                    projectdoc::revision_text(c, p.id, f.base_rev)?.unwrap_or_default()
+                };
+                let m = projectdoc::merge(&base, &cur.text, &mine2);
+                if !m.conflicts.is_empty() {
+                    return Ok(Saved::Conflicts(cur, m));
                 }
-                Err(_) => (f.text.clone(), "the whole document".into()),
+                (m.text, m.taken)
             };
-            match projectdoc::set(c, p.id, &text, "owner", &what) {
-                Ok((_, true)) => Ok(("saved", p.id, what)),
-                Ok((_, false)) => Ok(("same", p.id, what)),
-                Err(e) if e.to_string().contains("KB") => Ok(("big", p.id, what)),
+            let what = match projectdoc::changed_sections(&cur.text, &text) {
+                w if w.is_empty() => "the whole document".to_owned(),
+                w => w,
+            };
+            match projectdoc::set(c, p.id, &text, "owner", &format!("edited {what}")) {
+                Ok((_, true)) => Ok(Saved::Done("saved", what, taken.join(", "))),
+                Ok((_, false)) => Ok(Saved::Done("same", what, String::new())),
+                Err(e) if e.to_string().contains("KB") => Ok(Saved::Big(cur)),
                 Err(e) => Err(e),
             }
         })
-        .await;
-    let (code, what) = match res {
-        Ok((code, _, what)) => (code, what),
-        Err(_) => ("error", String::new()),
-    };
-    if code == "saved" {
-        let e = Entry::new(&actor, Via::Page, Action::Write, format!("project document of {slug}: {what}"))
-            .project(slug.clone())
-            .ip(Some(ip.0));
-        activity::write(&state.db, e).await;
+        .await?;
+    match res {
+        Saved::Done(code, what, taken) => {
+            if code == "saved" {
+                let e = Entry::new(&actor, Via::Page, Action::Write, format!("project document of {slug}: {what}"))
+                    .project(slug.clone())
+                    .ip(Some(ip.0));
+                activity::write(&state.db, e).await;
+            }
+            let taken = if taken.is_empty() { String::new() } else { format!("&taken={}", super::log::enc(&taken)) };
+            Ok(Redirect::to(&format!("/p/{slug}/doc?done={code}{taken}")).into_response())
+        }
+        // Too big, or both changed a section: the editor again, with the owner's text kept.
+        Saved::Big(cur) => editor_again(&state, &actor, &slug, cur, mine, Vec::new(), Some((false, format!(
+            "That would make it bigger than {} KB, which is read at the start of every session. Nothing was saved; shorten it, or move long parts into notes.",
+            projectdoc::MAX_BYTES / 1024
+        ))))
+        .await,
+        Saved::Conflicts(cur, m) => editor_again(&state, &actor, &slug, cur, m.text, m.conflicts, None).await,
     }
-    let back = if matches!(code, "big") { "&edit=all" } else { "" };
-    Ok(Redirect::to(&format!("/p/{slug}?tab=notes&doc={code}{back}")).into_response())
+}
+
+async fn editor_again(
+    state: &AppState,
+    actor: &Actor,
+    slug: &str,
+    cur: projectdoc::Doc,
+    text: String,
+    conflicts: Vec<projectdoc::Conflict>,
+    notice: Option<(bool, String)>,
+) -> AppResult<Response> {
+    let now = now_ms();
+    let s = slug.to_owned();
+    let p = state.db.call(move |c| crate::projects::require(c, &s)).await?;
+    render(DocPage {
+        nav: nav(state, actor, "/projects").await,
+        slug: p.slug,
+        name: p.name,
+        owner: true,
+        rev: cur.rev,
+        line: line(&cur, now),
+        bytes: format!("{:.1} KB of {} KB", cur.text.len() as f64 / 1024.0, projectdoc::MAX_BYTES / 1024),
+        sections: Vec::new(),
+        editor: Some(Editor {
+            preview_html: crate::markdown::to_html(&text),
+            text,
+            // Saving again goes over the version merged in.
+            base_rev: cur.rev,
+            conflicts: conflicts
+                .into_iter()
+                .map(|c| {
+                    let body = c.theirs.split_once('\n').map(|x| x.1).unwrap_or("");
+                    ConflictView {
+                        theirs_html: crate::markdown::to_html(body),
+                        title: c.title,
+                        theirs: c.theirs.trim_end().to_owned(),
+                        mine_kept: c.mine_kept,
+                    }
+                })
+                .collect(),
+            other: cur.author.clone(),
+        }),
+        history: Vec::new(),
+        old: None,
+        notice,
+    })
+}
+
+#[derive(Deserialize)]
+struct PreviewForm {
+    text: String,
+}
+
+/// The editor's preview: the Markdown as the dialog shows it.
+async fn preview(Extension(actor): Extension<Actor>, Form(f): Form<PreviewForm>) -> AppResult<Response> {
+    actor.require_owner()?;
+    let text: String = f.text.chars().take(4 * projectdoc::MAX_BYTES).collect();
+    Ok(([(header::CONTENT_TYPE, "text/html; charset=utf-8")], crate::markdown::to_html(&text)).into_response())
+}
+
+#[derive(Deserialize)]
+struct RevQuery {
+    since: i64,
+}
+
+/// For the editor while it's open: is there a newer version than the one it started from, by whom,
+/// and which sections it changed.
+async fn rev(
+    State(state): State<AppState>,
+    Extension(actor): Extension<Actor>,
+    Path(slug): Path<String>,
+    Query(q): Query<RevQuery>,
+) -> AppResult<Response> {
+    actor.require_owner()?;
+    let v = state
+        .db
+        .call(move |c| {
+            let p = crate::projects::require(c, &slug)?;
+            let d = projectdoc::get(c, p.id)?;
+            let changed = if d.rev > q.since {
+                let base = if q.since <= 0 {
+                    String::new()
+                } else {
+                    projectdoc::revision_text(c, p.id, q.since)?.unwrap_or_default()
+                };
+                projectdoc::changed_sections(&base, &d.text)
+            } else {
+                String::new()
+            };
+            Ok(serde_json::json!({"rev": d.rev, "author": d.author, "changed": changed}))
+        })
+        .await?;
+    Ok(Json(v).into_response())
 }
