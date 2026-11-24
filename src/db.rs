@@ -41,6 +41,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/028_usage_cost.sql"),
     include_str!("../migrations/029_plan_samples.sql"),
     include_str!("../migrations/030_handbook.sql"),
+    include_str!("../migrations/031_subagent_models.sql"),
 ];
 
 const POOL_SIZE: usize = 6;

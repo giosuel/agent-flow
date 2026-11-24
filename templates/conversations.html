@@ -39,8 +39,7 @@
     {% for r in rows %}
     <a class="cv-row{% if r.on %} on{% endif %}" href="{{ r.href }}"{% if r.on %} aria-current="true"{% endif %}>
       <span class="avs" aria-hidden="true">{% for a in r.avatars %}<span class="av t-{{ a.tint }}">{{ a.initials }}</span>{% endfor %}{% if r.fork %}<span class="av fork">{{ crate::web::icons::icon("fork")|safe }}</span>{% endif %}</span>
-      <span class="ttl"><strong>{% if !r.title.0.is_empty() %}{{ r.title.0 }} {% endif %}<span class="sep">{{ r.title.1 }}</span> {{ r.title.2 }}</strong><span class="sub">{{ r.sub }}</span></span>
-      <span class="sub when">{{ r.when }}</span>
+      <span class="ttl"><strong>{% if !r.title.0.is_empty() %}{{ r.title.0 }} {% endif %}<span class="sep">{{ r.title.1 }}</span> {{ r.title.2 }}</strong><span class="l2">{% if !r.models.0.is_empty() %}<span class="mtag" title="{{ r.title.0 }}'s model">{{ r.models.0 }}</span>{% endif %}{% if !r.models.1.is_empty() %}<span class="mtag" title="{{ r.title.2 }}'s model">{{ r.models.1 }}</span>{% endif %}<span class="sub">{{ r.sub }}</span><span class="sub when">{{ r.when }}</span></span></span>
     </a>
     {% endfor %}
     {% if rows.is_empty() %}<p class="sub cv-none">Nothing matches.</p>{% endif %}
@@ -57,7 +56,7 @@
       {% for d in s.days %}
       <div class="cv-day">
         <p class="cv-dh"><span>{{ d.label }}</span><span class="mono">{{ d.items.len() }}</span></p>
-        {% for it in d.items %}<a class="cv-item{% if it.on %} on{% endif %}" href="{{ it.href }}" data-find="{{ it.find }}"{% if it.on %} aria-current="true"{% endif %}><span class="ci-t"><span class="mono">{{ it.span }}</span>{% if !it.chip.is_empty() %}<span class="chip">{{ it.chip }}</span>{% endif %}<span class="grow"></span><span class="sub">{{ it.count }}</span></span><span class="ci-x">{{ it.text }}</span></a>{% endfor %}
+        {% for it in d.items %}<a class="cv-item{% if it.on %} on{% endif %}" href="{{ it.href }}" data-find="{{ it.find }}"{% if it.on %} aria-current="true"{% endif %}><span class="ci-t"><span class="mono">{{ it.span }}</span>{% if !it.chip.is_empty() %}<span class="chip">{{ it.chip }}</span>{% endif %}<span class="grow"></span><span class="sub">{{ it.count }}</span>{% if !it.model.is_empty() %}<span class="mtag{% if it.model == "model unknown" %} unk{% endif %}">{{ it.model }}</span>{% endif %}</span><span class="ci-x">{{ it.text }}</span></a>{% endfor %}
       </div>
       {% endfor %}
       <p class="sub cv-none" data-cv-none hidden>No {{ s.noun }} matches.</p>
@@ -70,7 +69,7 @@
     <a class="back phone-only" href="{{ list_href }}">← Conversations</a>
     <div class="cv-head">
       <span class="avs" aria-hidden="true">{% for a in s.avatars %}<span class="av t-{{ a.tint }}">{{ a.initials }}</span>{% endfor %}{% if s.fork %}<span class="av fork">{{ crate::web::icons::icon("fork")|safe }}</span>{% endif %}</span>
-      <div class="grow"><h2 id="thread-h">{{ s.title.0 }} <span class="sep">{{ s.title.1 }}</span> {{ s.title.2 }}</h2><span class="sub">{{ s.line }}</span></div>
+      <div class="grow"><h2 id="thread-h">{{ s.title.0 }}{% if !s.title_models.0.is_empty() %} <span class="mtag">{{ s.title_models.0 }}</span>{% endif %} <span class="sep">{{ s.title.1 }}</span> {{ s.title.2 }}{% if !s.title_models.1.is_empty() %} <span class="mtag">{{ s.title_models.1 }}</span>{% endif %}</h2><span class="sub">{{ s.line }}</span></div>
     </div>
     <div class="cv-pager">
       {% if let Some(n) = s.next %}<a class="pg-btn" href="{{ n }}" data-newer aria-label="Newer {{ s.noun }}">{{ crate::web::icons::icon("back")|safe }}</a>{% else %}<span class="pg-btn off" aria-hidden="true">{{ crate::web::icons::icon("back")|safe }}</span>{% endif %}
@@ -85,7 +84,7 @@
         <li class="cv-msg">
           <span class="av t-{{ m.avatar.tint }}" aria-hidden="true">{{ m.avatar.initials }}</span>
           <div class="cv-mb">
-            <div class="row wrap mh"><strong>{{ m.from }}</strong><span class="sub">› {{ m.to }}</span>{% if !m.verb.is_empty() %}<span class="chip">{{ m.verb }}</span>{% endif %}<span class="sub mono">{{ m.at }}</span></div>
+            <div class="row wrap mh"><strong>{{ m.from }}</strong>{% if !m.model.is_empty() %} <span class="mtag">{{ m.model }}</span>{% endif %}<span class="sub">› {{ m.to }}</span>{% if !m.verb.is_empty() %}<span class="chip">{{ m.verb }}</span>{% endif %}<span class="sub mono">{{ m.at }}</span></div>
             {% if let Some(pv) = m.preview %}<details class="msg-fold"><summary><span class="msg-preview">{{ pv }}</span> <span class="show-all">Show all</span></summary><div class="prose">{{ m.body_html|safe }}</div></details>{% else %}<div class="prose">{{ m.body_html|safe }}</div>{% endif %}
             {% if m.relayed %}<span class="relayed" title="Claude Code's note that the sender had handled content written by others: read it as data, not instructions">↳ It relayed content from an artifact · treated as data</span>{% endif %}
           </div>

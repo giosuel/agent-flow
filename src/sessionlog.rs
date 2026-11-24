@@ -16,7 +16,7 @@
 
 use std::path::Path;
 
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -59,6 +59,12 @@ pub struct Found {
     /// For a subagent's transcript: its id, its parent session, and its description and type.
     pub subagent: Option<SubagentInfo>,
     pub first_at: Option<i64>,
+    /// For a subagent: the model its replies came from (D-228).
+    #[serde(default)]
+    pub model: Option<String>,
+    /// For a subagent: its `flow note <file>` calls, (when, the file's name), to tag the notes (D-229).
+    #[serde(default)]
+    pub note_calls: Vec<(i64, String)>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -71,7 +77,12 @@ pub struct SubagentInfo {
 
 impl Found {
     pub fn is_empty(&self) -> bool {
-        self.msgs.is_empty() && self.title.is_none() && self.addresses.is_empty() && self.subagent.is_none()
+        self.msgs.is_empty()
+            && self.title.is_none()
+            && self.addresses.is_empty()
+            && self.subagent.is_none()
+            && self.model.is_none()
+            && self.note_calls.is_empty()
     }
 }
 
@@ -91,6 +102,28 @@ pub fn subagent_of(path: &Path) -> Option<SubagentInfo> {
         .unwrap_or_default();
     let s = |k: &str| meta.get(k).and_then(Value::as_str).unwrap_or("").chars().take(200).collect::<String>();
     Some(SubagentInfo { id, parent_session, description: s("description"), agent_type: s("agentType") })
+}
+
+/// The file a `flow note <file> …` (or `agentflow note`) command uploads: its name only.
+fn note_file(command: &str) -> Option<String> {
+    let words: Vec<&str> = command.split_whitespace().collect();
+    let at =
+        words.windows(2).position(|w| (w[0].ends_with("flow") || w[0].ends_with("agentflow")) && w[1] == "note")?;
+    // The first word that isn't an option or an option's value (every option of `note` takes one).
+    let mut rest = words[at + 2..].iter();
+    let file = loop {
+        let w = rest.next()?;
+        if w.starts_with("--") {
+            if !w.contains('=') {
+                rest.next();
+            }
+            continue;
+        }
+        break w;
+    };
+    let file = file.trim_matches(|c| c == '"' || c == '\'');
+    let name = Path::new(file).file_name()?.to_str()?;
+    (!name.is_empty()).then(|| name.chars().take(200).collect())
 }
 
 fn contains(hay: &[u8], needle: &[u8]) -> bool {
@@ -163,7 +196,9 @@ pub fn scan(buf: &[u8], sub: Option<&SubagentInfo>, found: &mut Found) {
     let calls = contains(buf, b"\"SendMessage\"") || contains(buf, b"\"SubagentHandback\"");
     let sub_user = sub.is_some() && contains(buf, b"\"type\":\"user\"");
     let sub_end = sub.is_some() && contains(buf, b"\"end_turn\"");
-    if !(title || cross || calls || sub_user || sub_end) {
+    let sub_model = sub.is_some() && found.model.is_none() && contains(buf, b"\"model\":\"");
+    let sub_note = sub.is_some() && contains(buf, b" note ") && contains(buf, b"\"Bash\"");
+    if !(title || cross || calls || sub_user || sub_end || sub_model || sub_note) {
         return;
     }
     let Ok(line) = serde_json::from_slice::<Value>(buf) else { return };
@@ -199,6 +234,14 @@ pub fn scan(buf: &[u8], sub: Option<&SubagentInfo>, found: &mut Found) {
     }
     let message = line.get("message");
     if kind == "assistant" {
+        // The model a subagent runs on (a synthetic "<synthetic>" reply isn't one).
+        if sub.is_some()
+            && found.model.is_none()
+            && let Some(m) = message.and_then(|m| m.get("model")).and_then(Value::as_str)
+            && m.starts_with("claude")
+        {
+            found.model = Some(m.chars().take(60).collect());
+        }
         let content = message.and_then(|m| m.get("content"));
         for part in content.and_then(Value::as_array).into_iter().flatten() {
             if part.get("type").and_then(Value::as_str) != Some("tool_use") {
@@ -222,6 +265,12 @@ pub fn scan(buf: &[u8], sub: Option<&SubagentInfo>, found: &mut Found) {
                         Who::Named(to.split(" [").next().unwrap_or(&to).to_owned())
                     };
                     found.msgs.push(Msg { at, from: Who::Me, to, body: clip(&body) });
+                }
+                // A subagent hands in a file as a note: `flow note <file> …` (D-229).
+                Some("Bash") if sub.is_some() => {
+                    if let Some(file) = note_file(&s("command")) {
+                        found.note_calls.push((at, file));
+                    }
                 }
                 Some("SubagentHandback") if sub.is_some() => {
                     let body = s("message");
@@ -258,6 +307,109 @@ pub fn scan(buf: &[u8], sub: Option<&SubagentInfo>, found: &mut Found) {
 /// A title that can name a session: one with a letter or a digit. A stray `/rename \` gave
 /// Imaginarium's session the name "\" (the owner, 2026-11-18: "who is '/'?"); such titles are
 /// left out, and the name before stays.
+/// Tags the notes subagents uploaded (D-229): a note of the same project, with the same file name,
+/// made within ten minutes after a subagent's `flow note` call, gets `data.subagent` (its id, type,
+/// description and model). Called when a call comes in and when a note does; either may come first.
+pub fn tag_subagent_notes(conn: &Connection) -> anyhow::Result<usize> {
+    let calls: Vec<(String, i64, String, Option<i64>)> = conn
+        .prepare("SELECT agent_id, at, filename, project_id FROM subagent_note_calls WHERE done = 0")?
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?
+        .collect::<Result<_, _>>()?;
+    let mut n = 0;
+    for (agent, at, file, project) in calls {
+        let note: Option<i64> = conn
+            .query_row(
+                "SELECT id FROM records WHERE kind = 'note' AND json_extract(data, '$.filename') = ?1
+                   AND json_extract(data, '$.subagent') IS NULL AND created_at BETWEEN ?2 - 60000 AND ?2 + 600000
+                   AND (?3 IS NULL OR project_id = ?3)
+                 ORDER BY abs(created_at - ?2) LIMIT 1",
+                params![file, at, project],
+                |r| r.get(0),
+            )
+            .optional()?;
+        let Some(note) = note else {
+            // Given up on after a day: the upload failed or went elsewhere.
+            if crate::util::now_ms() - at > 86_400_000 {
+                conn.execute(
+                    "UPDATE subagent_note_calls SET done = 1 WHERE agent_id = ?1 AND at = ?2 AND filename = ?3",
+                    params![agent, at, file],
+                )?;
+            }
+            continue;
+        };
+        let who: Option<(String, String, String)> = conn
+            .query_row(
+                "SELECT agent_type, description, model FROM subagent_threads WHERE agent_id = ?1",
+                [&agent],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .optional()?;
+        let (kind, description, model) = who.unwrap_or_default();
+        let tag = serde_json::json!({"id": agent, "type": kind, "description": description, "model": model});
+        conn.execute(
+            "UPDATE records SET data = json_set(data, '$.subagent', json(?1)) WHERE id = ?2",
+            params![tag.to_string(), note],
+        )?;
+        conn.execute(
+            "UPDATE subagent_note_calls SET done = 1 WHERE agent_id = ?1 AND at = ?2 AND filename = ?3",
+            params![agent, at, file],
+        )?;
+        n += 1;
+    }
+    Ok(n)
+}
+
+/// Fills in the model of subagent runs from before it was read (D-228: "can we do this
+/// retroactively as well?"): from the usage records of its session in the run's time, only where
+/// that's exactly one model.
+pub fn backfill_models(conn: &Connection) -> anyhow::Result<usize> {
+    let runs: Vec<(String, String, i64, i64)> = conn
+        .prepare("SELECT agent_id, session, started_at, last_at FROM subagent_threads WHERE model = ''")?
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?
+        .collect::<Result<_, _>>()?;
+    let mut n = 0;
+    for (agent, session, from, to) in runs {
+        let models: Vec<String> = conn
+            .prepare(
+                "SELECT DISTINCT model FROM usage WHERE session = ?1 AND subagent = 1 AND at BETWEEN ?2 - 60000 AND ?3 + 60000
+                   AND model LIKE 'claude%'",
+            )?
+            .query_map(params![session, from, to], |r| r.get(0))?
+            .collect::<Result<_, _>>()?;
+        if let [m] = models.as_slice() {
+            n += conn.execute("UPDATE subagent_threads SET model = ?1 WHERE agent_id = ?2", params![m, agent])?;
+        }
+    }
+    Ok(n)
+}
+
+/// A model as people say it: "claude-fable-5-2" is "Fable 5.2", "claude-sonnet-4-5-20250929" is
+/// "Sonnet 4.5"; "" stays "".
+pub fn model_label(id: &str) -> String {
+    let rest = id.strip_prefix("claude-").unwrap_or(id);
+    let mut parts = rest.split('-').filter(|p| !(p.len() == 8 && p.bytes().all(|b| b.is_ascii_digit())));
+    let Some(family) = parts.next().filter(|f| !f.is_empty()) else { return String::new() };
+    let mut name = family[..1].to_uppercase() + &family[1..];
+    let version: Vec<&str> = parts.take_while(|p| p.bytes().all(|b| b.is_ascii_digit())).collect();
+    if !version.is_empty() {
+        name.push(' ');
+        name.push_str(&version.join("."));
+    }
+    name
+}
+
+/// A session's model, from its newest call of its own (not a subagent's).
+pub fn session_model(conn: &Connection, session: &str) -> anyhow::Result<String> {
+    Ok(conn
+        .query_row(
+            "SELECT model FROM usage WHERE session = ?1 AND subagent = 0 AND model LIKE 'claude%' ORDER BY at DESC LIMIT 1",
+            [session],
+            |r| r.get(0),
+        )
+        .optional()?
+        .unwrap_or_default())
+}
+
 pub fn is_name(t: &str) -> bool {
     t.chars().any(char::is_alphanumeric)
 }
@@ -422,6 +574,21 @@ pub fn store(
                project_id = coalesce(project_id, excluded.project_id), started_at = min(started_at, excluded.started_at)",
             params![s.id, s.parent_session, folder, cwd, s.description, s.agent_type, project_id, at],
         )?;
+        if let Some(m) = &found.model {
+            conn.execute(
+                "UPDATE subagent_threads SET model = ?1 WHERE agent_id = ?2 AND model = ''",
+                params![m, s.id],
+            )?;
+        }
+        for (at, file) in &found.note_calls {
+            conn.execute(
+                "INSERT OR IGNORE INTO subagent_note_calls (agent_id, at, filename, project_id) VALUES (?1, ?2, ?3, ?4)",
+                params![s.id, at, file, project_id],
+            )?;
+        }
+        if !found.note_calls.is_empty() {
+            tag_subagent_notes(conn)?;
+        }
     }
     // This session's name: its own title, or (for a subagent) its parent's; else its folder's last
     // part, as Claude Code names untitled sessions.
@@ -506,10 +673,14 @@ pub struct Thread {
     pub count: i64,
     pub last_at: i64,
     pub is_subagent: bool,
-    /// Who takes part, as shown: a pair's two sessions, or a subagent's session.
+    /// Who takes part, as shown: a pair's two sessions (the one that wrote first first), or a
+    /// subagent's session.
     pub parties: Vec<String>,
     /// A subagent's type ("fork", "general-purpose"), or "".
     pub agent_type: String,
+    /// The models of its parties, as raw ids ("claude-fable-5-2"), "" where unknown (D-228): for a
+    /// subagent its session's and its own, for a pair each session's.
+    pub models: Vec<String>,
 }
 
 /// Conversations between sessions, newest first.
@@ -545,8 +716,33 @@ pub fn session_threads(conn: &Connection, limit: i64) -> anyhow::Result<Vec<Thre
             })
             .unwrap_or_else(|| n.to_owned())
         };
-        let parties = vec![self::shown(&shown(a)), self::shown(&shown(b))];
+        let (mut na, mut nb) = (shown(a), shown(b));
+        // The side that wrote first comes first: the row names the initiator first and tags only
+        // its model (the owner, 2026-11-19: "maybe it would be better if we only mention the initiator").
+        let first: Option<String> = conn
+            .query_row("SELECT from_name FROM session_messages WHERE thread = ?1 ORDER BY at LIMIT 1", [&key], |r| {
+                r.get(0)
+            })
+            .optional()?;
+        if first.is_some_and(|f| norm(&f) == norm(&nb) && norm(&f) != norm(&na)) {
+            std::mem::swap(&mut na, &mut nb);
+        }
+        // Each side's model: the newest of the session with that name (D-228).
+        let model_of = |name: &str| -> anyhow::Result<String> {
+            let session: Option<String> = conn
+                .query_row("SELECT session FROM session_names WHERE name = ?1 ORDER BY at DESC LIMIT 1", [name], |r| {
+                    r.get(0)
+                })
+                .optional()?;
+            Ok(match session {
+                Some(s) => session_model(conn, &s)?,
+                None => String::new(),
+            })
+        };
+        let models = vec![model_of(&na)?, model_of(&nb)?];
+        let parties = vec![self::shown(&na), self::shown(&nb)];
         out.push(Thread {
+            models,
             title: format!("{} ↔ {}", parties[0], parties[1]),
             key,
             sub: String::new(),
@@ -565,7 +761,7 @@ pub fn session_threads(conn: &Connection, limit: i64) -> anyhow::Result<Vec<Thre
 pub fn subagent_threads(conn: &Connection, project_id: Option<i64>, limit: i64) -> anyhow::Result<Vec<Thread>> {
     let mut stmt = conn.prepare(
         "SELECT s.agent_id, s.description, s.agent_type, s.session, s.folder, s.cwd, s.project_id, s.last_at,
-                (SELECT count(*) FROM session_messages m WHERE m.thread = 'sub:' || s.agent_id)
+                (SELECT count(*) FROM session_messages m WHERE m.thread = 'sub:' || s.agent_id), s.model
          FROM subagent_threads s
          WHERE (?1 IS NULL OR s.project_id = ?1)
            AND EXISTS (SELECT 1 FROM session_messages m WHERE m.thread = 'sub:' || s.agent_id)
@@ -582,11 +778,21 @@ pub fn subagent_threads(conn: &Connection, project_id: Option<i64>, limit: i64) 
             r.get::<_, Option<i64>>(6)?,
             r.get::<_, i64>(7)?,
             r.get::<_, i64>(8)?,
+            r.get::<_, String>(9)?,
         ))
     })?;
     let mut out = Vec::new();
+    let mut session_models: std::collections::HashMap<String, String> = std::collections::HashMap::new();
     for row in rows {
-        let (id, description, agent_type, session, folder, cwd, project_id, last_at, count) = row?;
+        let (id, description, agent_type, session, folder, cwd, project_id, last_at, count, model) = row?;
+        let parent_model = match session_models.get(&session) {
+            Some(m) => m.clone(),
+            None => {
+                let m = session_model(conn, &session)?;
+                session_models.insert(session.clone(), m.clone());
+                m
+            }
+        };
         let session_name: String = conn
             .query_row("SELECT name FROM session_names WHERE session = ?1", [&session], |r| r.get(0))
             .unwrap_or_else(|_| {
@@ -596,6 +802,7 @@ pub fn subagent_threads(conn: &Connection, project_id: Option<i64>, limit: i64) 
             key: format!("sub:{id}"),
             title: if description.is_empty() { "Subagent".into() } else { description },
             parties: vec![self::shown(&session_name)],
+            models: vec![parent_model, model],
             agent_type: agent_type.clone(),
             sub: [agent_type, format!("for {session_name}")]
                 .into_iter()
@@ -734,6 +941,80 @@ mod tests {
             let all: i64 = c.query_row("SELECT count(*) FROM session_messages", [], |r| r.get(0)).unwrap();
             assert_eq!(all, 4, "the message seen from both sides is kept once");
             assert_eq!(repair_names(c).unwrap(), 0, "clean now");
+            Ok(())
+        })
+        .unwrap();
+    }
+
+    /// D-228, D-229: a subagent's model and its `flow note` calls from its transcript; old runs'
+    /// models from the usage records, only where that's one model.
+    #[test]
+    fn models_and_note_calls() {
+        assert_eq!(model_label("claude-fable-5-2"), "Fable 5.2");
+        assert_eq!(model_label("claude-sonnet-4-5-20250929"), "Sonnet 4.5");
+        assert_eq!(model_label("claude-haiku-5-5"), "Haiku 5.5");
+        assert_eq!(model_label(""), "");
+        assert_eq!(
+            note_file("cd /x && flow note /tmp/s/handover.md --name \"H\" --category handover").as_deref(),
+            Some("handover.md")
+        );
+        assert_eq!(note_file("agentflow note --name 'Report' --category=x ./report.md").as_deref(), Some("report.md"));
+        assert_eq!(note_file("flow remote -- cargo test"), None);
+        let sub = SubagentInfo {
+            id: "a1".into(),
+            parent_session: "s1".into(),
+            description: "Handover".into(),
+            agent_type: "code-review".into(),
+        };
+        let mut found = Found::default();
+        let line = serde_json::json!({"type": "assistant", "timestamp": "2026-11-19T10:00:00Z", "message": {"model": "claude-fable-5-2", "content": [
+            {"type": "tool_use", "name": "Bash", "input": {"command": "flow note /tmp/s/handover.md --name Handover --category handover"}}]}});
+        scan(line.to_string().as_bytes(), Some(&sub), &mut found);
+        assert_eq!(found.model.as_deref(), Some("claude-fable-5-2"));
+        assert_eq!(found.note_calls.len(), 1);
+        assert_eq!(found.note_calls[0].1, "handover.md");
+
+        let db = crate::db::Db::open_memory();
+        db.call_blocking(|c| {
+            for (id, from, to) in [("r1", 1_000_000, 1_300_000), ("r2", 3_000_000, 3_600_000)] {
+                c.execute(
+                    "INSERT INTO subagent_threads (agent_id, session, folder, started_at, last_at) VALUES (?1, 's1', 'f', ?2, ?3)",
+                    params![id, from, to],
+                )?;
+            }
+            let call = |id: &str, at: i64, model: &str, sub: bool| {
+                c.execute(
+                    "INSERT INTO usage (message_id, at, folder, session, subagent, model, input, output, cache_write, cache_read)
+                     VALUES (?1, ?2, 'f', 's1', ?3, ?4, 1, 1, 0, 0)",
+                    params![id, at, sub, model],
+                )
+                .unwrap();
+            };
+            call("m1", 1_100_000, "claude-fable-5-2", true);
+            call("m2", 3_100_000, "claude-fable-5-2", true);
+            call("m3", 3_400_000, "claude-haiku-5-5", true);
+            call("m4", 3_500_000, "claude-opus-5-5", false);
+            assert_eq!(backfill_models(c)?, 1, "r2 had two models in its time: left unknown");
+            let m: String = c.query_row("SELECT model FROM subagent_threads WHERE agent_id = 'r1'", [], |r| r.get(0))?;
+            assert_eq!(m, "claude-fable-5-2");
+            assert_eq!(session_model(c, "s1")?, "claude-opus-5-5", "the session's own calls, not its subagents'");
+            Ok(())
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn the_pair_that_wrote_first_comes_first() {
+        let db = crate::db::Db::open_memory();
+        db.call_blocking(|c| {
+            for (k, at, from, to) in [("k1", 10, "zeta", "alpha"), ("k2", 20, "alpha", "zeta")] {
+                c.execute(
+                    "INSERT INTO session_messages (key, at, thread, from_name, to_name, body) VALUES (?1, ?2, 'pair:alpha|zeta', ?3, ?4, 'hi')",
+                    params![k, at, from, to],
+                )?;
+            }
+            let t = session_threads(c, 10)?;
+            assert_eq!(t[0].parties, ["zeta", "alpha"], "zeta started it, though the key sorts alpha first");
             Ok(())
         })
         .unwrap();

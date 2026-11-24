@@ -165,6 +165,10 @@ async fn upload(
             if let Some(target) = &shows {
                 records::link(c, &r, target, "relates", &a.name())?;
             }
+            // A subagent's upload: its `flow note` call may have come in already (D-229).
+            if let Err(e) = crate::sessionlog::tag_subagent_notes(c) {
+                tracing::warn!("tagging subagents' notes: {e:#}");
+            }
             Ok(r)
         })
         .await;
@@ -415,6 +419,8 @@ pub struct NoteRow {
     pub added: String,
     pub resolved: bool,
     pub download: String,
+    /// "code-review · Fable 5.2" when a subagent wrote it (D-229), else "".
+    pub subagent: String,
 }
 
 /// One choice of a filter's menu: (label, count or "", href, picked).
@@ -625,6 +631,7 @@ pub fn view(c: &rusqlite::Connection, slug: &str, project_id: i64, f: &Filter, n
         let (icon, tint) = type_icon(&ext);
         let size = r.data.get("size").and_then(Value::as_i64).map(notes::size);
         rows.push(NoteRow {
+            subagent: subagent_line(r),
             short: r.short_id(),
             url: r.url(),
             title_html: marked(&r.title, &words),
@@ -717,6 +724,8 @@ pub fn view(c: &rusqlite::Connection, slug: &str, project_id: i64, f: &Filter, n
 
 /// A note on its own page: its text (a text note, or a readable file), and the file to download.
 pub struct NotePage {
+    /// "code-review · Fable 5.2" when a subagent wrote it (D-229), else "".
+    pub subagent: String,
     pub text_html: String,
     pub plain: String,
     pub download: String,
@@ -725,6 +734,21 @@ pub struct NotePage {
     pub category: String,
     pub resurface: String,
     pub versions: Vec<(i64, String)>,
+}
+
+/// Who of the subagents wrote a note, as shown: its type (or description) and model, e.g.
+/// "code-review · Fable 5.2"; "subagent" when neither is known; "" when no subagent wrote it.
+pub fn subagent_line(r: &records::Record) -> String {
+    let Some(s) = r.data.get("subagent").filter(|s| s.is_object()) else { return String::new() };
+    let get = |k: &str| s.get(k).and_then(Value::as_str).unwrap_or("").trim().to_owned();
+    let who = match (get("type"), get("description")) {
+        (t, _) if !t.is_empty() => t,
+        (_, d) if !d.is_empty() => d.chars().take(40).collect(),
+        _ => String::new(),
+    };
+    let parts: Vec<String> =
+        [who, crate::sessionlog::model_label(&get("model"))].into_iter().filter(|x| !x.is_empty()).collect();
+    if parts.is_empty() { "subagent".into() } else { parts.join(" · ") }
 }
 
 pub fn page(data_dir: &std::path::Path, r: &records::Record) -> NotePage {
@@ -736,6 +760,7 @@ pub fn page(data_dir: &std::path::Path, r: &records::Record) -> NotePage {
     };
     let versions = r.data.get("versions").and_then(Value::as_i64).unwrap_or(0);
     NotePage {
+        subagent: subagent_line(r),
         text_html,
         plain,
         download: if ext.is_empty() { String::new() } else { format!("{}/file", r.url()) },
