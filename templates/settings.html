@@ -10,6 +10,12 @@
   <h2 id="new-token">Token for {{ name }}</h2>
   <p class="sub">Copy it now: AgentFlow stores only a hash and can't show it again. On that machine, save it to <code>~/.config/agentflow/token</code> (mode 600).</p>
   <pre class="cmd mono" id="token-value">{{ secret }}</pre>
+  <p class="sub">To run test builds there with <span class="mono">flow-run</span>, set it up once on that machine (fish or bash):</p>
+  <pre class="cmd mono">mkdir -p ~/.local/bin ~/.config/agentflow
+echo 'public_url = "{{ public_url }}"' > ~/.config/agentflow/config.toml
+curl -fsS -H "Authorization: Bearer $(cat ~/.config/agentflow/token)" {{ public_url }}/download/agentflow -o ~/.local/bin/agentflow
+chmod +x ~/.local/bin/agentflow; ln -sfn agentflow ~/.local/bin/flow-run</pre>
+  <p class="sub">Then <span class="mono">flow-run</span> lists the products, <span class="mono">flow-run &lt;product&gt;</span> starts the newest build. Linux, x86-64, glibc {{ glibc }} or newer.</p>
 </section>
 {% endif %}
 
@@ -55,14 +61,14 @@
 
 <section class="card pad stack" aria-labelledby="s-devices">
   <div class="sec"><h2 id="s-devices">Your devices</h2></div>
-  <p class="sub">Tokens for viber-run and the agentflow CLI on your machines. They can read, not change. The four characters after a name are the token's end; <span class="mono">agentflow whoami</span> on a machine shows which one it has.</p>
+  <p class="sub">Tokens for <span class="mono">flow-run</span> (test builds) and the agentflow CLI on your machines. They can read, not change. The four characters after a name are the token's end; <span class="mono">agentflow whoami</span> on a machine shows which one it has.</p>
   <ul class="rows">
   {% for t in device_tokens %}
     <li class="item-row"><div class="ttl"><strong>{{ t.holder }}{% if !t.hint.is_empty() %} <span class="mono sub">{{ t.hint }}</span>{% endif %}</strong><span class="sub">added {{ t.added }} · used {{ t.used }}{% if !t.from.is_empty() %} from {{ t.from }}{% endif %}</span></div>
       <form method="post" action="/settings/tokens/{{ t.id }}/revoke"><button class="btn sm ghost" type="submit" data-confirm="Revoke the token for {{ t.holder }}?">Revoke</button></form></li>
   {% endfor %}
   </ul>
-  <form method="post" action="/settings/devices" class="row wrap"><label class="vh" for="device-name">Device name</label><input id="device-name" name="name" placeholder="e.g. HEADQUARTERS viber-run" required maxlength="60"><button class="btn ghost" type="submit">Add a device token</button></form>
+  <form method="post" action="/settings/devices" class="row wrap"><label class="vh" for="device-name">Device name</label><input id="device-name" name="name" placeholder="e.g. HEADQUARTERS flow-run" required maxlength="60"><button class="btn ghost" type="submit">Add a device token</button></form>
 </section>
 
 <section class="card pad stack" aria-labelledby="s-agents">

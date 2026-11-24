@@ -38,6 +38,7 @@ check() {
 package() {
   cd "agent-flow-$pkgver"
   install -Dm755 target/release/agentflow "$pkgdir/usr/bin/agentflow"
+  ln -s agentflow "$pkgdir/usr/bin/flow-run"
   sed 's|@BIN@|/usr/bin/agentflow|' packaging/system/agentflow.service |
     install -Dm644 /dev/stdin "$pkgdir/usr/lib/systemd/system/agentflow.service"
   sed 's|@BIN@|/usr/bin/agentflow|' packaging/system/agentflow-hands.service |

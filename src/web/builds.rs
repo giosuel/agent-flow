@@ -1,5 +1,5 @@
 //! Builds over HTTP: agents upload them (`agentflow publish`), the owner's machines download them
-//! (`agentflow run`), and the owner gives feedback on a build's page.
+//! (`flow-run`), and the owner gives feedback on a build's page.
 
 use std::path::PathBuf;
 
@@ -31,6 +31,27 @@ pub fn routes() -> Router<AppState> {
         .route("/api/builds/{product}/{number}", get(one))
         .route("/api/builds/{product}/{number}/archive", get(archive))
         .route("/p/{slug}/{id}/feedback", post(feedback))
+        .route("/download/agentflow", get(download_self))
+}
+
+/// This very program, for the owner's machines to run test builds with (`flow-run`). Signed-in
+/// only: the owner, or a device's or agent's token.
+async fn download_self(Extension(actor): Extension<Actor>) -> Response {
+    if matches!(actor, Actor::Anonymous) {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    let Ok(path) = std::env::current_exe() else { return StatusCode::NOT_FOUND.into_response() };
+    match tokio::fs::read(&path).await {
+        Ok(bytes) => (
+            [
+                (axum::http::header::CONTENT_TYPE, "application/octet-stream"),
+                (axum::http::header::CONTENT_DISPOSITION, "attachment; filename=\"agentflow\""),
+            ],
+            bytes,
+        )
+            .into_response(),
+        Err(_) => StatusCode::NOT_FOUND.into_response(),
+    }
 }
 
 fn builds_dir(state: &AppState) -> PathBuf {
@@ -284,7 +305,7 @@ async fn upload(
     if ready {
         notify_build(&state, &project.name, &r);
     }
-    Json(json!({"id": r.ref_id, "number": r.number, "name": name, "run": format!("agentflow run {} {}", r.str("product"), r.number)})).into_response()
+    Json(json!({"id": r.ref_id, "number": r.number, "name": name, "run": format!("flow-run {} {}", r.str("product"), r.number)})).into_response()
 }
 
 pub fn notify_build(state: &AppState, project_name: &str, r: &Record) {

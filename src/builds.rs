@@ -1,7 +1,7 @@
 //! Test builds for the owner, folded in from viber-run (the owner, 2026-11-07: "integrate
 //! viber-run into agent flow and then rewrite the viber-run client CLI to talk to the agent flow
 //! server instead"). An agent publishes a build as a tar archive; AgentFlow checks it and keeps
-//! the archive as it came; the owner's `agentflow run` downloads, verifies and starts it.
+//! the archive as it came; the owner's `flow-run` downloads, verifies and starts it.
 //!
 //! Like viber-run: each product's builds are numbered and numbers are never reused; a build never
 //! changes once published; its name is `<date>-<time>-<topic>-<commit>`.
