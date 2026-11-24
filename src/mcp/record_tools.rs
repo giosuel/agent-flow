@@ -1682,6 +1682,8 @@ impl FlowMcp {
                     &a.name(),
                     Patch { state: Some("withdrawn".into()), note: p.reason, ..Default::default() },
                 )?;
+                // The tasks it blocked go back to todo, as after an answer.
+                crate::steps::unblock_after_withdraw(&tx, &q, &a.name())?;
                 tx.commit()?;
                 Ok(Outcome::new(brief(&q))
                     .summary(format!("question {} withdrawn", q.short_id()))
