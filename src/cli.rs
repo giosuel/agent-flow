@@ -742,6 +742,19 @@ pub struct PublishArgs {
     /// What it needs, one per flag, e.g. --needs "glibc 2.39 or newer" --needs "Vulkan (lavapipe works)".
     #[arg(long = "needs")]
     pub needs: Vec<String>,
+    /// An older build moved over (e.g. from viber-run): when it was built, "2026-10-26 10:28" in
+    /// UTC. It keeps that date, and the owner isn't notified.
+    #[arg(long)]
+    pub built_at: Option<String>,
+    /// An older build: the number it had (refused if taken). Needs --built-at.
+    #[arg(long, requires = "built_at")]
+    pub number: Option<i64>,
+    /// The commit it was built from, instead of --checkout's.
+    #[arg(long, conflicts_with = "checkout")]
+    pub commit: Option<String>,
+    /// The branch it was built from, instead of --checkout's.
+    #[arg(long, conflicts_with = "checkout")]
+    pub branch: Option<String>,
 }
 
 #[derive(Args)]
@@ -1173,8 +1186,9 @@ pub fn publish(config_path: &Path, a: PublishArgs) -> anyhow::Result<()> {
             git_out(dir, &["rev-parse", "--short=7", "HEAD"]).context("the checkout isn't a git repository")?,
             git_out(dir, &["rev-parse", "--abbrev-ref", "HEAD"]).unwrap_or_default(),
         ),
-        None => (String::new(), String::new()),
+        None => (a.commit.clone().unwrap_or_default(), a.branch.clone().unwrap_or_default()),
     };
+    crate::builds::check_summary(&a.summary)?;
     // Pack next to the user's cache, not in /tmp: builds are big and /tmp is small here.
     let cache = expand_home("~/.cache/agentflow");
     std::fs::create_dir_all(&cache)?;
@@ -1191,7 +1205,12 @@ pub fn publish(config_path: &Path, a: PublishArgs) -> anyhow::Result<()> {
         ("features", if a.features.is_empty() { String::new() } else { serde_json::to_string(&a.features)? }),
         ("platform", a.platform.clone().unwrap_or_default()),
         ("needs", if a.needs.is_empty() { String::new() } else { serde_json::to_string(&a.needs)? }),
+        ("built_at", a.built_at.clone().unwrap_or_default()),
+        ("number", a.number.map(|n| n.to_string()).unwrap_or_default()),
     ]);
+    // Everything the server would refuse is asked first: a refusal during the upload arrives
+    // only as a dropped connection.
+    client.post_json(&format!("/api/builds?{query}&check=true"), &serde_json::json!({}))?;
     let res = client.post_file(&format!("/api/builds?{query}"), file)?;
     println!(
         "Published {} as #{} ({}). The owner runs it with: {}",
