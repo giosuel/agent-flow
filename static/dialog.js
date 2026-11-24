@@ -17,6 +17,8 @@
   let list = [];
   let at = -1;
   let opener = null;
+  // The page under the dialog (its address before the record's).
+  let under = location.pathname + location.search;
 
   const record = (a) => {
     if (!a || a.target || a.hasAttribute("download")) return null;
@@ -74,6 +76,15 @@
     nav.hidden = list.length < 2;
     nav.querySelector("[data-step='-1']").disabled = at <= 0;
     nav.querySelector("[data-step='1']").disabled = at < 0 || at >= list.length - 1;
+    // An answer sent from here goes back to the page under the dialog when it's the record's
+    // project's (its tab), as the form's own `next` does for the project's page (09-9).
+    for (const n of body.querySelectorAll("form[data-answer] input[name=next]")) {
+      const u = new URL(under, location.origin);
+      const want = new URL(n.value, location.origin);
+      if (u.pathname !== want.pathname) continue;
+      u.searchParams.set("answered", want.searchParams.get("answered") || "");
+      n.value = u.pathname + u.search;
+    }
     body.scrollTop = 0;
     document.dispatchEvent(new CustomEvent("af:content", { detail: body }));
     return true;
@@ -81,6 +92,7 @@
 
   async function open(path, soft) {
     const was = !!box;
+    if (!was) under = location.pathname + location.search;
     if (!(await show(path, soft))) return;
     if (!was) history.pushState({ rdlg: path }, "", path);
     else history.replaceState({ rdlg: path }, "", path);

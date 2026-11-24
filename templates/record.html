@@ -143,8 +143,9 @@
       {% if !related.is_empty() %}<p class="sub">It touches {% for d in related %}<a href="{{ d.url }}">{{ d.short }} {{ d.title }}</a>{% if !loop.last %}, {% endif %}{% endfor %}.</p>{% endif %}
       {% if let Some(d) = going_ahead %}<p class="notice" role="status">{{ crate::web::icons::icon("info")|safe }}<span>The agent is going ahead with <strong>{{ d }}</strong> meanwhile, built so it's easy to change. Pick it to confirm, or another (or your own words) to change course.</span></p>{% endif %}
       {% if can_answer %}
-      {# Pick an option or write your own answer, never both; nothing is sent until Send answer. #}
-      {% call ui::choices("/p/{}/{}/answer"|format(project_slug, short), "", options.as_slice(), true, "words") %}{% endcall %}
+      {# Pick an option or write your own answer, never both; nothing is sent until Send answer. Sent,
+         it goes back to the project's page (its dialog sets the page it sits on), not the Dashboard. #}
+      {% call ui::choices("/p/{}/{}/answer"|format(project_slug, short), "/p/{}?answered={}"|format(project_slug, short), options.as_slice(), true, "words") %}{% endcall %}
       {% else %}
         {% if !options.is_empty() %}
         <ol class="plain opts-ro">{% for o in options %}<li class="{% if o.chosen %}chosen{% endif %}"><span class="mono">{{ o.n }}</span> {{ o.title }}{% if o.recommended %} <span class="chip">recommended</span>{% endif %}{% if o.chosen %} <span class="chip ok">chosen</span>{% endif %}</li>{% endfor %}</ol>

@@ -781,7 +781,11 @@ async fn the_owner_answers_on_the_page_and_the_agent_reads_it() {
         .unwrap();
     assert_eq!(res.headers()[LOCATION], "/p/vinculum/Q-1?error=both", "an option or own words, not both");
     let page = s.http.get(s.url("/p/vinculum/Q-1?error=both")).header(COOKIE, &cookie).send().await.unwrap();
-    assert!(page.text().await.unwrap().contains("not both"));
+    let page = page.text().await.unwrap();
+    assert!(page.contains("not both"));
+    // Sent from the question's page (or its dialog), the answer goes back to the project, not the
+    // Dashboard (09-9).
+    assert!(page.contains(r#"name="next" value="/p/vinculum?answered=Q-1""#), "{page}");
     let res = s
         .http
         .post(s.url("/p/vinculum/Q-1/answer"))
