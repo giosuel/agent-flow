@@ -8,9 +8,9 @@
 <div class="head"><h1>Tasks</h1></div>
 <div class="tk-bar">
   <span class="sub">{{ tasks.len() }} task{% if tasks.len() != 1 %}s{% endif %} with tokens in the last {{ days }} days, last worked on first</span>
-  <span class="ranges" role="group" aria-label="Window">
-    <a class="rng{% if days == 7 %} on{% endif %}" href="/usage/tasks" data-dlg{% if days == 7 %} aria-current="true"{% endif %}>7 days</a>
-    <a class="rng{% if days == 14 %} on{% endif %}" href="/usage/tasks?days=14" data-dlg{% if days == 14 %} aria-current="true"{% endif %}>14 days</a>
+  <span class="seg sm" role="group" aria-label="Window">
+    <a{% if days == 7 %} class="on"{% endif %} href="/usage/tasks" data-dlg{% if days == 7 %} aria-current="true"{% endif %}>7 days</a>
+    <a{% if days == 14 %} class="on"{% endif %} href="/usage/tasks?days=14" data-dlg{% if days == 14 %} aria-current="true"{% endif %}>14 days</a>
   </span>
 </div>
 {% if tasks.is_empty() && outside.is_empty() %}<p class="sub">No tokens in the last {{ days }} days.</p>{% else %}

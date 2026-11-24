@@ -4292,6 +4292,12 @@ fn the_ui_library_replaced_the_old_buttons() {
     let gone = [
         "ghost",
         "lsearch",
+        "class=\"ranges",
+        "class=\"rng",
+        "seg3",
+        "cv-chip",
+        "class=\"pills",
+        "sb-menu",
         "edit.g.",
         "<datalist",
         "solid-danger",

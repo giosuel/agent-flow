@@ -132,7 +132,7 @@
         <div class="step-line card"><span class="srail-i {{ st.class }}" aria-hidden="true"></span><span class="chip mono">{{ st.name }}</span><strong class="sl-t">{{ st.title }}</strong><span class="chip{% if st.class == "now" %} accent{% else if st.class == "done" %} state-done{% endif %}">{% if st.class == "now" %}under way{% else if st.class == "done" %}done{% else %}next{% endif %}</span><span class="sub sl-sub">{{ st.sub }}</span><a class="btn sm secondary step-open" href="{{ st.url }}">{% if st.class == "done" %}Summary{% else %}Open step{% endif %}{{ crate::web::icons::icon("out")|safe }}</a></div>
         {% endif %}
         {% if b.empty %}<div class="card pad ml-nothing"><h3>Nothing on the board yet</h3><p class="sub">It has no steps and no tasks. When the agent starts it, its steps show here as a rail and its tasks on the board.</p></div>{% else %}
-        <div class="bchips" role="tablist" aria-label="Columns">{% for col in b.columns %}<button type="button" role="tab" data-col="{{ loop.index0 }}"{% if loop.index0 == b.first_col %} aria-selected="true" class="on"{% endif %}>{{ col.title }} <span class="mono">{{ col.count }}</span></button>{% endfor %}</div>
+        <div class="bchips fchips" role="tablist" aria-label="Columns">{% for col in b.columns %}<button type="button" role="tab" data-col="{{ loop.index0 }}" class="fchip{% if loop.index0 == b.first_col %} on{% endif %}"{% if loop.index0 == b.first_col %} aria-selected="true"{% endif %}>{{ col.title }} <span class="n">{{ col.count }}</span></button>{% endfor %}</div>
         <div class="board fixed" data-show="{{ b.first_col }}">
           {% for col in b.columns %}
           <div class="col{% if loop.index0 == b.first_col %} on{% endif %}"><div class="col-h"><span class="label">{{ col.title }}</span><span class="mono sub">{{ col.count }}</span></div>
@@ -164,7 +164,7 @@
   {% if shots_all == 0 %}
   <p class="card pad sub">No screenshots yet. The agent uploads them with <span class="mono">flow screenshot</span>: test builds, mockups, spike tests, bugs.</p>
   {% else %}
-  <nav class="pills" aria-label="Categories">{% for (label, href, n, on) in shot_cats %}<a href="{{ href }}"{% if *on %} class="on" aria-current="true"{% endif %}>{{ label }} <span class="mono">{{ n }}</span></a>{% endfor %}</nav>
+  <nav class="fchips" aria-label="Categories">{% for (label, href, n, on) in shot_cats %}<a class="fchip{% if *on %} on{% endif %}" href="{{ href }}"{% if *on %} aria-current="true"{% endif %}>{{ label }} <span class="n">{{ n }}</span></a>{% endfor %}</nav>
   <ul class="shots">{% for s in shots %}<li><a class="shot" href="{{ s.url }}"><img src="{{ s.image }}" alt="" loading="lazy" decoding="async"><span class="shot-meta"><strong>{{ s.title }}</strong><span class="sub"><span class="chip">{{ s.category }}</span>{% if !s.mstate.is_empty() %} <span class="mstate {{ s.mstate }}">{{ s.mstate }}</span>{% endif %} {{ s.when }}{% if s.design %} · design ↗{% endif %}</span></span></a></li>{% endfor %}</ul>
   {% endif %}
 </section>

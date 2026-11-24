@@ -24,7 +24,7 @@
   <details class="dd{% if kind_label != "Between sessions" %} set{% endif %}"><summary><span class="sub">Kind</span> {{ kind_label }}</summary>
     <div class="dd-menu">{% for (label, n, href, on) in kinds %}<a href="{{ href }}"{% if *on %} class="on" aria-current="true"{% endif %}><span>{{ label }}</span><span class="mono sub">{{ n }}</span></a>{% endfor %}</div>
   </details>
-  <div class="ranges" role="group" aria-label="Time range">{% for (label, href, on) in ranges %}<a class="rng{% if *on %} on{% endif %}" href="{{ href }}"{% if *on %} aria-current="true"{% endif %}>{{ label }}</a>{% endfor %}</div>
+  <div class="seg" role="group" aria-label="Time range">{% for (label, href, on) in ranges %}<a{% if *on %} class="on"{% endif %} href="{{ href }}"{% if *on %} aria-current="true"{% endif %}>{{ label }}</a>{% endfor %}</div>
   {% if let Some(r) = reset %}<a class="sub" href="{{ r }}">Clear</a>{% endif %}
 </form>
 
@@ -48,7 +48,7 @@
   <section class="card cv-mid" aria-label="The {{ s.noun }}s">
     <div class="cv-lh"><span class="label">{{ s.list_count }}</span><span class="sub">newest first{% if s.noun == "conversation" && !s.list_count.contains("match") %} · split at a pause of 30 min{% endif %}</span></div>
     <div class="cv-midtop">
-      {% if !s.types.is_empty() %}<div class="cv-chips" role="group" aria-label="Type">{% for (label, n, href, on) in s.types %}<a class="cv-chip{% if *on %} on{% endif %}" href="{{ href }}"{% if *on %} aria-current="true"{% endif %}>{{ label }} <span class="mono">{{ n }}</span></a>{% endfor %}</div>{% endif %}
+      {% if !s.types.is_empty() %}<div class="fchips" role="group" aria-label="Type">{% for (label, n, href, on) in s.types %}<a class="fchip{% if *on %} on{% endif %}" href="{{ href }}"{% if *on %} aria-current="true"{% endif %}>{{ label }} <span class="n">{{ n }}</span></a>{% endfor %}</div>{% endif %}
       <label class="search sm cv-find">{{ crate::web::icons::icon("search")|safe }}<span class="vh">Find a {{ s.noun }}</span><input type="search" placeholder="Find in these {{ s.noun }}s" data-cv-find autocomplete="off"></label>
     </div>
     <div class="cv-days" data-cv-days>

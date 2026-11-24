@@ -192,6 +192,55 @@ input[type=checkbox]:disabled, input[type=radio]:disabled { background-color: va
 .switch input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
 .switch input:disabled + span { opacity: .4; }
 
+/* ---------------------------------------------------------------- Segmented control: one look, two sizes
+   Time ranges, metrics, Markdown/Preview, a mockup's state. Links take aria-current, buttons
+   aria-pressed or aria-selected; the picked one has .on. md in toolbars, .sm in card heads. */
+.seg { display: inline-flex; flex: none; max-width: 100%; overflow-x: auto; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--panel); }
+.seg > a, .seg > button { display: inline-flex; align-items: center; justify-content: center; gap: var(--sp-1_5); min-height: calc(var(--h-md) - 2px); padding: 0 14px; border: 0; border-left: 1px solid var(--border); background: none; color: var(--ink2); font: inherit; font-size: var(--fs-sm); text-decoration: none; white-space: nowrap; cursor: pointer; text-transform: none; }
+.seg > :first-child { border-left: 0; }
+.seg > a:hover, .seg > button:hover { background: var(--hover-bg); color: var(--ink); }
+.seg > .on, .seg > .on:hover { background: var(--accent-chip); color: var(--accent-chip-ink); font-weight: 500; }
+.seg.sm > a, .seg.sm > button { min-height: calc(var(--h-sm) - 2px); padding: 0 12px; font-size: var(--fs-sub); }
+.seg .n { font: var(--fs-label) var(--mono); color: var(--muted); }
+
+/* Filter chips: pills that filter, with a count */
+.fchips { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.fchip { display: inline-flex; align-items: center; gap: var(--sp-1_5); min-height: var(--h-sm); padding: 0 14px; border-radius: var(--r-pill); border: 1px solid var(--border); background: transparent; color: var(--ink2); font: inherit; font-size: var(--fs-sm); text-decoration: none; white-space: nowrap; cursor: pointer; }
+.fchip .n { font: var(--fs-label) var(--mono); color: var(--muted); }
+.fchip:hover { background: var(--hover-bg); color: var(--ink); }
+.fchip.on, .fchip.on:hover { background: var(--accent-chip); border-color: var(--accent-line); color: var(--accent-chip-ink); }
+.fchip.on .n { color: var(--accent-chip-ink); }
+
+/* ---------------------------------------------------------------- Menu: one dropdown (details.dd)
+   <details class="dd [set]"><summary><span class="sub">Label</span> value</summary><div class="dd-menu">…</div></details>
+   .set while it filters; items are links (.on for the picked one, .ck with a .box for several);
+   app.js keeps one open at a time and closes it on Esc or a click beside it. */
+.dd { position: relative; }
+.dd > summary { list-style: none; cursor: pointer; display: inline-flex; align-items: center; gap: var(--sp-1_5); min-height: var(--h-md); padding: 0 38px 0 14px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--panel) var(--caret) no-repeat right 12px center / 16px 16px; color: var(--ink); font-size: var(--fs-sm); white-space: nowrap; }
+.dd > summary::-webkit-details-marker { display: none; }
+.dd > summary:hover { background-color: var(--hover-bg); }
+.dd[open] > summary { border-color: var(--accent); }
+.dd.set > summary { border-color: var(--accent-line); background-color: var(--accent-bg); }
+.dd-menu { position: absolute; z-index: 30; top: calc(100% + 6px); left: 0; min-width: 220px; max-height: 360px; overflow-y: auto; padding: 6px; background: var(--panel); border: 1px solid var(--border); border-radius: var(--r-lg); box-shadow: var(--shadow-pop); }
+.dd-menu a { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); min-height: 36px; padding: 0 10px; border-radius: var(--r-sm); color: var(--ink2); text-decoration: none; font-size: var(--fs-sm); }
+.dd-menu a:hover { background: var(--hover-bg); color: var(--ink); }
+.dd-menu a.on { background: var(--accent-bg); color: var(--ink); }
+.dd-menu a.ck { justify-content: flex-start; gap: 10px; }
+.dd-menu a.ck .grow { flex: 1; }
+.dd-menu .box { width: 18px; height: 18px; flex: none; border-radius: 5px; border: 1.5px solid var(--border); background: var(--sunken); display: inline-grid; place-items: center; }
+.dd-menu a.ck.on .box { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.dd-menu .box .i { width: 12px; height: 12px; stroke-width: 3; }
+.dd-menu .dd-find { margin: 0 0 6px; }
+.dd-foot { border-top: 1px solid var(--line2); margin: 6px -6px 0; padding: 8px 16px 2px; display: flex; justify-content: space-between; gap: var(--sp-3); }
+.dd-foot a { display: inline; min-height: 0; padding: 0; color: var(--muted); text-decoration: underline; }
+.dd-foot a:hover { background: none; color: var(--ink); }
+.dd-none { padding: 8px 10px; margin: 0; }
+.dd-label { margin: 6px 10px 4px; }
+.dd-g { margin: 10px 10px 4px; }
+.dd-right { left: auto; right: 0; }
+.dd-more > summary { list-style: none; cursor: pointer; padding: 8px 10px; }
+.dd-more > summary::-webkit-details-marker { display: none; }
+
 /* Copy field: a command or token with the copy icon in its corner (app.js adds the button) */
 .cmd { display: block; margin: 0; padding: 10px 12px; background: var(--sunken); color: var(--ink); border: 1px solid var(--line); border-radius: var(--r-md); font: var(--fs-sub)/1.5 var(--mono); overflow-x: auto; white-space: pre; }
 .copy-wrap { position: relative; }
@@ -203,6 +252,10 @@ input[type=checkbox]:disabled, input[type=radio]:disabled { background-color: va
   input, select, textarea { font-size: 16px; }
   .field > input, .field > select, .field > textarea { font-size: 16px; }
   .search { flex-basis: 100%; }
+  .seg:not(.sm) { flex-basis: 100%; }
+  .seg:not(.sm) > a, .seg:not(.sm) > button { flex: 1; }
+  .fchip { min-height: var(--h-md); }
+  .dd-menu { position: fixed; left: 16px; right: 16px; top: auto; bottom: calc(90px + env(safe-area-inset-bottom)); max-height: 50vh; }
   .btn.sm { min-height: var(--h-md); }
   .ibtn { width: 44px; height: 44px; }
 }

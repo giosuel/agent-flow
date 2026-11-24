@@ -32,7 +32,7 @@
     {% if !sv.mstate.is_empty() %}
     <section class="stack-sm" aria-labelledby="ms-state-h">
       <h2 class="label" id="ms-state-h">State</h2>
-      {% if is_owner %}<form method="post" action="{{ sv.state_action }}" class="seg3" role="group" aria-label="Mockup state">{% for st in ["proposed", "approved", "built"] %}<button type="submit" name="state" value="{{ st }}"{% if sv.mstate == *st %} class="on" aria-pressed="true"{% else %} aria-pressed="false"{% endif %}>{{ st }}</button>{% endfor %}</form>
+      {% if is_owner %}<form method="post" action="{{ sv.state_action }}" class="seg" role="group" aria-label="Mockup state">{% for st in ["proposed", "approved", "built"] %}<button type="submit" name="state" value="{{ st }}"{% if sv.mstate == *st %} class="on" aria-pressed="true"{% else %} aria-pressed="false"{% endif %}>{{ st }}</button>{% endfor %}</form>
       <p class="sub">You or the agent can change it; the agent sets built when the PR that implements it merges.</p>{% else %}<p><span class="mstate {{ sv.mstate }}">{{ sv.mstate }}</span></p>{% endif %}
     </section>
     {% endif %}
