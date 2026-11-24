@@ -4,7 +4,7 @@
 {% block content %}
 {# Every task with tokens, opened as a dialog from Usage's Tasks by cost card (D-238); a page of
    its own without scripts. #}
-<div data-dlg-content class="tasks-all">
+<div data-dlg-content data-dlg-size="lg" class="tasks-all">
 <div class="head"><h1>Tasks</h1></div>
 <div class="tk-bar">
   <span class="sub">{{ tasks.len() }} task{% if tasks.len() != 1 %}s{% endif %} with tokens in the last {{ days }} days, last worked on first</span>

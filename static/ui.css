@@ -350,6 +350,37 @@ summary.card-head::-webkit-details-marker { display: none; }
 .copy-wrap .cmd { padding-right: 48px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .copy-wrap > .ibtn { position: absolute; top: 5px; right: 5px; width: 34px; height: 34px; }
 
+/* ---------------------------------------------------------------- Dialog: one, in four sizes
+   A head (the title 18/600, its tools, the close icon button), a body, a foot (actions on the
+   right: quiet first, then the primary or danger-solid). sm 440 confirms; md 760 records and
+   pages; lg 1240 tables and Settings; xl 1480 the project document. The bell's panel is a .pop: a
+   dialog without a scrim under its button. On the phone both are sheets from below. Behaviour
+   (the stack, Esc, focus, the scroll lock, a pull to close): app.js afDlg. */
+html.dlg-on { overflow: hidden; }
+.dlg-back { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; padding: var(--sp-8); background: var(--scrim); opacity: 0; transition: opacity .16s ease; }
+.dlg-back.open { opacity: 1; }
+.dlg { display: flex; flex-direction: column; width: min(760px, 100%); max-height: calc(100dvh - 64px); background: var(--panel); border: 1px solid var(--border); border-radius: var(--r-xl); box-shadow: var(--shadow-dialog); overflow: hidden; transform: translateY(8px) scale(.985); transition: transform .16s ease; }
+.dlg-back.open .dlg { transform: none; }
+.dlg.sm { width: min(440px, 100%); }
+.dlg.lg { width: min(1240px, 100%); }
+.dlg.xl { width: min(1480px, 100%); height: calc(100dvh - 64px); }
+.dlg-grab { display: none; }
+.dlg-head { display: flex; align-items: center; gap: var(--sp-3); flex: none; min-height: 64px; padding: 12px 14px 12px var(--sp-6); border-bottom: 1px solid var(--line2); }
+.dlg-t { flex: 1; min-width: 0; margin: 0; font-size: var(--fs-h2); font-weight: 600; line-height: 1.3; overflow-wrap: anywhere; }
+.dlg-tools { display: flex; align-items: center; gap: var(--sp-2); }
+.dlg-tools:empty { display: none; }
+.dlg-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: var(--sp-5) var(--sp-6) var(--sp-6); }
+.dlg-body[hidden] { display: none; }
+.dlg-body > p:only-child { margin: 0; color: var(--ink2); line-height: 1.5; }
+.dlg-foot { display: flex; justify-content: flex-end; gap: var(--sp-2); flex: none; padding: 14px var(--sp-6); border-top: 1px solid var(--line2); background: var(--band); }
+.pop-back { position: fixed; inset: 0; z-index: 60; pointer-events: none; }
+.pop { position: absolute; top: 58px; right: 16px; width: 400px; max-height: min(640px, calc(100dvh - 80px)); display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--border); border-radius: var(--r-lg); box-shadow: var(--shadow-pop); overflow: hidden; pointer-events: auto; opacity: 0; transform: translateY(-6px); transition: opacity .15s ease, transform .15s ease; }
+.pop-back.open .pop { opacity: 1; transform: none; }
+.pop .dlg-head { min-height: 52px; padding: 8px 10px 8px var(--sp-5); gap: var(--sp-1); }
+.pop .dlg-t { font-size: var(--fs-h3); }
+.pop .dlg-body { padding: 0; }
+@media (prefers-reduced-motion: reduce) { .dlg-back, .dlg, .pop, .pop-back { transition: none; } }
+
 /* ---------------------------------------------------------------- The phone (one breakpoint: 700) */
 @media (max-width: 700px) {
   input, select, textarea { font-size: 16px; }
@@ -363,4 +394,17 @@ summary.card-head::-webkit-details-marker { display: none; }
   .dd-menu { position: fixed; left: 16px; right: 16px; top: auto; bottom: calc(90px + env(safe-area-inset-bottom)); max-height: 50vh; }
   .btn.sm { min-height: var(--h-md); }
   .ibtn { width: 44px; height: 44px; }
+  .dlg-back { padding: 0; place-items: end stretch; }
+  .dlg { width: 100%; max-height: calc(100dvh - 10px - env(safe-area-inset-top)); border-radius: 18px 18px 0 0; border-bottom: 0; transform: translateY(100%); transition: transform .26s cubic-bezier(.2, .8, .2, 1); }
+  .dlg.sm { width: 100%; }
+  .dlg.md, .dlg.lg, .dlg.xl { width: 100%; height: calc(100dvh - 10px - env(safe-area-inset-top)); }
+  .dlg-grab { display: block; width: 44px; height: 5px; border-radius: 3px; background: var(--border); margin: 8px auto 0; flex: none; }
+  .dlg-head { min-height: 0; padding: 4px 8px 10px var(--sp-5); }
+  .dlg-body { padding: var(--sp-4) var(--sp-4) calc(24px + env(safe-area-inset-bottom)); }
+  .dlg.sm .dlg-body { padding-bottom: var(--sp-4); }
+  .dlg-foot { flex-direction: column-reverse; padding: 12px var(--sp-4) calc(16px + env(safe-area-inset-bottom)); }
+  .dlg-foot > .btn { width: 100%; }
+  .pop-back { pointer-events: auto; background: var(--scrim); opacity: 0; transition: opacity .15s ease; }
+  .pop-back.open { opacity: 1; }
+  .pop { inset: calc(12px + env(safe-area-inset-top)) 0 0 0; width: auto; max-height: none; border-radius: 16px 16px 0 0; border-bottom: 0; transform: translateY(24px); }
 }

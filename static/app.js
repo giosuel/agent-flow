@@ -60,56 +60,144 @@ document.addEventListener("DOMContentLoaded", () => wireAnswers(document));
 document.addEventListener("af:content", (e) => wireAnswers(e.detail));
 
 
-// Dialogs in the page's own style instead of the browser's (the owner, 2026-11-17: "remove all
-// the simple alerts and replace them with actual styled dialogs that fit into the design"): a
-// centred card over a dimmed page, on the phone too. window.afDialog({title, text, ok, cancel,
-// danger}) resolves true for OK; without cancel it's a message with one button.
+// One dialog (the UI library, D-245; canvas board 5): every dialog is a .dlg (head, body, foot) in
+// one of its sizes over one scrim, and the bell's panel is a .pop; on the phone both are sheets
+// from below that a pull on the handle or head closes. One controller keeps the open ones as a
+// stack (N-18 #18, N-19 #38): Esc and a click on the scrim close the top one only (a confirm over
+// a record closes just the confirm), focus moves into it, stays there and goes back to what opened
+// it, and the page behind doesn't scroll.
+// afDlg.open({ size, title, label, cls, pop, anchor, opener, role, dismiss, closed }) gives { el, head,
+// title, tools, body, close, dismiss }. `dismiss` is what Esc, the close button, the scrim and a
+// pull do: by default close(); a dialog can ask first or go Back instead.
+window.afDlg = (() => {
+  const stack = [];
+  const FOCUS = "a[href], button:not([disabled]), input:not([disabled]):not([type=hidden]), select:not([disabled]), textarea:not([disabled]), summary, [tabindex]:not([tabindex='-1'])";
+  const phone = matchMedia("(max-width: 700px)");
+  let n = 0;
+  const top = () => stack[stack.length - 1];
+  const lock = () => document.documentElement.classList.toggle("dlg-on", stack.some((d) => !d.pop));
+  document.addEventListener("keydown", (e) => {
+    const d = top();
+    if (!d) return;
+    if (e.key === "Escape") {
+      // A menu open inside it closes first (the menus' own Esc).
+      if (d.el.querySelector("details.dd[open], details[data-menu][open]")) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      d.dismiss();
+    } else if (e.key === "Tab" && !d.pop) {
+      const f = [...d.el.querySelectorAll(FOCUS)].filter((x) => x.getClientRects().length);
+      if (!f.length) return;
+      const i = f.indexOf(document.activeElement);
+      if (e.shiftKey ? i <= 0 : i < 0 || i === f.length - 1) {
+        e.preventDefault();
+        f[e.shiftKey ? f.length - 1 : 0].focus();
+      }
+    }
+  }, true);
+  // A popover closes on a click anywhere else (its own button toggles it).
+  document.addEventListener("click", (e) => {
+    const d = top();
+    if (d && d.pop && !d.el.contains(e.target) && !(d.anchor && d.anchor.contains(e.target))) d.dismiss();
+  }, true);
+  const open = ({ size = "md", title = "", label = "", cls = "", pop = false, anchor = null, opener = null, role = "dialog", dismiss = null, closed = null } = {}) => {
+    const id = "dlg-t" + ++n;
+    const back = document.createElement("div");
+    back.className = pop ? "pop-back" : "dlg-back";
+    back.innerHTML = `<div class="${pop ? "pop" : "dlg " + size}${cls ? " " + cls : ""}" role="${role}" aria-modal="${!pop}" aria-labelledby="${id}">
+      <div class="dlg-grab" aria-hidden="true"></div>
+      <div class="dlg-head"><div class="dlg-t" id="${id}" role="heading" aria-level="2"></div><span class="dlg-tools"></span><button type="button" class="ibtn${pop ? " flat" : ""} dlg-x" aria-label="Close">${icon("close")}</button></div>
+      <div class="dlg-body"></div></div>`;
+    const el = back.firstElementChild;
+    const d = {
+      back, el, pop, anchor,
+      head: el.querySelector(".dlg-head"), title: el.querySelector(".dlg-t"),
+      tools: el.querySelector(".dlg-tools"), body: el.querySelector(".dlg-body"),
+      opener: opener || document.activeElement,
+    };
+    d.title.textContent = title;
+    if (label) { el.setAttribute("aria-label", label); el.removeAttribute("aria-labelledby"); }
+    d.close = () => {
+      const i = stack.indexOf(d);
+      if (i < 0) return;
+      stack.splice(i, 1);
+      lock();
+      // Focus goes back to what opened it, unless it already went somewhere else on the page.
+      const a = document.activeElement;
+      if ((!a || a === document.body || el.contains(a)) && d.opener && document.contains(d.opener)) d.opener.focus({ preventScroll: true });
+      back.classList.remove("open");
+      setTimeout(() => back.remove(), 260);
+      if (closed) closed(d);
+    };
+    d.dismiss = () => (dismiss ? dismiss(d) : d.close());
+    el.querySelector(".dlg-x").addEventListener("click", () => d.dismiss());
+    // The scrim: a press that starts and ends on it (not a text selection that ends there).
+    let down = false;
+    back.addEventListener("mousedown", (e) => { down = e.target === back; });
+    back.addEventListener("click", (e) => { if (down && e.target === back && !pop) d.dismiss(); });
+    // The phone's sheet: a pull down on its handle or head.
+    let y0 = null;
+    el.addEventListener("touchstart", (e) => {
+      if (phone.matches && e.target.closest(".dlg-grab, .dlg-head") && !e.target.closest("button, a, input")) y0 = e.touches[0].clientY;
+    }, { passive: true });
+    el.addEventListener("touchmove", (e) => {
+      if (y0 !== null) el.style.transform = `translateY(${Math.max(0, e.touches[0].clientY - y0)}px)`;
+    }, { passive: true });
+    el.addEventListener("touchend", (e) => {
+      if (y0 === null) return;
+      const dy = e.changedTouches[0].clientY - y0;
+      y0 = null;
+      el.style.transform = "";
+      if (dy > 110) d.dismiss();
+    });
+    // A popover sits under its button on the desktop.
+    if (pop && anchor && !phone.matches) {
+      const r = anchor.getBoundingClientRect();
+      el.style.top = `${Math.round(r.bottom + 8)}px`;
+      el.style.right = `${Math.max(16, Math.round(innerWidth - r.right))}px`;
+    }
+    back.style.zIndex = String(60 + stack.length * 2);
+    stack.push(d);
+    document.body.append(back);
+    lock();
+    requestAnimationFrame(() => back.classList.add("open"));
+    if (!pop) d.el.querySelector(".dlg-x").focus({ preventScroll: true });
+    return d;
+  };
+  return { open, top, closePop: () => { const d = top(); if (d && d.pop) d.close(); } };
+})();
+
+// Confirms and messages in that dialog, never the browser's (the owner, 2026-11-17: "remove all
+// the simple alerts and replace them with actual styled dialogs that fit into the design").
+// window.afDialog({title, text, ok, cancel, danger}) resolves true for OK; without cancel it's a
+// message with one button. The safe choice has focus, so Enter never removes something by accident.
 window.afDialog = ({ title, text = "", ok = "OK", cancel = null, danger = false }) =>
   new Promise((resolve) => {
-    const back = document.createElement("div");
-    back.className = "cdlg-back";
-    back.innerHTML = `<div class="cdlg" role="${cancel ? "alertdialog" : "dialog"}" aria-modal="true" aria-labelledby="cdlg-t" aria-describedby="cdlg-x">
-      <h2 id="cdlg-t"></h2><p id="cdlg-x" class="sub"></p>
-      <div class="cdlg-btns">${cancel ? '<button type="button" class="btn quiet" data-v="0"></button>' : ""}<button type="button" class="btn${danger ? " danger-solid" : ""}" data-v="1"></button></div></div>`;
-    back.querySelector("#cdlg-t").textContent = title;
-    const body = back.querySelector("#cdlg-x");
-    body.textContent = text;
-    body.hidden = !text;
-    back.querySelector('[data-v="1"]').textContent = ok;
-    if (cancel) back.querySelector('[data-v="0"]').textContent = cancel;
-    const opener = document.activeElement;
-    const done = (v) => {
-      back.classList.remove("open");
-      document.removeEventListener("keydown", key, true);
-      setTimeout(() => back.remove(), 160);
-      if (opener && opener.focus) opener.focus();
-      resolve(v);
-    };
-    const key = (e) => {
-      if (e.key === "Escape") { e.preventDefault(); done(false); }
-      // Focus stays in the dialog.
-      if (e.key === "Tab") {
-        const b = [...back.querySelectorAll("button")];
-        const i = b.indexOf(document.activeElement);
-        e.preventDefault();
-        b[(i + (e.shiftKey ? b.length - 1 : 1)) % b.length].focus();
-      }
-    };
-    back.addEventListener("click", (e) => {
-      const btn = e.target.closest("button[data-v]");
-      if (btn) done(btn.dataset.v === "1");
-      else if (e.target === back) done(false);
+    let yes = false;
+    const d = window.afDlg.open({ size: "sm", title, cls: "cdlg", role: cancel ? "alertdialog" : "dialog", closed: () => resolve(yes) });
+    const p = document.createElement("p");
+    p.textContent = text;
+    d.body.append(p);
+    d.body.hidden = !text;
+    if (text) { p.id = d.title.id + "-x"; d.el.setAttribute("aria-describedby", p.id); }
+    const foot = document.createElement("div");
+    foot.className = "dlg-foot";
+    foot.innerHTML = `${cancel ? '<button type="button" class="btn quiet" data-v="0"></button>' : ""}<button type="button" class="btn${danger ? " danger-solid" : ""}" data-v="1"></button>`;
+    foot.querySelector('[data-v="1"]').textContent = ok;
+    if (cancel) foot.querySelector('[data-v="0"]').textContent = cancel;
+    foot.addEventListener("click", (e) => {
+      const b = e.target.closest("button[data-v]");
+      if (!b) return;
+      yes = b.dataset.v === "1";
+      d.close();
     });
-    document.addEventListener("keydown", key, true);
-    document.body.append(back);
-    requestAnimationFrame(() => back.classList.add("open"));
-    // The safe choice has focus, so Enter never removes something by accident.
-    back.querySelector(cancel ? '[data-v="0"]' : '[data-v="1"]').focus();
+    d.el.append(foot);
+    foot.querySelector(cancel ? '[data-v="0"]' : '[data-v="1"]').focus();
   });
 
 // Buttons with data-confirm ask first (no inline handlers: the CSP forbids them). The question's
-// first sentence is the title, the rest the text; the button's own label confirms, red when it
-// removes or ends something.
+// first sentence is the title, the rest the text; the button's own label confirms, red when the
+// button is (.danger) or says so (data-danger), never guessed from its words (N-19 #34).
 document.addEventListener("click", (e) => {
   const el = e.target.closest("[data-confirm]");
   if (!el || el.dataset.confirmed) return;
@@ -120,7 +208,7 @@ document.addEventListener("click", (e) => {
   const title = cut < 0 ? q : q.slice(0, cut + 1);
   const text = cut < 0 ? "" : q.slice(cut + 2);
   const label = (el.dataset.confirmOk || el.textContent || el.getAttribute("aria-label") || "OK").trim() || "OK";
-  const danger = el.classList.contains("danger") || /^(remove|revoke|delete|rotate|sign out|switch off|turn off|cancel job)/i.test(label) || el.dataset.danger !== undefined;
+  const danger = el.classList.contains("danger") || el.dataset.danger !== undefined;
   window.afDialog({ title, text, ok: label, cancel: "Cancel", danger }).then((yes) => {
     if (!yes) return;
     el.dataset.confirmed = "1";
@@ -548,38 +636,20 @@ document.addEventListener("change", (e) => {
 // its dot until it closes. /notifications opened directly is the dashboard with the panel open.
 (() => {
   let panel = null;
-  const close = () => {
-    if (!panel) return;
-    panel.classList.remove("open");
-    const p = panel;
-    panel = null;
-    setTimeout(() => p.remove(), 160);
-    document.removeEventListener("keydown", onKey, true);
-    document.removeEventListener("click", outside, true);
-    const bell = document.querySelector("[data-bell]");
-    if (bell) bell.setAttribute("aria-expanded", "false");
-  };
-  const onKey = (e) => { if (e.key === "Escape") { e.preventDefault(); close(); } };
-  const outside = (e) => {
-    if (panel && !e.target.closest(".ntf-panel") && !e.target.closest("[data-bell]")) close();
-  };
   const open = async (bell) => {
     const res = await fetch("/notifications/panel", { credentials: "same-origin" });
     if (!res.ok) { location.href = bell.href; return; }
     const html = await res.text();
-    panel = document.createElement("div");
-    panel.className = "ntf-back";
-    panel.innerHTML = `<div class="ntf-panel" role="dialog" aria-modal="false" aria-label="Notifications">
-      <div class="ntf-head"><strong>Notifications</strong><span class="grow"></span><a class="ibtn flat" href="/settings?s=notifications" aria-label="Notification settings" data-settings>${icon("gear")}</a><button type="button" class="ibtn flat ntf-x" aria-label="Close">${icon("close")}</button></div>
-      <div class="ntf-list"></div></div>`;
-    panel.querySelector(".ntf-list").innerHTML = html;
-    panel.querySelector(".ntf-x").addEventListener("click", close);
-    panel.addEventListener("click", (e) => { if (e.target === panel) close(); });
-    document.body.append(panel);
-    requestAnimationFrame(() => panel && panel.classList.add("open"));
+    panel = window.afDlg.open({
+      pop: true, anchor: bell, cls: "ntf-panel", title: "Notifications",
+      closed: () => {
+        panel = null;
+        for (const b of document.querySelectorAll("[data-bell]")) b.setAttribute("aria-expanded", "false");
+      },
+    });
+    panel.tools.innerHTML = `<a class="ibtn flat" href="/settings?s=notifications" aria-label="Notification settings" data-settings>${icon("gear")}</a>`;
+    panel.body.innerHTML = html;
     bell.setAttribute("aria-expanded", "true");
-    document.addEventListener("keydown", onKey, true);
-    document.addEventListener("click", outside, true);
     // Read: the badge goes now (here and on the phone's bell).
     for (const b of document.querySelectorAll(".bell-badge")) b.remove();
     for (const b of document.querySelectorAll("[data-bell]")) b.setAttribute("aria-label", "Notifications");
@@ -596,7 +666,7 @@ document.addEventListener("change", (e) => {
     const bell = e.target.closest("[data-bell]");
     if (!bell || e.metaKey || e.ctrlKey || e.shiftKey || e.button) return;
     e.preventDefault();
-    if (panel) close(); else open(bell);
+    if (panel) panel.close(); else open(bell);
   });
 })();
 
@@ -606,72 +676,48 @@ document.addEventListener("change", (e) => {
 // it was. It shows the /settings page's own content, so it never differs from it; without scripts
 // the cog is a link to that page.
 (() => {
-  let back = null;
-  let opener = null;
+  let d = null;
   const shellOf = (html) => {
     const doc = new DOMParser().parseFromString(html, "text/html");
     return doc.querySelector(".set-shell");
   };
   const show = (shell) => {
-    const body = back.querySelector(".sdlg-body");
-    body.replaceChildren(shell);
+    d.body.replaceChildren(shell);
     shell.querySelector(".set-pane")?.scrollTo(0, 0);
+    if (!d.el.contains(document.activeElement)) d.el.querySelector(".dlg-x").focus({ preventScroll: true });
     document.dispatchEvent(new CustomEvent("af:content", { detail: shell }));
   };
   const load = async (url, init, soft) => {
-    back.classList.add("busy");
+    const box = d;
+    box.el.classList.add("busy");
     try {
       const res = await fetch(url, { credentials: "same-origin", ...init });
       const shell = shellOf(await res.text());
       if (!shell) throw new Error("no settings in the answer");
-      show(shell);
+      if (d === box) show(shell);
     } catch (_) {
-      if (soft) close(); else location.href = typeof url === "string" ? url : "/settings";
+      if (soft) box.close(); else location.href = typeof url === "string" ? url : "/settings";
     } finally {
-      back && back.classList.remove("busy");
+      box.el.classList.remove("busy");
     }
   };
-  const close = () => {
-    if (!back) return;
-    back.classList.remove("open");
-    const b = back;
-    back = null;
-    document.removeEventListener("keydown", onKey, true);
-    document.documentElement.classList.remove("no-scroll");
-    setTimeout(() => b.remove(), 160);
-    if (opener && opener.focus) opener.focus();
-  };
-  const onKey = (e) => {
-    if (e.key === "Escape" && !document.querySelector(".cdlg-back")) { e.preventDefault(); close(); }
-  };
   const open = (url, soft) => {
-    opener = document.activeElement;
-    back = document.createElement("div");
-    back.className = "sdlg-back";
-    back.innerHTML = `<div class="sdlg" role="dialog" aria-modal="true" aria-label="Settings">
-      <div class="sdlg-head"><h2>Settings</h2><button type="button" class="ibtn flat sdlg-x" aria-label="Close">${icon("close")}</button></div>
-      <div class="sdlg-body"><p class="sub sdlg-wait">Loading…</p></div></div>`;
-    back.querySelector(".sdlg-x").addEventListener("click", close);
-    back.addEventListener("mousedown", (e) => { if (e.target === back) close(); });
+    d = window.afDlg.open({ size: "lg", cls: "sdlg", title: "Settings", closed: () => { d = null; } });
+    d.body.innerHTML = '<p class="sub sdlg-wait">Loading…</p>';
     // Inside: section links load in place; forms post and show the section they come back to.
-    back.addEventListener("click", (e) => {
+    d.el.addEventListener("click", (e) => {
       const a = e.target.closest("a[href]");
       if (!a || e.defaultPrevented || e.metaKey || e.ctrlKey) return;
       const u = new URL(a.href, location.href);
       if (u.origin === location.origin && u.pathname === "/settings") { e.preventDefault(); load(u.pathname + u.search); }
-      else if (u.origin === location.origin && !a.target) close();
+      else if (u.origin === location.origin && !a.target) d.close();
     });
-    back.addEventListener("submit", (e) => {
+    d.el.addEventListener("submit", (e) => {
       const form = e.target;
       if (!form.matches("form[method=post], form[method=POST]")) return;
       e.preventDefault();
       load(form.action, { method: "POST", body: new URLSearchParams(new FormData(form, e.submitter)), headers: { "Content-Type": "application/x-www-form-urlencoded" } });
     });
-    document.addEventListener("keydown", onKey, true);
-    document.body.append(back);
-    document.documentElement.classList.add("no-scroll");
-    requestAnimationFrame(() => back && back.classList.add("open"));
-    back.querySelector(".sdlg-x").focus();
     load(url, undefined, soft);
   };
   // A direct link to Settings: the server sent the dashboard; Settings opens over it.
@@ -687,9 +733,9 @@ document.addEventListener("change", (e) => {
     if (location.pathname === "/settings") return;
     e.preventDefault();
     // From the bell's panel: that closes first.
-    document.querySelector(".ntf-back .ntf-x")?.click();
+    window.afDlg.closePop();
     const u = new URL(a.href, location.href);
-    if (back) load(u.pathname + u.search); else open(u.pathname + u.search);
+    if (d) load(u.pathname + u.search); else open(u.pathname + u.search);
   });
 })();
 
@@ -698,21 +744,15 @@ document.addEventListener("change", (e) => {
 // it stay inside it, and an answer that isn't such a page (e.g. the new project's page) is opened
 // as a page. Without scripts, they're pages as before.
 (() => {
-  let back = null;
-  const close = () => {
-    if (!back) return;
-    // An editor with unsaved edits asks first (the project document).
-    if (window.afDocGuard && back.querySelector("form[data-md-editor]") && !window.afDocGuard()) return;
-    const ed = back.querySelector("form[data-md-editor] textarea[name=text]");
+  let d = null;
+  const SIZES = ["sm", "md", "lg", "xl"];
+  // Closing: an editor with unsaved edits asks first (the project document).
+  const dismiss = async (box) => {
+    if (window.afDocGuard && box.el.querySelector("form[data-md-editor]") && !(await window.afDocGuard())) return;
+    const ed = box.el.querySelector("form[data-md-editor] textarea[name=text]");
     if (ed) ed.defaultValue = ed.value;
-    back.classList.remove("open");
-    const b = back;
-    back = null;
-    document.documentElement.classList.remove("no-scroll");
-    document.removeEventListener("keydown", onKey, true);
-    setTimeout(() => b.remove(), 160);
+    box.close();
   };
-  const onKey = (e) => { if (e.key === "Escape" && !document.querySelector(".cdlg-back")) { e.preventDefault(); close(); } };
   const show = async (url, init, soft) => {
     let res;
     try {
@@ -726,32 +766,26 @@ document.addEventListener("change", (e) => {
     if (!content) { if (!soft) location.href = res.url; return; }
     const h1 = content.querySelector(".head h1");
     const title = h1 ? h1.textContent : document.title;
-    if (h1) h1.closest(".head").querySelector("h1").remove();
-    if (!back) {
-      back = document.createElement("div");
-      back.className = "sdlg-back pdlg-back";
-      back.innerHTML = `<div class="sdlg pdlg" role="dialog" aria-modal="true" aria-labelledby="pdlg-t">
-        <div class="sdlg-head"><h2 id="pdlg-t"></h2><button type="button" class="ibtn flat sdlg-x" aria-label="Close">${icon("close")}</button></div>
-        <div class="pdlg-body"></div></div>`;
-      back.querySelector(".sdlg-x").addEventListener("click", close);
-      back.addEventListener("mousedown", (e) => { if (e.target === back) close(); });
-      back.addEventListener("submit", (e) => {
+    if (h1) h1.remove();
+    // Its size comes with the page: data-dlg-size (md when it doesn't say).
+    const size = SIZES.includes(content.dataset.dlgSize) ? content.dataset.dlgSize : "md";
+    if (!d) {
+      d = window.afDlg.open({ size, cls: "pdlg", dismiss, closed: () => { d = null; } });
+      d.el.addEventListener("submit", (e) => {
         const form = e.target;
         if ((form.getAttribute("method") || "").toLowerCase() !== "post") return;
         e.preventDefault();
         show(form.action, { method: "POST", body: new URLSearchParams(new FormData(form, e.submitter)), headers: { "Content-Type": "application/x-www-form-urlencoded" } });
       });
-      document.body.append(back);
-      document.documentElement.classList.add("no-scroll");
-      document.addEventListener("keydown", onKey, true);
-      requestAnimationFrame(() => back && back.classList.add("open"));
+    } else {
+      d.el.classList.remove(...SIZES);
+      d.el.classList.add(size);
     }
-    back.querySelector("#pdlg-t").textContent = title;
-    const body = back.querySelector(".pdlg-body");
-    body.replaceChildren(content);
-    body.scrollTo(0, 0);
+    d.title.textContent = title;
+    d.body.replaceChildren(content);
+    d.body.scrollTo(0, 0);
+    if (!d.el.contains(document.activeElement)) d.el.querySelector(".dlg-x").focus({ preventScroll: true });
     document.dispatchEvent(new CustomEvent("af:content", { detail: content }));
-    back.querySelector(".sdlg-x").focus();
   };
   document.addEventListener("click", (e) => {
     const a = e.target.closest("a[data-dlg]");
@@ -761,7 +795,7 @@ document.addEventListener("change", (e) => {
   });
   document.addEventListener("submit", (e) => {
     const form = e.target.closest("form[data-dlg]");
-    if (!form || back) return;
+    if (!form || d) return;
     e.preventDefault();
     show(form.action, { method: "POST", body: new URLSearchParams(new FormData(form, e.submitter)), headers: { "Content-Type": "application/x-www-form-urlencoded" } });
   });
@@ -881,17 +915,26 @@ document.addEventListener("click", (e) => {
     const ta = form && form.querySelector("textarea[name=text]");
     return !!ta && ta.value !== ta.defaultValue;
   };
-  const ask = () => confirm("Drop your edits?");
-  window.afDocGuard = () => {
+  // The app's dialog, never the browser's own (N-19 #38, T-114).
+  const ask = () => window.afDialog({ title: "Drop your edits?", text: "What you changed in the document isn't saved.", ok: "Drop them", cancel: "Keep editing", danger: true });
+  window.afDocGuard = async () => {
     const f = document.querySelector("form[data-md-editor]");
     return !dirty(f) || ask();
   };
-  // Cancel and links out of the editor ask first.
+  // Cancel asks first; once it's answered, the same click goes on.
   document.addEventListener("click", (e) => {
     const a = e.target.closest("a[data-cancel]");
-    if (!a || !dirty(a.closest("form"))) return;
-    if (!ask()) { e.preventDefault(); e.stopImmediatePropagation(); }
-    else a.closest("form").querySelector("textarea[name=text]").defaultValue = a.closest("form").querySelector("textarea[name=text]").value;
+    if (!a || a.dataset.confirmed || !dirty(a.closest("form"))) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    ask().then((yes) => {
+      if (!yes) return;
+      const ta = a.closest("form").querySelector("textarea[name=text]");
+      ta.defaultValue = ta.value;
+      a.dataset.confirmed = "1";
+      a.click();
+      delete a.dataset.confirmed;
+    });
   }, true);
   window.addEventListener("beforeunload", (e) => {
     if (dirty(document.querySelector("form[data-md-editor]"))) { e.preventDefault(); e.returnValue = ""; }

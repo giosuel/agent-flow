@@ -2,7 +2,7 @@
 {% block title %}Project document · {{ name }}{% endblock %}
 {% block content %}
 {# The project document as a dialog over the overview (the owner, 2026-11-18), edited whole. #}
-<div data-dlg-content class="pdoc-dlg">
+<div data-dlg-content data-dlg-size="xl" class="pdoc-dlg">
 <div class="head"><h1>Project document</h1></div>
 {% if let Some((ok, text)) = notice %}<p class="notice flash{% if *ok %} ok{% else %} warn{% endif %}" role="status">{% if *ok %}{{ crate::web::icons::icon("check")|safe }}{% endif %}<span>{{ text }}</span></p>{% endif %}
 <div class="pd-bar">
