@@ -106,7 +106,7 @@ impl Kind {
         match self {
             Kind::Question => &["open", "answered", "withdrawn"],
             Kind::Decision | Kind::Adr => &["current", "replaced"],
-            Kind::Task => &["todo", "doing", "review", "done", "blocked", "parked"],
+            Kind::Task => &["todo", "doing", "review", "done", "blocked", "parked", "skipped"],
             Kind::Pr => &["open", "merged", "closed"],
             Kind::Release => &["planned", "waiting", "tagged", "dropped"],
             Kind::Build => &["published", "tried", "withdrawn"],
