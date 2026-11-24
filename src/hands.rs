@@ -14,7 +14,8 @@
 //!
 //! A forged helper (an agent replacing the process) could see the jobs and fake their results;
 //! it gains nothing it doesn't have already as that user, and the server's database, tokens and
-//! sessions stay out of its reach.
+//! sessions stay out of its reach. That is why no job carries the server's GitHub token: what
+//! needs it (gh's reads, AgentFlow's own Merge and Push tag commands) runs in the server.
 
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
@@ -34,9 +35,6 @@ pub enum Job {
         argv: Vec<String>,
         cwd: Option<PathBuf>,
         timeout_s: u64,
-        /// Extra environment, e.g. `GH_TOKEN` when the server has a GitHub token of its own.
-        #[serde(default)]
-        env: Vec<(String, String)>,
     },
     WriteToken {
         path: PathBuf,
@@ -170,7 +168,7 @@ impl Job {
     /// Does it, as whoever runs this process.
     pub fn execute(self) -> anyhow::Result<serde_json::Value> {
         match self {
-            Job::Exec { argv, cwd, timeout_s, env } => to_value(exec(&argv, cwd.as_deref(), timeout_s, &env)?),
+            Job::Exec { argv, cwd, timeout_s } => to_value(exec(&argv, cwd.as_deref(), timeout_s)?),
             Job::WriteToken { path, secret } => to_value(crate::tokens::write_token_file_here(&path, &secret)?),
             Job::TokenExists { path } => to_value(path.exists()),
             Job::WriteSetup { folder, token_file, name, public_url } => {
@@ -208,8 +206,9 @@ impl Job {
     }
 }
 
-/// A command with a time limit; its output is cut at 1 MB each.
-fn exec(argv: &[String], cwd: Option<&Path>, timeout_s: u64, env: &[(String, String)]) -> anyhow::Result<ExecOut> {
+/// A command with a time limit; its output is cut at 1 MB each. It gets no environment from the
+/// server: what runs here is the agents' to watch, so the server's GitHub token never comes here.
+fn exec(argv: &[String], cwd: Option<&Path>, timeout_s: u64) -> anyhow::Result<ExecOut> {
     use std::io::Read;
     let (program, args) = argv.split_first().context("an empty command")?;
     let mut cmd = std::process::Command::new(program);
@@ -219,9 +218,6 @@ fn exec(argv: &[String], cwd: Option<&Path>, timeout_s: u64, env: &[(String, Str
         .stderr(std::process::Stdio::piped());
     if let Some(dir) = cwd {
         cmd.current_dir(dir);
-    }
-    for (k, v) in env {
-        cmd.env(k, v);
     }
     let mut child = cmd.spawn().with_context(|| format!("couldn't start {program}"))?;
     let (mut out, mut err) = (child.stdout.take().unwrap(), child.stderr.take().unwrap());
@@ -325,7 +321,6 @@ mod tests {
                     argv: vec!["sh".into(), "-c".into(), "echo hi; echo err >&2; exit 3".into()],
                     cwd: None,
                     timeout_s: 5,
-                    env: vec![],
                 },
             )
             .unwrap(),
@@ -333,8 +328,7 @@ mod tests {
         .unwrap();
         assert_eq!((out.code, out.stdout.as_str(), out.stderr.as_str()), (Some(3), "hi\n", "err\n"));
         let slow: ExecOut = serde_json::from_value(
-            send(&sock, &Job::Exec { argv: vec!["sleep".into(), "5".into()], cwd: None, timeout_s: 1, env: vec![] })
-                .unwrap(),
+            send(&sock, &Job::Exec { argv: vec!["sleep".into(), "5".into()], cwd: None, timeout_s: 1 }).unwrap(),
         )
         .unwrap();
         assert!(slow.timed_out && slow.code.is_none());

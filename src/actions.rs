@@ -36,6 +36,10 @@ pub struct ActionRow {
     pub finished_at: Option<i64>,
     pub exit_code: Option<i64>,
     pub output: String,
+    /// AgentFlow's own command for this record ([`own_command`]), which runs in the server with
+    /// its GitHub token. Found out when the button is claimed, never stored.
+    #[serde(skip)]
+    pub server: bool,
 }
 
 impl ActionRow {
@@ -98,6 +102,7 @@ fn from_row(r: &Row) -> rusqlite::Result<ActionRow> {
         finished_at: r.get(11)?,
         exit_code: r.get(12)?,
         output: r.get(13)?,
+        server: false,
     })
 }
 
@@ -304,7 +309,7 @@ pub fn enabled_in_chain(conn: &Connection, a: &ActionRow) -> anyhow::Result<Resu
 }
 
 fn claim_with(conn: &Connection, id: i64, shown_hash: &str, in_chain: bool) -> anyhow::Result<ActionRow> {
-    let a = get(conn, id)?.context("no such button")?;
+    let mut a = get(conn, id)?.context("no such button")?;
     if a.hash() != shown_hash {
         bail!("this button's command isn't the one the page showed; reload and look again");
     }
@@ -318,7 +323,66 @@ fn claim_with(conn: &Connection, id: i64, shown_hash: &str, in_chain: bool) -> a
     if n == 0 {
         bail!("it was pressed a moment ago");
     }
+    a.server = own_command(conn, &a)?;
     Ok(a)
+}
+
+/// Is this button's command the one AgentFlow makes itself for this very record: the merge of
+/// this PR, or the tag of this release, in the project's own repository? Only those run with the
+/// server's GitHub token. A command of the same shape that an agent wrote for another repository,
+/// PR or tag, or put on a button of another kind (which skips the merge order), doesn't.
+pub fn own_command(conn: &Connection, a: &ActionRow) -> anyhow::Result<bool> {
+    use crate::prs::ServerCommand;
+    if !a.workdir.is_empty() {
+        return Ok(false);
+    }
+    let Some(command) = crate::prs::server_command(&a.command) else {
+        return Ok(false);
+    };
+    let record = records::get(conn, a.record_id)?;
+    let project = crate::projects::get_by_id(conn, record.project_id)?;
+    let ours = |repo: &str| {
+        crate::projects::looks_like_repo(project.repo.trim()) && repo.eq_ignore_ascii_case(project.repo.trim())
+    };
+    Ok(match (command, a.kind, record.kind) {
+        (ServerCommand::Merge { repo, number }, ButtonKind::Merge, Kind::Pr) => ours(&repo) && number == record.number,
+        (ServerCommand::Tag { repo, tag }, ButtonKind::Tag, Kind::Release) => ours(&repo) && tag == record.str("tag"),
+        _ => false,
+    })
+}
+
+/// A button's command as a job for the agents' user. It never carries the server's GitHub token:
+/// the helper, its PATH and gh's settings there are the agents' to change.
+fn hands_job(a: &ActionRow) -> crate::hands::Job {
+    let dir: PathBuf = if a.workdir.is_empty() { crate::util::home_dir() } else { expand_home(&a.workdir) };
+    crate::hands::Job::Exec {
+        argv: vec!["bash".into(), "-c".into(), a.command.clone()],
+        cwd: Some(dir),
+        timeout_s: TIMEOUT.as_secs(),
+    }
+}
+
+/// AgentFlow's own command, run by the server itself and as its user, with its GitHub token. The
+/// command needs no project folder (GitHub's API does the work).
+async fn run_here(command: &str, token: Vec<(String, String)>) -> anyhow::Result<crate::hands::ExecOut> {
+    let run = tokio::process::Command::new("bash")
+        .args(["-c", command])
+        .current_dir(std::env::temp_dir())
+        .envs(token)
+        .env("GH_PROMPT_DISABLED", "1")
+        .stdin(std::process::Stdio::null())
+        .kill_on_drop(true)
+        .output();
+    let Ok(out) = tokio::time::timeout(TIMEOUT, run).await else {
+        return Ok(crate::hands::ExecOut { timed_out: true, ..Default::default() });
+    };
+    let out = out.context("couldn't start bash")?;
+    Ok(crate::hands::ExecOut {
+        code: out.status.code(),
+        stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
+        stderr: String::from_utf8_lossy(&out.stderr).into_owned(),
+        timed_out: false,
+    })
 }
 
 pub struct RunResult {
@@ -327,23 +391,19 @@ pub struct RunResult {
     pub output: String,
 }
 
-/// Runs the command with bash in its folder, as the agents' user (see [`crate::hands`]), with a
-/// 10-minute limit. Never called by an agent.
+/// Runs the command with bash and a 10-minute limit. An agent's own command runs in its folder
+/// as the agents' user (see [`crate::hands`]). AgentFlow's own Merge and Push tag commands run in
+/// the server when it has a GitHub token of its own, so the token never reaches the agents' user;
+/// without one they use the agents' `gh` login like any other button. Never called by an agent.
 pub async fn execute(a: &ActionRow) -> RunResult {
     let dir: PathBuf = if a.workdir.is_empty() { crate::util::home_dir() } else { expand_home(&a.workdir) };
-    let job = crate::hands::Job::Exec {
-        argv: vec!["bash".into(), "-c".into(), a.command.clone()],
-        cwd: Some(dir.clone()),
-        timeout_s: TIMEOUT.as_secs(),
-        // AgentFlow's own Merge and Push tag commands use gh with the server's token when it has
-        // one; an agent's own command never gets it.
-        env: if a.workdir.is_empty() && crate::prs::is_server_command(&a.command) {
-            crate::secrets::gh_env()
-        } else {
-            Vec::new()
-        },
+    let token = if a.server { crate::secrets::gh_env() } else { Vec::new() };
+    let out = if token.is_empty() {
+        crate::hands::run_async::<crate::hands::ExecOut>(hands_job(a)).await
+    } else {
+        run_here(&a.command, token).await
     };
-    match crate::hands::run_async::<crate::hands::ExecOut>(job).await {
+    match out {
         Ok(out) if out.timed_out => {
             RunResult { ok: false, exit_code: None, output: "Stopped after 10 minutes.".into() }
         }
@@ -474,6 +534,69 @@ mod tests {
             let m = crate::projects::get_milestone(c, m.id)?;
             assert_eq!((m.state.as_str(), m.tag.as_str()), ("closed", "v0.0.5-m4"));
             assert_eq!(records::get(c, rel.id)?.state, "tagged");
+            Ok(())
+        })
+        .unwrap();
+    }
+
+    /// A project with repository o/r and its PR #48, which has AgentFlow's own Merge button.
+    fn project_with_pr(c: &Connection) -> anyhow::Result<(Record, ActionRow)> {
+        let p = crate::projects::create(c, "v", "V", "t")?;
+        let patch = crate::projects::ProjectPatch { repo: Some("o/r".into()), ..Default::default() };
+        crate::projects::update(c, p.id, &patch, "t")?;
+        let p = crate::projects::get_by_id(c, p.id)?;
+        let (r, _) = crate::prs::sync(c, &p, "o/r", &pr(48, "main", "b48"), "poller")?;
+        let own = for_record(c, r.id)?.into_iter().next().context("the PR's own Merge button")?;
+        Ok((r, own))
+    }
+
+    #[test]
+    fn the_servers_token_stays_out_of_hands() {
+        let db = Db::open_memory();
+        db.call_blocking(|c| {
+            let (_, own) = project_with_pr(c)?;
+            assert!(own_command(c, &own)?);
+            // What goes over the socket to the agents' user has no place for a token.
+            let job = serde_json::to_string(&hands_job(&own))?;
+            assert!(!job.contains("\"env\"") && !job.contains("GH_TOKEN"), "{job}");
+            Ok(())
+        })
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn own_commands_run_in_the_server_with_the_token() {
+        let token = vec![("GH_TOKEN".to_owned(), "t0k".to_owned())];
+        let out = run_here("echo $GH_TOKEN in $PWD; echo warn >&2; exit 4", token).await.unwrap();
+        assert_eq!((out.code, out.stderr.as_str()), (Some(4), "warn\n"));
+        assert!(out.stdout.starts_with("t0k in "), "{}", out.stdout);
+    }
+
+    #[test]
+    fn only_agentflows_own_commands_get_the_token() {
+        let db = Db::open_memory();
+        db.call_blocking(|c| {
+            let (r, own) = project_with_pr(c)?;
+            assert_eq!(own.command, crate::prs::merge_command("o/r", 48, "merge"));
+            assert!(own_command(c, &own)?, "AgentFlow's Merge button for this PR");
+            // An agent's button with the same shape, for another repository or another PR.
+            let agents = |kind, command: &str| -> anyhow::Result<ActionRow> {
+                let b = NewButton { label: "Merge", kind, command, workdir: "", requires: &[] };
+                Ok(get(c, add(c, &r, &b, "v")?)?.unwrap())
+            };
+            // Only a claimed button knows it: the page's rows never say "server".
+            let (id, hash) = (own.id, own.hash());
+            assert!(!own.server && claim(c, id, &hash)?.server);
+            for (kind, command) in [
+                (ButtonKind::Merge, crate::prs::merge_command("o/other", 7, "merge")),
+                (ButtonKind::Merge, crate::prs::merge_command("o/r", 7, "merge")),
+                (ButtonKind::Other, crate::prs::merge_command("o/r", 48, "merge")),
+                (ButtonKind::Other, crate::prs::tag_command("o/r", "v1", "v1")),
+            ] {
+                let a = agents(kind, &command)?;
+                assert!(crate::prs::is_server_command(&a.command));
+                assert!(!own_command(c, &a)?, "{kind:?} {command}");
+            }
             Ok(())
         })
         .unwrap();
@@ -630,6 +753,7 @@ mod tests {
             finished_at: None,
             exit_code: None,
             output: String::new(),
+            server: false,
         };
         let r = execute(&a).await;
         assert!(!r.ok);

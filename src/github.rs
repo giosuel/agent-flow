@@ -205,8 +205,7 @@ impl GhCli {
         }
         let argv = std::iter::once("gh").chain(args.iter().copied()).map(String::from).collect();
         let out: crate::hands::ExecOut =
-            crate::hands::run_async(crate::hands::Job::Exec { argv, cwd: None, timeout_s: 60, env: Vec::new() })
-                .await?;
+            crate::hands::run_async(crate::hands::Job::Exec { argv, cwd: None, timeout_s: 60 }).await?;
         if out.timed_out {
             bail!("gh took longer than a minute");
         }

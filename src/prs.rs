@@ -179,38 +179,51 @@ pub fn merge_command(repo: &str, number: i64, method: &str) -> String {
     format!("gh pr merge {number} -R {repo} --{method} --delete-branch")
 }
 
-/// Is this exactly a command AgentFlow makes itself (a Merge or Push tag button's)? Only those
-/// run with the server's GitHub token; a command an agent wrote never sees it.
+/// What a command AgentFlow makes itself does: merges a PR, or tags a repository's main.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ServerCommand {
+    Merge { repo: String, number: i64 },
+    Tag { repo: String, tag: String },
+}
+
+/// Is this exactly a command AgentFlow makes itself (a Merge or Push tag button's)? That is only
+/// its shape: whether it runs with the server's GitHub token also depends on the button's record
+/// (see [`crate::actions::own_command`]).
 pub fn is_server_command(cmd: &str) -> bool {
+    server_command(cmd).is_some()
+}
+
+/// The command taken apart, when it is exactly one AgentFlow makes itself.
+pub fn server_command(cmd: &str) -> Option<ServerCommand> {
     let safe = |s: &str| !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || "._-+/".contains(c));
     let w: Vec<&str> = cmd.split(' ').collect();
     if let ["gh", "pr", "merge", n, "-R", repo, method, "--delete-branch"] = w.as_slice() {
         let m = method.trim_start_matches("--");
-        return n.parse::<i64>().is_ok()
-            && crate::projects::looks_like_repo(repo)
+        let number = n.parse::<i64>().ok()?;
+        let ok = crate::projects::looks_like_repo(repo)
             && safe(repo)
-            && cmd == merge_command(repo, n.parse().unwrap_or(0), m)
+            && cmd == merge_command(repo, number, m)
             && ["merge", "squash", "rebase"].contains(&m);
+        return ok.then(|| ServerCommand::Merge { repo: (*repo).to_owned(), number });
     }
     let between = |a: &str, b: &str| cmd.split_once(a).and_then(|(_, r)| r.split_once(b)).map(|(x, _)| x.to_owned());
     // The tag from the last line, after the message.
     let tag = cmd.rsplit_once(" -f ref=refs/tags/").and_then(|(_, r)| r.split_once(' ')).map(|(t, _)| t.to_owned());
     let (Some(repo), Some(tag)) = (between("gh api repos/", "/git/ref/heads/main"), tag) else {
-        return false;
+        return None;
     };
     if !(crate::projects::looks_like_repo(&repo) && safe(&repo) && safe(&tag)) {
-        return false;
-    }
-    if cmd == tag_command_bare(&repo, &tag) {
-        return true;
+        return None;
     }
     // The message is whatever stands between the heredoc's lines; the rest must be exactly ours.
     let start = format!("<<'{MESSAGE_END}'\n");
     let end = format!("\n{MESSAGE_END}\n)");
-    match cmd.split_once(&start).and_then(|(_, r)| r.split_once(&end)) {
-        Some((message, _)) => check_tag_message(message).is_ok() && cmd == tag_command(&repo, &tag, message),
-        None => false,
-    }
+    let ours = cmd == tag_command_bare(&repo, &tag)
+        || cmd
+            .split_once(&start)
+            .and_then(|(_, r)| r.split_once(&end))
+            .is_some_and(|(message, _)| check_tag_message(message).is_ok() && cmd == tag_command(&repo, &tag, message));
+    ours.then_some(ServerCommand::Tag { repo, tag })
 }
 
 /// Every open PR of the project's own repository has its Merge button (Imaginarium's agent,
