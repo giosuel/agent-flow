@@ -44,16 +44,6 @@
 .notice.ok { background: #0F2A1A; color: var(--ok); }
 
 /* Buttons and fields */
-input, textarea, select { font: inherit; background: var(--ground); color: var(--ink); border: 1px solid var(--border); border-radius: 8px; min-height: 44px; padding: 0 12px; }
-/* One height for every one-line field, and selects drawn the same everywhere (Safari on the
-   iPhone otherwise draws its own, shorter and grey). The arrow follows the theme. */
-input:not([type=checkbox]):not([type=radio]):not([type=file]), select { box-sizing: border-box; height: 44px; line-height: normal; }
-select {
-  appearance: none; -webkit-appearance: none; padding-right: 36px; cursor: pointer;
-  background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%);
-  background-position: calc(100% - 19px) 50%, calc(100% - 14px) 50%; background-size: 5px 5px; background-repeat: no-repeat;
-}
-textarea { padding: 10px 12px; resize: vertical; }
 
 /* Sign-in and error pages */
 .bare { align-items: center; justify-content: center; padding: 24px 16px; }
@@ -78,10 +68,6 @@ textarea { padding: 10px 12px; resize: vertical; }
 .rows .item-row:first-child { border-top: 0; }
 .ttl { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .ttl strong { font-weight: 500; overflow-wrap: anywhere; }
-.toggles { border: 0; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
-.toggles legend { margin-bottom: 6px; }
-.toggle { display: flex; align-items: center; gap: 12px; min-height: 44px; cursor: pointer; }
-.toggle input { width: 20px; height: 20px; min-height: 0; accent-color: var(--accent); }
 .warn-text { color: var(--warn-ink); }
 .table-wrap { overflow-x: auto; }
 .table { width: 100%; border-collapse: collapse; font-size: 14px; }
@@ -155,9 +141,6 @@ pre code { background: none; padding: 0; }
 .ext-draft { color: var(--accent); }
 .ext-done summary { cursor: pointer; min-height: 32px; display: flex; align-items: center; }
 /* A draft for someone else's repository. */
-.field { display: flex; flex-direction: column; gap: 6px; font-size: 14px; color: var(--muted); }
-.field input, .field textarea { width: 100%; box-sizing: border-box; color: var(--ink); }
-.field textarea.mono-text { font-family: var(--mono); font-size: 13px; line-height: 1.55; }
 .checks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; font-size: 14px; }
 .checks li { display: flex; gap: 10px; align-items: flex-start; }
 .checks .y { color: var(--ok); }
@@ -504,11 +487,8 @@ button.opt { font: inherit; color: var(--ink); text-align: left; width: 100%; }
 .table.nums thead th:not(:first-child) { text-align: right; }
 /* New project */
 .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px 20px; }
-.form-grid label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--ink2); }
-.form-grid label.span-all { grid-column: 1 / -1; }
-.form-grid input, .form-grid select, .form-grid textarea { font-size: 15px; }
+.form-grid .span-all { grid-column: 1 / -1; }
 /* Below 16px Safari zooms the page when a field is focused. */
-@media (max-width: 600px) { .form-grid input, .form-grid select, .form-grid textarea { font-size: 16px; } }
 /* Review 3 (UX) */
 .only-phone { display: none; }
 .chart .y-zero { position: absolute; left: 0; bottom: 22px; font-size: 11px; transform: translateY(50%); }
@@ -517,7 +497,6 @@ button.opt { font: inherit; color: var(--ink); text-align: left; width: 100%; }
   .only-phone { display: inline; }
   p.only-phone { display: block; }
 }
-.form-grid input::placeholder { color: var(--muted); opacity: .7; }
 .explain { color: var(--ink2); font-size: 15px; display: flex; flex-direction: column; gap: 6px; margin: 0; padding-left: 20px; }
 
 /* Phone: an iOS-style tab bar at the bottom instead of the links at the top (the owner,
@@ -690,7 +669,7 @@ body { box-sizing: border-box; min-height: 100vh; min-height: 100dvh; }
 .tt-list { list-style: none; margin: 0; padding: 0; }
 .tt-item { display: flex; gap: 14px; align-items: flex-start; padding: 12px 0; border-top: 1px solid var(--line2); }
 .tt-list .tt-item:first-child { border-top: 0; }
-.tt-item input[type=checkbox] { width: 22px; height: 22px; min-height: 0; margin: 2px 0 0; accent-color: var(--accent); flex: none; }
+.tt-item input[type=checkbox] { margin-top: 3px; }
 .tt-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
 .tt-body .t { color: var(--ink); font-weight: 500; cursor: pointer; }
 .tt-problem { font-size: 13px; color: var(--warn-ink); }
@@ -876,7 +855,6 @@ a.blk.q:hover { text-decoration: underline; }
 .etb .sep { width: 1px; height: 20px; background: var(--line); margin: 0 8px; }
 .etb .sub { font-size: 12px; }
 .pd-ta { flex: 1; min-height: 0; width: 100%; resize: none; box-sizing: border-box; font-size: 13.5px; line-height: 1.7; padding: 12px 14px; color: #D6D6DC; background: #08080A; border: 1px solid var(--border); border-radius: 0 0 0 8px; }
-.pd-ta:focus { outline: none; border-color: #5B4A99; }
 .pd-prev { border: 1px solid var(--line); border-left: 0; border-radius: 0 8px 8px 0; background: #0C0C0F; overflow-y: auto; padding: 14px 22px; min-height: 0; }
 .pd-prev h2 { font-size: 18px; margin: 18px 0 8px; }
 .pd-foot { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
@@ -902,10 +880,9 @@ a.blk.q:hover { text-decoration: underline; }
 
 /* Notes (the owner, 2026-11-12): any file or text an agent hands in. */
 /* The Notes tab like the Log (the owner, 2026-11-18): one table, an icon per file type. */
-.ntool .lsearch.set, .dd.set > summary { border-color: #5B4A99; }
+.dd.set > summary { border-color: var(--accent-line); }
 .dd.set > summary { background: #161028; }
-.dd-menu .dd-find { min-height: 38px; margin: 0 0 6px; flex: none; }
-.dd-menu .dd-find input { min-height: 34px; }
+.dd-menu .dd-find { margin: 0 0 6px; }
 .ncats .dd-menu { min-width: 290px; }
 .dd-menu a.ck { justify-content: flex-start; align-items: center; gap: 10px; }
 .dd-menu a.ck .grow { flex: 1; }
@@ -1036,15 +1013,6 @@ a.blk.q:hover { text-decoration: underline; }
 .set-rows.dim { opacity: .45; pointer-events: none; }
 .bs-more summary { cursor: pointer; width: fit-content; min-height: 32px; display: inline-flex; align-items: center; color: var(--accent); }
 .bs-more[open] { display: flex; flex-direction: column; gap: 12px; }
-/* A real on/off switch (the owner, 2026-11-17: "lets make the consultant switch into an actually
-   toggle"). The checkbox stays, for keyboards and screen readers; it saves at once. */
-.switch { position: relative; flex: none; width: 46px; height: 26px; cursor: pointer; }
-.switch input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; min-height: 0; }
-.switch span { position: absolute; inset: 0; border-radius: 13px; background: var(--chip); border: 1px solid var(--border); transition: background .15s, border-color .15s; pointer-events: none; }
-.switch span::after { content: ""; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: var(--muted); transition: transform .15s, background .15s; }
-.switch input:checked + span { background: var(--accent); border-color: var(--accent); }
-.switch input:checked + span::after { transform: translateX(20px); background: #17112A; }
-.switch input:focus-visible + span { outline: 2px solid var(--hover); outline-offset: 2px; }
 @media (max-width: 700px) {
   .set-title.chosen { display: none; }
   .set-shell { grid-template-columns: 1fr; min-height: 0; background: none; border: 0; border-radius: 0; overflow: visible; }
@@ -1120,9 +1088,6 @@ a.blk.q:hover { text-decoration: underline; }
 .ltabs a.on .n { color: var(--ink2); }
 .lright { display: flex; align-items: center; gap: 14px; padding: 0 14px 0 10px; flex: none; }
 .ltool { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 14px 20px; background: #0C0C0F; border-bottom: 1px solid var(--line2); }
-.lsearch { flex: 1 1 380px; display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--inset); }
-.lsearch .i { width: 17px; height: 17px; color: var(--muted); flex: none; }
-.lsearch input { flex: 1; min-width: 0; border: 0; background: none; padding: 0; min-height: 40px; outline: none; }
 .dd { position: relative; }
 .dd > summary { list-style: none; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; min-height: 44px; padding: 0 30px 0 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); white-space: nowrap; position: relative; }
 .dd > summary::-webkit-details-marker { display: none; }
@@ -1205,7 +1170,6 @@ ol.lrows { padding: 0; margin: 0; list-style: none; gap: 0; }
   .lright #live { min-height: 36px; padding: 0 10px; }
   .lright #live span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   .ltool { gap: 8px; padding: 12px 16px; }
-  .lsearch { flex-basis: 100%; }
   .dd > summary { min-height: 40px; font-size: 14px; }
   .dd-menu { position: fixed; left: 16px; right: 16px; top: auto; bottom: calc(90px + env(safe-area-inset-bottom)); max-height: 50vh; }
   .ranges { flex-basis: 100%; }
@@ -1297,20 +1261,8 @@ html.no-scroll { overflow: hidden; }
 .lim-t strong { font-weight: 500; }
 .lim-c { display: flex; align-items: center; gap: 10px; flex: none; }
 .lim-c input:not(.num) { width: 240px; }
-.lim-c .num { width: 96px; text-align: right; }
 /* Number fields: our own steppers inside the field's right edge instead of the browser's (the
    owner, 2026-11-23: "make sure the up/down buttons inside the input fields look nice"). */
-.numf { position: relative; display: inline-flex; flex: none; }
-.numf .num { padding-right: 36px; appearance: textfield; -moz-appearance: textfield; }
-.numf .num::-webkit-inner-spin-button, .numf .num::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
-.numf-b { position: absolute; top: 5px; bottom: 5px; right: 5px; width: 24px; display: flex; flex-direction: column; gap: 2px; }
-.numf-b button { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; padding: 0; border: 0; border-radius: 4px; background: var(--chip); color: var(--muted); cursor: pointer; }
-.numf-b button:hover { background: var(--chip-accent); color: var(--chip-accent-ink); }
-.numf-b button:active { background: var(--soft); color: var(--ink); }
-.numf-b button:disabled { opacity: .35; cursor: default; background: var(--chip); color: var(--muted); }
-.numf-b .i { width: 12px; height: 12px; }
-.numf-b [data-step="1"] .i { rotate: -90deg; }
-.numf-b [data-step="-1"] .i { rotate: 90deg; }
 .lim-c .unit { width: 52px; color: var(--muted); font-size: 14px; }
 .lim-save { display: flex; justify-content: flex-end; padding: 6px 0 14px; }
 .lim-danger { border-top: 1px solid var(--line); }
@@ -1820,8 +1772,6 @@ html.no-scroll { overflow: hidden; }
 .cv-mid .cv-lh .label { white-space: nowrap; }
 .cv-mid .cv-lh .sub { font-size: 12px; text-align: right; }
 .cv-midtop { flex: none; display: flex; flex-direction: column; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--line2); }
-.cv-find { min-height: 38px; flex: none; }
-.cv-find input { min-height: 34px; }
 .cv-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .cv-chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; min-height: 30px; border-radius: 999px; border: 1px solid var(--line); color: var(--ink2); text-decoration: none; font-size: 13px; }
 .cv-chip .mono { color: var(--muted); font-size: 12px; }
@@ -2030,6 +1980,8 @@ html.no-scroll { overflow: hidden; }
 .st .cap { font: var(--fs-micro) var(--mono); color: var(--dim); }
 .space-bar { display: block; height: 28px; background: var(--accent-deep); border-radius: 3px; }
 .radius-box { display: block; width: 52px; height: 40px; border: 1.5px solid var(--accent); background: var(--accent-bg); }
+.ui-w { width: 280px; }
+.ui-wide { width: 100%; }
 .icons-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: var(--sp-2); }
 .icons-grid span { display: flex; flex-direction: column; align-items: center; gap: var(--sp-1_5); padding: 10px var(--sp-1); border-radius: var(--r-md); color: var(--ink2); font: var(--fs-micro) var(--mono); }
 .icons-grid span:hover { background: var(--hover-bg); }

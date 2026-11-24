@@ -11,10 +11,10 @@
 
 <form method="get" action="/conversations" class="ltool cvtool">
   {% for (k, v) in keep %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
-  <label class="lsearch{% if !q.is_empty() %} set{% endif %}">{{ crate::web::icons::icon("search")|safe }}<span class="vh">Search messages</span><input name="q" value="{{ q }}" placeholder="Search messages, or a query like from:office to:agent-flow" autocomplete="off"></label>
+  <label class="search{% if !q.is_empty() %} set{% endif %}">{{ crate::web::icons::icon("search")|safe }}<span class="vh">Search messages</span><input name="q" value="{{ q }}" placeholder="Search messages, or a query like from:office to:agent-flow" autocomplete="off"></label>
   <details class="dd cvwho{% if who_label != "All" %} set{% endif %}"><summary><span class="sub">Participant</span> {{ who_label }}</summary>
     <div class="dd-menu">
-      <label class="lsearch dd-find">{{ crate::web::icons::icon("search")|safe }}<span class="vh">Find a session</span><input type="search" placeholder="Find a session" data-find autocomplete="off"></label>
+      <label class="search sm dd-find">{{ crate::web::icons::icon("search")|safe }}<span class="vh">Find a session</span><input type="search" placeholder="Find a session" data-find autocomplete="off"></label>
       <p class="label dd-label">Sessions, most messages first</p>
       {% for w in who %}<a href="{{ w.href }}" class="ck{% if w.on %} on{% endif %}" data-name="{{ w.name }}"{% if w.on %} aria-current="true"{% endif %}><span class="box" aria-hidden="true">{% if w.on %}{{ crate::web::icons::icon("check")|safe }}{% endif %}</span><span class="av sm t-{{ w.avatar.tint }}" aria-hidden="true">{{ w.avatar.initials }}</span><span class="grow">{{ w.name }}</span><span class="mono sub">{{ w.count }}</span></a>{% endfor %}
       {% if who.is_empty() %}<p class="sub dd-none">Nobody yet.</p>{% endif %}
@@ -49,7 +49,7 @@
     <div class="cv-lh"><span class="label">{{ s.list_count }}</span><span class="sub">newest first{% if s.noun == "conversation" && !s.list_count.contains("match") %} · split at a pause of 30 min{% endif %}</span></div>
     <div class="cv-midtop">
       {% if !s.types.is_empty() %}<div class="cv-chips" role="group" aria-label="Type">{% for (label, n, href, on) in s.types %}<a class="cv-chip{% if *on %} on{% endif %}" href="{{ href }}"{% if *on %} aria-current="true"{% endif %}>{{ label }} <span class="mono">{{ n }}</span></a>{% endfor %}</div>{% endif %}
-      <label class="lsearch cv-find">{{ crate::web::icons::icon("search")|safe }}<span class="vh">Find a {{ s.noun }}</span><input type="search" placeholder="Find in these {{ s.noun }}s" data-cv-find autocomplete="off"></label>
+      <label class="search sm cv-find">{{ crate::web::icons::icon("search")|safe }}<span class="vh">Find a {{ s.noun }}</span><input type="search" placeholder="Find in these {{ s.noun }}s" data-cv-find autocomplete="off"></label>
     </div>
     <div class="cv-days" data-cv-days>
       {% for d in s.days %}

@@ -16,7 +16,7 @@
 </div>
 
 <form method="get" action="/log" class="ltool">
-  <label class="lsearch">{{ crate::web::icons::icon("search")|safe }}<span class="vh">Search</span><input name="q" value="{{ q }}" placeholder="Search the text, or a query like actor:imaginarium -action:read" autocomplete="off"></label>
+  <label class="search{% if !q.is_empty() %} set{% endif %}">{{ crate::web::icons::icon("search")|safe }}<span class="vh">Search</span><input name="q" value="{{ q }}" placeholder="Search the text, or a query like actor:imaginarium -action:read" autocomplete="off"></label>
   <input type="hidden" name="range" value="{{ range }}">
   {% for d in drops %}
   <details class="dd"><summary><span class="sub">{{ d.label }}</span> {% if d.picked.is_empty() %}All{% else %}{{ d.picked }}{% endif %}</summary>

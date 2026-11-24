@@ -1,0 +1,7 @@
+{# The UI library's template macros (M15): components whose markup is more than a class. Import with
+   {% import "ui.html" as ui %} at the top of a template; call with {% call ui::number(…) %}{% endcall %}.
+   The table component's headers are in table.html. #}
+
+{# Number: the field with its own steppers (static/ui.css .numf; app.js steps within min and max).
+   id is prefix-key; max may be "" for none. #}
+{% macro number(prefix, key, name, min, max, value) %}<span class="numf"><input id="{{ prefix }}-{{ key }}" class="num" name="{{ name }}" type="number" min="{{ min }}"{% if !max.is_empty() %} max="{{ max }}"{% endif %} step="1" value="{{ value }}"><span class="numf-b"><button type="button" tabindex="-1" data-step="1" aria-label="One more">{{ crate::web::icons::icon("chevron")|safe }}</button><button type="button" tabindex="-1" data-step="-1" aria-label="One less">{{ crate::web::icons::icon("chevron")|safe }}</button></span></span>{% endmacro %}

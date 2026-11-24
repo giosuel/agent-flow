@@ -2499,6 +2499,10 @@ async fn notes_are_files_or_text_and_come_back() {
     let page =
         s.http.get(s.url("/p/vinculum/settings")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
     assert!(page.contains("data-dlg-content") && page.contains("Archive the project"), "{page}");
+    // Model and Effort are selects from one list (the UI library, M15), with fields of one kind.
+    assert!(page.contains(r#"<label class="field">Model<select name="model">"#), "{page}");
+    assert!(page.contains(r#"<label class="field">Effort<select name="effort">"#), "{page}");
+    assert!(!page.contains("edit.g."), "{page}");
     let f = s.http.get(s.url("/p/vinculum/N-2/file")).header(COOKIE, &cookie).send().await.unwrap();
     assert_eq!(f.headers()[CONTENT_TYPE], "application/octet-stream");
     assert!(f.headers()["content-disposition"].to_str().unwrap().starts_with("attachment"));
@@ -4262,7 +4266,24 @@ fn the_ui_library_replaced_the_old_buttons() {
         let rest = l.trim_start().strip_prefix('.')?;
         Some(rest.split(|c: char| !(c.is_ascii_alphanumeric() || c == '-' || c == '_')).next()?.to_owned())
     };
-    let roots: std::collections::BTreeSet<String> = ui.lines().filter_map(class_of).collect();
+    // Every class a library rule names, not only its first: `.field .opt` met the answer cards' `.opt`.
+    let roots: std::collections::BTreeSet<String> = ui
+        .lines()
+        .filter(|l| l.contains('{') && !l.trim_start().starts_with(['/', '@', '-']))
+        .flat_map(|l| {
+            let sel = l.split('{').next().unwrap_or("");
+            sel.split('.')
+                .skip(1)
+                .map(|c| {
+                    c.split(|ch: char| !(ch.is_ascii_alphanumeric() || ch == '-' || ch == '_'))
+                        .next()
+                        .unwrap_or("")
+                        .to_owned()
+                })
+                .collect::<Vec<_>>()
+        })
+        .filter(|c| !c.is_empty())
+        .collect();
     for line in app.lines() {
         if let Some(class) = class_of(line) {
             assert!(!roots.contains(&class), "app.css redefines the library's .{class}: {line}");
@@ -4270,6 +4291,9 @@ fn the_ui_library_replaced_the_old_buttons() {
     }
     let gone = [
         "ghost",
+        "lsearch",
+        "edit.g.",
+        "<datalist",
         "solid-danger",
         "icon-only",
         "reload-btn",
@@ -4311,6 +4335,9 @@ async fn the_ui_catalogue_shows_the_library() {
     assert!(page.contains(r#"<button type="button" class="btn danger-solid">Delete</button>"#), "{page}");
     assert!(page.contains(r#"class="ibtn busy" disabled"#), "{page}");
     assert!(page.contains(r#"<symbol id="i-close" viewBox="0 0 24 24">"#), "the sprite: {page}");
+    assert!(page.contains(r#"<input value="vinculum!" aria-invalid="true""#), "{page}");
+    assert!(page.contains(r#"<span class="numf"><input id="ui-a" class="num" name="jobs" type="number" min="1" max="8" step="1" value="3">"#), "{page}");
+    assert!(page.contains(r#"<span class="numf"><input id="ui-b" class="num" name="max" type="number" min="1" max="8" step="1" value="8">"#), "{page}");
     assert!(page.contains(r#"title="close">"#) && page.contains(r#"title="alert">"#), "every icon: {page}");
     let res = s.http.get(s.url("/ui")).send().await.unwrap();
     assert_ne!(res.status(), reqwest::StatusCode::OK, "not without signing in");
