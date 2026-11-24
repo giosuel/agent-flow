@@ -19,11 +19,11 @@
   <label class="search{% if !q.is_empty() %} set{% endif %}">{{ crate::web::icons::icon("search")|safe }}<span class="vh">Search</span><input name="q" value="{{ q }}" placeholder="Search the text, or a query like actor:imaginarium -action:read" autocomplete="off"></label>
   <input type="hidden" name="range" value="{{ range }}">
   {% for d in drops %}
-  <details class="dd"><summary><span class="sub">{{ d.label }}</span> {% if d.picked.is_empty() %}All{% else %}{{ d.picked }}{% endif %}</summary>
+  <details class="dd{% if !d.picked.is_empty() %} set{% endif %}"><summary><span class="sub">{{ d.label }}</span> {% if d.picked.is_empty() %}All{% else %}{{ d.picked }}{% endif %}</summary>
     <div class="dd-menu"><a href="{{ d.all_href }}"{% if d.picked.is_empty() %} class="on"{% endif %}><span>All</span></a>{% for (v, n, href, on) in d.values %}<a href="{{ href }}"{% if *on %} class="on"{% endif %}><span>{{ v }}</span><span class="mono sub">{{ n }}</span></a>{% endfor %}</div>
   </details>
   {% endfor %}
-  <div class="ranges" role="group" aria-label="Time range">{% for (k, label, href, on) in ranges %}<a class="rng{% if *on %} on{% endif %}" href="{{ href }}"{% if *on %} aria-current="true"{% endif %}>{{ label }}</a>{% endfor %}</div>
+  <div class="seg" role="group" aria-label="Time range">{% for (k, label, href, on) in ranges %}<a{% if *on %} class="on"{% endif %} href="{{ href }}"{% if *on %} aria-current="true"{% endif %}>{{ label }}</a>{% endfor %}</div>
   {% if let Some(r) = reset %}<a class="sub" href="{{ r }}">Clear</a>{% endif %}
 </form>
 

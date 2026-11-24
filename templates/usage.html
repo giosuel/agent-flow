@@ -37,8 +37,8 @@
   <div class="sec wrap"><div class="stack-sm"><h2 id="chart-h">{{ chart_title }}</h2><span class="sub">{% if zoomed %}{{ chart_sub }}{% else %}<span class="hide-phone">Open a day for its hours</span><span class="only-phone">Tap a day for its hours</span>{% endif %}</span></div>
     <span class="row wrap">
       {% if zoomed %}<a class="sub" href="/usage{% for (k, _, on) in metrics %}{% if *on && !k.is_empty() %}?metric={{ k }}{% endif %}{% endfor %}">← Back to 14 days</a>{% endif %}
-      <span class="ranges" role="group" aria-label="What to count">
-        {% for (k, name, on) in metrics %}<a class="rng{% if *on %} on{% endif %}" href="/usage?{{ day_q }}{{ keep_days }}{% if !k.is_empty() %}metric={{ k }}{% endif %}"{% if *on %} aria-current="true"{% endif %}>{{ name }}</a>{% endfor %}
+      <span class="seg sm" role="group" aria-label="What to count">
+        {% for (k, name, on) in metrics %}<a{% if *on %} class="on"{% endif %} href="/usage?{{ day_q }}{{ keep_days }}{% if !k.is_empty() %}metric={{ k }}{% endif %}"{% if *on %} aria-current="true"{% endif %}>{{ name }}</a>{% endfor %}
       </span>
     </span>
   </div>
@@ -84,9 +84,9 @@
 <div class="usage-pair">
 <section class="card pad stack tk-card" aria-labelledby="tasks-h">
   <div class="sec wrap"><div class="tk-title"><h2 id="tasks-h">Tasks by cost</h2><span class="sub">last {{ days }} days</span></div>
-    <span class="ranges" role="group" aria-label="Window">
-      <a class="rng{% if days == 7 %} on{% endif %}" href="/usage?{{ keep_day_metric }}days=7#tasks-h"{% if days == 7 %} aria-current="true"{% endif %}>7 days</a>
-      <a class="rng{% if days == 14 %} on{% endif %}" href="/usage?{{ keep_day_metric }}days=14#tasks-h"{% if days == 14 %} aria-current="true"{% endif %}>14 days</a>
+    <span class="seg sm" role="group" aria-label="Window">
+      <a{% if days == 7 %} class="on"{% endif %} href="/usage?{{ keep_day_metric }}days=7#tasks-h"{% if days == 7 %} aria-current="true"{% endif %}>7 days</a>
+      <a{% if days == 14 %} class="on"{% endif %} href="/usage?{{ keep_day_metric }}days=14#tasks-h"{% if days == 14 %} aria-current="true"{% endif %}>14 days</a>
     </span>
   </div>
   {% if top_tasks.is_empty() %}

@@ -15,7 +15,7 @@
 
 <section class="card pad stack" aria-labelledby="hist-h" id="hist">
   <div class="sec wrap"><h2 id="hist-h">By project</h2>
-    <span class="ranges" role="group" aria-label="Time range">{% for (k, label, on) in ranges %}<a class="rng{% if *on %} on{% endif %}" href="/machine?range={{ k }}"{% if *on %} aria-current="true"{% endif %}>{{ label }}</a>{% endfor %}</span>
+    <span class="seg" role="group" aria-label="Time range">{% for (k, label, on) in ranges %}<a{% if *on %} class="on"{% endif %} href="/machine?range={{ k }}"{% if *on %} aria-current="true"{% endif %}>{{ label }}</a>{% endfor %}</span>
   </div>
   {% if !sampled %}<p class="sub">No samples yet; the first comes a minute or two after AgentFlow starts.</p>{% else %}
   {% if let Some(c) = collecting %}<p class="sub">{{ c }}</p>{% endif %}

@@ -19,7 +19,7 @@
   <details class="dd{% if nv.state_label != "Current" %} set{% endif %}"><summary><span class="sub">State</span> {{ nv.state_label }}</summary>
     <div class="dd-menu">{% for (label, n, href, on) in nv.states %}<a href="{{ href }}"{% if *on %} class="on" aria-current="true"{% endif %}><span>{{ label }}</span><span class="mono sub">{{ n }}</span></a>{% endfor %}</div>
   </details>
-  <div class="ranges" role="group" aria-label="Added">{% for (label, _n, href, on) in nv.ranges %}<a class="rng{% if *on %} on{% endif %}" href="{{ href }}"{% if *on %} aria-current="true"{% endif %}>{{ label }}</a>{% endfor %}</div>
+  <div class="seg" role="group" aria-label="Added">{% for (label, _n, href, on) in nv.ranges %}<a{% if *on %} class="on"{% endif %} href="{{ href }}"{% if *on %} aria-current="true"{% endif %}>{{ label }}</a>{% endfor %}</div>
   {% if let Some(r) = nv.reset %}<a class="sub" href="{{ r }}">Clear</a>{% endif %}
 </form>
 <section class="card lpanel npanel" aria-labelledby="notes-h">
