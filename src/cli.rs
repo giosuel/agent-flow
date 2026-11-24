@@ -423,6 +423,49 @@ pub struct RemoteArgs {
 /// Runs a build or test on a build server and prints its output as it comes; exits with its exit
 /// code. Exit code 75 means the server is offline: build here instead.
 #[derive(Args)]
+pub struct NoteArgs {
+    #[command(flatten)]
+    pub client: ClientArgs,
+    /// The file: any kind, up to 25 MB (a morning report, a plan, a benchmark, a log).
+    pub file: PathBuf,
+    /// What it is, in a few words, e.g. "Morning report, 12 Nov".
+    #[arg(long, default_value = "")]
+    pub name: String,
+    /// A category of your choosing: morning report, overnight plan, estimate, known issue, …
+    #[arg(long, default_value = "")]
+    pub category: String,
+    /// More about it (Markdown).
+    #[arg(long, default_value = "")]
+    pub description: String,
+    /// A record it belongs to, e.g. T-12.
+    #[arg(long)]
+    pub record: Option<String>,
+    /// When it should come back to you in hello: a date (2026-11-25) or a condition.
+    #[arg(long)]
+    pub resurface: Option<String>,
+    /// A new version of this note's file, e.g. N-6 (the old one is kept).
+    #[arg(long)]
+    pub replaces: Option<String>,
+}
+
+/// Uploads a file as a note of the project.
+pub fn note(config_path: &Path, a: NoteArgs) -> anyhow::Result<()> {
+    let client = Client::new(config_path, &a.client)?.with_timeout(std::time::Duration::from_secs(300));
+    let file = std::fs::File::open(&a.file).with_context(|| format!("can't open {}", a.file.display()))?;
+    let filename = a.file.file_name().and_then(|n| n.to_str()).unwrap_or("note").to_owned();
+    let mut q = vec![("name", a.name.clone()), ("category", a.category.clone()), ("filename", filename), ("description", a.description.clone())];
+    for (k, v) in [("record", &a.record), ("resurface", &a.resurface), ("replaces", &a.replaces)] {
+        if let Some(v) = v {
+            q.push((k, v.clone()));
+        }
+    }
+    let query = q.iter().map(|(k, v)| format!("{k}={}", url_encode(v))).collect::<Vec<_>>().join("&");
+    let res = client.post_file(&format!("/api/notes?{query}"), file)?;
+    println!("Uploaded as {}: {}", res["id"].as_str().unwrap_or(""), res["url"].as_str().unwrap_or(""));
+    Ok(())
+}
+
+#[derive(Args)]
 pub struct TimeArgs {
     #[command(flatten)]
     pub client: ClientArgs,

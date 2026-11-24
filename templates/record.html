@@ -30,6 +30,15 @@
     </figure>
     {% endif %}
 
+    {% if let Some(nt) = note %}
+    <section class="stack-sm" aria-labelledby="note-h">
+      <div class="row wrap"><h2 class="label" id="note-h">{% if nt.download.is_empty() %}Note{% else %}File{% endif %}</h2>{% if !nt.category.is_empty() %}<span class="chip">{{ nt.category }}</span>{% endif %}{% if !nt.size.is_empty() %}<span class="sub">{{ nt.filename }} · {{ nt.size }}</span>{% endif %}<span class="grow"></span>{% if !nt.download.is_empty() %}<a class="btn sm ghost" href="{{ nt.download }}" download>Download</a>{% endif %}</div>
+      {% if !nt.resurface.is_empty() %}<p class="sub">Comes back to the agent {{ nt.resurface }}.</p>{% endif %}
+      {% if !nt.text_html.is_empty() %}<div class="md-doc prose">{{ nt.text_html|safe }}</div>{% endif %}
+      {% if !nt.plain.is_empty() %}<pre class="md-doc mono note-plain">{{ nt.plain }}</pre>{% endif %}
+      {% if !nt.versions.is_empty() %}<p class="sub">Older versions: {% for (v, u) in nt.versions %}<a href="{{ u }}" download>v{{ v }}</a>{% if !loop.last %}, {% endif %}{% endfor %}</p>{% endif %}
+    </section>
+    {% endif %}
     {% if let Some(tv) = time %}
     <section class="stack-sm" aria-labelledby="time-h">
       <h2 class="label" id="time-h">Time</h2>

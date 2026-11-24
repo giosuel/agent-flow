@@ -114,6 +114,19 @@ pub struct EditProjectDoc {
     pub text: String,
 }
 
+fn notes_back(c: &rusqlite::Connection, project_id: i64) -> anyhow::Result<Value> {
+    let now = now_ms();
+    let notes = records::query(c, &Query { project_id: Some(project_id), kinds: vec![Kind::Note], states: vec!["current".into()], limit: 0, ..Default::default() })?;
+    Ok(Value::Array(
+        notes
+            .iter()
+            .filter(|n| !n.str("resurface").is_empty())
+            .filter(|n| n.data.get("resurface_at").and_then(Value::as_i64).is_none_or(|at| at <= now))
+            .map(|n| json!({"id": n.short_id(), "name": n.title, "category": n.str("category"), "when": n.str("resurface")}))
+            .collect(),
+    ))
+}
+
 fn doc_json(d: &crate::projectdoc::Doc) -> Value {
     json!({"text": d.text, "rev": d.rev, "edited": if d.rev > 0 { format!("{} by {} ({})", crate::util::fmt_utc(d.updated_at), d.author, d.what) } else { String::new() }})
 }
@@ -230,6 +243,8 @@ impl FlowMcp {
                     // Where you are: each step under way, its tasks in doing, the next one, and
                     // what's blocked by what.
                     "where": crate::steps::where_json(c, project.id)?,
+                    // Notes that come back today (a date that's here) or until resolved (a condition).
+                    "notes_back": notes_back(c, project.id)?,
                     "open_questions": open.iter().map(|q| json!({"id": q.ref_id, "title": q.title})).collect::<Vec<_>>(),
                     "answered_this_week": answered.iter().map(|q| json!({"id": q.ref_id, "title": q.title, "answer": q.data.get("answer")})).collect::<Vec<_>>(),
                     "unread_events": unread,

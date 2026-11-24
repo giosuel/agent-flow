@@ -19,6 +19,7 @@ mod logview;
 mod machine;
 mod markdown;
 mod mcp;
+mod notes;
 mod messages;
 mod onboard;
 mod outgoing;
@@ -83,6 +84,9 @@ enum Command {
     /// test --workspace`. Measures wall time, CPU and peak memory, prints them, logs them on the
     /// task, step or PR, and exits with the command's exit code.
     Time(cli::TimeArgs),
+    /// Hand in a file as a note (agents): a morning report, a plan, an estimate, a benchmark, a
+    /// log. `agentflow note report.md --name "Morning report, 12 Nov" --category "morning report"`.
+    Note(cli::NoteArgs),
     /// Fetch and start a test build (the owner's machines). Also `flow-run`: the same program
     /// called by that name runs this. Without a product, lists the products; `run <product>
     /// list` lists its builds.
@@ -158,6 +162,7 @@ fn main() -> anyhow::Result<()> {
             let code = cli::remote(&config_path, args)?;
             std::process::exit(code);
         }
+        Command::Note(args) => cli::note(&config_path, args),
         Command::Time(args) => {
             let code = cli::time(&config_path, args)?;
             std::process::exit(code);

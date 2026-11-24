@@ -107,6 +107,39 @@ pub struct UpdateTask {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct AddNote {
+    /// What it is, in a few words, e.g. "Loro depends on the unmaintained im crate".
+    pub name: String,
+    /// A category of your choosing, e.g. "known issue", "technical note", "morning report",
+    /// "estimate". Keep using the same ones. For files, use the `agentflow note <file>` command.
+    pub category: String,
+    /// The note itself, Markdown.
+    pub text: String,
+    /// A record it belongs to, e.g. "T-31".
+    pub record: Option<String>,
+    /// When it should come back to you in hello: a date ("2026-11-25") or a condition ("when Loro
+    /// updates", listed in every hello until you resolve it).
+    pub resurface: Option<String>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct UpdateNote {
+    /// The note, e.g. "N-4".
+    pub id: String,
+    pub name: Option<String>,
+    pub category: Option<String>,
+    /// A text note's new text (a file gets a new version with `agentflow note --replaces N-4`).
+    pub text: Option<String>,
+    /// When it comes back; empty stops it coming back.
+    pub resurface: Option<String>,
+    /// "resolved" when a known issue is gone or the note no longer holds (say why in note), or
+    /// "current" again.
+    pub state: Option<String>,
+    #[serde(default)]
+    pub note: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct LogTiming {
     /// What ran, e.g. "cargo test --workspace".
     pub what: String,
@@ -665,6 +698,107 @@ impl FlowMcp {
             })
             .await;
         self.finish(&actor, "log_timing", Action::Write, outcome).await
+    }
+
+    #[tool(description = "Write a short note: a known issue, a technical note, an estimate, anything worth keeping \
+        that isn't a task or a decision. Files (reports, plans, benchmarks, logs) go up with `agentflow note <file> \
+        --name … --category …`. A note can come back to you in hello: on a date, or until you resolve it.")]
+    async fn add_note(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(p): Parameters<AddNote>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let actor = actor_of(&parts);
+        let a = actor.clone();
+        let outcome = self
+            .state
+            .db
+            .call(move |c| {
+                let tx = c.transaction()?;
+                let project = target_project(&tx, &a, None, true)?;
+                let category = crate::screenshots::category(&p.category)?;
+                if p.text.trim().is_empty() {
+                    anyhow::bail!("a text note needs its text; a file goes up with `agentflow note <file>`");
+                }
+                if p.text.len() > 64 * 1024 {
+                    anyhow::bail!("that's long for a text note; upload it as a file with `agentflow note <file>`");
+                }
+                let mut data = Map::new();
+                data.insert("category".into(), category.into());
+                if let Some(r) = p.resurface.as_deref().map(str::trim).filter(|r| !r.is_empty()) {
+                    let (at, text) = crate::notes::resurface(r)?;
+                    data.insert("resurface".into(), text.into());
+                    data.insert("resurface_at".into(), at.map(Value::from).unwrap_or(Value::Null));
+                }
+                let n = records::create(
+                    &tx,
+                    project.id,
+                    &a.name(),
+                    NewRecord { kind: Some(Kind::Note), title: p.name, body: p.text, data, ..Default::default() },
+                )?;
+                if let Some(r) = p.record.as_deref().map(str::trim).filter(|r| !r.is_empty()) {
+                    let target = records::find_str(&tx, r, Some(&project.slug))?;
+                    records::link(&tx, &n, &target, "relates", &a.name())?;
+                }
+                tx.commit()?;
+                Ok(Outcome::new(json!({"id": n.ref_id})).summary(format!("note {} added", n.short_id())).project(project.slug).target(n.ref_id))
+            })
+            .await;
+        self.finish(&actor, "add_note", Action::Write, outcome).await
+    }
+
+    #[tool(description = "Change a note: its name, category, text (text notes), when it comes back, or resolve it \
+        (a known issue that's gone, a note that no longer holds; say why).")]
+    async fn update_note(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(p): Parameters<UpdateNote>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let actor = actor_of(&parts);
+        let a = actor.clone();
+        let outcome = self
+            .state
+            .db
+            .call(move |c| {
+                let tx = c.transaction()?;
+                let n = writable(&tx, &a, &p.id)?;
+                if n.kind != Kind::Note {
+                    anyhow::bail!("{} isn't a note", n.ref_id);
+                }
+                if p.text.is_some() && !n.str("ext").is_empty() {
+                    anyhow::bail!("{} is a file; upload a new version with `agentflow note <file> --replaces {}`", n.short_id(), n.short_id());
+                }
+                if p.state.as_deref() == Some("resolved") && p.note.trim().is_empty() {
+                    anyhow::bail!("say why it's resolved, in note");
+                }
+                let mut data = Map::new();
+                if let Some(cat) = &p.category {
+                    data.insert("category".into(), crate::screenshots::category(cat)?.into());
+                }
+                if let Some(r) = &p.resurface {
+                    if r.trim().is_empty() {
+                        data.insert("resurface".into(), Value::Null);
+                        data.insert("resurface_at".into(), Value::Null);
+                    } else {
+                        let (at, text) = crate::notes::resurface(r)?;
+                        data.insert("resurface".into(), text.into());
+                        data.insert("resurface_at".into(), at.map(Value::from).unwrap_or(Value::Null));
+                    }
+                }
+                let (n, changed) = records::update(
+                    &tx,
+                    &n,
+                    &a.name(),
+                    Patch { title: p.name, body: p.text, state: p.state, data, note: p.note, ..Default::default() },
+                )?;
+                tx.commit()?;
+                Ok(Outcome::new(json!({"id": n.ref_id, "state": n.state, "changed": changed}))
+                    .summary(format!("note {} updated", n.short_id()))
+                    .project(n.project.clone())
+                    .target(n.ref_id))
+            })
+            .await;
+        self.finish(&actor, "update_note", Action::Write, outcome).await
     }
 
     #[tool(description = "Change a task, or several at once with ids: its state (todo, doing, review, done, blocked, \

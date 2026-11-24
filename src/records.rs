@@ -28,10 +28,14 @@ pub enum Kind {
     /// Something for the owner to test, with a category the agent picks (the owner, 2026-11-11:
     /// "a log of things that i need to test"). Open ones come along with every release and build.
     Test,
+    /// A note: any file or a short text an agent hands in, with a category (the owner, 2026-11-12:
+    /// "some generic upload "note" endpoint so agents can submit any kind of files, like morning
+    /// reports, estimates, etc."). Known issues are notes that can resurface.
+    Note,
 }
 
 impl Kind {
-    pub const ALL: [Kind; 11] = [
+    pub const ALL: [Kind; 12] = [
         Kind::Question,
         Kind::Decision,
         Kind::Task,
@@ -43,6 +47,7 @@ impl Kind {
         Kind::Contribution,
         Kind::Screenshot,
         Kind::Test,
+        Kind::Note,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -58,6 +63,7 @@ impl Kind {
             Kind::Contribution => "contribution",
             Kind::Screenshot => "screenshot",
             Kind::Test => "test",
+            Kind::Note => "note",
         }
     }
 
@@ -75,6 +81,7 @@ impl Kind {
             Kind::Contribution => "C",
             Kind::Screenshot => "S",
             Kind::Test => "TT",
+            Kind::Note => "N",
         }
     }
 
@@ -91,6 +98,7 @@ impl Kind {
             Kind::Contribution => "External contribution",
             Kind::Screenshot => "Screenshot",
             Kind::Test => "To test",
+            Kind::Note => "Note",
         }
     }
 
@@ -116,6 +124,8 @@ impl Kind {
             Kind::Screenshot => &["current", "withdrawn"],
             // open: to test; tested: the owner tried it and it works; dropped: no longer needed.
             Kind::Test => &["open", "tested", "dropped"],
+            // resolved: a known issue that's gone, or a note no longer current (with a reason).
+            Kind::Note => &["current", "resolved"],
         }
     }
 
@@ -146,7 +156,7 @@ pub fn finished_word(kind: Kind) -> &'static str {
         Kind::Question => "answered",
         Kind::Build => "tried",
         Kind::Contribution => "merged",
-        Kind::Decision | Kind::Adr | Kind::Screenshot => "current",
+        Kind::Decision | Kind::Adr | Kind::Screenshot | Kind::Note => "current",
         Kind::Test => "tested",
         Kind::Feedback => "works",
         Kind::Task => "done",

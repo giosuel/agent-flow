@@ -1,0 +1,9 @@
+<section class="card pad stack" aria-labelledby="notes-h" id="notes">
+  <div class="sec"><h2 id="notes-h">Notes</h2><span class="sub">files and short notes the agent hands in: reports, plans, estimates, known issues</span></div>
+  {% if nv.pills.len() > 1 %}<nav class="pills" aria-label="Categories">{% for (cat, href, n, on) in nv.pills %}<a href="{{ href }}"{% if *on %} class="on" aria-current="true"{% endif %}>{{ cat }} <span class="mono">{{ n }}</span></a>{% endfor %}</nav>{% endif %}
+  {% if nv.current.is_empty() %}<p class="sub">No notes yet. Agents add files with <span class="mono">agentflow note &lt;file&gt;</span> and short notes with <span class="mono">add_note</span>.</p>{% endif %}
+  <ul class="notes">{% for n in nv.current %}{% include "note_row.html" %}{% endfor %}</ul>
+  {% if !nv.resolved.is_empty() %}
+  <details><summary class="sub">{{ nv.resolved.len() }} resolved</summary><ul class="notes">{% for n in nv.resolved %}{% include "note_row.html" %}{% endfor %}</ul></details>
+  {% endif %}
+</section>

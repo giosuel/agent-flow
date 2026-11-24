@@ -1377,6 +1377,53 @@ async fn the_project_document_is_the_agents_and_the_owners() {
 }
 
 #[tokio::test]
+async fn notes_are_files_or_text_and_come_back() {
+    let s = TestServer::start().await;
+    let token = s.token(TokenKind::Project, Some("vinculum")).await;
+    let sess = mcp_session(&s, &token).await;
+    let call = |name: &'static str, args: Value| {
+        let (s, token, sess) = (&s, token.clone(), sess.clone());
+        async move { mcp_tool(s, &token, &sess, name, args).await }
+    };
+    // A file: any kind, kept and offered for download, never as a page.
+    let up = |q: &'static str, body: &'static [u8]| {
+        let (s, token) = (&s, token.clone());
+        async move { s.http.post(s.url(&format!("/api/notes?{q}"))).bearer_auth(&token).body(body).send().await.unwrap() }
+    };
+    let res = up("name=Morning%20report&category=Morning%20Report&filename=report.md", b"# Done\n\n- T-4").await;
+    assert!(res.status().is_success(), "{}", res.text().await.unwrap());
+    let res = up("name=Page&category=x&filename=evil.html", b"<script>alert(1)</script>").await;
+    assert!(res.status().is_success());
+    assert!(!up("name=&category=x&filename=a.txt", b"x").await.status().is_success(), "a name");
+    // A new version keeps the old file.
+    assert!(up("replaces=N-1&filename=report.md&name=&category=", b"# Done\n\n- T-4\n- T-5").await.status().is_success());
+    // A text note that comes back until resolved, one on a past date, one later.
+    let (ok, n) = call("add_note", json!({"name": "Loro needs im", "category": "known issue", "text": "Check on every Loro update.", "resurface": "when Loro updates"})).await;
+    assert!(ok, "{n}");
+    assert!(call("add_note", json!({"name": "x-wing pin", "category": "known issue", "text": "pinned", "resurface": "2020-01-01"})).await.0);
+    assert!(call("add_note", json!({"name": "Later", "category": "known issue", "text": "later", "resurface": "2099-01-01"})).await.0);
+    let (_, hello) = call("hello", json!({"session": "V", "machine": "m", "model": "o", "effort": "h"})).await;
+    let mut back: Vec<&str> = hello["notes_back"].as_array().unwrap().iter().map(|n| n["name"].as_str().unwrap()).collect();
+    back.sort_unstable();
+    assert_eq!(back, ["Loro needs im", "x-wing pin"], "{hello}");
+    assert!(!call("update_note", json!({"id": "N-3", "state": "resolved"})).await.0, "a reason");
+    assert!(call("update_note", json!({"id": "N-3", "state": "resolved", "note": "Loro 1.3 dropped im"})).await.0);
+    assert!(!call("update_note", json!({"id": "N-1", "text": "x"})).await.0, "files get a new version instead");
+
+    let cookie = s.owner_cookie().await;
+    let tab = s.http.get(s.url("/p/vinculum?tab=notes")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
+    assert!(tab.contains("Morning report") && tab.contains("morning report") && tab.contains("1 resolved"), "{tab}");
+    assert!(tab.contains("comes back when Loro updates") || tab.contains("2 versions"), "{tab}");
+    let page = s.http.get(s.url("/p/vinculum/N-1")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
+    assert!(page.contains("<li>T-5</li>") && page.contains("v1"), "the newest version rendered: {page}");
+    let f = s.http.get(s.url("/p/vinculum/N-2/file")).header(COOKIE, &cookie).send().await.unwrap();
+    assert_eq!(f.headers()[CONTENT_TYPE], "application/octet-stream");
+    assert!(f.headers()["content-disposition"].to_str().unwrap().starts_with("attachment"));
+    let old = s.http.get(s.url("/p/vinculum/N-1/file?v=1")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
+    assert!(old.contains("T-4") && !old.contains("T-5"));
+}
+
+#[tokio::test]
 async fn screenshots_are_uploaded_shown_and_linked() {
     let s = TestServer::start().await;
     let token = s.token(TokenKind::Project, Some("vinculum")).await;
