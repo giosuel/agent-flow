@@ -2668,9 +2668,15 @@ async fn jobs_run_on_a_builder_and_bring_back_what_was_asked() {
                 .unwrap()
         }
     };
-    // A project without a build server builds where its agent is.
+    // A project without a build server picked is told which builders are online (not "offline").
     let res = start(work.join("crate"), agent.clone()).await;
     assert_eq!(res.status(), StatusCode::SERVICE_UNAVAILABLE);
+    let v: Value = res.json().await.unwrap();
+    assert_eq!(v["none_picked"], true, "{v}");
+    assert!(v["online"].as_array().unwrap().iter().any(|n| n == name), "{v}");
+    let hint =
+        s.db.call(|c| crate::remote::build_hint(c, crate::projects::get(c, "imaginarium")?.unwrap().id)).await.unwrap();
+    assert!(hint["how"].as_str().unwrap().contains("--server"), "{hint}");
     s.db.call(|c| {
         let p = crate::projects::get(c, "imaginarium")?.unwrap();
         crate::remote::set_project_server(c, p.id, name)

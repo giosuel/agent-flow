@@ -21,6 +21,13 @@ struct Args {
 enum Command {
     /// Run the server.
     Serve,
+    /// Back up the database now, into the data folder's backups (e.g. before an install). Opens it
+    /// read-only, so it never migrates it; the server may keep running.
+    Backup {
+        /// What it's for, in the file's name, e.g. "pre-install".
+        #[arg(long, default_value = "")]
+        name: String,
+    },
     /// Print the root command that installs Claude Code managed settings keeping agents' file
     /// tools away from AgentFlow's tokens and data (the packages will do this themselves).
     ManagedSettings,
@@ -60,6 +67,12 @@ fn main() -> anyhow::Result<()> {
             let vapid = push::Vapid::load_or_create(&config.data_dir())?;
             let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().build()?;
             runtime.block_on(web::serve(web::AppState::new(db, config, vapid, std::sync::Arc::new(github::GhCli))))
+        }
+        Command::Backup { name } => {
+            let config = config::Config::load(&config_path)?;
+            let path = agentflow::backup::backup_named(&config.data_dir(), &config.db_path(), &name)?;
+            println!("{}", path.display());
+            Ok(())
         }
         Command::ManagedSettings => {
             let config = config::Config::load(&config_path)?;

@@ -351,6 +351,8 @@ pub(crate) fn hello_reply(
         "answered_this_week": answered.iter().map(|q| json!({"id": q.ref_id, "title": q.title, "answer": q.data.get("answer")})).collect::<Vec<_>>(),
         "new_project_decisions": new_project_decisions,
         "unread_events": unread,
+        // Where heavy builds and tests go.
+        "builds": crate::remote::build_hint(c, project.id)?,
         "recent_events": recent.iter().map(|e| json!({"at": crate::util::fmt_utc(e.at), "what": e.summary, "by": e.actor})).collect::<Vec<_>>(),
         // The CLI (publish, screenshot, contribute, remote, wait) needs the same token.
         "cli": {

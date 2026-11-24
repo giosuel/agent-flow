@@ -23,33 +23,79 @@ pub fn backup(conn: &Connection, data_dir: &Path, date: &str) -> anyhow::Result<
     if path.exists() {
         return Ok(None);
     }
+    copy_into(conn, &dir, &path)?;
+    // Keep the newest daily ones; names sort by date.
+    prune(&dir, |n| n.len() == "flow-2026-01-01.db".len(), KEEP);
+    Ok(Some(path))
+}
+
+/// A backup on request (`agentflow backup`, e.g. before an install; the owner, 2026-11-17: "a
+/// script (or a small server cli) that backs up the database that is shipped with agentflow"):
+/// `backups/flow-<date>-<time>-<what>.db`, mode 600. The database is opened read-only, so the
+/// program that makes it never migrates it (an install runs the new program before the old server
+/// stops). The newest 20 of these are kept, apart from the daily ones.
+pub fn backup_named(data_dir: &Path, db_path: &Path, what: &str) -> anyhow::Result<PathBuf> {
+    let what: String = what
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '.' { c } else { '-' })
+        .take(60)
+        .collect();
+    let conn = Connection::open_with_flags(
+        db_path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )?;
+    conn.busy_timeout(std::time::Duration::from_secs(10))?;
+    let dir = data_dir.join("backups");
+    std::fs::create_dir_all(&dir)?;
+    let stamp = stamp();
+    let path = dir.join(if what.is_empty() { format!("flow-{stamp}.db") } else { format!("flow-{stamp}-{what}.db") });
+    copy_into(&conn, &dir, &path)?;
+    prune(&dir, |n| n.len() > "flow-2026-01-01.db".len(), 20);
+    Ok(path)
+}
+
+/// "2026-11-17-1230" in UTC.
+fn stamp() -> String {
+    let t = time::OffsetDateTime::from_unix_timestamp_nanos(crate::util::now_ms() as i128 * 1_000_000)
+        .unwrap_or(time::OffsetDateTime::UNIX_EPOCH);
+    t.format(time::macros::format_description!("[year]-[month]-[day]-[hour][minute]")).unwrap_or_default()
+}
+
+fn prune(dir: &Path, which: impl Fn(&str) -> bool, keep: usize) {
+    let Ok(rd) = std::fs::read_dir(dir) else { return };
+    let mut all: Vec<PathBuf> = rd
+        .filter_map(Result::ok)
+        .map(|e| e.path())
+        .filter(|p| {
+            p.file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.starts_with("flow-") && n.ends_with(".db") && which(n))
+        })
+        .collect();
+    all.sort();
+    let excess = all.len().saturating_sub(keep);
+    for old in &all[..excess] {
+        let _ = std::fs::remove_file(old);
+    }
+}
+
+/// A consistent copy (SQLite's VACUUM INTO, fine while the server writes), mode 600.
+fn copy_into(conn: &Connection, dir: &Path, path: &Path) -> anyhow::Result<()> {
     // The disk is shared with production: a copy needs room for itself and 5 GB to spare.
     let size: i64 =
         conn.query_row("SELECT page_count * page_size FROM pragma_page_count(), pragma_page_size()", [], |r| r.get(0))?;
-    let free = rustix::fs::statvfs(&dir).map(|s| s.f_bavail.saturating_mul(s.f_frsize)).unwrap_or(0);
+    let free = rustix::fs::statvfs(dir).map(|s| s.f_bavail.saturating_mul(s.f_frsize)).unwrap_or(0);
     if free < size as u64 + 5 * 1024 * 1024 * 1024 {
         anyhow::bail!("not backing up: {} GB free on the disk is too little", free >> 30);
     }
-    let tmp = dir.join(format!(".flow-{date}.db.tmp"));
+    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("flow.db");
+    let tmp = dir.join(format!(".{name}.tmp"));
     let _ = std::fs::remove_file(&tmp);
     conn.execute("VACUUM INTO ?1", [tmp.to_string_lossy()])?;
     // Only the server's user reads it, whatever the umask of whoever ran the backup.
     std::fs::set_permissions(&tmp, std::os::unix::fs::PermissionsExt::from_mode(0o600))?;
-    std::fs::rename(&tmp, &path)?;
-    // Keep the newest ones; names sort by date.
-    let mut all: Vec<PathBuf> = std::fs::read_dir(&dir)?
-        .filter_map(Result::ok)
-        .map(|e| e.path())
-        .filter(|p| {
-            p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with("flow-") && n.ends_with(".db"))
-        })
-        .collect();
-    all.sort();
-    let excess = all.len().saturating_sub(KEEP);
-    for old in &all[..excess] {
-        let _ = std::fs::remove_file(old);
-    }
-    Ok(Some(path))
+    std::fs::rename(&tmp, path)?;
+    Ok(())
 }
 
 fn record_md(out: &mut String, r: &Record) {
@@ -168,6 +214,22 @@ pub fn spawn(state: crate::web::AppState) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_named_backup_is_read_only_private_and_kept_apart_from_the_daily_ones() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("flow.db");
+        drop(crate::db::Db::open(&db_path).unwrap());
+        let a = backup_named(dir.path(), &db_path, "pre install/../x").unwrap();
+        let name = a.file_name().unwrap().to_str().unwrap().to_owned();
+        assert!(name.starts_with("flow-") && name.ends_with("-pre-install-..-x.db") && !name.contains('/'), "{name}");
+        assert_eq!(std::fs::metadata(&a).unwrap().permissions().mode() & 0o777, 0o600);
+        let copy = Connection::open(&a).unwrap();
+        let n: i64 =
+            copy.query_row("SELECT count(*) FROM sqlite_master WHERE name = 'projects'", [], |r| r.get(0)).unwrap();
+        assert_eq!(n, 1, "a whole database");
+    }
 
     #[test]
     fn backups_and_exports() {

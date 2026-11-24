@@ -676,7 +676,9 @@ pub struct RemoteArgs {
 }
 
 /// Runs a build or test on a build server and prints its output as it comes; exits with its exit
-/// code. Exit code 75 means the server is offline: build here instead.
+/// code. Exit code 75 means the server is offline: build here instead. Exit code 78 means the
+/// project has no build server picked; the message names the builders that are online, for
+/// `--server`.
 #[derive(Args)]
 pub struct NoteArgs {
     #[command(flatten)]
@@ -874,7 +876,8 @@ pub fn remote(config_path: &Path, a: RemoteArgs) -> anyhow::Result<i32> {
     let v: serde_json::Value = res.json().unwrap_or(serde_json::Value::Null);
     if status == reqwest::StatusCode::SERVICE_UNAVAILABLE {
         eprintln!("{}", v["error"].as_str().unwrap_or("the build server is offline"));
-        return Ok(75);
+        // 78: nothing picked (a builder may be online: --server names it); 75: offline.
+        return Ok(if v["none_picked"].as_bool() == Some(true) { 78 } else { 75 });
     }
     if !status.is_success() {
         bail!("{status}: {}", v["error"].as_str().unwrap_or("couldn't start the job"));

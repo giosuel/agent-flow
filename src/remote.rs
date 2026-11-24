@@ -554,6 +554,37 @@ pub fn project_server(conn: &Connection, project_id: i64) -> anyhow::Result<Opti
         .optional()?)
 }
 
+/// Where a project's agent builds, for `hello` and `flow remote` (the owner, 2026-11-17: agents
+/// kept building locally while a builder was online): the picked builder and whether it's online,
+/// or, with none picked, the builders that are online.
+pub fn build_hint(conn: &Connection, project_id: i64) -> anyhow::Result<serde_json::Value> {
+    let hub = crate::builders::hub();
+    let online: Vec<String> = load_servers(conn)?.into_iter().map(|b| b.name).filter(|n| hub.is_online(n)).collect();
+    Ok(match project_server(conn, project_id)? {
+        Some(name) => {
+            let up = hub.is_online(&name);
+            serde_json::json!({
+                "server": name,
+                "online": up,
+                "how": if up {
+                    format!("Heavy builds and tests go to {name}: flow remote [--fetch target/release/app] -- cargo build --release. Programs that must run on this machine (a different glibc) are built here.")
+                } else {
+                    format!("{name} is offline: build here (flow remote exits 75).")
+                },
+            })
+        }
+        None => serde_json::json!({
+            "server": null,
+            "online_builders": online,
+            "how": if online.is_empty() {
+                "No build server is picked for this project and none is online: build here.".to_owned()
+            } else {
+                format!("No build server is picked for this project (the owner picks one in its Settings), but {} online: flow remote --server {} -- …", online.join(", "), online[0])
+            },
+        }),
+    })
+}
+
 /// Picks a project's build server ("" for none).
 pub fn set_project_server(conn: &Connection, project_id: i64, server: &str) -> anyhow::Result<()> {
     if server.is_empty() {

@@ -72,12 +72,23 @@ async fn start(State(state): State<AppState>, Extension(actor): Extension<Actor>
     let picked = state.db.call(move |c| remote::project_server(c, pid)).await.ok().flatten();
     let wanted = s.server.clone().or(picked);
     let Some(server) = wanted.as_ref().and_then(|n| servers.iter().find(|b| &b.name == n)) else {
-        // Nothing to build on: like offline, so the agent builds here.
-        let why = match wanted {
-            Some(n) => format!("there's no build server called {n}; build here instead"),
-            None => "this project has no build server (the owner picks one in its Settings); build here instead".into(),
+        // Nothing picked: said apart from offline, naming the builders that are online, so an agent
+        // doesn't quietly build here while one waits (the owner, 2026-11-17).
+        let online: Vec<String> =
+            servers.iter().map(|b| b.name.clone()).filter(|n| crate::builders::hub().is_online(n)).collect();
+        let why = match (&wanted, online.first()) {
+            (Some(n), _) => format!("there's no build server called {n}"),
+            (None, Some(first)) => format!(
+                "no build server is picked for this project (the owner picks one in its Settings); online now: {} (flow remote --server {first} -- …)",
+                online.join(", ")
+            ),
+            (None, None) => "no build server is picked for this project and none is online; build here instead".into(),
         };
-        return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({"error": why, "offline": true}))).into_response();
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({"error": why, "offline": false, "none_picked": true, "online": online})),
+        )
+            .into_response();
     };
     if !crate::builders::hub().is_online(&server.name) {
         return (
