@@ -47,6 +47,10 @@ pub struct AddRelease {
     pub body: String,
     /// The milestone this tag closes, e.g. "M4".
     pub milestone: Option<String>,
+    /// Its "Push tag" button comes by itself (an annotated tag on origin/main, run in the
+    /// project's folder, unlocked once every PR it waits for is merged). false: you add your own
+    /// with add_button, e.g. to tag another branch.
+    pub tag_button: Option<bool>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -79,8 +83,9 @@ pub struct ButtonId {
 #[tool_router(router = pr_tools, vis = "pub(super)")]
 impl FlowMcp {
     #[tool(
-        description = "Mark one of your PRs ready for the owner to merge (or not), and say which tasks it carries out. \
-        AgentFlow picks up PRs from your repository by itself; this also adds one it hasn't seen yet."
+        description = "A PR that isn't a draft on GitHub is ready to merge by itself; use this to mark one not ready \
+        (or ready again), or to say which tasks it carries out when its branch isn't theirs. AgentFlow picks up PRs \
+        from your repository by itself; this also adds one it hasn't seen yet."
     )]
     async fn update_pr(
         &self,
@@ -184,8 +189,9 @@ impl FlowMcp {
     }
 
     #[tool(
-        description = "Plan a tag (a milestone's closing tag or a release) that waits for PRs to be merged. Then add \
-        its \"Push tag …\" button with add_button; the owner presses it once every PR is merged."
+        description = "Plan a tag (a milestone's closing tag or a release) that waits for PRs to be merged. Its \
+        \"Push tag …\" button comes by itself (an annotated tag on origin/main); the owner presses it once every PR is \
+        merged. Your PRs' Merge buttons come by themselves too, once a PR isn't a draft."
     )]
     async fn add_release(
         &self,
@@ -201,8 +207,8 @@ impl FlowMcp {
                 let tx = c.transaction()?;
                 let project = target_project(&tx, &a, None, true)?;
                 let tag = p.tag.trim();
-                if tag.is_empty() || tag.contains(char::is_whitespace) {
-                    anyhow::bail!("tag: one word, e.g. v0.0.5-m4");
+                if tag.is_empty() || tag.starts_with('-') || !tag.chars().all(|c| c.is_ascii_alphanumeric() || "._-+".contains(c)) {
+                    anyhow::bail!("tag: one word of letters, digits and . _ - +, e.g. v0.0.5-m4");
                 }
                 let mut waits = Vec::new();
                 for w in &p.waits_for {
@@ -235,8 +241,35 @@ impl FlowMcp {
                 )?;
                 // Everything still to test comes along (the owner, 2026-11-11).
                 let to_test = crate::totest::attach_to_release(&tx, &r, &a.name())?;
+                // Its Push tag button, so the agent doesn't write it by hand (Imaginarium's agent,
+                // 2026-11-12); it needs the project's folder.
+                let mut button = Value::Null;
+                if p.tag_button.unwrap_or(true) {
+                    let proj = crate::projects::get_by_id(&tx, project.id)?;
+                    if proj.checkout.trim().is_empty() {
+                        button = "none: the project has no folder set (update_project checkout); add it with add_button".into();
+                    } else {
+                        let command = format!(
+                            "git fetch origin main && git tag -a {tag} -m {tag} origin/main && git push origin {tag}"
+                        );
+                        let requires: Vec<String> = p.waits_for.clone();
+                        let id = crate::actions::add(
+                            &tx,
+                            &r,
+                            &crate::actions::NewButton {
+                                label: &format!("Push tag {tag}"),
+                                kind: crate::actions::ButtonKind::parse("tag")?,
+                                command: &command,
+                                workdir: proj.checkout.trim(),
+                                requires: &requires,
+                            },
+                            &a.name(),
+                        )?;
+                        button = json!({"id": id, "command": command});
+                    }
+                }
                 tx.commit()?;
-                Ok(Outcome::new(json!({"id": r.ref_id, "tag": tag, "to_test": to_test}))
+                Ok(Outcome::new(json!({"id": r.ref_id, "tag": tag, "to_test": to_test, "tag_button": button}))
                     .summary(format!("release {} planned: {tag}", r.short_id()))
                     .project(project.slug)
                     .target(r.ref_id))

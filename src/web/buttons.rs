@@ -96,7 +96,7 @@ pub fn pr_rows(c: &Connection, project_id: i64, now: i64) -> anyhow::Result<Vec<
             (Ok(()), None) => ("ready".to_owned(), "ok"),
             (Ok(()), Some(_)) => ("ready".to_owned(), "accent"),
             // Not marked ready is the normal state of work in progress, not a problem.
-            (Err(why), _) if why.contains("hasn't marked it ready") => ("not ready yet".to_owned(), "quiet"),
+            (Err(why), _) if why.contains("marked it not ready") => ("not ready yet".to_owned(), "quiet"),
             (Err(why), _) => {
                 (why.clone(), if r.str("ci") == "failing" || r.str("mergeable") == "conflicting" { "bad" } else { "" })
             }

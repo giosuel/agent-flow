@@ -140,6 +140,19 @@ pub struct UpdateNote {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct AnswerQuestion {
+    /// The question, e.g. "Q-12".
+    pub id: String,
+    /// What the owner said in chat, verbatim.
+    pub owner_words: String,
+    /// The option they picked, counting from 1, if they picked one ("lets go with 1").
+    pub option: Option<u32>,
+    /// The decision in one statement, e.g. "The sidebar is a list of names"; made from the
+    /// question and their answer if left out.
+    pub decision: Option<String>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct UpdateScreenshot {
     /// The screenshot, e.g. "S-4".
     pub id: String,
@@ -856,6 +869,40 @@ impl FlowMcp {
         self.finish(&actor, "update_screenshot", Action::Write, outcome).await
     }
 
+    #[tool(description = "The owner answered one of your questions in chat: record it. Answers the question with their \
+        words, unblocks the tasks it blocked, and records the decision (with their words, said now). Questions they \
+        answer in AgentFlow need nothing from you; the decision is recorded by itself.")]
+    async fn answer_question(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(p): Parameters<AnswerQuestion>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let actor = actor_of(&parts);
+        let a = actor.clone();
+        let outcome = self
+            .state
+            .db
+            .call(move |c| {
+                let tx = c.transaction()?;
+                let q = writable(&tx, &a, &p.id)?;
+                if q.kind != Kind::Question {
+                    anyhow::bail!("{} isn't a question", q.ref_id);
+                }
+                if p.owner_words.trim().is_empty() {
+                    anyhow::bail!("owner_words: quote what the owner said");
+                }
+                let q = records::answer_question(&tx, &q, p.option, p.owner_words.trim(), &a.name())?;
+                let d = records::decision_from_answer(&tx, &q, p.decision.as_deref(), "owner, in chat", &a.name())?;
+                tx.commit()?;
+                Ok(Outcome::new(json!({"question": q.ref_id, "state": q.state, "decision": d.ref_id}))
+                    .summary(format!("{} answered in chat; decision {}", q.short_id(), d.short_id()))
+                    .project(q.project.clone())
+                    .target(q.ref_id))
+            })
+            .await;
+        self.finish(&actor, "answer_question", Action::Write, outcome).await
+    }
+
     #[tool(description = "Change a task, or several at once with ids: its state (todo, doing, review, done, blocked, \
         parked, skipped), title, details, step, tags, estimate, branch, or when a parked task comes back. Doing starts \
         its step; blocked needs blocked_by; skipped a note on why.")]
@@ -1143,6 +1190,10 @@ impl FlowMcp {
                 )?;
                 if let Some(q) = &p.answers {
                     let q = records::find_str(&tx, q, Some(&project.slug))?;
+                    // An answer given in chat closes the question too (the owner, 2026-11-12).
+                    if q.kind == Kind::Question && q.state == "open" {
+                        records::answer_question(&tx, &q, None, p.owner_words.trim(), &a.name())?;
+                    }
                     records::link(&tx, &d, &q, "answers", &a.name())?;
                 }
                 if let Some(old) = &p.supersedes {

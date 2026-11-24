@@ -1455,6 +1455,51 @@ async fn notes_are_files_or_text_and_come_back() {
 }
 
 #[tokio::test]
+async fn answers_make_decisions_and_releases_bring_their_tag_button() {
+    let s = TestServer::start().await;
+    let token = s.token(TokenKind::Project, Some("vinculum")).await;
+    let sess = mcp_session(&s, &token).await;
+    let call = |name: &'static str, args: Value| {
+        let (s, token, sess) = (&s, token.clone(), sess.clone());
+        async move { mcp_tool(s, &token, &sess, name, args).await }
+    };
+    assert!(call("add_milestone", json!({"name": "M4", "title": "Keybinds"})).await.0);
+    assert!(call("add_task", json!({"title": "Sidebar", "milestone": "M4", "estimate": "1 h"})).await.0);
+    let (ok, _) = call("ask_question", json!({"title": "List or grid?", "options": [{"title": "A list"}, {"title": "A grid"}], "recommended": 1, "blocks": ["T-1"]})).await;
+    assert!(ok);
+    // Answered in chat: one call answers, unblocks and records the decision.
+    let (ok, r) = call("answer_question", json!({"id": "Q-1", "owner_words": "lets go with 1", "option": 1})).await;
+    assert!(ok, "{r}");
+    assert_eq!(r["state"], "answered");
+    let (_, d) = call("get_record", json!({"id": r["decision"].as_str().unwrap()})).await;
+    let d = d.to_string();
+    assert!(d.contains("List or grid: A list") && d.contains("lets go with 1") && d.contains("owner, in chat"), "{d}");
+    let (_, t) = call("get_record", json!({"id": "T-1"})).await;
+    assert_eq!(t["state"], "todo", "{t}");
+    // record_decision with answers closes an open question too.
+    assert!(call("ask_question", json!({"title": "Port 8990?"})).await.0);
+    assert!(call("record_decision", json!({"title": "8990 it is", "owner_words": "yes", "source": "owner", "answers": "Q-2"})).await.0);
+    let (_, q2) = call("get_record", json!({"id": "Q-2"})).await;
+    assert_eq!(q2["state"], "answered", "{q2}");
+    // Answered on the page: the decision is recorded by itself.
+    assert!(call("ask_question", json!({"title": "Tabs or a list?", "options": [{"title": "Tabs"}, {"title": "A list"}]})).await.0);
+    let cookie = s.owner_cookie().await;
+    let res = s.http.post(s.url("/p/vinculum/Q-3/answer")).header(COOKIE, &cookie).header(ORIGIN, &s.base).form(&[("option", "2")]).send().await.unwrap();
+    assert!(res.status().is_redirection());
+    let decisions = s.http.get(s.url("/p/vinculum?tab=decisions")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
+    assert!(decisions.contains("Tabs or a list: A list"), "{decisions}");
+
+    // A release brings its Push tag button once the project has a folder.
+    let (ok, r) = call("add_release", json!({"tag": "v0.0.5-m4", "title": "M4: Keybinds"})).await;
+    assert!(ok && r["tag_button"].as_str().unwrap_or("").starts_with("none"), "{r}");
+    assert!(call("update_project", json!({"checkout": "~/vinculum"})).await.0);
+    let (ok, r) = call("add_release", json!({"tag": "v0.0.6-m5", "title": "M5"})).await;
+    assert!(ok, "{r}");
+    assert_eq!(r["tag_button"]["command"], "git fetch origin main && git tag -a v0.0.6-m5 -m v0.0.6-m5 origin/main && git push origin v0.0.6-m5");
+    assert!(!call("add_release", json!({"tag": "v1; rm -rf ~", "title": "x"})).await.0);
+}
+
+#[tokio::test]
 async fn screenshots_are_uploaded_shown_and_linked() {
     let s = TestServer::start().await;
     let token = s.token(TokenKind::Project, Some("vinculum")).await;

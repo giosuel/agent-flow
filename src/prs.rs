@@ -131,8 +131,10 @@ pub fn merge_ready(pr: &Record) -> Result<(), String> {
     if pr.str("mergeable") == "conflicting" {
         return Err("has conflicts".into());
     }
-    if !pr.data.get("ready").and_then(Value::as_bool).unwrap_or(false) {
-        return Err("the agent hasn't marked it ready".into());
+    // Ready unless the agent said it isn't: GitHub's draft flag says the rest (Imaginarium's agent,
+    // 2026-11-12: "a non-draft PR is ready and a draft isn't").
+    if pr.data.get("ready").and_then(Value::as_bool) == Some(false) {
+        return Err("the agent marked it not ready".into());
     }
     if pr.str("ci") == "pending" {
         return Err("CI still running".into());
@@ -242,9 +244,11 @@ mod tests {
                 merge_order(c, p.id)?.iter().map(|o| (o.record.number, o.after)).collect();
             assert_eq!(order, [(48, None), (49, Some(48)), (50, Some(49)), (51, None)]);
 
-            // Not ready until the agent says so; then CI and conflicts decide.
+            // Ready once it isn't a draft, unless the agent says it isn't; then CI and conflicts decide.
             let r48 = records::find_str(c, "v/PR-48", None)?;
-            assert!(merge_ready(&r48).is_err());
+            assert!(merge_ready(&r48).is_ok());
+            let r48 = set_ready(c, &r48, false, "waiting for the review agent", "v")?;
+            assert_eq!(merge_ready(&r48).unwrap_err(), "the agent marked it not ready");
             let r48 = set_ready(c, &r48, true, "ready for review", "v")?;
             assert!(merge_ready(&r48).is_ok());
             let mut failing = pr(48, "main", "b48");
