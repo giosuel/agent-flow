@@ -19,7 +19,7 @@
   <div class="qpager-p" hidden><button type="button" class="ibtn qp-prev" aria-label="Earlier questions">{{ crate::web::icons::icon("prev")|safe }}</button><span class="mono qp-pos" aria-live="polite"></span><button type="button" class="ibtn qp-next" aria-label="Later questions">{{ crate::web::icons::icon("chevron")|safe }}</button></div>
 </section>
 {% else %}
-<p class="notice" role="status">{{ crate::web::icons::icon("check")|safe }}<span><strong>No open questions.</strong> When the agent asks one, it waits here, and your answer becomes a decision below.</span></p>
+<section class="card" aria-labelledby="dq-none"><div class="card-head flat"><span class="ok-text">{{ crate::web::icons::icon("check")|safe }}</span><h2 id="dq-none">No open questions.</h2><span class="sub">When the agent asks one, it waits here, and your answer becomes a decision below.</span></div></section>
 {% endif %}
 
 <section class="card lpanel" aria-labelledby="dec-h">
