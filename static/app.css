@@ -1198,3 +1198,75 @@ html.no-scroll { overflow: hidden; }
   .pdlg-body { padding: 16px; }
   .setup-code { font-size: 24px; }
 }
+
+/* An accordion (the owner, 2026-11-17: "make it into an accordion instead this clickable text"):
+   a bordered row with a chevron that turns; its body below in the same frame. */
+.acc { border: 1px solid var(--line); border-radius: 10px; background: var(--inset); margin-top: 6px; }
+.acc > summary { list-style: none; display: flex; align-items: center; gap: 12px; min-height: 48px; padding: 0 14px 0 16px; cursor: pointer; border-radius: 10px; }
+.acc > summary::-webkit-details-marker { display: none; }
+.acc > summary:hover { background: #121217; }
+.acc-t { font-weight: 500; }
+.acc-s { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.acc-c { display: inline-flex; color: var(--muted); transition: transform .15s ease; }
+.acc-c .i { width: 18px; height: 18px; }
+.acc[open] > summary { border-bottom: 1px solid var(--line); border-radius: 10px 10px 0 0; }
+.acc[open] .acc-c { transform: rotate(90deg); }
+.acc-body { padding: 4px 16px 12px; }
+/* Limits: one per row, what it means on the left, a short number field with its unit right. */
+.lim-row { display: flex; align-items: center; justify-content: space-between; gap: 12px 24px; padding: 14px 0; border-top: 1px solid var(--line2); }
+.acc-body > form:first-child.lim-row, .lim-form > .lim-row:first-child { border-top: 0; }
+.lim-form { border-top: 1px solid var(--line2); }
+.lim-t { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.lim-t strong { font-weight: 500; }
+.lim-c { display: flex; align-items: center; gap: 10px; flex: none; }
+.lim-c input:not(.num) { width: 240px; }
+.lim-c .num { width: 96px; text-align: right; }
+.lim-c .unit { width: 52px; color: var(--muted); font-size: 14px; }
+.lim-save { display: flex; justify-content: flex-end; padding: 6px 0 14px; }
+.lim-danger { border-top: 1px solid var(--line); }
+@media (max-width: 700px) {
+  .acc-s { display: none; }
+  .lim-row { flex-direction: column; align-items: stretch; }
+  .lim-c input:not(.num) { flex: 1; width: auto; }
+  .lim-save .btn { width: 100%; }
+}
+
+/* The milestone board (the owner, 2026-11-17, the "Milestone board" mockups): one step bar instead
+   of a pill per step; the board fills the window and each column scrolls on its own. */
+.stepbar { display: flex; align-items: center; gap: 10px 12px; flex-wrap: wrap; padding: 10px 12px 10px 16px; }
+.sb-t { font-weight: 500; }
+.sb-dots { display: inline-flex; gap: 4px; }
+.sb-dots i { width: 18px; height: 5px; border-radius: 3px; background: var(--line); }
+.sb-dots i.done { background: #3F7D55; }
+.sb-dots i.now { background: var(--accent); }
+.sb-menu .dd-menu { left: auto; right: 0; min-width: 380px; max-height: 480px; }
+.sb-menu .dd-menu a { flex-direction: column; gap: 2px; justify-content: flex-start; }
+.dd-g { margin: 10px 10px 4px; }
+.dd-more > summary { cursor: pointer; padding: 8px 10px; list-style: none; }
+.dd-more > summary::-webkit-details-marker { display: none; }
+/* As tall as the window at most: a short board stays short, a long one scrolls inside. */
+.board.fixed { flex-wrap: nowrap; max-height: max(420px, calc(100dvh - 220px)); }
+.board.fixed .col { min-height: 180px; }
+.board.fixed .col { padding: 0; gap: 0; overflow: hidden; }
+.board.fixed .col-h { position: sticky; top: 0; padding: 12px 12px 10px; background: var(--inset); z-index: 1; }
+.col-b { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0 12px 12px; display: flex; flex-direction: column; gap: 10px; }
+.col-empty { margin: 4px 2px; }
+.more-done > summary { list-style: none; cursor: pointer; text-align: center; padding: 10px; border: 1px dashed var(--border); border-radius: 8px; color: var(--accent); font-size: 14px; }
+.more-done > summary::-webkit-details-marker { display: none; }
+.more-done[open] > summary { display: none; }
+.more-done[open] { display: flex; flex-direction: column; gap: 10px; }
+.bchips { display: none; }
+@media (max-width: 700px) {
+  .bchips { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; margin: 0 -16px; padding: 0 16px; }
+  .bchips button { flex: none; min-height: 36px; padding: 0 12px; border-radius: 18px; border: 1px solid var(--line); background: var(--panel); color: var(--ink2); font: inherit; font-size: 14px; }
+  .bchips button.on { background: var(--soft); border-color: var(--accent); color: var(--ink); }
+  .board.fixed { max-height: none; display: block; }
+  .board.fixed .col { display: none; background: none; }
+  .board.fixed .col.on { display: block; }
+  .board.fixed .col-h { display: none; }
+  .col-b { padding: 0; overflow: visible; }
+  .sb-dots, .sb-n { display: none; }
+  .sb-menu { width: 100%; }
+  .sb-menu > summary { width: 100%; }
+  .sb-menu .dd-menu { position: fixed; left: 16px; right: 16px; min-width: 0; }
+}
