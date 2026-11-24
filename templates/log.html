@@ -15,7 +15,7 @@
   {% if live %}<div class="lright"><span class="livedot" id="livedot">Live</span><button class="btn sm secondary" type="button" id="live" data-q="{{ q }}" data-range="{{ range }}" data-after="{{ latest }}">{{ crate::web::icons::icon("pause")|safe }}<span>Pause</span></button></div>{% endif %}
 </div>
 
-<form method="get" action="/log" class="ltool">
+<form method="get" action="/log" class="toolbar">
   <label class="search{% if !q.is_empty() %} set{% endif %}">{{ crate::web::icons::icon("search")|safe }}<span class="vh">Search</span><input name="q" value="{{ q }}" placeholder="Search the text, or a query like actor:imaginarium -action:read" autocomplete="off"></label>
   <input type="hidden" name="range" value="{{ range }}">
   {% for d in drops %}
@@ -27,7 +27,7 @@
   {% if let Some(r) = reset %}<a class="sub" href="{{ r }}">Clear</a>{% endif %}
 </form>
 
-  <div class="lp-top"><h2 id="lp-h">{{ total }} entr{% if total == 1 %}y{% else %}ies{% endif %} · {{ span }}</h2><span class="sub">newest first · {{ tz }} · click a bar to zoom in</span></div>
+  <div class="card-head flat lp-top"><h2 id="lp-h">{{ total }} entr{% if total == 1 %}y{% else %}ies{% endif %} · {{ span }}</h2><span class="sub">newest first · {{ tz }} · click a bar to zoom in</span></div>
   <div class="hist" role="img" aria-label="Entries over time">{% for b in bars %}<a href="{{ b.href }}" data-tip="{{ b.label }}" aria-label="{{ b.label }}"><i style="height: {{ b.height }}%"></i></a>{% endfor %}</div>
   <div class="axis sub mono">{% for a in axis %}<span>{{ a }}</span>{% endfor %}</div>
   <div class="lhead" aria-hidden="true"><span>Time</span><span>Category</span><span>Actor</span><span>Project</span><span>What</span><span>Severity</span></div>

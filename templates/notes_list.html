@@ -1,7 +1,8 @@
 {% import "table.html" as tbl %}
 {# The Notes tab like the Log (the owner, 2026-11-18): search and filters on top, one table, an icon
    per file type. #}
-<form method="get" action="/p/{{ slug }}" class="ltool ntool" id="notes">
+<section class="card lpanel npanel" aria-labelledby="notes-h">
+<form method="get" action="/p/{{ slug }}" class="toolbar ntool" id="notes">
   <input type="hidden" name="tab" value="notes">
   {% for (k, v) in nv.keep %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
   <label class="search{% if !nv.q.is_empty() %} set{% endif %}">{{ crate::web::icons::icon("search")|safe }}<span class="vh">Search notes</span><input name="nq" value="{{ nv.q }}" placeholder="Search titles and text, or a query like category:plan is:file" autocomplete="off"></label>
@@ -22,8 +23,7 @@
   <div class="seg" role="group" aria-label="Added">{% for (label, _n, href, on) in nv.ranges %}<a{% if *on %} class="on"{% endif %} href="{{ href }}"{% if *on %} aria-current="true"{% endif %}>{{ label }}</a>{% endfor %}</div>
   {% if let Some(r) = nv.reset %}<a class="sub" href="{{ r }}">Clear</a>{% endif %}
 </form>
-<section class="card lpanel npanel" aria-labelledby="notes-h">
-  <div class="lp-top"><h2 id="notes-h"><span class="label">Notes</span> <span class="sub">{{ nv.summary }}</span></h2><span class="sub hide-phone">files and short notes the agent hands in</span></div>
+  <div class="card-head flat lp-top"><h2 id="notes-h">Notes</h2><span class="sub">{{ nv.summary }}</span><span class="grow"></span><span class="sub hide-phone">files and short notes the agent hands in</span></div>
   {% if nv.none %}<p class="sub lempty">No notes yet. Agents add files with <span class="mono">flow note &lt;file&gt;</span> and short notes with <span class="mono">add_note</span>.</p>
   {% else %}
   <div class="ntable" role="table" aria-label="Notes" data-sortable>
