@@ -4,7 +4,7 @@
 {# Project settings as a dialog over the project page (the owner, 2026-11-18, D-205). #}
 <div data-dlg-content class="stack">
 <div class="head"><h1>{{ name }}: settings</h1></div>
-{% if let Some(n) = notice %}<p class="notice{% if notice_bad %} warn{% else %} ok{% endif %}" role="status">{{ n }}</p>{% endif %}
+{% if let Some(n) = notice %}<p class="notice flash{% if notice_bad %} warn{% else %} ok{% endif %}" role="status">{% if !notice_bad %}{{ crate::web::icons::icon("check")|safe }}{% endif %}<span>{{ n }}</span></p>{% endif %}
 <form method="post" action="/p/{{ slug }}/settings" class="card pad stack" aria-labelledby="set-h">
   <h2 id="set-h">Details</h2>
   <p class="sub">The same details the project's agent sets with <span class="mono">update_project</span>; it sees your changes the next time it checks. The project's id, <span class="mono">{{ slug }}</span>, stays as it is: every record and link uses it.</p>
