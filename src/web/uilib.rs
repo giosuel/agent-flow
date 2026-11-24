@@ -33,6 +33,7 @@ const COLOURS: &[(&str, Swatches)] = &[
         "Surfaces",
         &[
             ("--ground", "the page"),
+            ("--grid-line", "the blueprint grid on the page, every --grid-size"),
             ("--sunken", "fields, code, the bar"),
             ("--band", "toolbars, dialog feet"),
             ("--panel", "cards, dialogs"),
