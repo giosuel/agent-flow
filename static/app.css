@@ -1365,7 +1365,10 @@ ol.lrows { padding: 0; margin: 0; list-style: none; gap: 0; }
 @media (min-width: 701px) {
   /* The bar like the website's landing nav (the owner, 2026-11-24, D-257: "similar but different
      colors and no borders"): black under a soft violet light, no line, no boxes, quiet links. */
-  body { background-image: radial-gradient(900px 420px at 80% -10%, var(--glow-a), transparent 70%), radial-gradient(700px 380px at 8% -6%, var(--glow-b), transparent 70%), linear-gradient(to right, var(--grid-line) 1px, transparent 1px), linear-gradient(to bottom, var(--grid-line) 1px, transparent 1px); background-size: auto, auto, var(--grid-size) var(--grid-size), var(--grid-size) var(--grid-size); background-repeat: no-repeat, no-repeat, repeat, repeat; }
+  /* The glows sit in px from the top, not in % of the page's height, so a long page gets the same
+     light as a short one (the owner, 2026-11-24: "why is the illumionation at the top different
+     from page to page?"). */
+  body { background-image: radial-gradient(900px 420px at 80% -140px, var(--glow-a), transparent 70%), radial-gradient(700px 380px at 8% -85px, var(--glow-b), transparent 70%), linear-gradient(to right, var(--grid-line) 1px, transparent 1px), linear-gradient(to bottom, var(--grid-line) 1px, transparent 1px); background-size: auto, auto, var(--grid-size) var(--grid-size), var(--grid-size) var(--grid-size); background-repeat: no-repeat, no-repeat, repeat, repeat; }
   .top { position: relative; z-index: 15; background: transparent; }
   .top-in { flex-wrap: nowrap; align-items: stretch; gap: 18px; }
   .top-in > * { align-self: center; }
