@@ -143,6 +143,11 @@ code, pre, .mono { font-family: var(--mono); }
 .ibtn[disabled], .ibtn.off { color: var(--dim); border-color: var(--line2); background: transparent; cursor: default; pointer-events: none; }
 .ibtn.flat[disabled], .ibtn.flat.off { border-color: transparent; }
 .ibtn[disabled] .i { opacity: .6; }
+/* On a warn surface (the questions island): its own warm tones, not the neutral greys made for
+   dark cards (the owner, 2026-11-24: "some of these colors still seem off"). */
+.ibtn.warn { color: var(--warn-ink); border-color: var(--warn-line); }
+.ibtn.warn:hover { color: var(--warn-ink); background: var(--warn-line); border-color: var(--warn-line); }
+.ibtn.warn[disabled], .ibtn.warn.off { color: var(--warn-ink); border-color: var(--warn-line); background: transparent; opacity: .35; }
 .ibtn.busy .i { animation: spin 1.2s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
