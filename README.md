@@ -43,9 +43,14 @@ build from source.
 # Debian, Ubuntu (from v0.1.0): the server needs the client package too
 sudo apt install ./agentflow-client_0.1.0_amd64.deb ./agentflow_0.1.0_amd64.deb
 
-# Arch (from v0.1.0)
+# Arch (from v0.1.0); other machines need only agentflow-client-bin or agentflow-client
 yay -S agentflow-bin    # the release programs
 yay -S agentflow        # built from the tagged source
+
+# The release archive (from v0.1.0)
+curl -LO https://github.com/giosuel/agent-flow/releases/download/v0.1.0/agentflow-0.1.0-linux-x86_64.tar.gz
+tar -xzf agentflow-0.1.0-linux-x86_64.tar.gz && cd agentflow-0.1.0-linux-x86_64
+sudo install -m 755 agentflow flow agentflow-builder /usr/local/bin/
 
 # From source (Rust 1.90 or newer)
 git clone https://github.com/giosuel/agent-flow && cd agent-flow

@@ -63,8 +63,8 @@ const base = import.meta.env.BASE_URL;
           <label for="i-src">From source</label>
         </div>
         <div class="inst-p p-rel">
-          <p>From the release's Linux x86_64 programs, installed where only root can change them:</p>
-          <code class="cmd">sudo install -m 755 agentflow flow agentflow-builder /usr/local/bin/</code>
+          <p>The release's Linux x86_64 programs, installed where only root can change them:</p>
+          <code class="cmd">{'curl -LO https://github.com/giosuel/agent-flow/releases/download/v0.1.0/agentflow-0.1.0-linux-x86_64.tar.gz\ntar -xzf agentflow-0.1.0-linux-x86_64.tar.gz && cd agentflow-0.1.0-linux-x86_64\nsudo install -m 755 agentflow flow agentflow-builder /usr/local/bin/'}</code>
           <p class="sub">From v0.1.0.</p>
         </div>
         <div class="inst-p p-deb">
@@ -75,7 +75,7 @@ const base = import.meta.env.BASE_URL;
         <div class="inst-p p-aur">
           <p>The release programs, or built from the tagged source:</p>
           <code class="cmd">{'yay -S agentflow-bin\nyay -S agentflow'}</code>
-          <p class="sub">From v0.1.0.</p>
+          <p class="sub">From v0.1.0. Other machines need only the client: agentflow-client-bin or agentflow-client.</p>
         </div>
         <div class="inst-p p-src">
           <p>Rust 1.90 or newer. The version comes from the git tags.</p>

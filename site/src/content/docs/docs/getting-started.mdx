@@ -32,11 +32,14 @@ notifications need one), [Claude Code](https://claude.com/claude-code) where the
    ```sh
    yay -S agentflow-bin    # the release programs
    yay -S agentflow        # or built from the tagged source
+   # other machines need only the client: agentflow-client-bin or agentflow-client
    ```
    </TabItem>
    <TabItem label="Release">
    ```sh
-   # from the release's Linux x86_64 archive
+   # the release's Linux x86_64 archive
+   curl -LO https://github.com/giosuel/agent-flow/releases/download/v0.1.0/agentflow-0.1.0-linux-x86_64.tar.gz
+   tar -xzf agentflow-0.1.0-linux-x86_64.tar.gz && cd agentflow-0.1.0-linux-x86_64
    sudo install -m 755 agentflow flow agentflow-builder /usr/local/bin/
    ```
    </TabItem>
