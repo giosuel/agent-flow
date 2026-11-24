@@ -907,6 +907,7 @@ struct TabQuery {
     nkind: Option<String>,
     nstate: Option<String>,
     nrange: Option<String>,
+    nsort: Option<String>,
     /// After answering a question on the overview: its id.
     answered: Option<String>,
 }
@@ -1029,6 +1030,7 @@ async fn project(
             q.nkind.as_deref(),
             q.nstate.as_deref(),
             q.nrange.as_deref(),
+            q.nsort.as_deref(),
         );
         page.notes = Some(
             state
