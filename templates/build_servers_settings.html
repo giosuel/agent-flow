@@ -1,42 +1,70 @@
-{# The Settings page's Build servers section. #}
+{# The Settings dialog's Build servers section: a list, each builder a row that opens (the owner,
+   2026-11-17, D-190, the "Build servers and clients" mockups); a lone builder is open. #}
 <section aria-labelledby="h-sec">
-  <h2 id="h-sec">Build servers</h2>
-  <p class="sub set-lead">Machines agents build and test on with <span class="mono">flow remote</span>. Each project picks one in its own Settings.</p>
+  <div class="sl-head"><div><h2 id="h-sec">Build servers</h2>
+    <p class="sub set-lead">Machines agents build and test on with <span class="mono">flow remote</span>. Each project picks one in its own Settings.</p></div>
+    <button class="btn sm sl-add-btn" type="button" data-open="add-builder">{{ crate::web::icons::icon("plus")|safe }} Add a builder</button></div>
   {% if let Some((ok, text)) = notice %}<p class="notice{% if *ok %} ok{% else %} warn{% endif %}" role="status">{{ text }}</p>{% endif %}
-  <div class="set-row stack-row"><div class="set-txt"><strong>Add one</strong><span class="sub">Run this on that machine. It asks whether the builder gets a user of its own (recommended) and its name, then asks for your approval here.</span></div>
-    <pre class="cmd mono">flow builder add</pre></div>
+  <div class="slist">
   {% for s in servers %}
-  <div class="set-row stack-row bsrv">
-    <div class="set-txt"><strong><span class="dot{% if s.online %} ok{% endif %}" aria-hidden="true"></span> {{ s.name }}</strong><span class="sub">{{ s.line }}</span>
-      {% if s.waiting %}<span class="sub">It was an SSH builder. Run <span class="mono">flow builder add</span> on that machine, named {{ s.name }}: it takes this one over, with its projects and jobs.</span>{% endif %}
-      <span class="sub">{% if s.projects.is_empty() %}No project uses it yet.{% else %}Used by {% for p in s.projects %}{% if !loop.first %}, {% endif %}{{ p }}{% endfor %}.{% endif %}</span></div>
-    <details class="acc">
-      <summary><span class="acc-t">Name and limits</span><span class="sub acc-s">{{ s.slots }} at once · starts at {{ s.min_threads }} threads + {{ s.min_memory }} GB free</span><span class="acc-c" aria-hidden="true">{{ crate::web::icons::icon("chevron")|safe }}</span></summary>
-      <div class="acc-body">
-        <form method="post" action="/settings/build-servers/{{ s.name }}/rename" class="lim-row">
-          <label class="lim-t" for="rn-{{ s.name }}"><strong>Name</strong><span class="sub">Projects and jobs follow it; it reconnects under the new one.</span></label>
-          <div class="lim-c"><input id="rn-{{ s.name }}" name="name" required maxlength="64" value="{{ s.name }}"><button class="btn sm ghost" type="submit">Rename</button></div>
-        </form>
-        <form method="post" action="/settings/build-servers/{{ s.name }}/limits" class="lim-form">
-          <div class="lim-row"><label class="lim-t" for="sl-{{ s.name }}"><strong>Jobs of one project at once</strong><span class="sub">Each in a work folder of its own; the first build in a new one is a full build.</span></label>
-            <div class="lim-c"><input id="sl-{{ s.name }}" class="num" name="slots" type="number" min="1" max="8" step="1" value="{{ s.slots }}"><span class="unit">jobs</span></div></div>
-          <div class="lim-row"><label class="lim-t" for="mt-{{ s.name }}"><strong>Start another job when</strong><span class="sub">at least this many threads are free…</span></label>
-            <div class="lim-c"><input id="mt-{{ s.name }}" class="num" name="min_threads" type="number" min="0" step="1" value="{{ s.min_threads }}"><span class="unit">threads</span></div></div>
-          <div class="lim-row"><label class="lim-t" for="mm-{{ s.name }}"><strong>…and</strong><span class="sub">at least this much memory is free.</span></label>
-            <div class="lim-c"><input id="mm-{{ s.name }}" class="num" name="min_memory_gb" type="number" min="0" step="1" value="{{ s.min_memory }}"><span class="unit">GB</span></div></div>
-          <div class="lim-row"><label class="lim-t" for="rm-{{ s.name }}"><strong>Pause jobs when free memory drops below</strong><span class="sub">They go on when there's room again; the machine's user comes first.</span></label>
-            <div class="lim-c"><input id="rm-{{ s.name }}" class="num" name="reserve_memory_gb" type="number" min="0" step="1" value="{{ s.reserve_memory }}"><span class="unit">GB</span></div></div>
-          <div class="lim-row"><label class="lim-t" for="kd-{{ s.name }}"><strong>Delete a project's folders unused for</strong><span class="sub">Its work folders and builds there.</span></label>
-            <div class="lim-c"><input id="kd-{{ s.name }}" class="num" name="keep_days" type="number" min="1" step="1" value="{{ s.keep_days }}"><span class="unit">days</span></div></div>
-          <div class="lim-save"><button class="btn sm" type="submit">Save limits</button></div>
-        </form>
-        <form method="post" action="/settings/build-servers/{{ s.name }}/remove" class="lim-row lim-danger">
-          <div class="lim-t"><strong>Remove this builder</strong><span class="sub">Projects that use it build where their agent is. Its folders there stay until you delete them.</span></div>
-          <div class="lim-c"><button class="btn sm danger" type="submit" data-confirm="Remove {{ s.name }}? Projects that use it build where their agent is. Its work folders there stay until you delete them.">Remove</button></div>
-        </form>
+  <details class="sl-item"{% if servers.len() == 1 %} open{% endif %}>
+    <summary>
+      <span class="dot{% if s.online %} ok{% else if s.waiting %} warn{% endif %}" aria-hidden="true"></span>
+      <span class="sl-name"><strong>{{ s.name }}</strong><span class="sub">{{ s.state }}</span></span>
+      <span class="sub sl-machine">{{ s.machine }}</span>
+      <span class="sl-chips">{% if s.waiting %}<span class="chip warn">waiting for flow builder add</span>{% else if s.running + s.queued == 0 %}{% if s.online %}<span class="chip">idle</span>{% endif %}{% else %}{% if s.running > 0 %}<span class="chip ok">{{ s.running }} running</span>{% endif %}{% if s.queued > 0 %}<span class="chip warn">{{ s.queued }} waiting</span>{% endif %}{% endif %}</span>
+      <span class="sub sl-proj">{% for p in s.projects %}{% if !loop.first %}, {% endif %}{{ p }}{% endfor %}</span>
+      <span class="sl-chev" aria-hidden="true">{{ crate::web::icons::icon("chevron")|safe }}</span>
+    </summary>
+    <div class="sl-body">
+      {% if s.waiting %}<p class="sub">It was an SSH builder. Run <span class="mono">flow builder add</span> on that machine, named {{ s.name }}: it takes this one over, with its projects and jobs.</p>{% endif %}
+      <div class="sl-cols">
+        <div class="sl-col">
+          {% if !s.facts.is_empty() %}<h3 class="label">Machine</h3>
+          <dl class="sl-facts">{% for (k, v, d) in s.facts %}<dt>{{ k }}</dt><dd>{{ v }}{% if !d.is_empty() %} <span class="sub">· {{ d }}</span>{% endif %}</dd>{% endfor %}</dl>{% endif %}
+          {% if !s.waiting %}<h3 class="label">Now</h3>
+          {% if s.jobs.is_empty() %}<p class="sub">No jobs running or waiting.</p>{% endif %}
+          {% for (id, what, st, sub) in s.jobs %}<a class="sl-job" href="/machine/jobs/{{ id }}"><span class="mono acc-ink">#{{ id }}</span><span class="sl-job-t"><span class="ell">{{ what }}</span><span class="sub ell">{{ sub }}</span></span><span class="chip {% if st == "running" %}ok{% else %}warn{% endif %}">{{ st }}</span></a>{% endfor %}
+          <p class="sub"><a href="/machine">All jobs on the Machine page</a> · in a terminal: <span class="mono">flow builder status {{ s.name }}</span></p>{% endif %}
+          <h3 class="label">Used by</h3>
+          {% if s.projects.is_empty() %}<p class="sub">No project uses it yet.</p>{% else %}<p class="sl-chiprow">{% for p in s.projects %}<span class="chip">{{ p }}</span>{% endfor %}</p>{% endif %}
+          <p class="sub">A project picks its build server in its own Settings.</p>
+        </div>
+        <div class="sl-col">
+          <h3 class="label">Limits</h3>
+          <form method="post" action="/settings/build-servers/{{ s.name }}/limits" class="lim-form">
+            <div class="lim-row"><label class="lim-t" for="sl-{{ s.name }}"><strong>Jobs of one project at once</strong><span class="sub">Each in a work folder of its own; the first build in a new one is a full build.</span></label>
+              <div class="lim-c"><input id="sl-{{ s.name }}" class="num" name="slots" type="number" min="1" max="8" step="1" value="{{ s.slots }}"><span class="unit">jobs</span></div></div>
+            <div class="lim-row"><label class="lim-t" for="mt-{{ s.name }}"><strong>Start another job when</strong><span class="sub">at least this many threads are free…</span></label>
+              <div class="lim-c"><input id="mt-{{ s.name }}" class="num" name="min_threads" type="number" min="0" step="1" value="{{ s.min_threads }}"><span class="unit">threads</span></div></div>
+            <div class="lim-row"><label class="lim-t" for="mm-{{ s.name }}"><strong>…and</strong><span class="sub">at least this much memory is free.</span></label>
+              <div class="lim-c"><input id="mm-{{ s.name }}" class="num" name="min_memory_gb" type="number" min="0" step="1" value="{{ s.min_memory }}"><span class="unit">GB</span></div></div>
+            <div class="lim-row"><label class="lim-t" for="rm-{{ s.name }}"><strong>Pause jobs when free memory drops below</strong><span class="sub">They go on when there's room again.</span></label>
+              <div class="lim-c"><input id="rm-{{ s.name }}" class="num" name="reserve_memory_gb" type="number" min="0" step="1" value="{{ s.reserve_memory }}"><span class="unit">GB</span></div></div>
+            <div class="lim-row"><label class="lim-t" for="kd-{{ s.name }}"><strong>Delete a project's folders unused for</strong><span class="sub">Its work folders and builds there.</span></label>
+              <div class="lim-c"><input id="kd-{{ s.name }}" class="num" name="keep_days" type="number" min="1" step="1" value="{{ s.keep_days }}"><span class="unit">days</span></div></div>
+            <div class="lim-save"><button class="btn sm" type="submit">Save limits</button></div>
+          </form>
+          <h3 class="label">Name</h3>
+          <form method="post" action="/settings/build-servers/{{ s.name }}/rename" class="sl-rename">
+            <input aria-label="Name" name="name" required maxlength="64" value="{{ s.name }}"><button class="btn sm ghost" type="submit">Rename</button>
+          </form>
+          <p class="sub">Projects and jobs follow the new name; the builder reconnects under it.</p>
+        </div>
       </div>
-    </details>
-  </div>
+      <form method="post" action="/settings/build-servers/{{ s.name }}/remove" class="sl-danger">
+        <div><strong>Remove this builder</strong><span class="sub">Projects that use it build where their agent is. Its folders there stay until you delete them.</span></div>
+        <button class="btn sm danger" type="submit" data-confirm="Remove {{ s.name }}? Projects that use it build where their agent is. Its work folders there stay until you delete them.">Remove</button>
+      </form>
+    </div>
+  </details>
   {% endfor %}
-  {% if servers.is_empty() %}<div class="set-row"><div class="set-txt"><strong>None yet</strong><span class="sub">Any Linux machine that reaches this server can be one.</span></div></div>{% endif %}
+  <details class="sl-item sl-add" id="add-builder"{% if servers.is_empty() %} open{% endif %}>
+    <summary><span class="sl-plus" aria-hidden="true">{{ crate::web::icons::icon("plus")|safe }}</span><span class="sl-name acc-ink">Add a builder</span><span class="sub sl-proj">any Linux machine that reaches this server</span></summary>
+    <div class="sl-body">
+      <p class="sub">Run this on that machine. It asks whether the builder gets a user of its own (recommended) and its name, then asks for your approval here.</p>
+      <pre class="cmd mono">flow builder add</pre>
+    </div>
+  </details>
+  </div>
 </section>

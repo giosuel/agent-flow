@@ -104,8 +104,8 @@ struct SettingsPage {
     github: Vec<(&'static str, &'static str, &'static str, Option<String>)>,
     /// The consultant, run by the server.
     consultant: super::consultant::View,
-    /// Requests from `flow` waiting for approval: (code, what, machine).
-    approvals: Vec<(String, String, String)>,
+    /// Requests from `flow` waiting for approval: (code, what, machine, asked).
+    approvals: Vec<(String, String, String, String)>,
     passkeys_available: bool,
     public_url: String,
     /// This server's glibc: the downloaded program needs one at least as new.
@@ -114,11 +114,21 @@ struct SettingsPage {
     push_key: String,
     push_devices: Vec<DeviceView>,
     toggles: Vec<ToggleView>,
-    device_tokens: Vec<TokenView>,
+    clients: Vec<ClientView>,
     agent_tokens: Vec<TokenView>,
     sessions: Vec<SessionView>,
     /// The Build servers card.
     build_servers: String,
+}
+
+/// A machine with `flow` (the owner, 2026-11-17, D-190: "rename this to clients … and also show
+/// what projects run on these devices").
+struct ClientView {
+    token: TokenView,
+    /// An agent of one of its projects is online.
+    online: bool,
+    /// The projects set up there: (name, slug, folder, agent "online" / "last seen 2 h ago").
+    projects: Vec<(String, String, String, String)>,
 }
 
 struct SectionLink {
@@ -135,13 +145,15 @@ type Section = (&'static str, &'static str, &'static str);
 const SECTIONS: &[(&str, &[Section])] = &[
     ("Account", &[("passkeys", "Passkeys", "key"), ("browsers", "Signed-in browsers", "window")]),
     ("", &[("notifications", "Notifications", "bell")]),
-    ("Machines", &[("devices", "Devices", "laptop"), ("builders", "Build servers", "server")]),
+    ("Machines", &[("clients", "Clients", "laptop"), ("builders", "Build servers", "server")]),
     ("Agents", &[("agents", "Agent tokens", "robot"), ("consultant", "Consultant", "message")]),
     ("Connections", &[("github", "GitHub", "git")]),
 ];
 
 /// The section a key names, or None.
 fn section_key(k: &str) -> Option<&'static str> {
+    // Clients were called Devices until 2026-11-17; older links still find them.
+    let k = if k == "devices" { "clients" } else { k };
     SECTIONS.iter().flat_map(|(_, l)| l.iter()).find(|(key, _, _)| *key == k).map(|(key, _, _)| *key)
 }
 
@@ -150,7 +162,7 @@ fn section_of_notice(done: &str) -> &'static str {
     match done {
         "passkey-removed" => "passkeys",
         "session-ended" => "browsers",
-        "revoked" => "devices",
+        "revoked" | "approved" | "denied" | "approve-failed" => "clients",
         "rotated" => "agents",
         "github-saved" | "github-removed" => "github",
         _ => "notifications",
@@ -179,6 +191,9 @@ fn notice_for(key: &str) -> Option<&'static str> {
         "revoked" => "Token revoked. Whatever used it can no longer reach AgentFlow.",
         "rotated" => "New token written to its file; the old one is revoked. The agent picks it up when it reconnects.",
         "session-ended" => "That browser is signed out.",
+        "approved" => "Approved and done. The terminal that asked has it now.",
+        "denied" => "Denied. Nothing was done.",
+        "approve-failed" => "Approved, but it failed; the terminal that asked says why.",
         "github-saved" => "GitHub token saved. AgentFlow's gh calls use it from now on.",
         "github-removed" => "GitHub token removed. gh uses the login of the user it runs as again.",
         _ => return None,
@@ -221,7 +236,7 @@ async fn render_page(
         _ => 0,
     };
     let now = now_ms();
-    let (passkeys, devices, toggles, tokens, sessions) = state
+    let (passkeys, devices, toggles, tokens, sessions, projects) = state
         .db
         .call(move |c| {
             let passkeys = passkey::list(c)?;
@@ -243,7 +258,8 @@ async fn render_page(
                     ))
                 })?
                 .collect::<Result<Vec<_>, _>>()?;
-            Ok((passkeys, devices, toggles, tokens, sessions))
+            let projects = crate::projects::list(c)?;
+            Ok((passkeys, devices, toggles, tokens, sessions, projects))
         })
         .await?;
 
@@ -269,12 +285,12 @@ async fn render_page(
         })
         .partition(|t| t.kind == "device");
 
-    let approvals: Vec<(String, String, String)> = state
+    let approvals: Vec<(String, String, String, String)> = state
         .db
         .call(|c| crate::approvals::pending(c))
         .await?
         .iter()
-        .map(|a| (a.code.clone(), crate::approvals::describe(a), a.machine.clone()))
+        .map(|a| (a.code.clone(), crate::approvals::describe(a), a.machine.clone(), ago(a.created_at, now)))
         .collect();
     let section = explicit.unwrap_or("notifications");
     let groups = SECTIONS
@@ -286,7 +302,7 @@ async fn render_page(
                     key,
                     label,
                     icon,
-                    badge: (key == "devices" && !approvals.is_empty()).then(|| format!("{} waiting", approvals.len())),
+                    badge: (key == "clients" && !approvals.is_empty()).then(|| format!("{} waiting", approvals.len())),
                 })
                 .collect();
             (*g, links)
@@ -301,6 +317,35 @@ async fn render_page(
         .iter()
         .find(|t| t.kind == "admin" && t.holder == crate::consultant::NAME && !t.hint.is_empty())
         .map(|t| t.hint.clone());
+    // A client's projects: those set up on its host (`flow project setup` records the machine).
+    let clients = device_tokens
+        .into_iter()
+        .map(|t| {
+            let host = t.holder.rsplit('@').next().unwrap_or(&t.holder).to_lowercase();
+            let mine: Vec<_> = projects
+                .iter()
+                .filter(|p| p.status != "archived")
+                .filter(|p| {
+                    !host.is_empty() && (p.machine.to_lowercase() == host || p.agent.machine.to_lowercase() == host)
+                })
+                .collect();
+            ClientView {
+                online: mine.iter().any(|p| p.agent.online(now)),
+                projects: mine
+                    .iter()
+                    .map(|p| {
+                        let agent = if p.agent.online(now) {
+                            "agent online".to_owned()
+                        } else {
+                            p.agent.seen_at.map(|t| format!("agent last seen {}", ago(t, now))).unwrap_or_default()
+                        };
+                        (p.name.clone(), p.slug.clone(), p.checkout.clone(), agent)
+                    })
+                    .collect(),
+                token: t,
+            }
+        })
+        .collect();
     let page = SettingsPage {
         nav,
         notice,
@@ -364,7 +409,7 @@ async fn render_page(
             })
             .collect(),
         toggles: toggles.into_iter().map(|(k, on)| ToggleView { key: k.key(), label: k.label(), on }).collect(),
-        device_tokens,
+        clients,
         agent_tokens,
         sessions: sessions
             .into_iter()

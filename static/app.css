@@ -1270,3 +1270,70 @@ html.no-scroll { overflow: hidden; }
   .sb-menu > summary { width: 100%; }
   .sb-menu .dd-menu { position: fixed; left: 16px; right: 16px; min-width: 0; }
 }
+
+/* Settings lists: Build servers and Clients, a row per entry that opens (the owner, 2026-11-17,
+   D-190, the "Build servers and clients" mockups). */
+.sl-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
+.sl-add-btn { flex: none; display: inline-flex; align-items: center; gap: 6px; }
+.sl-add-btn .i { width: 16px; height: 16px; }
+.acc-ink { color: var(--accent); }
+.code-chip { background: var(--chip); padding: 1px 6px; border-radius: 4px; }
+.slist { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; margin-top: 14px; }
+.sl-item + .sl-item { border-top: 1px solid var(--line); }
+.sl-item > summary { list-style: none; cursor: pointer; display: grid; grid-template-columns: 10px minmax(150px, 1.2fr) minmax(0, 1fr) auto minmax(0, .9fr) 18px; align-items: center; gap: 8px 16px; padding: 14px 18px; }
+.sl-item > summary::-webkit-details-marker { display: none; }
+.sl-item > summary:hover { background: var(--soft); }
+.sl-item[open] > summary { background: var(--soft); box-shadow: inset 2px 0 var(--accent); }
+.sl-name { display: flex; flex-direction: column; gap: 2px; min-width: 0; color: var(--ink); text-decoration: none; }
+.sl-name strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sl-machine, .sl-proj { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sl-proj { text-align: right; }
+.sl-chips { display: flex; gap: 6px; justify-content: flex-end; flex-wrap: wrap; }
+.sl-chev { display: flex; color: var(--ink2); transition: transform .15s; }
+.sl-chev .i, .sl-plus .i { width: 18px; height: 18px; }
+.sl-item[open] .sl-chev { transform: rotate(90deg); }
+.sl-add > summary { grid-template-columns: 18px 1fr auto; }
+.sl-c > summary { grid-template-columns: 10px minmax(220px, 1.4fr) auto minmax(0, 1.2fr) 18px; }
+.sl-plus { display: flex; color: var(--accent); }
+.sl-body { padding: 18px 18px 18px 44px; display: flex; flex-direction: column; gap: 10px; }
+.sl-body .cmd { margin: 0; }
+.sl-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 8px 36px; }
+.sl-col { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.sl-col h3.label { margin: 12px 0 2px; }
+.sl-col h3.label:first-child { margin-top: 0; }
+.sl-col p { margin: 0; }
+.sl-facts { display: grid; grid-template-columns: 84px 1fr; gap: 8px 12px; margin: 0; }
+.sl-facts dt { color: var(--ink2); }
+.sl-facts dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.sl-job { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; color: var(--ink); text-decoration: none; }
+.sl-job:hover { border-color: var(--accent); }
+.sl-job-t { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+.ell { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sl-chiprow { display: flex; gap: 6px; flex-wrap: wrap; }
+.sl-col .lim-row { padding: 10px 0; }
+.sl-rename { display: flex; gap: 8px; }
+.sl-rename input { flex: 1; min-width: 0; }
+.sl-danger { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-top: 10px; padding: 14px 16px; border: 1px solid #5A2330; background: #160A0D; border-radius: 8px; }
+.sl-danger > div { display: flex; flex-direction: column; gap: 2px; }
+.sl-danger .btn { flex: none; }
+.sl-wait { display: flex; align-items: center; gap: 14px; padding: 12px 18px; margin-top: 8px; border: 1px solid #5C4A12; background: var(--warn-bg); border-radius: 10px; }
+.sl-wait .sl-name { flex: 1; }
+.sl-wait-btns { display: flex; gap: 8px; flex: none; }
+@media (max-width: 700px) {
+  .sl-head { flex-direction: column; gap: 0; }
+  .sl-head .sl-add-btn { order: -1; align-self: flex-end; margin-bottom: -34px; }
+  .sl-head h2 { padding-right: 130px; }
+  .sl-item > summary { grid-template-columns: 10px minmax(0, 1fr) 18px; padding: 14px; }
+  .sl-item > summary > .sl-machine, .sl-item > summary > .sl-chips, .sl-item > summary > .sl-proj { grid-column: 2; justify-content: flex-start; text-align: left; }
+  .sl-item > summary > .sl-chev { grid-row: 1; grid-column: 3; }
+  .sl-add > summary { grid-template-columns: 18px minmax(0, 1fr); }
+  .sl-c > summary { grid-template-columns: 10px minmax(0, 1fr) 18px; }
+  .sl-add > summary > .sl-proj { grid-column: 2; }
+  .sl-body { padding: 14px; }
+  .sl-cols { grid-template-columns: minmax(0, 1fr); gap: 20px; }
+  .sl-c > summary > .sl-machine { display: none; }
+  .sl-danger { flex-direction: column; align-items: stretch; }
+  .sl-wait { flex-wrap: wrap; padding: 12px 14px; }
+  .sl-wait-btns { width: 100%; padding-left: 24px; }
+  .sl-wait-btns .btn { flex: 1; }
+}
