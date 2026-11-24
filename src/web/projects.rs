@@ -912,7 +912,6 @@ struct TabQuery {
     tcat: Option<String>,
     tfrom: Option<String>,
     tstate: Option<String>,
-    ball: Option<u8>,
     /// The milestone whose board the overview shows (its name); the current one if left out.
     ms: Option<String>,
     /// A step of that milestone the board shows alone (its name); the whole milestone if left out.
@@ -1080,13 +1079,8 @@ async fn project(
     }
     if tab == "builds" {
         let slug = page.slug.clone();
-        let filter = super::buildstab::Filter::new(
-            q.tq.as_deref(),
-            q.tcat.as_deref(),
-            q.tfrom.as_deref(),
-            q.tstate.as_deref(),
-            q.ball == Some(1),
-        );
+        let filter =
+            super::buildstab::Filter::new(q.tq.as_deref(), q.tcat.as_deref(), q.tfrom.as_deref(), q.tstate.as_deref());
         let ua = headers.get(axum::http::header::USER_AGENT).and_then(|v| v.to_str().ok()).unwrap_or("");
         let windows_first = ua.contains("Windows");
         let is_owner = actor.is_owner();

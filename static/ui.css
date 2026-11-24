@@ -148,6 +148,10 @@ code, pre, .mono { font-family: var(--mono); }
 .ibtn.warn { color: var(--warn-ink); border-color: var(--warn-line); }
 .ibtn.warn:hover { color: var(--warn-ink); background: var(--warn-line); border-color: var(--warn-line); }
 .ibtn.warn[disabled], .ibtn.warn.off { color: var(--warn-ink); border-color: var(--warn-line); background: transparent; opacity: .35; }
+/* Pager: a list a page at a time, "1–10 of 69 · page 1 of 7" and ‹ › (templates/ui.html pager;
+   app.js fills it in). The questions island and Earlier builds. */
+.pager { display: flex; align-items: center; gap: var(--sp-2); }
+.pager[hidden] { display: none; }
 .ibtn.busy .i { animation: spin 1.2s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
@@ -414,10 +418,16 @@ summary.card-head::-webkit-details-marker { display: none; }
 .th-sort { appearance: none; background: none; border: 0; padding: 0; margin: 0; font: inherit; color: inherit; letter-spacing: inherit; text-transform: inherit; display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
 .th-sort:hover, [aria-sort] > .th-sort { color: var(--ink); }
 .th-sort:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--r-xs); }
-.sort-i { font-size: var(--fs-sub); letter-spacing: 0; opacity: .45; min-width: 1ch; }
-.sort-i::before { content: "\2195"; }
-[aria-sort=ascending] > .th-sort .sort-i::before { content: "\2191"; }
-[aria-sort=descending] > .th-sort .sort-i::before { content: "\2193"; }
+/* Two small carets drawn in CSS, not the arrow characters: IBM Plex has ↑ and ↓ but not ↕, so the
+   browser drew it from another font, larger and unlike the others (the owner, 2026-11-24: "why is
+   the table header weird here?"). Sorted, only the caret of its direction stays. */
+.sort-i { position: relative; display: inline-block; width: 7px; height: 11px; flex: none; opacity: .45; }
+.sort-i::before, .sort-i::after { content: ""; position: absolute; left: 0; border-left: 3.5px solid transparent; border-right: 3.5px solid transparent; }
+.sort-i::before { top: 0; border-bottom: 4px solid currentColor; }
+.sort-i::after { bottom: 0; border-top: 4px solid currentColor; }
+[aria-sort=ascending] > .th-sort .sort-i::after, [aria-sort=descending] > .th-sort .sort-i::before { display: none; }
+[aria-sort=ascending] > .th-sort .sort-i::before { top: 3px; }
+[aria-sort=descending] > .th-sort .sort-i::after { bottom: 3px; }
 [aria-sort] > .th-sort .sort-i { opacity: 1; color: var(--accent-ink); }
 .th-sort:hover .sort-i { opacity: .9; }
 

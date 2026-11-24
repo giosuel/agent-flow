@@ -5,7 +5,7 @@
    src/web/decisions.rs builds it. #}
 {% if !dv.questions.is_empty() %}
 <section class="qsec qfull" aria-labelledby="dq-h" data-qpage="cards">
-  <div class="qsec-h"><span class="qsec-ico">{{ crate::web::icons::icon("question")|safe }}</span><h2 id="dq-h">Waiting on you</h2><span class="chip warn">{{ dv.questions.len() }} question{% if dv.questions.len() != 1 %}s{% endif %}</span><span class="grow"></span><span class="sub hide-phone">an answer becomes a decision below, quoting you</span><div class="qpager" hidden><span class="mono sub qp-range" aria-live="polite"></span><button type="button" class="ibtn warn qp-prev" aria-label="Earlier questions">{{ crate::web::icons::icon("prev")|safe }}</button><button type="button" class="ibtn warn qp-next" aria-label="Later questions">{{ crate::web::icons::icon("chevron")|safe }}</button></div></div>
+  <div class="qsec-h"><span class="qsec-ico">{{ crate::web::icons::icon("question")|safe }}</span><h2 id="dq-h">Waiting on you</h2><span class="chip warn">{{ dv.questions.len() }} question{% if dv.questions.len() != 1 %}s{% endif %}</span><span class="grow"></span><span class="sub hide-phone">an answer becomes a decision below, quoting you</span>{% call ui::pager("warn") %}{% endcall %}</div>
   <div class="qgrid">
   {% for q in dv.questions %}
   <article class="qc" aria-labelledby="dqt-{{ q.short }}">

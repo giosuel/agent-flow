@@ -611,9 +611,10 @@ async fn the_overview_puts_questions_first_and_folds_closed_milestones() {
         page.contains("Waiting on you") && page.contains("Take A") && page.contains(r#"class="choice rec""#),
         "{page}"
     );
-    assert!(page.contains("data-qpage") && page.contains(r#"<div class="qpager" hidden>"#), "{page}");
+    assert!(page.contains("data-qpage") && page.contains(r#"<div class="pager" hidden>"#), "{page}");
     // On the amber island the pager is warm, not the greys made for dark cards.
-    assert!(page.contains(r#"class="ibtn warn qp-prev""#) && !page.contains(r#"class="ibtn qp-"#), "{page}");
+    assert!(page.contains(r#"class="ibtn warn pg-prev""#) && page.contains(r#"class="ibtn warn qp-prev""#), "{page}");
+    assert!(!page.contains(r#"class="ibtn qp-"#) && !page.contains(r#"class="ibtn pg-"#), "{page}");
     assert!(page.contains("Opt one") && page.contains("Opt two") && page.contains("Opt five"), "{page}");
     assert!(
         !page.contains("Opt three") && !page.contains("Opt four") && page.contains("2 more, or your own"),
@@ -1558,6 +1559,9 @@ async fn a_build_goes_from_agent_to_owner_and_feedback_comes_back() {
         "{earlier}"
     );
     assert!(earlier.contains(r#"href="/p/imaginarium/B-1/download""#), "{earlier}");
+    // Every earlier build is in the page, ten at a time with the pager component (no "Show all").
+    assert!(earlier.contains(r#"data-pager="10""#) && earlier.contains(r#"<div class="pager" hidden>"#), "{earlier}");
+    assert!(!earlier.contains("Show all") && !earlier.contains("ball=1"), "{earlier}");
     let linux = s.http.get(s.url("/p/imaginarium/B-1/download")).header(COOKIE, &cookie).send().await.unwrap();
     assert_eq!(linux.status(), StatusCode::OK);
 }

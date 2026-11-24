@@ -24,7 +24,7 @@
 {# One row of questions a page, ‹ › to step (the owner, 2026-11-23, D-234); app.js pages them and
    keeps the page in ?q=. Without scripts every question shows. #}
 <section class="qsec" aria-labelledby="q-h" data-qpage>
-  <div class="qsec-h"><span class="qsec-ico">{{ crate::web::icons::icon("question")|safe }}</span><h2 id="q-h">Waiting on you</h2><span class="chip warn">{{ qcards.len() }} question{% if qcards.len() != 1 %}s{% endif %}</span><span class="grow"></span><div class="qpager" hidden><span class="mono sub qp-range" aria-live="polite"></span><button type="button" class="ibtn warn qp-prev" aria-label="Earlier questions">{{ crate::web::icons::icon("prev")|safe }}</button><button type="button" class="ibtn warn qp-next" aria-label="Later questions">{{ crate::web::icons::icon("chevron")|safe }}</button></div><a class="sub" href="/p/{{ slug }}?tab=questions">All questions</a></div>
+  <div class="qsec-h"><span class="qsec-ico">{{ crate::web::icons::icon("question")|safe }}</span><h2 id="q-h">Waiting on you</h2><span class="chip warn">{{ qcards.len() }} question{% if qcards.len() != 1 %}s{% endif %}</span><span class="grow"></span>{% call ui::pager("warn") %}{% endcall %}<a class="sub" href="/p/{{ slug }}?tab=questions">All questions</a></div>
   <div class="qgrid">
   {% for q in qcards %}
   <article class="qc{% if !loop.first %} qc-more{% endif %}" aria-labelledby="qt-{{ q.short }}">

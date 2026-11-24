@@ -7,7 +7,8 @@
 //! A build published for several platforms is several records with one commit: they show as one
 //! build with a platform each. The filters come from the address: `tq` (words), `tcat`
 //! (categories, `|` between them), `tfrom` (a build, e.g. B-66, or "none") and `tstate` (open by
-//! default; problem, tested, skipped, all). `ball` shows every earlier build.
+//! default; problem, tested, skipped, all). The earlier builds are
+//! all in the page, ten at a time (app.js pages them).
 
 use rusqlite::Connection;
 use serde_json::Value;
@@ -24,12 +25,10 @@ pub struct Filter {
     pub cats: Vec<String>,
     pub from: String,
     pub state: String,
-    /// Every earlier build, not only the latest few.
-    pub all_builds: bool,
 }
 
 impl Filter {
-    pub fn new(q: Option<&str>, cats: Option<&str>, from: Option<&str>, state: Option<&str>, all: bool) -> Self {
+    pub fn new(q: Option<&str>, cats: Option<&str>, from: Option<&str>, state: Option<&str>) -> Self {
         let from = from.unwrap_or("").trim();
         let from = if from == "none"
             || (from.starts_with("B-") && from[2..].bytes().all(|b| b.is_ascii_digit()) && from.len() > 2)
@@ -43,7 +42,6 @@ impl Filter {
             cats: cats.unwrap_or("").split('|').map(str::trim).filter(|c| !c.is_empty()).map(str::to_owned).collect(),
             from,
             state: state.filter(|s| ["problem", "tested", "skipped", "all"].contains(s)).unwrap_or("").to_owned(),
-            all_builds: all,
         }
     }
 
@@ -61,9 +59,6 @@ impl Filter {
             if !v.is_empty() {
                 u += &format!("&{k}={v}");
             }
-        }
-        if self.all_builds {
-            u += "&ball=1";
         }
         u
     }
@@ -160,7 +155,6 @@ pub struct BuildsView {
     pub filtering: bool,
     pub earlier: Vec<Earlier>,
     pub earlier_total: usize,
-    pub earlier_all: Option<String>,
     pub none: bool,
 }
 
@@ -462,21 +456,12 @@ pub fn view(
         });
     }
     let earlier_total = earlier.len();
-    const SHOWN: usize = 6;
-    let earlier_all =
-        (!f.all_builds && earlier_total > SHOWN).then(|| f.with(|x| x.all_builds = true).href(slug) + "#earlier");
-    if !f.all_builds {
-        earlier.truncate(SHOWN);
-    }
 
     let mut keep = Vec::new();
     for (k, v) in [("tcat", f.cats.join("|")), ("tfrom", f.from.clone()), ("tstate", f.state.clone())] {
         if !v.is_empty() {
             keep.push((k, v));
         }
-    }
-    if f.all_builds {
-        keep.push(("ball", "1".into()));
     }
     let picked = |v: &Vec<Choice>| v.iter().find(|c| c.3).map(|c| c.0.clone());
     Ok(BuildsView {
@@ -521,7 +506,6 @@ pub fn view(
         filtering,
         earlier,
         earlier_total,
-        earlier_all,
     })
 }
 
@@ -531,10 +515,10 @@ mod tests {
 
     #[test]
     fn filters_round_trip_through_the_address() {
-        let f = Filter::new(Some("hover"), Some("Agents|Paint"), Some("B-66"), Some("problem"), true);
-        assert_eq!(f.href("x"), "/p/x?tab=builds&tq=hover&tcat=Agents%7CPaint&tfrom=B-66&tstate=problem&ball=1");
-        assert_eq!(Filter::new(None, None, Some("../x"), Some("open"), false), Filter::default());
-        assert_eq!(Filter::new(None, None, Some("B-"), None, false).from, "");
-        assert_eq!(Filter::new(None, None, Some("none"), None, false).from, "none");
+        let f = Filter::new(Some("hover"), Some("Agents|Paint"), Some("B-66"), Some("problem"));
+        assert_eq!(f.href("x"), "/p/x?tab=builds&tq=hover&tcat=Agents%7CPaint&tfrom=B-66&tstate=problem");
+        assert_eq!(Filter::new(None, None, Some("../x"), Some("open")), Filter::default());
+        assert_eq!(Filter::new(None, None, Some("B-"), None).from, "");
+        assert_eq!(Filter::new(None, None, Some("none"), None).from, "none");
     }
 }
