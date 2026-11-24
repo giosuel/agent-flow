@@ -1,0 +1,67 @@
+{% import "ui.html" as ui %}
+{# The Decisions tab with the questions merged in (the owner, 2026-11-23, Q-6, Q-8; S-38, S-39):
+   open questions on top, answered in place; then the decisions under the app's filter band, as a
+   timeline by day quoting the owner. src/web/decisions.rs builds it. #}
+{% if !dv.questions.is_empty() %}
+<section class="qsec qfull" aria-labelledby="dq-h" data-qpage="cards">
+  <div class="qsec-h"><span class="qsec-ico">{{ crate::web::icons::icon("question")|safe }}</span><h2 id="dq-h">Waiting on you</h2><span class="chip warn">{{ dv.questions.len() }} question{% if dv.questions.len() != 1 %}s{% endif %}</span><span class="grow"></span><span class="sub hide-phone">an answer becomes a decision below, quoting you</span><div class="qpager" hidden><span class="mono sub qp-range" aria-live="polite"></span><button type="button" class="ibtn qp-prev" aria-label="Earlier questions">{{ crate::web::icons::icon("prev")|safe }}</button><button type="button" class="ibtn qp-next" aria-label="Later questions">{{ crate::web::icons::icon("chevron")|safe }}</button></div></div>
+  <div class="qgrid">
+  {% for q in dv.questions %}
+  <article class="qc" aria-labelledby="dqt-{{ q.short }}">
+    <div class="qh"><a class="mono qid" href="{{ q.url }}">{{ q.short }}</a><span class="chip">{{ q.scope }}</span><span class="qwhen">{{ q.asked }}</span>{% if !q.blocks.is_empty() %}<span class="warn-text qblocks">· blocks {% for (t, u) in q.blocks %}{% if !loop.first %}, {% endif %}<a class="warn-text" href="{{ u }}">{{ t }}</a>{% endfor %}</span>{% endif %}</div>
+    <h3 class="qt" id="dqt-{{ q.short }}"><a href="{{ q.url }}">{{ q.title }}</a></h3>
+    {% if !q.body.is_empty() %}<p class="qb">{{ q.body }}</p>{% endif %}
+    {% call ui::choices("/p/{}/{}/answer"|format(slug, q.short), "{}&answered={}"|format(dv.back, q.short), q.options.as_slice(), true, "dqw-{}"|format(q.short)) %}{% endcall %}
+  </article>
+  {% endfor %}
+  </div>
+  <div class="qpager-p" hidden><button type="button" class="ibtn qp-prev" aria-label="Earlier questions">{{ crate::web::icons::icon("prev")|safe }}</button><span class="mono qp-pos" aria-live="polite"></span><button type="button" class="ibtn qp-next" aria-label="Later questions">{{ crate::web::icons::icon("chevron")|safe }}</button></div>
+</section>
+{% endif %}
+
+<section class="card lpanel" aria-labelledby="dec-h">
+<form method="get" action="/p/{{ slug }}" class="toolbar" id="decided">
+  <input type="hidden" name="tab" value="decisions">
+  {% for (k, v) in dv.keep %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
+  <label class="search{% if !dv.q.is_empty() %} set{% endif %}">{{ crate::web::icons::icon("search")|safe }}<span class="vh">Search decisions</span><input name="dq" value="{{ dv.q }}" placeholder="Search decisions, your words too" autocomplete="off"></label>
+  <details class="dd{% if dv.scope_set %} set{% endif %}"><summary><span class="sub">Scope</span> {{ dv.scope_label }}</summary>
+    <div class="dd-menu wide">
+      {% if dv.scopes_open.len() + dv.scopes_closed.len() > 6 %}<label class="search sm dd-find">{{ crate::web::icons::icon("search")|safe }}<span class="vh">Find a scope</span><input type="search" placeholder="Find a scope" data-find autocomplete="off"></label>{% endif %}
+      {% for (c, n, href, on) in dv.scopes_open %}<a href="{{ href }}" class="ck{% if *on %} on{% endif %}" data-name="{{ c }}"{% if *on %} aria-current="true"{% endif %}><span class="box" aria-hidden="true">{% if *on %}{{ crate::web::icons::icon("check")|safe }}{% endif %}</span><span class="grow">{{ c }}</span><span class="mono sub">{{ n }}</span></a>{% endfor %}
+      {% if !dv.scopes_closed.is_empty() %}<p class="dd-group label">Closed milestones</p>
+      {% for (c, n, href, on) in dv.scopes_closed %}<a href="{{ href }}" class="ck{% if *on %} on{% endif %}" data-name="{{ c }}"{% if *on %} aria-current="true"{% endif %}><span class="box" aria-hidden="true">{% if *on %}{{ crate::web::icons::icon("check")|safe }}{% endif %}</span><span class="grow">{{ c }}</span><span class="mono sub">{{ n }}</span></a>{% endfor %}{% endif %}
+      {% if let Some(r) = dv.scopes_reset %}<div class="dd-foot"><a href="{{ r }}">Back to the scopes in force</a></div>{% endif %}
+    </div>
+  </details>
+  <details class="dd{% if dv.state_label != "In force" %} set{% endif %}"><summary><span class="sub">State</span> {{ dv.state_label }}</summary>
+    <div class="dd-menu">{% for (label, n, href, on) in dv.states %}<a href="{{ href }}"{% if *on %} class="on" aria-current="true"{% endif %}><span>{{ label }}</span><span class="mono sub">{{ n }}</span></a>{% endfor %}</div>
+  </details>
+  <div class="seg" role="group" aria-label="Said">{% for (label, _n, href, on) in dv.ranges %}<a{% if *on %} class="on"{% endif %} href="{{ href }}"{% if *on %} aria-current="true"{% endif %}>{{ label }}</a>{% endfor %}</div>
+  {% if let Some(r) = dv.reset %}<a class="act subtle" href="{{ r }}">Clear</a>{% endif %}
+</form>
+  <div class="card-head flat lp-top"><h2 id="dec-h">Decided</h2><span class="sub">{{ dv.summary }}</span><span class="grow"></span><span class="sub hide-phone">your words quoted</span></div>
+  {% if dv.none %}<p class="empty-in">No decisions yet. An answer to a question becomes one, and agents record what you decide with <span class="mono">record_decision</span>.</p>
+  {% else %}
+  <div class="dtl">
+  {% for d in dv.days %}
+    <div class="grphead">{{ d.label }} · {{ d.entries.len() }}</div>
+    {% for e in d.entries %}
+    <article class="dec" aria-labelledby="dt-{{ e.short }}">
+      <div class="dec-when"><a class="mono" href="{{ e.url }}">{{ e.short }}</a><span class="mono sub">{{ e.time }}</span></div>
+      <div class="dec-body">
+        <h3 class="dec-t" id="dt-{{ e.short }}"><a href="{{ e.url }}">{{ e.title_html|safe }}</a></h3>
+        {% if !e.quote_html.is_empty() %}<blockquote class="quote sm">“{{ e.quote_html|safe }}”</blockquote>{% endif %}
+        <div class="dec-meta"><span class="tag{% if e.project_wide %} accent{% endif %}">{{ e.scope }}</span><span class="sub">{{ e.source }}</span>
+          {% if let Some((id, url, title)) = e.answers %}<a class="chip warn" href="{{ url }}">{{ crate::web::icons::icon("question")|safe }}<span>answers {{ id }}<span class="hide-phone"> · {{ title }}</span></span></a>{% endif %}
+          {% for (id, url) in e.replaces %}<a class="chip" href="{{ url }}">{{ crate::web::icons::icon("history")|safe }}<span>replaces {{ id }}</span></a>{% endfor %}
+          {% if !e.not_in_force.is_empty() %}<span class="chip quiet">{{ e.not_in_force }}</span>{% endif %}
+        </div>
+      </div>
+    </article>
+    {% for o in e.folded %}<a class="dec-old" href="{{ o.url }}">{{ crate::web::icons::icon("history")|safe }}<span class="mono">{{ o.short }}</span><s>{{ o.title }}</s><span class="hide-phone">· replaced by {{ e.short }}</span></a>{% endfor %}
+    {% endfor %}
+  {% endfor %}
+  </div>
+  {% endif %}
+  {% if !dv.foot.is_empty() %}<p class="sub nfoot dec-foot">{{ crate::web::icons::icon("history")|safe }}<span>{{ dv.foot }}</span></p>{% endif %}
+</section>

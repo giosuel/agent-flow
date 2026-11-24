@@ -301,6 +301,10 @@ summary.card-head::-webkit-details-marker { display: none; }
 .dd-foot a { display: inline; min-height: 0; padding: 0; color: var(--muted); text-decoration: underline; }
 .dd-foot a:hover { background: none; color: var(--ink); }
 .dd-none { padding: 8px 10px; margin: 0; }
+/* A group's head inside a menu (closed milestones under the open ones), and a menu for long names. */
+.dd-menu .dd-group { margin: 6px -6px 4px; padding: 10px 16px 2px; border-top: 1px solid var(--line2); }
+.dd-menu.wide { min-width: 340px; max-width: min(420px, 90vw); }
+.dd-menu.wide a { padding-block: 6px; line-height: 1.35; }
 .dd-label { margin: 6px 10px 4px; }
 .dd-g { margin: 10px 10px 4px; }
 .dd-right { left: auto; right: 0; }
@@ -411,6 +415,11 @@ a.item-row:hover { background: var(--hover-bg); }
 .ttl a:hover, .rows a:not(.item-row):hover { color: var(--accent-ink); text-decoration: underline; }
 .grphead { display: flex; align-items: center; gap: var(--sp-2); min-height: 36px; padding: 0 var(--sp-5); background: var(--band); border-top: 1px solid var(--line2); border-bottom: 1px solid var(--line2); font-size: var(--fs-label); font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
 .grphead:first-child { border-top: 0; }
+
+/* ---------------------------------------------------------------- Quote: the owner's words
+   <blockquote class="quote">“…”</blockquote> on a record; .sm in a list or a timeline. */
+.quote { margin: 0; padding: 14px 18px; border-left: 3px solid var(--accent); background: var(--soft); border-radius: 0 var(--r-md) var(--r-md) 0; font-size: var(--fs-h3); color: var(--ink); white-space: pre-wrap; }
+.quote.sm { padding: 2px 0 2px 14px; background: none; border-left-color: var(--accent-line); border-radius: 0; font-size: var(--fs-body); line-height: 1.5; color: var(--ink2); }
 
 /* ---------------------------------------------------------------- Key-value list: one
    dl.kv: names muted, values in ink, side by side; .stack puts each name over its value in

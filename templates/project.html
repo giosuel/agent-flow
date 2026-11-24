@@ -9,7 +9,7 @@
 </div>
 <nav class="tabs proj-tabs" aria-label="Project">
   {% for (key, name) in tabs %}
-  <a href="/p/{{ slug }}{% if *key == "settings" %}/settings" data-dlg{% else if *key == "plan" %}/plan"{% else %}{% if *key != "overview" %}?tab={{ key }}{% endif %}"{% endif %}{% if tab == *key %} class="on" aria-current="page"{% endif %}>{% if *key == "prs" %}<span class="hide-phone">{{ name }}</span><span class="only-phone">PRs</span>{% else if *key == "screenshots" %}<span class="hide-phone">{{ name }}</span><span class="only-phone">Shots</span>{% else if *key == "to-test" %}<span class="hide-phone">{{ name }}</span><span class="only-phone">Test</span>{% else %}{{ name }}{% endif %}{% if *key == "questions" && !open_questions.is_empty() %} <span class="count warn">{{ open_questions.len() }}</span>{% endif %}{% if *key == "prs" && prs_total > 0 %} <span class="count">{{ prs_total }}</span>{% endif %}{% if *key == "to-test" && to_test_open > 0 %} <span class="count warn">{{ to_test_open }}</span>{% endif %}</a>
+  <a href="/p/{{ slug }}{% if *key == "settings" %}/settings" data-dlg{% else if *key == "plan" %}/plan"{% else %}{% if *key != "overview" %}?tab={{ key }}{% endif %}"{% endif %}{% if tab == *key %} class="on" aria-current="page"{% endif %}>{% if *key == "prs" %}<span class="hide-phone">{{ name }}</span><span class="only-phone">PRs</span>{% else if *key == "screenshots" %}<span class="hide-phone">{{ name }}</span><span class="only-phone">Shots</span>{% else if *key == "to-test" %}<span class="hide-phone">{{ name }}</span><span class="only-phone">Test</span>{% else %}{{ name }}{% endif %}{% if *key == "decisions" && !open_questions.is_empty() %} <span class="count warn">{{ open_questions.len() }}</span>{% endif %}{% if *key == "prs" && prs_total > 0 %} <span class="count">{{ prs_total }}</span>{% endif %}{% if *key == "to-test" && to_test_open > 0 %} <span class="count warn">{{ to_test_open }}</span>{% endif %}</a>
   {% endfor %}
 </nav>
 {% if let Some(n) = notice %}<p class="notice{% if notice_bad %} bad{% else %} ok{% endif %}" role="status">{% if notice_bad %}{{ crate::web::icons::icon("alert")|safe }}{% else %}{{ crate::web::icons::icon("check")|safe }}{% endif %}<span>{{ n }}</span></p>{% endif %}
@@ -24,7 +24,7 @@
 {# One row of questions a page, ‹ › to step (the owner, 2026-11-23, D-234); app.js pages them and
    keeps the page in ?q=. Without scripts every question shows. #}
 <section class="qsec" aria-labelledby="q-h" data-qpage>
-  <div class="qsec-h"><span class="qsec-ico">{{ crate::web::icons::icon("question")|safe }}</span><h2 id="q-h">Waiting on you</h2><span class="chip warn">{{ qcards.len() }} question{% if qcards.len() != 1 %}s{% endif %}</span><span class="grow"></span><div class="qpager" hidden><span class="mono sub qp-range" aria-live="polite"></span><button type="button" class="ibtn qp-prev" aria-label="Earlier questions">{{ crate::web::icons::icon("prev")|safe }}</button><button type="button" class="ibtn qp-next" aria-label="Later questions">{{ crate::web::icons::icon("chevron")|safe }}</button></div><a class="sub" href="/p/{{ slug }}?tab=questions">All questions</a></div>
+  <div class="qsec-h"><span class="qsec-ico">{{ crate::web::icons::icon("question")|safe }}</span><h2 id="q-h">Waiting on you</h2><span class="chip warn">{{ qcards.len() }} question{% if qcards.len() != 1 %}s{% endif %}</span><span class="grow"></span><div class="qpager" hidden><span class="mono sub qp-range" aria-live="polite"></span><button type="button" class="ibtn qp-prev" aria-label="Earlier questions">{{ crate::web::icons::icon("prev")|safe }}</button><button type="button" class="ibtn qp-next" aria-label="Later questions">{{ crate::web::icons::icon("chevron")|safe }}</button></div><a class="sub" href="/p/{{ slug }}?tab=decisions">All questions</a></div>
   <div class="qgrid">
   {% for q in qcards %}
   <article class="qc{% if !loop.first %} qc-more{% endif %}" aria-labelledby="qt-{{ q.short }}">
@@ -185,32 +185,5 @@
 </section>
 {% endif %}
 
-{% if tab == "decisions" %}
-<section class="card pad stack">
-  {% if decisions.is_empty() %}<p class="sub">No decisions in force: none project-wide or for a milestone that's open.</p>{% endif %}
-  <ul class="rows">{% for d in decisions %}<li class="item-row"><span class="mono sub id-col">{{ d.short }}</span><div class="ttl"><a href="{{ d.url }}">{{ d.title }}</a><span class="sub">{{ d.sub }}</span></div></li>{% endfor %}</ul>
-  {% if !decisions_closed.is_empty() %}
-  <details><summary class="sub">{{ decisions_closed.len() }} of closed milestones</summary>
-    <ul class="rows">{% for d in decisions_closed %}<li class="item-row"><span class="mono sub id-col">{{ d.short }}</span><div class="ttl"><a href="{{ d.url }}">{{ d.title }}</a><span class="sub">{{ d.sub }}</span></div></li>{% endfor %}</ul>
-  </details>
-  {% endif %}
-  {% if !decisions_replaced.is_empty() %}
-  <details><summary class="sub">{{ decisions_replaced.len() }} replaced by newer ones</summary>
-    <ul class="rows">{% for d in decisions_replaced %}<li class="item-row"><span class="mono sub id-col">{{ d.short }}</span><div class="ttl"><a href="{{ d.url }}">{{ d.title }}</a><span class="sub">{{ d.sub }}</span></div></li>{% endfor %}</ul>
-  </details>
-  {% endif %}
-  {% if !decisions_archived.is_empty() %}
-  <details><summary class="sub">{{ decisions_archived.len() }} archived</summary>
-    <ul class="rows">{% for d in decisions_archived %}<li class="item-row"><span class="mono sub id-col">{{ d.short }}</span><div class="ttl"><a href="{{ d.url }}">{{ d.title }}</a><span class="sub">{{ d.sub }}</span></div></li>{% endfor %}</ul>
-  </details>
-  {% endif %}
-</section>
-{% endif %}
-
-{% if tab == "questions" %}
-<section class="card pad stack">
-  {% if questions.is_empty() %}<p class="sub">No questions yet.</p>{% endif %}
-  <ul class="rows">{% for q in questions %}<li class="item-row"><span class="mono sub id-col">{{ q.short }}</span><div class="ttl"><a href="{{ q.url }}">{{ q.title }}</a><span class="sub">{{ q.sub }}</span></div><span class="chip{% if q.state == "open" %} warn{% endif %}">{{ q.state }}</span></li>{% endfor %}</ul>
-</section>
-{% endif %}
+{% if tab == "decisions" %}{% if let Some(dv) = dview %}{% include "decisions.html" %}{% endif %}{% endif %}
 {% endblock %}
