@@ -3,7 +3,7 @@
 //! its work and writes its own activity-log row.
 
 mod build_tools;
-mod guide_tools;
+mod handbook_tools;
 mod message_tools;
 mod pr_tools;
 mod project_tools;
@@ -26,7 +26,7 @@ use crate::activity::{self, Action, Entry, Via};
 use crate::auth::Actor;
 use crate::web::AppState;
 
-/// What every agent sees when it connects. The full guides come later through `guide()`.
+/// What every agent sees when it connects. The handbook comes later through `handbook_read()`.
 const INSTRUCTIONS: &str = "AgentFlow is the owner's project-management server. Each project has one agent \
 (you, for your project); it records the project's milestones, steps, tasks, decisions, ADRs, questions for the \
 owner, notes, PRs and builds here instead of in Markdown files, and only it writes here (subagents report back \
@@ -92,7 +92,7 @@ impl FlowMcp {
             + Self::pr_tools()
             + Self::build_tools()
             + Self::message_tools()
-            + Self::guide_tools();
+            + Self::handbook_tools();
         for route in tool_router.map.values_mut() {
             route.attr.input_schema = std::sync::Arc::new(schema::inline(&route.attr.input_schema));
         }

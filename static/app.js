@@ -662,8 +662,8 @@ document.addEventListener("change", (e) => {
   const close = () => {
     if (!back) return;
     // An editor with unsaved edits asks first (the project document).
-    if (window.afDocGuard && back.querySelector("form[data-doc-editor]") && !window.afDocGuard()) return;
-    const ed = back.querySelector("form[data-doc-editor] textarea[name=text]");
+    if (window.afDocGuard && back.querySelector("form[data-md-editor]") && !window.afDocGuard()) return;
+    const ed = back.querySelector("form[data-md-editor] textarea[name=text]");
     if (ed) ed.defaultValue = ed.value;
     back.classList.remove("open");
     const b = back;
@@ -823,11 +823,13 @@ document.addEventListener("click", (e) => {
     t.scrollIntoView({ behavior: "smooth", block: "start" });
   });
   document.addEventListener("scroll", (e) => {
-    const box = e.target;
+    // A dialog's body scrolls, or the page itself (the Handbook).
+    const page = e.target === document;
+    const box = page ? document.documentElement : e.target;
     if (!(box instanceof Element)) return;
     const toc = box.querySelector(".pd-toc");
     if (!toc) return;
-    const top = box.getBoundingClientRect().top + 40;
+    const top = page ? 90 : box.getBoundingClientRect().top + 40;
     let cur = null;
     for (const s of box.querySelectorAll(".pd-doc section[id]")) if (s.getBoundingClientRect().top <= top) cur = s.id;
     for (const a of toc.querySelectorAll("a")) a.classList.toggle("on", a.getAttribute("href") === "#" + (cur || toc.querySelector("a")?.getAttribute("href").slice(1)));
@@ -837,9 +839,9 @@ document.addEventListener("click", (e) => {
     const ta = form && form.querySelector("textarea[name=text]");
     return !!ta && ta.value !== ta.defaultValue;
   };
-  const ask = () => confirm("Drop your edits to the project document?");
+  const ask = () => confirm("Drop your edits?");
   window.afDocGuard = () => {
-    const f = document.querySelector("form[data-doc-editor]");
+    const f = document.querySelector("form[data-md-editor]");
     return !dirty(f) || ask();
   };
   // Cancel and links out of the editor ask first.
@@ -850,7 +852,7 @@ document.addEventListener("click", (e) => {
     else a.closest("form").querySelector("textarea[name=text]").defaultValue = a.closest("form").querySelector("textarea[name=text]").value;
   }, true);
   window.addEventListener("beforeunload", (e) => {
-    if (dirty(document.querySelector("form[data-doc-editor]"))) { e.preventDefault(); e.returnValue = ""; }
+    if (dirty(document.querySelector("form[data-md-editor]"))) { e.preventDefault(); e.returnValue = ""; }
   });
 
   // Section helpers for "Use its version": the text split at `## ` headings outside code.
@@ -866,19 +868,20 @@ document.addEventListener("click", (e) => {
   };
 
   const wire = (root) => {
-    const form = root.querySelector && root.querySelector("form[data-doc-editor]");
+    const form = root.querySelector && root.querySelector("form[data-md-editor]");
     if (!form || form.dataset.wired) return;
     form.dataset.wired = "1";
     const ta = form.querySelector("textarea[name=text]");
     const prev = form.querySelector("[data-preview]");
     const flag = form.closest("[data-dlg-content], main")?.querySelector("[data-dirty]");
-    const slug = form.dataset.slug;
+    const previewUrl = form.dataset.preview;
+    const revUrl = form.dataset.rev;
     let timer = null;
     let seq = 0;
     const render = async () => {
       const n = ++seq;
       try {
-        const res = await fetch(`/p/${encodeURIComponent(slug)}/doc/preview`, {
+        const res = await fetch(previewUrl, {
           method: "POST", credentials: "same-origin",
           headers: { "Content-Type": "application/x-www-form-urlencoded" },
           body: new URLSearchParams({ text: ta.value }),
@@ -941,10 +944,10 @@ document.addEventListener("click", (e) => {
     // A newer version saved while editing: say so (it's merged on Save).
     const warn = form.querySelector("[data-live-warn]");
     const base = Number(form.dataset.base);
-    const poll = setInterval(async () => {
+    const poll = revUrl && setInterval(async () => {
       if (!form.isConnected) { clearInterval(poll); return; }
       try {
-        const res = await fetch(`/p/${encodeURIComponent(slug)}/doc/rev?since=${base}`, { credentials: "same-origin" });
+        const res = await fetch(`${revUrl}${revUrl.includes("?") ? "&" : "?"}since=${base}`, { credentials: "same-origin" });
         const d = await res.json();
         if (d.rev > base && warn) {
           warn.querySelector("[data-live-text]").textContent = `${d.author} saved rev ${d.rev} while you were editing; it changed ${d.changed || "the document"}. Saving keeps your edits and takes its changes to the sections you didn't touch; where you both changed a section, you pick.`;

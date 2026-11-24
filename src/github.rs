@@ -39,7 +39,7 @@ pub struct ItemInfo {
     pub review_comments: i64,
 }
 
-/// A pull request as a list shows it (the guides' PRs).
+/// A pull request as a list shows it.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RepoPr {
@@ -80,7 +80,7 @@ pub trait GitHub: Send + Sync {
     fn item<'a>(&'a self, repo: &'a str, number: i64) -> BoxFuture<'a, anyhow::Result<ItemInfo>>;
     /// Open PRs, or the most recently merged ones.
     fn repo_prs<'a>(&'a self, repo: &'a str, merged: bool) -> BoxFuture<'a, anyhow::Result<Vec<RepoPr>>>;
-    /// Merges a PR (the owner's button on the Guides page) and deletes its branch, but only if
+    /// Merges a PR (the owner's Merge button) and deletes its branch, but only if
     /// its branch is still at `head`: a push after the owner looked makes it fail.
     fn merge<'a>(&'a self, repo: &'a str, number: i64, head: &'a str) -> BoxFuture<'a, anyhow::Result<String>>;
 }

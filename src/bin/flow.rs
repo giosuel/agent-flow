@@ -186,6 +186,14 @@ enum Command {
         #[arg(long, hide = true)]
         send: Option<String>,
     },
+    /// The handbook's copy on this machine (~/.local/share/agentflow/handbook), which Claude Code's
+    /// ~/.claude/CLAUDE.md includes: `flow handbook sync` brings it up to date (session starts do).
+    Handbook {
+        #[command(flatten)]
+        client: cli::ClientArgs,
+        /// Only "sync" for now.
+        action: String,
+    },
     /// Print the Authorization header for Claude Code's `headersHelper`, from a token file.
     McpHeaders {
         /// File holding the token, e.g. ~/.config/agentflow/tokens/<project>.token
@@ -419,5 +427,16 @@ fn real_main() -> anyhow::Result<()> {
             Ok(())
         }
         Command::Statusline { client, send } => agentflow::statusline::run(&config_path, &client, send),
+        Command::Handbook { client, action } => {
+            if action != "sync" {
+                anyhow::bail!("flow handbook sync brings this machine's copy up to date");
+            }
+            let c = cli::Client::new(&config_path, &client)?;
+            match cli::sync_handbook(&c)? {
+                Some(n) => println!("The handbook is up to date: {n} files in {}.", cli::handbook_dir().display()),
+                None => println!("The handbook was up to date already ({}).", cli::handbook_dir().display()),
+            }
+            Ok(())
+        }
     }
 }

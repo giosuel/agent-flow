@@ -78,7 +78,7 @@ pub fn set(conn: &Connection, project_id: i64, text: &str, author: &str, what: &
 /// The document's `##` sections: (title, text with its heading). Text before the first heading is
 /// "Introduction".
 pub fn sections(text: &str) -> Vec<(String, String)> {
-    crate::guides::split(text).into_iter().map(|s| (s.title, s.text)).collect()
+    crate::handbook::split(text).into_iter().map(|s| (s.title, s.text)).collect()
 }
 
 /// Replaces one `##` section (found by its title, any case), adds it at the end when there's
