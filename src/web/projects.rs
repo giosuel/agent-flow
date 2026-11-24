@@ -1931,8 +1931,9 @@ async fn answer(
         .call(move |c| {
             let tx = c.transaction()?;
             let q = records::find_str(&tx, &format!("{s}/{i}"), None)?;
+            // The answer stays on the question; the agent records a decision only when it thinks
+            // the answer is one (the owner, 2026-11-12).
             let q = records::answer_question(&tx, &q, option, &words, "owner")?;
-            records::decision_from_answer(&tx, &q, None, &format!("owner, answering {} in AgentFlow", q.short_id()), "owner")?;
             tx.commit()?;
             Ok(q)
         })

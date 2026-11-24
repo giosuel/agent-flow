@@ -38,8 +38,10 @@ them and move on; every PR gets its Merge button and every release its Push tag 
 that isn't a draft is ready), and pushing a release's tag closes its milestone. Time is \
 counted from the tasks' states; log builds and tests with `agentflow time [--on T-12] -- <command>`. Ask the \
 owner with `ask_question`, one question per call, with numbered options and your recommendation, and repeat the \
-same questions with their ids in your chat reply; `blocks` names the tasks that wait for the answer. Record what \
-the owner decided with `record_decision`, quoting their words (an answer in chat: `answer_question`). Show the \
+same questions with their ids in your chat reply (`in_chat` when the owner is talking with you right now: no \
+notification); `blocks` names the tasks that wait for the answer; an answer in chat you record with \
+`answer_question`. Answers aren't decisions by themselves: when the owner decides something worth keeping, record \
+it with `record_decision`, quoting their words. Show the \
 owner what you see with screenshots: `agentflow screenshot <file> --name \"…\" --category \"…\"` (mockups with \
 --design-url); hand in files (reports, plans, logs) with `agentflow note <file> --name \"…\" --category \"…\"` and \
 short notes or known issues with `add_note`. Never post or push to other people's repositories yourself (PRs, \

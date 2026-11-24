@@ -15,6 +15,8 @@ pub struct Waiting {
     pub questions: Vec<Record>,
     /// Open questions whose agent goes ahead with its recommendation meanwhile; not counted.
     pub going_ahead: Vec<Record>,
+    /// Open questions asked in a chat the owner is having with the agent; not counted.
+    pub in_chat: Vec<Record>,
     /// PRs and releases with a button for the owner (M4).
     pub merges: Vec<Record>,
     /// Builds published for the owner to try (M5).
@@ -29,7 +31,8 @@ pub fn load(conn: &Connection) -> anyhow::Result<Waiting> {
         &Query { kinds: vec![Kind::Question], states: vec!["open".into()], limit: 0, ..Default::default() },
     )?;
     // Urgent first, then questions that block something, then the oldest.
-    let (going_ahead, mut questions): (Vec<Record>, Vec<Record>) = questions.into_iter().partition(is_going_ahead);
+    let (going_ahead, questions): (Vec<Record>, Vec<Record>) = questions.into_iter().partition(is_going_ahead);
+    let (in_chat, mut questions): (Vec<Record>, Vec<Record>) = questions.into_iter().partition(is_in_chat);
     let blocking = blocking_ids(conn)?;
     questions.sort_by_key(|q| {
         let urgent = q.data.get("urgent").and_then(Value::as_bool).unwrap_or(false);
@@ -86,11 +89,11 @@ pub fn load(conn: &Connection) -> anyhow::Result<Waiting> {
     .filter(crate::outgoing::waits_for_owner)
     .collect();
     drafts.sort_by_key(|r| r.updated_at);
-    let mut going_ahead = going_ahead;
-    for list in [&mut questions, &mut going_ahead, &mut merges, &mut builds, &mut drafts] {
+    let (mut going_ahead, mut in_chat) = (going_ahead, in_chat);
+    for list in [&mut questions, &mut going_ahead, &mut in_chat, &mut merges, &mut builds, &mut drafts] {
         list.retain(|r| !archived.contains(&r.project_id));
     }
-    Ok(Waiting { questions, going_ahead, merges, builds, drafts })
+    Ok(Waiting { questions, going_ahead, in_chat, merges, builds, drafts })
 }
 
 /// Leaves out archived projects' records.
@@ -101,7 +104,8 @@ pub fn count(conn: &Connection) -> anyhow::Result<usize> {
     let questions: i64 = conn.query_row(
         &format!(
             "SELECT count(*) FROM records WHERE kind = 'question' AND state = 'open'
-               AND NOT coalesce(json_extract(data, '$.going_ahead'), 0) {LIVE}"
+               AND NOT coalesce(json_extract(data, '$.going_ahead'), 0)
+               AND NOT coalesce(json_extract(data, '$.in_chat'), 0) {LIVE}"
         ),
         [],
         |r| r.get(0),
@@ -125,6 +129,11 @@ pub fn count(conn: &Connection) -> anyhow::Result<usize> {
 /// A question its agent goes ahead on with its recommendation (no badge, no notification).
 pub fn is_going_ahead(q: &Record) -> bool {
     q.data.get("going_ahead").and_then(Value::as_bool).unwrap_or(false)
+}
+
+/// A question asked in a chat the owner is having with its agent (no badge, no notification).
+pub fn is_in_chat(q: &Record) -> bool {
+    q.data.get("in_chat").and_then(Value::as_bool).unwrap_or(false)
 }
 
 fn blocking_ids(conn: &Connection) -> anyhow::Result<Vec<i64>> {

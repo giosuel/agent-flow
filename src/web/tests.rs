@@ -1472,7 +1472,7 @@ async fn notes_are_files_or_text_and_come_back() {
 }
 
 #[tokio::test]
-async fn answers_make_decisions_and_releases_bring_their_tag_button() {
+async fn answers_stay_answers_and_releases_bring_their_tag_button() {
     let s = TestServer::start().await;
     let token = s.token(TokenKind::Project, Some("vinculum")).await;
     let sess = mcp_session(&s, &token).await;
@@ -1484,13 +1484,14 @@ async fn answers_make_decisions_and_releases_bring_their_tag_button() {
     assert!(call("add_task", json!({"title": "Sidebar", "milestone": "M4", "estimate": "1 h"})).await.0);
     let (ok, _) = call("ask_question", json!({"title": "List or grid?", "options": [{"title": "A list"}, {"title": "A grid"}], "recommended": 1, "blocks": ["T-1"]})).await;
     assert!(ok);
-    // Answered in chat: one call answers, unblocks and records the decision.
+    // Answered in chat: one call answers and unblocks; an answer isn't a decision by itself
+    // (the owner, 2026-11-12).
     let (ok, r) = call("answer_question", json!({"id": "Q-1", "owner_words": "lets go with 1", "option": 1})).await;
     assert!(ok, "{r}");
     assert_eq!(r["state"], "answered");
-    let (_, d) = call("get_record", json!({"id": r["decision"].as_str().unwrap()})).await;
-    let d = d.to_string();
-    assert!(d.contains("List or grid: A list") && d.contains("lets go with 1") && d.contains("owner, in chat"), "{d}");
+    assert!(r.get("decision").is_none(), "{r}");
+    let (_, q1) = call("get_record", json!({"id": "Q-1"})).await;
+    assert!(q1.to_string().contains("lets go with 1"), "{q1}");
     let (_, t) = call("get_record", json!({"id": "T-1"})).await;
     assert_eq!(t["state"], "todo", "{t}");
     // record_decision with answers closes an open question too.
@@ -1498,13 +1499,23 @@ async fn answers_make_decisions_and_releases_bring_their_tag_button() {
     assert!(call("record_decision", json!({"title": "8990 it is", "owner_words": "yes", "source": "owner", "answers": "Q-2"})).await.0);
     let (_, q2) = call("get_record", json!({"id": "Q-2"})).await;
     assert_eq!(q2["state"], "answered", "{q2}");
-    // Answered on the page: the decision is recorded by itself.
+    // Answered on the page: the answer stays on the question, no decision.
     assert!(call("ask_question", json!({"title": "Tabs or a list?", "options": [{"title": "Tabs"}, {"title": "A list"}]})).await.0);
     let cookie = s.owner_cookie().await;
     let res = s.http.post(s.url("/p/vinculum/Q-3/answer")).header(COOKIE, &cookie).header(ORIGIN, &s.base).form(&[("option", "2")]).send().await.unwrap();
     assert!(res.status().is_redirection());
     let decisions = s.http.get(s.url("/p/vinculum?tab=decisions")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
-    assert!(decisions.contains("Tabs or a list: A list"), "{decisions}");
+    assert!(decisions.contains("8990 it is") && !decisions.contains("Tabs or a list"), "{decisions}");
+    let (_, q3) = call("get_record", json!({"id": "Q-3"})).await;
+    assert_eq!(q3["state"], "answered", "{q3}");
+    // Asked in a chat the owner is having: recorded, but no badge (and no push).
+    assert!(!call("ask_question", json!({"title": "Now?", "in_chat": true, "urgent": true})).await.0);
+    let before = s.db.call(|c| crate::waiting::count(c)).await.unwrap();
+    let (ok, r) = call("ask_question", json!({"title": "Rename it to Atlas?", "in_chat": true})).await;
+    assert!(ok, "{r}");
+    assert_eq!(s.db.call(|c| crate::waiting::count(c)).await.unwrap(), before);
+    let dash = s.http.get(s.url("/")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
+    assert!(dash.contains("Asked in chat") && dash.contains("Rename it to Atlas?"), "{dash}");
 
     // A cleanup the owner asked for: fix a decision, archive a duplicate, bring it back.
     let (ok, d) = call("record_decision", json!({"title": "Tabs on the left", "owner_words": "paraphrase, from memory: tabs left", "source": "owner", "tags": ["paraphrase"]})).await;
