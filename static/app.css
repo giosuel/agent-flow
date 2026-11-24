@@ -1204,14 +1204,20 @@ a.blk.q:hover { text-decoration: underline; }
 .log-head .row { align-items: center; gap: 12px; }
 #live .i { width: 15px; height: 15px; }
 #live.on { background: var(--accent); color: var(--on-accent); }
-.ltabs { display: flex; gap: 2px; padding: 4px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; overflow-x: auto; scrollbar-width: none; margin-bottom: 16px; }
-.ltabs a { display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; border-radius: 8px; color: var(--ink2); text-decoration: none; white-space: nowrap; font-weight: 500; }
+/* The Log's card (D-237): the categories as its underlined header, Live and Pause at its right end,
+   then the search and filters as a darker band, then the chart and the rows. */
+.lbar { display: flex; align-items: stretch; min-height: 54px; border-bottom: 1px solid var(--line); }
+.ltabs { display: flex; align-items: stretch; gap: 2px; padding: 0 10px; flex: 1 1 auto; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+.ltabs::-webkit-scrollbar { display: none; }
+.ltabs a { display: inline-flex; align-items: center; gap: 8px; padding: 0 14px; color: var(--ink2); text-decoration: none; white-space: nowrap; font-weight: 500; font-size: 15px; }
 .ltabs a .i { width: 16px; height: 16px; color: var(--muted); }
-.ltabs a .n { font-size: 12px; color: var(--muted); }
-.ltabs a:hover { background: #15151A; color: var(--ink); }
-.ltabs a.on { background: var(--chip); color: var(--ink); }
+.ltabs a .n { font-size: 12.5px; color: var(--muted); }
+.ltabs a:hover { color: var(--ink); }
+.ltabs a.on { color: var(--ink); box-shadow: inset 0 -2px 0 var(--accent); }
 .ltabs a.on .i { color: var(--accent); }
-.ltool { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 16px; }
+.ltabs a.on .n { color: var(--ink2); }
+.lright { display: flex; align-items: center; gap: 14px; padding: 0 14px 0 10px; flex: none; }
+.ltool { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 14px 20px; background: #0C0C0F; border-bottom: 1px solid var(--line2); }
 .lsearch { flex: 1 1 380px; display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--inset); }
 .lsearch .i { width: 17px; height: 17px; color: var(--muted); flex: none; }
 .lsearch input { flex: 1; min-width: 0; border: 0; background: none; padding: 0; min-height: 40px; outline: none; }
@@ -1223,7 +1229,8 @@ a.blk.q:hover { text-decoration: underline; }
 .dd-menu a { display: flex; justify-content: space-between; gap: 12px; padding: 8px 10px; border-radius: 6px; color: var(--ink2); text-decoration: none; font-size: 14px; }
 .dd-menu a:hover { background: #15151A; color: var(--ink); }
 .dd-menu a.on { background: var(--soft); color: var(--ink); }
-.lpanel { padding: 0; overflow: hidden; }
+.lpanel { padding: 0; overflow: hidden; border-radius: 14px; }
+.lpanel:has(.dd[open]) { overflow: visible; }
 .lp-top { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; padding: 18px 20px 0; }
 .lp-top h2 { margin: 0; font-size: 17px; display: flex; align-items: center; gap: 10px; }
 .livedot { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 500; color: var(--ok); }
@@ -1289,8 +1296,14 @@ ol.lrows { padding: 0; margin: 0; list-style: none; gap: 0; }
 }
 /* The phone (the calm version of the mockup): a category menu instead of tabs, two-line rows. */
 @media (max-width: 700px) {
-  .ltabs { margin: 0 -16px 12px; border-radius: 0; border-left: 0; border-right: 0; }
-  .ltool { gap: 8px; }
+  .lbar { min-height: 48px; }
+  .ltabs { padding: 0 6px; }
+  .ltabs a { padding: 0 12px; font-size: 14.5px; }
+  .lright { gap: 10px; padding: 0 12px 0 8px; box-shadow: -12px 0 12px -8px var(--panel); }
+  .lright .livedot { font-size: 0; gap: 0; }
+  .lright #live { min-height: 36px; padding: 0 10px; }
+  .lright #live span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .ltool { gap: 8px; padding: 12px 16px; }
   .lsearch { flex-basis: 100%; }
   .dd > summary { min-height: 40px; font-size: 14px; }
   .dd-menu { position: fixed; left: 16px; right: 16px; top: auto; bottom: calc(90px + env(safe-area-inset-bottom)); max-height: 50vh; }
