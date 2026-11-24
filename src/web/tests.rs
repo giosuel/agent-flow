@@ -753,7 +753,6 @@ async fn the_owner_answers_on_the_page_and_the_agent_reads_it() {
         "/p/vinculum/plan/none",
         "/p/vinculum/plan",
         "/p/vinculum?tab=decisions",
-        "/p/vinculum?tab=questions",
         "/p/vinculum/Q-1",
     ] {
         let res = s.http.get(s.url(path)).header(COOKIE, &cookie).send().await.unwrap();
@@ -1054,8 +1053,11 @@ async fn the_bar_shows_the_project_its_tabs_and_the_global_pages() {
     let bar = &page[page.find("<header").unwrap()..page.find("</header>").unwrap()];
     assert!(bar.contains(r#"<summary class="pswitch-btn"><span>vinculum</span>"#), "{bar}");
     assert!(bar.contains(r#"href="/p/vinculum" aria-current="page""#), "the project is checked in the switcher");
-    assert!(bar.contains(r#"<a href="/p/vinculum?tab=decisions" class="on" aria-current="page">Decisions</a>"#));
-    assert!(bar.contains(r#"Questions<span class="count warn">1</span>"#), "the open question is counted");
+    // Questions went into Decisions (Q-6): Decisions counts the open question.
+    assert!(bar.contains(
+        r#"<a href="/p/vinculum?tab=decisions" class="on" aria-current="page">Decisions<span class="count warn">1</span></a>"#
+    ));
+    assert!(!bar.contains(">Questions<"), "{bar}");
     assert!(bar.contains(r#"href="/p/vinculum/settings" data-dlg>Settings"#));
     assert!(bar.contains(r#"aria-label="Usage" data-name="Usage""#), "global pages are icons");
 
@@ -1081,7 +1083,7 @@ async fn the_bar_shows_the_project_its_tabs_and_the_global_pages() {
     let bar = &usage[usage.find("<header").unwrap()..usage.find("</header>").unwrap()];
     assert!(bar.contains(r#"<summary class="pswitch-btn"><span>vinculum</span>"#), "{bar}");
     assert!(bar.contains(r#"<a href="/p/vinculum">Overview</a>"#), "its tabs, none lit: {bar}");
-    assert!(bar.contains(r#"Questions<span class="count warn">1</span>"#), "with their counts");
+    assert!(bar.contains(r#"Decisions<span class="count warn">1</span>"#), "with their counts");
     assert!(bar.contains(r#"<a href="/usage" class="on" aria-current="page">"#), "the page is still Usage");
     let unknown = owner_page(&s, &format!("{cookie}; af_project=nope"), "/usage").await;
     assert!(unknown.contains("<span>All projects</span>"), "a project that isn't there is ignored");
@@ -2902,12 +2904,13 @@ async fn the_demo_project_shows_on_every_tab() {
     let data = s.state.config.data_dir();
     s.state.db.call(move |c| crate::demo::create(c, &data)).await.unwrap();
     let cookie = s.owner_cookie().await;
-    for tab in
-        ["", "/plan", "/plan/none", "?tab=questions", "?tab=prs", "?tab=builds", "?tab=decisions", "?tab=screenshots"]
-    {
+    for tab in ["", "/plan", "/plan/none", "?tab=prs", "?tab=builds", "?tab=decisions", "?tab=screenshots"] {
         let res = s.http.get(s.url(&format!("/p/lumen-demo{tab}"))).header(COOKIE, &cookie).send().await.unwrap();
         assert_eq!(res.status(), StatusCode::OK, "{tab}");
     }
+    // Questions went into Decisions (Q-6): its old links open Decisions.
+    let old = s.http.get(s.url("/p/lumen-demo?tab=questions")).header(COOKIE, &cookie).send().await.unwrap();
+    assert_eq!(old.headers()[LOCATION], "/p/lumen-demo?tab=decisions");
     // The Tasks tab went (D-218): its old links open Plan, and so do the overview's old board links.
     let old = s.http.get(s.url("/p/lumen-demo?tab=tasks")).header(COOKIE, &cookie).send().await.unwrap();
     assert_eq!(old.headers()[LOCATION], "/p/lumen-demo/plan");
@@ -3867,17 +3870,19 @@ async fn questions_and_decisions_have_scopes() {
     .await;
     assert!(page["count"] == 1 && page["total"] == ids.len() + 2 && page["more"] == true, "{page}");
     assert!(page["records"][0].get("owner_words").is_none() && page["records"][0]["scope"].is_string(), "{page}");
-    let tab = s
-        .http
-        .get(s.url("/p/vinculum?tab=decisions"))
-        .header(COOKIE, &cookie)
-        .send()
-        .await
-        .unwrap()
-        .text()
-        .await
-        .unwrap();
-    assert!(tab.contains("1 of closed milestones") && tab.contains("1 replaced by newer ones"), "{tab}");
+    // The Decisions tab (M16.1): in force by default; a replaced decision folds under the one that
+    // replaced it, a closed milestone's wait under Scope; the filters bring the rest in.
+    let short = |id: &str| id.rsplit('/').next().unwrap().to_owned();
+    let tab = owner_page(&s, &cookie, "/p/vinculum?tab=decisions").await;
+    assert!(tab.contains("New rule") && !tab.contains("M8 thing"), "{tab}");
+    assert!(tab.contains(r#"class="dec-old""#) && tab.contains(&format!("· replaced by {}", short(&new_id))), "{tab}");
+    assert!(tab.contains("Closed milestones") && tab.contains("1 replaced hidden: State"), "{tab}");
+    let m8 = owner_page(&s, &cookie, "/p/vinculum?tab=decisions&dscope=M8").await;
+    assert!(m8.contains("M8 thing") && !m8.contains("New rule"), "{m8}");
+    let replaced = owner_page(&s, &cookie, "/p/vinculum?tab=decisions&dstate=replaced&dscope=M9").await;
+    assert!(replaced.contains(&format!("replaced by {}", short(&new_id))) && !replaced.contains(r#"class="dec-old""#));
+    let found = owner_page(&s, &cookie, "/p/vinculum?tab=decisions&dq=new+rule").await;
+    assert!(found.contains("<mark>New</mark> <mark>rule</mark>") && found.contains(" found</span>"), "{found}");
     // hello lists project-wide decisions since the last session.
     let (_, h) = call("hello", hello).await;
     assert!(h["new_project_decisions"].to_string().contains("New rule"), "{h}");
@@ -4493,6 +4498,11 @@ async fn the_ui_catalogue_shows_the_library() {
     assert!(
         page.contains(r#"<div class="dlg sm ui-dlg" role="presentation">"#)
             && page.contains(r#"<p class="notice bad">"#),
+        "{page}"
+    );
+    // The owner's words, and a menu's group head (M16.1).
+    assert!(
+        page.contains(r#"<blockquote class="quote sm">"#) && page.contains(r#"<p class="dd-group label">"#),
         "{page}"
     );
     let res = s.http.get(s.url("/ui")).send().await.unwrap();

@@ -1142,13 +1142,15 @@ document.addEventListener("click", (e) => {
 
 // The overview's questions, a page at a time (the owner, 2026-11-23, D-234): on the desktop one
 // row (as many as the grid has columns), on the phone the first question whole and five rows a
-// page. The page is kept in ?q=, and an answer comes back to it.
+// page. The page is kept in ?q=, and an answer comes back to it. On the Decisions tab
+// (data-qpage="cards") every question is a whole card, one a page on the phone.
 (() => {
   const sec = document.querySelector('[data-qpage]');
   if (!sec) return;
   const grid = sec.querySelector('.qgrid');
   const top = sec.querySelector('.qpager'), bottom = sec.querySelector('.qpager-p');
   const phone = matchMedia('(max-width: 700px)');
+  const cardsOnly = sec.dataset.qpage === 'cards';
   let page = Math.max(1, parseInt(new URLSearchParams(location.search).get('q'), 10) || 1);
   const withPage = (href) => {
     const u = new URL(href, location.href);
@@ -1157,10 +1159,11 @@ document.addEventListener("click", (e) => {
   };
   function render() {
     const cards = [...grid.querySelectorAll('article.qc')], rows = [...grid.querySelectorAll('.qmini')];
-    const items = phone.matches ? rows : cards;
-    (phone.matches ? cards : rows).forEach((e) => { e.hidden = false; });
+    const mini = phone.matches && !cardsOnly;
+    const items = mini ? rows : cards;
+    (mini ? cards : rows).forEach((e) => { e.hidden = false; });
     grid.style.gridTemplateColumns = '';
-    const per = phone.matches ? 5 : Math.max(1, getComputedStyle(grid).gridTemplateColumns.split(' ').filter(Boolean).length);
+    const per = phone.matches ? (cardsOnly ? 1 : 5) : Math.max(1, getComputedStyle(grid).gridTemplateColumns.split(' ').filter(Boolean).length);
     if (items.length <= per) {
       items.forEach((e) => { e.hidden = false; });
       top.hidden = bottom.hidden = true;

@@ -340,7 +340,7 @@ fn esc(s: &str) -> String {
 }
 
 /// `text`, escaped, with every search word marked.
-fn marked(text: &str, words: &[String]) -> String {
+pub(super) fn marked(text: &str, words: &[String]) -> String {
     let lower = text.to_lowercase();
     // Lowercasing can change byte lengths (rare letters); then nothing is marked.
     if lower.len() != text.len() || words.is_empty() {
@@ -372,7 +372,7 @@ fn marked(text: &str, words: &[String]) -> String {
 
 /// A line of a note's text: Markdown marks left out, on one line; around the first search word
 /// when it's further in.
-fn snippet(body: &str, words: &[String]) -> String {
+pub(super) fn snippet(body: &str, words: &[String]) -> String {
     let flat: String = body
         .lines()
         .map(|l| l.trim().trim_start_matches(['#', '>', '-', '*', ' ']).trim())

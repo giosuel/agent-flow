@@ -836,13 +836,10 @@ struct ProjectPage {
     board: Option<Board>,
     agent: AgentCard,
     open_questions: Vec<RecordRow>,
+    /// The overview's latest decisions in force.
     decisions: Vec<RecordRow>,
-    /// Put away in a cleanup: folded away on the Decisions tab.
-    decisions_archived: Vec<RecordRow>,
-    /// Decisions of closed milestones, and replaced ones: folded away.
-    decisions_closed: Vec<RecordRow>,
-    decisions_replaced: Vec<RecordRow>,
-    questions: Vec<RecordRow>,
+    /// The Decisions tab: open questions, filters and the timeline.
+    dview: Option<super::decisions::DecisionsView>,
     /// The Builds tab: every build, newest first.
     builds: Vec<RecordRow>,
     /// The Settings tab's form, filled with the project's details.
@@ -926,6 +923,11 @@ struct TabQuery {
     nkind: Option<String>,
     nstate: Option<String>,
     nrange: Option<String>,
+    /// The Decisions tab's search and filters (see `super::decisions::Filter`).
+    dq: Option<String>,
+    dscope: Option<String>,
+    dstate: Option<String>,
+    drange: Option<String>,
     /// After answering a question on the overview: its id.
     answered: Option<String>,
 }
@@ -963,17 +965,16 @@ fn press_notice(q: &TabQuery) -> (Option<String>, bool) {
     }
 }
 
-/// The project page's tabs, in order; questions come right after the overview.
+/// The project page's tabs, in order. Questions went into Decisions (the owner, 2026-11-23, Q-6).
 /// `?ms=none`: the board of the tasks without a milestone.
 const LOOSE: &str = "none";
 
 pub(super) const TABS: &[(&str, &str)] = &[
     ("overview", "Overview"),
     ("plan", "Plan"),
-    ("questions", "Questions"),
+    ("decisions", "Decisions"),
     ("prs", "Pull requests"),
     ("builds", "Builds"),
-    ("decisions", "Decisions"),
     ("to-test", "To test"),
     ("screenshots", "Screenshots"),
     ("notes", "Notes"),
@@ -992,6 +993,10 @@ async fn project(
         let code = q.settings.as_deref().map(|c| format!("?settings={}", super::log::enc(c))).unwrap_or_default();
         return Ok(Redirect::to(&format!("/p/{slug}/settings{code}")).into_response());
     }
+    // Questions went into Decisions (the owner, 2026-11-23, Q-6): its links open Decisions.
+    if q.tab.as_deref() == Some("questions") {
+        return Ok(Redirect::to(&format!("/p/{slug}?tab=decisions")).into_response());
+    }
     // The Tasks tab went (the owner, 2026-11-18, D-218): its links open Plan.
     if q.tab.as_deref() == Some("tasks") {
         return Ok(Redirect::to(&format!("/p/{slug}/plan")).into_response());
@@ -1007,26 +1012,13 @@ async fn project(
     let chosen = q.ms.clone();
     let chosen_step = q.step.clone();
     let t = tab.clone();
+    let tz_d = tz.clone();
     let page = state
         .db
         .call(move |c| {
             let Some(p) = projects::get(c, &slug)? else { return Ok(None) };
             let ms = projects::milestones(c, p.id)?;
-            let mut all =
-                records::query(c, &records::Query { project_id: Some(p.id), limit: 0, ..Default::default() })?;
-            // The Decisions tab folds the archived ones at its end.
-            if t == "decisions" {
-                all.extend(records::query(
-                    c,
-                    &records::Query {
-                        project_id: Some(p.id),
-                        kinds: vec![Kind::Decision],
-                        states: vec!["archived".into()],
-                        limit: 0,
-                        ..Default::default()
-                    },
-                )?);
-            }
+            let all = records::query(c, &records::Query { project_id: Some(p.id), limit: 0, ..Default::default() })?;
             let checkout = (p.checkout.trim().to_owned(), p.machine.trim().to_owned());
             Ok(Some((
                 build_project_page(c, p, ms, all, &t, (chosen.as_deref(), chosen_step.as_deref()), now, &tz)?,
@@ -1076,6 +1068,25 @@ async fn project(
                 .call(move |c| {
                     let p = projects::require(c, &slug)?;
                     super::notes::view(c, &slug, p.id, &filter, now)
+                })
+                .await?,
+        );
+    }
+    if tab == "decisions" {
+        let slug = page.slug.clone();
+        let filter = super::decisions::Filter::new(
+            q.dq.as_deref(),
+            q.dscope.as_deref(),
+            q.dstate.as_deref(),
+            q.drange.as_deref(),
+        );
+        let tz2 = tz_d;
+        page.dview = Some(
+            state
+                .db
+                .call(move |c| {
+                    let p = projects::require(c, &slug)?;
+                    super::decisions::view(c, &slug, p.id, &filter, now, &tz2)
                 })
                 .await?,
         );
@@ -1502,36 +1513,8 @@ fn build_project_page(
         None => true,
         Some(id) => ms.iter().any(|m| m.id == id && m.state != "closed"),
     };
-    let scoped_row = |r: &Record| {
-        let mut row = row(r);
-        row.sub = format!("{} · {}", r.milestone.clone().unwrap_or_else(|| "Project-wide".into()), row.sub);
-        row
-    };
-    let decisions_archived: Vec<RecordRow> = if tab == "decisions" {
-        decisions_all.iter().filter(|r| r.state == "archived").map(|r| scoped_row(r)).collect()
-    } else {
-        Vec::new()
-    };
-    let (decisions_closed, decisions_replaced): (Vec<RecordRow>, Vec<RecordRow>) = if tab == "decisions" {
-        (
-            decisions_all
-                .iter()
-                .filter(|r| r.state == "current" && !in_force_scope(r))
-                .map(|r| scoped_row(r))
-                .collect(),
-            decisions_all.iter().filter(|r| r.state == "replaced").map(|r| scoped_row(r)).collect(),
-        )
-    } else {
-        (Vec::new(), Vec::new())
-    };
-    let decisions: Vec<RecordRow> = match tab {
-        "decisions" => {
-            decisions_all.iter().filter(|r| r.state == "current" && in_force_scope(r)).map(|r| scoped_row(r)).collect()
-        }
-        _ => {
-            decisions_all.iter().filter(|r| r.state == "current" && in_force_scope(r)).take(5).map(|r| row(r)).collect()
-        }
-    };
+    let decisions: Vec<RecordRow> =
+        decisions_all.iter().filter(|r| r.state == "current" && in_force_scope(r)).take(5).map(|r| row(r)).collect();
     let open_questions = questions_all.iter().filter(|r| r.state == "open").map(|r| row(r)).collect();
     let mut qcards = Vec::new();
     if tab == "overview" {
@@ -1566,7 +1549,6 @@ fn build_project_page(
             });
         }
     }
-    let questions = if tab == "questions" { questions_all.iter().map(|r| row(r)).collect() } else { Vec::new() };
 
     // "1 works · 1 problem · 1 skipped" per build, from its feedback records.
     let verdicts: HashMap<i64, String> = if tab == "builds" {
@@ -1657,6 +1639,7 @@ fn build_project_page(
         to_test_open: crate::totest::open_count(c, p.id)?,
         doc_line: super::projectdoc::short_line(&crate::projectdoc::get(c, p.id)?, now_ms()),
         notes: None,
+        dview: None,
         to_test,
         external,
         external_done,
@@ -1723,10 +1706,6 @@ fn build_project_page(
         },
         open_questions,
         decisions,
-        decisions_archived,
-        decisions_closed,
-        decisions_replaced,
-        questions,
         builds,
         shots_all: shots.len(),
         shots,
@@ -1931,7 +1910,7 @@ async fn record(
 fn record_tab(kind: Kind) -> Option<&'static str> {
     match kind {
         Kind::Task => Some("plan"),
-        Kind::Question => Some("questions"),
+        Kind::Question => Some("decisions"),
         Kind::Decision | Kind::Adr => Some("decisions"),
         Kind::Pr => Some("prs"),
         Kind::Build | Kind::Feedback => Some("builds"),

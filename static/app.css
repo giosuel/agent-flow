@@ -161,7 +161,6 @@ ul.plain, ol.plain { margin: 0; padding-left: 18px; display: flex; flex-directio
 .task-t { font-weight: 500; }
 /* Records */
 .rec-title { font-size: var(--fs-h1); line-height: 1.25; max-width: 60ch; }
-.quote { margin: 0; padding: 14px 18px; border-left: 3px solid var(--accent); background: var(--soft); border-radius: 0 8px 8px 0; font-size: var(--fs-h3); color: var(--ink); white-space: pre-wrap; }
 .prose { color: var(--ink2); max-width: 75ch; display: flex; flex-direction: column; gap: 10px; }
 .prose p, .prose ul, .prose ol, .prose pre { margin: 0; }
 .prose pre { background: var(--code); border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; overflow-x: auto; }
@@ -1046,11 +1045,11 @@ ol.lrows { padding: 0; margin: 0; list-style: none; gap: 0; }
   .qh { flex-wrap: nowrap; white-space: nowrap; min-width: 0; }
   .qh .chip, .qh .qid, .qwhen { flex: none; }
   .qblocks { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-  .qt a, .qc .choice .txt { display: -webkit-box; -webkit-box-orient: vertical; overflow: hidden; }
-  .qt a { -webkit-line-clamp: 3; }
-  .qc .choice .txt { -webkit-line-clamp: 2; }
+  .qsec:not(.qfull) .qt a, .qsec:not(.qfull) .qc .choice .txt { display: -webkit-box; -webkit-box-orient: vertical; overflow: hidden; }
+  .qsec:not(.qfull) .qt a { -webkit-line-clamp: 3; }
+  .qsec:not(.qfull) .qc .choice .txt { -webkit-line-clamp: 2; }
   /* Room for three answers and Send answer (the answer control, M15). */
-  .qsec[data-paged] .qc { height: 380px; overflow: hidden; }
+  .qsec[data-paged]:not(.qfull) .qc { height: 380px; overflow: hidden; }
 }
 .ov-lay { display: grid; grid-template-columns: minmax(0, 1fr) 400px; gap: 22px; align-items: start; }
 .ov-main, .ov-side { display: flex; flex-direction: column; gap: 22px; min-width: 0; }
@@ -1499,3 +1498,33 @@ ol.lrows { padding: 0; margin: 0; list-style: none; gap: 0; }
 /* Placement of library parts on these pages */
 .relayed { align-self: flex-start; margin-top: 6px; }
 .ntf-dot { margin-top: 8px; }
+
+/* The Decisions tab (M16.1; the owner, 2026-11-23, Q-6, Q-8; S-38, S-39): open questions as whole
+   cards, then the decisions by day, each with the owner's words. */
+.qfull .qb { margin: 0; color: var(--ink2); font-size: var(--fs-sm); line-height: 1.5; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
+.qfull .qsec-h > .sub { margin-right: 4px; }
+.qfull .qgrid { grid-template-columns: repeat(auto-fit, minmax(min(100%, 560px), 1fr)); }
+.dec { display: grid; grid-template-columns: 84px minmax(0, 1fr); gap: 16px; padding: 18px 20px; border-top: 1px solid var(--line2); }
+.dtl > .grphead + .dec { border-top: 0; }
+.dec-when { display: flex; flex-direction: column; gap: 4px; font-size: var(--fs-sub); padding-top: 1px; }
+.dec-when a { color: var(--accent); text-decoration: none; }
+.dec-when a:hover { color: var(--hover); }
+.dec-body { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.dec-t { margin: 0; font-size: var(--fs-body); font-weight: 600; line-height: 1.4; }
+.dec-t a { color: var(--ink); text-decoration: none; }
+.dec-t a:hover { color: var(--hover); }
+.dec-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-size: var(--fs-sub); }
+.dec-meta .chip { text-decoration: none; max-width: 100%; }
+.dec-meta .chip > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.dec-old { display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 0 20px 0 120px; border-top: 1px solid var(--line2); color: var(--muted); text-decoration: none; font-size: var(--fs-sub); }
+.dec-old:hover { background: var(--hover-bg); color: var(--ink2); }
+.dec-old .i { width: var(--ic-xs); height: var(--ic-xs); flex: none; }
+.dec-old s { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dec-old span { flex: none; }
+.dec-foot { display: flex; align-items: center; gap: 8px; border-top: 1px solid var(--line2); }
+.dec-foot .i { width: var(--ic-sm); height: var(--ic-sm); flex: none; }
+@media (max-width: 700px) {
+  .dec { grid-template-columns: minmax(0, 1fr); gap: 8px; padding: 14px 16px; }
+  .dec-when { flex-direction: row; gap: 10px; }
+  .dec-old { padding: 0 16px; }
+}

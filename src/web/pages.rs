@@ -297,7 +297,8 @@ impl Nav {
             .iter()
             .map(|&(key, label)| {
                 let (count, warn) = match key {
-                    "questions" => (questions, true),
+                    // Decisions carries the questions waiting (Q-6).
+                    "decisions" => (questions, true),
                     "prs" => (prs, false),
                     "to-test" => (tests, true),
                     _ => (0, false),
