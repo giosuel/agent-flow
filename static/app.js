@@ -258,7 +258,10 @@ document.addEventListener("af:content", (e) => wireCopy(e.detail));
   }
 
   // One floating tooltip for small marks with a data-tip.
+  let smallWired = false;
   function small() {
+    if (smallWired) return;
+    smallWired = true;
     const tip = document.createElement("div");
     tip.className = "chart-tip floating";
     tip.hidden = true;
@@ -303,6 +306,7 @@ document.addEventListener("af:content", (e) => wireCopy(e.detail));
       svg.dataset.wired = "1";
       chart(svg);
     }
+    if (document.querySelector("[data-tip]")) small();
   });
 })();
 
@@ -384,3 +388,48 @@ document.addEventListener("click", async (e) => {
     location.href = a.href;
   }
 });
+
+// Project tabs on the phone switch in place (the owner, 2026-11-12: "on mobile clicking a tab in a
+// project page doesn't add navigation and instead just switches tabs"): the tab's page is fetched,
+// its content swapped in, and the address replaced rather than pushed, so Back leaves the project
+// instead of stepping through its tabs. Anything going wrong falls back to loading the tab, still
+// without a history entry.
+(() => {
+  const phone = window.matchMedia("(max-width: 700px)");
+  let pending = null;
+  document.addEventListener("click", async (e) => {
+    const a = e.target.closest && e.target.closest(".proj-tabs a[href]");
+    if (!a || !phone.matches || e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    e.preventDefault();
+    const url = a.href;
+    const bar = a.parentElement;
+    for (const t of bar.querySelectorAll("a")) {
+      t.classList.toggle("on", t === a);
+      if (t === a) t.setAttribute("aria-current", "page");
+      else t.removeAttribute("aria-current");
+    }
+    if (pending) pending.abort();
+    pending = new AbortController();
+    try {
+      const res = await fetch(url, { signal: pending.signal, credentials: "same-origin", headers: { Accept: "text/html" } });
+      if (!res.ok || res.redirected) throw new Error(String(res.status));
+      const doc = new DOMParser().parseFromString(await res.text(), "text/html");
+      const next = doc.getElementById("main");
+      const main = document.getElementById("main");
+      if (!next || !main) throw new Error("no content");
+      const left = bar.scrollLeft;
+      main.replaceChildren(...Array.from(next.childNodes, (n) => document.importNode(n, true)));
+      document.title = doc.title;
+      history.replaceState(history.state, "", url);
+      const tabs = main.querySelector(".proj-tabs");
+      if (tabs) {
+        tabs.scrollLeft = left;
+        if (window.scrollY > tabs.offsetTop) window.scrollTo({ top: Math.max(0, tabs.offsetTop - 8) });
+      }
+      document.dispatchEvent(new CustomEvent("af:content", { detail: main }));
+      document.dispatchEvent(new CustomEvent("af:charts"));
+    } catch (err) {
+      if (err.name !== "AbortError") location.replace(url);
+    }
+  });
+})();
