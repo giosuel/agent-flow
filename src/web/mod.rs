@@ -297,7 +297,8 @@ async fn usage_round(state: &AppState) -> anyhow::Result<crate::usage::Stats> {
     Ok(stats)
 }
 
-/// Moves reads older than 90 days to the monthly archive: at start, then every six hours.
+/// Moves reads older than 90 days to the monthly archive and cleans up builders' old files: at
+/// start, then every six hours.
 fn spawn_archiver(state: AppState) {
     tokio::spawn(async move {
         let mut tick = tokio::time::interval(std::time::Duration::from_secs(6 * 3600));
@@ -310,8 +311,33 @@ fn spawn_archiver(state: AppState) {
                 Ok(n) => tracing::info!("archived {n} reads older than 90 days"),
                 Err(e) => tracing::warn!("archiving old reads: {e:#}"),
             }
+            // Builders' files: blobs unused for two weeks, jobs' results after a week.
+            let data = state.config.data_dir();
+            let freed = tokio::task::spawn_blocking(move || {
+                let (n, bytes) = crate::blobs::Store::new(data.join("blobs")).gc(DAY * 14);
+                let results = clean_old(&data.join("remote").join("results"), DAY * 7);
+                (n, bytes, results)
+            })
+            .await;
+            if let Ok((n, bytes, results)) = freed
+                && (n > 0 || results > 0)
+            {
+                tracing::info!("removed {n} unused blobs ({} MB) and {results} old jobs' results", bytes >> 20);
+            }
         }
     });
+}
+
+const DAY: std::time::Duration = std::time::Duration::from_secs(86400);
+
+/// Removes the folders in `dir` last changed more than `age` ago. Returns how many.
+fn clean_old(dir: &std::path::Path, age: std::time::Duration) -> usize {
+    let cutoff = std::time::SystemTime::now() - age;
+    let Ok(rd) = std::fs::read_dir(dir) else { return 0 };
+    rd.flatten()
+        .filter(|e| e.metadata().is_ok_and(|m| m.is_dir() && m.modified().is_ok_and(|t| t < cutoff)))
+        .filter(|e| std::fs::remove_dir_all(e.path()).is_ok())
+        .count()
 }
 
 async fn shutdown_signal() {

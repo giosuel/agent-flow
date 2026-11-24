@@ -68,9 +68,20 @@ struct Outbox {
     wake: tokio::sync::Notify,
 }
 
+/// Lines kept while the server is away; older lines go first (a job's end never does).
+const MAX_QUEUED_LINES: usize = 200_000;
+
 impl Outbox {
     fn push(&self, r: Reply) {
-        self.queue.lock().unwrap_or_else(|e| e.into_inner()).push_back(r);
+        let mut q = self.queue.lock().unwrap_or_else(|e| e.into_inner());
+        if matches!(r, Reply::Line { .. })
+            && q.len() >= MAX_QUEUED_LINES
+            && let Some(i) = q.iter().position(|x| matches!(x, Reply::Line { .. }))
+        {
+            q.remove(i);
+        }
+        q.push_back(r);
+        drop(q);
         self.wake.notify_one();
     }
 }
@@ -87,6 +98,14 @@ struct Builder {
 pub async fn run(cfg: Config) -> anyhow::Result<()> {
     let token = cfg.token()?;
     let me = Arc::new(Builder { cfg, token, out: Outbox::default(), kills: Mutex::new(HashMap::new()) });
+    // Blobs no snapshot used for two weeks go (checked daily).
+    tokio::spawn(async {
+        let mut tick = tokio::time::interval(Duration::from_secs(86400));
+        loop {
+            tick.tick().await;
+            let _ = tokio::task::spawn_blocking(|| store().gc(Duration::from_secs(14 * 86400))).await;
+        }
+    });
     let mut pause = 1u64;
     loop {
         match session(&me).await {
@@ -257,7 +276,20 @@ async fn sh(me: &Arc<Builder>, id: u64, script: &str, stream: bool, timeout_s: u
         tokio::select! {
             l = out.next_line() => match l {
                 Ok(Some(text)) => me.out.push(Reply::Line { re: id, text, err: false }),
-                _ => break child.wait().await.ok(),
+                _ => {
+                    // stdout is done: what stderr still holds comes before the end.
+                    while err_open {
+                        match tokio::time::timeout(Duration::from_secs(5), err.next_line()).await {
+                            Ok(Ok(Some(text))) => {
+                                last_err.push_back(text.clone());
+                                if last_err.len() > 20 { last_err.pop_front(); }
+                                me.out.push(Reply::Line { re: id, text, err: true });
+                            }
+                            _ => err_open = false,
+                        }
+                    }
+                    break child.wait().await.ok();
+                }
             },
             l = err.next_line(), if err_open => match l {
                 Ok(Some(text)) => {

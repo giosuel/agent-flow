@@ -840,8 +840,19 @@ pub fn remote(config_path: &Path, a: RemoteArgs) -> anyhow::Result<i32> {
         (dir.clone(), String::new(), None)
     } else {
         let (top, sub) = crate::snapshot::top_of(&dir)?;
-        let up = crate::snapshot::upload(&client, &top, a.server.as_deref())?;
-        (top, sub, Some(up))
+        // Only a connected builder takes a snapshot; one that's offline would refuse the job
+        // anyway, so nothing travels for it. An SSH builder (or an older server that doesn't
+        // say) gets one only when it's a daemon.
+        match crate::snapshot::target(&client, a.server.as_deref()) {
+            Some((kind, false, _)) if kind == "daemon" => {
+                eprintln!("the build server is offline; build here instead");
+                return Ok(75);
+            }
+            Some((kind, true, base)) if kind == "daemon" => {
+                (top.clone(), sub, Some(crate::snapshot::upload(&client, &top, &base)?))
+            }
+            _ => (top, sub, None),
+        }
     };
     let body = serde_json::json!({
         "dir": if a.setup { dir.clone() } else { top.clone() }, "command": a.command, "fetch": a.fetch, "gpu": a.gpu,

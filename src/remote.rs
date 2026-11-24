@@ -786,6 +786,15 @@ pub fn rename_server(conn: &mut Connection, old: &str, new: &str) -> anyhow::Res
     let probe = BuildServer { name: new.to_owned(), kind: "daemon".into(), ..Default::default() };
     check_server(&probe)?;
     let tx = conn.transaction()?;
+    // A job in flight is tied to the builder's name: rename once it's idle.
+    let busy: i64 = tx.query_row(
+        "SELECT count(*) FROM remote_jobs WHERE server = ?1 AND state IN ('queued', 'running', 'paused')",
+        [old],
+        |r| r.get(0),
+    )?;
+    if busy > 0 {
+        bail!("{old} has jobs waiting or running; rename it when they're done");
+    }
     let taken: bool =
         tx.query_row("SELECT EXISTS (SELECT 1 FROM build_servers WHERE name = ?1)", [new], |r| r.get(0))?;
     if taken {
@@ -1475,6 +1484,8 @@ async fn stream_daemon(
     let (tx, mut stop) = tokio::sync::oneshot::channel();
     state.remote.lock().unwrap_or_else(|e| e.into_inner()).running.insert(job.id, tx);
     let mut tick = tokio::time::interval(Duration::from_secs(1));
+    // A builder gone for good (restarted, removed) never reports: give up after 10 minutes offline.
+    let mut offline_since: Option<std::time::Instant> = None;
     let code = loop {
         tokio::select! {
             ev = events.recv() => match ev {
@@ -1486,7 +1497,15 @@ async fn stream_daemon(
                 }
                 None => break None,
             },
-            _ = tick.tick() => flush(state, job, out).await,
+            _ = tick.tick() => {
+                flush(state, job, out).await;
+                if crate::builders::hub().is_online(&server.name) {
+                    offline_since = None;
+                } else if offline_since.get_or_insert_with(std::time::Instant::now).elapsed() > Duration::from_secs(600) {
+                    out.line(&note(&format!("{} has been offline for 10 minutes; giving up on this job", server.name))).await;
+                    break None;
+                }
+            }
             _ = &mut stop => {
                 crate::builders::hub().kill(&server.name, rid);
                 break None;

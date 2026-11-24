@@ -29,6 +29,8 @@ pub struct Manifest {
 
 /// The largest blob taken (a build's working tree holds sources, not builds).
 pub const MAX_BLOB: u64 = 512 * 1024 * 1024;
+/// The most a pack may unpack to, all blobs together.
+pub const MAX_PACK: u64 = 8 * 1024 * 1024 * 1024;
 
 pub fn check_sha(sha: &str) -> anyhow::Result<()> {
     if sha.len() != 64 || !sha.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()) {
@@ -64,7 +66,12 @@ impl Store {
         check_sha(sha)?;
         let dest = self.path(sha);
         if dest.is_file() {
-            std::io::copy(data, &mut std::io::sink())?;
+            std::io::copy(&mut data.take(MAX_BLOB + 1), &mut std::io::sink())?;
+            // Used again: it stays (see gc).
+            let _ = std::fs::File::options()
+                .write(true)
+                .open(&dest)
+                .and_then(|f| f.set_modified(std::time::SystemTime::now()));
             return Ok(());
         }
         let dir = dest.parent().context("a blob's folder")?;
@@ -124,13 +131,37 @@ impl Store {
         let dec = zstd::stream::read::Decoder::new(input)?;
         let mut tar = tar::Archive::new(dec);
         let mut n = 0;
+        let mut total = 0u64;
         for entry in tar.entries()? {
             let mut e = entry?;
+            total += e.size();
+            if total > MAX_PACK {
+                bail!("the pack unpacks to more than {} GB", MAX_PACK >> 30);
+            }
             let name = e.path()?.to_string_lossy().to_string();
             self.put(&name, &mut e)?;
             n += 1;
         }
         Ok(n)
+    }
+
+    /// Deletes blobs nobody used for `age` (a job's snapshot is synced within minutes; the next
+    /// one sends again what's gone). Returns the files and bytes freed.
+    pub fn gc(&self, age: std::time::Duration) -> (u64, u64) {
+        let cutoff = std::time::SystemTime::now() - age;
+        let (mut files, mut bytes) = (0, 0);
+        let Ok(top) = std::fs::read_dir(&self.dir) else { return (0, 0) };
+        for d in top.flatten() {
+            let Ok(inner) = std::fs::read_dir(d.path()) else { continue };
+            for f in inner.flatten() {
+                let Ok(m) = f.metadata() else { continue };
+                if m.is_file() && m.modified().is_ok_and(|t| t < cutoff) && std::fs::remove_file(f.path()).is_ok() {
+                    files += 1;
+                    bytes += m.len();
+                }
+            }
+        }
+        (files, bytes)
     }
 }
 

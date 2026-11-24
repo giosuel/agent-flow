@@ -346,7 +346,7 @@ fn admin_sockets() -> Vec<PathBuf> {
 }
 
 /// `sudo flow server add-passkey`: asks the server on this machine, over its local socket that
-/// only root and the server's user may use, for a one-time link that adds a passkey.
+/// only root may use, for a one-time link that adds a passkey.
 pub fn add_passkey(socket: Option<&Path>) -> anyhow::Result<()> {
     use std::io::{BufRead, BufReader};
     let candidates = match socket {

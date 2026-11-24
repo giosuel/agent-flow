@@ -339,7 +339,7 @@ async fn merge(
             argv,
             cwd: None,
             timeout_s: 120,
-            env: crate::secrets::gh_env(),
+            env: Vec::new(),
         })
         .await
     };

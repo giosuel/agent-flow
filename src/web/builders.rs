@@ -77,8 +77,22 @@ async fn connect(State(state): State<AppState>, Extension(actor): Extension<Acto
 async fn serve(state: AppState, name: String, socket: WebSocket) {
     let (mut sink, mut stream) = socket.split();
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-    let conn = hub().connect(&name, tx);
+    let (conn, replaced) = hub().connect(&name, tx);
     tracing::info!("builder {name} connected");
+    if replaced {
+        // Two at once: the token is being used somewhere else too.
+        tracing::warn!("builder {name} connected while its earlier connection was still open");
+        activity::write(
+            &state.db,
+            Entry::new(
+                &Actor::System("builders"),
+                Via::Build,
+                Action::Denied,
+                format!("builder {name} connected a second time while still connected: is its token copied?"),
+            ),
+        )
+        .await;
+    }
     activity::write(
         &state.db,
         Entry::new(&Actor::System("builders"), Via::Build, Action::Login, format!("builder {name} connected")),
@@ -213,7 +227,9 @@ struct BaseQuery {
     server: Option<String>,
 }
 
-/// The newest commit a builder has of this project, so flow's git bundle carries only what's new.
+/// The newest commit a builder has of this project, so flow's git bundle carries only what's new;
+/// and what kind of builder it is and whether it's online, so flow uploads a snapshot only when a
+/// connected builder will use it.
 async fn base(
     State(state): State<AppState>,
     Extension(actor): Extension<Actor>,
@@ -222,20 +238,29 @@ async fn base(
     let Actor::Project { project_id, .. } = actor else {
         return json_error(StatusCode::FORBIDDEN, "for projects' agents");
     };
+    let wanted = q.server.clone();
     let found = state
         .db
         .call(move |c| {
-            let Some(server) = q.server.or(crate::remote::project_server(c, project_id)?) else { return Ok(None) };
-            Ok(c.query_row(
-                "SELECT commit_sha FROM remote_jobs WHERE project_id = ?1 AND server = ?2 AND commit_sha != '' ORDER BY id DESC LIMIT 1",
-                rusqlite::params![project_id, server],
-                |r| r.get::<_, String>(0),
-            )
-            .ok())
+            let Some(server) = wanted.or(crate::remote::project_server(c, project_id)?) else { return Ok(None) };
+            let sha = c
+                .query_row(
+                    "SELECT commit_sha FROM remote_jobs WHERE project_id = ?1 AND server = ?2 AND commit_sha != '' ORDER BY id DESC LIMIT 1",
+                    rusqlite::params![project_id, server],
+                    |r| r.get::<_, String>(0),
+                )
+                .ok();
+            Ok(Some((server, sha)))
         })
         .await;
     match found {
-        Ok(sha) => Json(json!({"commit": sha.unwrap_or_default()})).into_response(),
+        Ok(None) => Json(json!({"commit": "", "server": null})).into_response(),
+        Ok(Some((server, sha))) => {
+            let kind = crate::remote::servers(&state).into_iter().find(|b| b.name == server).map(|b| b.kind);
+            let online = kind.as_deref() == Some("daemon") && hub().is_online(&server);
+            Json(json!({"commit": sha.unwrap_or_default(), "server": server, "kind": kind, "online": online}))
+                .into_response()
+        }
         Err(e) => json_error(StatusCode::INTERNAL_SERVER_ERROR, format!("{e:#}")),
     }
 }

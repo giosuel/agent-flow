@@ -103,6 +103,7 @@ async fn upload(
             if read.offset < from {
                 anyhow::bail!("a round can't end before it starts");
             }
+            read.confine(c, project_id)?;
             let calls = crate::usage::store_as(c, &read, Some(project_id))?;
             crate::projects::seen(c, project_id)?;
             Ok(Ok((calls, read.offset)))

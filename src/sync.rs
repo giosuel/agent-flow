@@ -77,25 +77,45 @@ pub fn session_count(project_dir: &Path) -> (usize, Option<std::time::SystemTime
     (n, latest)
 }
 
-/// Sends what's new in these files. Returns the calls the server didn't have yet.
+/// Sends what's new in these files. Returns the calls the server didn't have yet. A file that
+/// fails doesn't hold up the others (the next sync tries it again from where the server stopped).
 pub fn send(client: &Client, files: &[PathBuf]) -> anyhow::Result<usize> {
     let root = transcripts_root();
     let machine = crate::connect::machine_name();
     let mut calls = 0;
+    let mut failed = Vec::new();
     for path in files {
-        let file = format!("{machine}:{}", path.display());
-        // Several rounds for a long file; each starts where the server stopped.
-        for _ in 0..1000 {
-            let st = client.post_json("/api/sync/state", &json!({"file": file}))?;
-            let offset = st["offset"].as_u64().unwrap_or(0);
-            let first_at = st["first_at"].as_i64();
-            let Some(read) = read_new(&root, path, offset, first_at)? else { break };
-            if read.offset == offset {
-                break; // only a line still being written
+        match send_file(client, &root, &format!("{machine}:{}", path.display()), path) {
+            Ok(n) => calls += n,
+            Err(e) => {
+                eprintln!("flow sync: {}: {e:#}", path.display());
+                failed.push(e);
             }
-            let from = if std::fs::metadata(path)?.len() < offset { 0 } else { offset };
-            let got = client.post_json("/api/sync", &json!({"file": file, "from": from, "read": read_json(&read)?}))?;
-            calls += got["calls"].as_u64().unwrap_or(0) as usize;
+        }
+    }
+    match failed.into_iter().next() {
+        Some(e) if calls == 0 && files.len() == 1 => Err(e),
+        _ => Ok(calls),
+    }
+}
+
+fn send_file(client: &Client, root: &Path, file: &str, path: &Path) -> anyhow::Result<usize> {
+    let mut calls = 0;
+    // Several rounds for a long file; each starts where the server stopped (asked again each
+    // round, so a round refused because another sync got there first just moves on).
+    for _ in 0..1000 {
+        let st = client.post_json("/api/sync/state", &json!({"file": file}))?;
+        let offset = st["offset"].as_u64().unwrap_or(0);
+        let first_at = st["first_at"].as_i64();
+        let Some(read) = read_new(root, path, offset, first_at)? else { break };
+        if read.offset == offset {
+            break; // only a line still being written
+        }
+        let from = if std::fs::metadata(path)?.len() < offset { 0 } else { offset };
+        match client.post_json("/api/sync", &json!({"file": file, "from": from, "read": read_json(&read)?})) {
+            Ok(got) => calls += got["calls"].as_u64().unwrap_or(0) as usize,
+            Err(e) if format!("{e:#}").starts_with("409") => continue,
+            Err(e) => return Err(e),
         }
     }
     Ok(calls)
