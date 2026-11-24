@@ -41,6 +41,9 @@ pub fn sync(
     data.insert("url".into(), info.url.clone().into());
     data.insert("base".into(), info.base.clone().into());
     data.insert("head".into(), info.head.clone().into());
+    if !info.head_sha.is_empty() {
+        data.insert("head_sha".into(), info.head_sha.clone().into());
+    }
     data.insert("draft".into(), info.draft.into());
     data.insert("mergeable".into(), info.mergeable.clone().into());
     data.insert("ci".into(), info.ci.clone().into());
@@ -179,6 +182,18 @@ pub fn merge_command(repo: &str, number: i64, method: &str) -> String {
     format!("gh pr merge {number} -R {repo} --{method} --delete-branch")
 }
 
+/// The same, merging only if the PR's branch is still at the commit `head`: the one AgentFlow
+/// knew when the owner looked. A push after that makes gh refuse, instead of merging commits
+/// nobody saw. Without a known commit it is the plain command.
+pub fn merge_command_at(repo: &str, number: i64, method: &str, head: &str) -> String {
+    let plain = merge_command(repo, number, method);
+    if is_commit(head) { format!("{plain} --match-head-commit {head}") } else { plain }
+}
+
+fn is_commit(sha: &str) -> bool {
+    matches!(sha.len(), 40 | 64) && sha.chars().all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c))
+}
+
 /// What a command AgentFlow makes itself does: merges a PR, or tags a repository's main.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ServerCommand {
@@ -197,12 +212,17 @@ pub fn is_server_command(cmd: &str) -> bool {
 pub fn server_command(cmd: &str) -> Option<ServerCommand> {
     let safe = |s: &str| !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || "._-+/".contains(c));
     let w: Vec<&str> = cmd.split(' ').collect();
-    if let ["gh", "pr", "merge", n, "-R", repo, method, "--delete-branch"] = w.as_slice() {
+    if let ["gh", "pr", "merge", n, "-R", repo, method, "--delete-branch", pin @ ..] = w.as_slice() {
         let m = method.trim_start_matches("--");
         let number = n.parse::<i64>().ok()?;
+        let head = match pin {
+            [] => "",
+            ["--match-head-commit", sha] if is_commit(sha) => *sha,
+            _ => return None,
+        };
         let ok = crate::projects::looks_like_repo(repo)
             && safe(repo)
-            && cmd == merge_command(repo, number, m)
+            && cmd == merge_command_at(repo, number, m, head)
             && ["merge", "squash", "rebase"].contains(&m);
         return ok.then(|| ServerCommand::Merge { repo: (*repo).to_owned(), number });
     }
@@ -233,11 +253,18 @@ fn ensure_merge_button(conn: &Connection, project: &Project, repo: &str, pr: &Re
     if pr.state != "open" || repo.is_empty() || !repo.eq_ignore_ascii_case(project.repo.trim()) {
         return Ok(());
     }
-    let has: i64 = conn.query_row(
-        "SELECT count(*) FROM actions WHERE record_id = ?1 AND kind = 'merge' AND state != 'withdrawn'",
-        [pr.id],
-        |r| r.get(0),
-    )?;
+    let command = merge_command_at(repo, pr.number, &project.merge_method, pr.str("head_sha"));
+    // AgentFlow's own button follows the PR's newest commit: after a push, the page shows the new
+    // command, and a press from a page that showed the older one is refused.
+    let merges_this = Some(ServerCommand::Merge { repo: repo.to_owned(), number: pr.number });
+    let mut has = 0;
+    for b in crate::actions::for_record(conn, pr.id)?.into_iter().filter(|b| b.is_merge()) {
+        has += 1;
+        let ours = b.added_by == "agentflow" && server_command(&b.command) == merges_this;
+        if ours && b.command != command && ["waiting", "failed"].contains(&b.state.as_str()) {
+            conn.execute("UPDATE actions SET command = ?1 WHERE id = ?2", rusqlite::params![command, b.id])?;
+        }
+    }
     if has > 0 {
         return Ok(());
     }
@@ -247,7 +274,7 @@ fn ensure_merge_button(conn: &Connection, project: &Project, repo: &str, pr: &Re
         &crate::actions::NewButton {
             label: "Merge",
             kind: crate::actions::ButtonKind::parse("merge")?,
-            command: &merge_command(repo, pr.number, &project.merge_method),
+            command: &command,
             workdir: "",
             requires: &[],
         },
@@ -594,6 +621,47 @@ mod tests {
             );
             assert!(ready_in_order(of(61)).is_ok());
             assert!(ready_in_order(of(62)).is_ok(), "stacked on an open PR: its turn comes after #61");
+            Ok(())
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn merge_pins_the_commit_the_owner_saw() {
+        let db = Db::open_memory();
+        db.call_blocking(|c| {
+            let p = crate::projects::create(c, "v", "V", "t")?;
+            let patch = crate::projects::ProjectPatch { repo: Some("o/r".into()), ..Default::default() };
+            crate::projects::update(c, p.id, &patch, "owner")?;
+            let p = crate::projects::get_by_id(c, p.id)?;
+            let at = |sha: &str| PrInfo { head_sha: sha.into(), ..pr(48, "main", "b48") };
+            let (first, second) = ("a".repeat(40), "b".repeat(40));
+            let (r, _) = sync(c, &p, "o/r", &at(&first), "poller")?;
+            let shown = crate::actions::for_record(c, r.id)?.remove(0);
+            assert_eq!(
+                shown.command,
+                format!("gh pr merge 48 -R o/r --merge --delete-branch --match-head-commit {first}")
+            );
+            assert!(crate::actions::own_command(c, &shown)?, "still AgentFlow's own, with the server's token");
+            // A push after the owner looked: the button moves on, and the old page's press is refused.
+            sync(c, &p, "o/r", &at(&second), "poller")?;
+            let buttons = crate::actions::for_record(c, r.id)?;
+            assert_eq!(buttons.len(), 1);
+            assert!(buttons[0].command.ends_with(&format!("--match-head-commit {second}")), "{}", buttons[0].command);
+            let err = crate::actions::claim(c, shown.id, &shown.hash()).unwrap_err().to_string();
+            assert!(err.contains("isn't the one the page showed"), "{err}");
+            // A new merge method keeps the pin; nothing else may follow the command.
+            let squash = crate::projects::ProjectPatch { merge_method: Some("squash".into()), ..Default::default() };
+            crate::projects::update(c, p.id, &squash, "owner")?;
+            assert_eq!(crate::actions::for_record(c, r.id)?[0].command, merge_command_at("o/r", 48, "squash", &second));
+            for bad in [
+                "--match-head-commit abc",
+                "--match-head-commit $(id)",
+                "--admin",
+                &format!("--match-head-commit {first} --admin"),
+            ] {
+                assert!(!is_server_command(&format!("{} {bad}", merge_command("o/r", 48, "merge"))), "{bad}");
+            }
             Ok(())
         })
         .unwrap();

@@ -280,15 +280,15 @@ pub fn update(
         // Waiting Merge buttons AgentFlow made follow the new method.
         let p = get_by_id(conn, project_id)?;
         let mut stmt = conn.prepare(
-            "SELECT a.id, r.number FROM actions a JOIN records r ON r.id = a.record_id
+            "SELECT a.id, r.number, coalesce(json_extract(r.data, '$.head_sha'), '') FROM actions a JOIN records r ON r.id = a.record_id
              WHERE r.project_id = ?1 AND r.kind = 'pr' AND a.kind = 'merge' AND a.added_by = 'agentflow' AND a.state = 'waiting'",
         )?;
-        let rows: Vec<(i64, i64)> =
-            stmt.query_map([project_id], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<Result<_, _>>()?;
-        for (id, number) in rows {
+        let rows: Vec<(i64, i64, String)> =
+            stmt.query_map([project_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?.collect::<Result<_, _>>()?;
+        for (id, number, head) in rows {
             conn.execute(
                 "UPDATE actions SET command = ?1 WHERE id = ?2",
-                params![crate::prs::merge_command(p.repo.trim(), number, v.trim()), id],
+                params![crate::prs::merge_command_at(p.repo.trim(), number, v.trim(), &head), id],
             )?;
         }
     }

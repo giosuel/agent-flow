@@ -264,6 +264,7 @@ pub fn create(c: &mut Connection, data_dir: &Path) -> anyhow::Result<String> {
             draft,
             base: base.into(),
             head: head.into(),
+            head_sha: String::new(),
             mergeable: "mergeable".into(),
             ci: "passing".into(),
         };
