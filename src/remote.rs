@@ -702,7 +702,8 @@ pub fn check_server(b: &BuildServer) -> anyhow::Result<()> {
     if !simple(&b.name) {
         bail!("the name is letters, digits, - _ . (e.g. headquarters)");
     }
-    let target_ok = !b.ssh.is_empty()
+    let target_ok = b.kind == "daemon"
+        || !b.ssh.is_empty()
         && b.ssh.len() <= 200
         && !b.ssh.starts_with('-')
         && b.ssh.bytes().all(|c| c.is_ascii_alphanumeric() || b"-_.@:[]".contains(&c));
@@ -767,6 +768,28 @@ pub fn remove_server(conn: &Connection, name: &str) -> anyhow::Result<()> {
     }
     conn.execute("DELETE FROM project_build_server WHERE server = ?1", [name])?;
     conn.execute("DELETE FROM build_servers WHERE name = ?1", [name])?;
+    // A builder that connected itself loses its token with it.
+    conn.execute("UPDATE tokens SET revoked_at = ?2 WHERE kind = 'builder' AND name = ?1 AND revoked_at IS NULL", params![name, now_ms()])?;
+    Ok(())
+}
+
+/// Renames a builder: its projects, its job history and its token (a builder connects by name)
+/// move with it.
+pub fn rename_server(conn: &mut Connection, old: &str, new: &str) -> anyhow::Result<()> {
+    let probe = BuildServer { name: new.to_owned(), kind: "daemon".into(), ..Default::default() };
+    check_server(&probe)?;
+    let tx = conn.transaction()?;
+    let taken: bool = tx.query_row("SELECT EXISTS (SELECT 1 FROM build_servers WHERE name = ?1)", [new], |r| r.get(0))?;
+    if taken {
+        bail!("there's a builder called {new} already");
+    }
+    if tx.execute("UPDATE build_servers SET name = ?2 WHERE name = ?1", params![old, new])? == 0 {
+        bail!("no builder called {old}");
+    }
+    tx.execute("UPDATE project_build_server SET server = ?2 WHERE server = ?1", params![old, new])?;
+    tx.execute("UPDATE remote_jobs SET server = ?2 WHERE server = ?1", params![old, new])?;
+    tx.execute("UPDATE tokens SET name = ?2 WHERE kind = 'builder' AND name = ?1", params![old, new])?;
+    tx.commit()?;
     Ok(())
 }
 

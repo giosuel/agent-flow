@@ -30,6 +30,7 @@ pub const ACTIONS: &[&str] = &[
     "project_add",
     "project_create",
     "builder_create",
+    "builder_remove",
     "backup",
     "import_prs",
 ];
@@ -127,6 +128,14 @@ pub fn check_args(c: &Connection, action: &str, args: &Value) -> anyhow::Result<
             let taken: bool = c.query_row("SELECT EXISTS (SELECT 1 FROM build_servers WHERE name = ?1)", [&name], |r| r.get(0))?;
             if taken {
                 bail!("a builder called {name} exists already");
+            }
+            Ok(())
+        }
+        "builder_remove" => {
+            let name = s("name");
+            let known: bool = c.query_row("SELECT EXISTS (SELECT 1 FROM build_servers WHERE name = ?1)", [&name], |r| r.get(0))?;
+            if !known {
+                bail!("no builder called {name}");
             }
             Ok(())
         }
@@ -352,6 +361,11 @@ pub fn execute(c: &mut Connection, a: &Approval, data_dir: &std::path::Path) -> 
             tx.commit()?;
             Ok(json!({"token": secret, "id": id, "name": b.name, "min_threads": b.min_threads, "min_memory_gb": b.min_memory_gb, "reserve_memory_gb": b.reserve_memory_gb}))
         }
+        "builder_remove" => {
+            crate::remote::remove_server(c, &s("name"))?;
+            crate::builders::hub().drop_builder(&s("name"));
+            Ok(json!({"removed": s("name")}))
+        }
         "backup" => {
             let now = now_ms();
             let stamp = format!("{}-{}", crate::util::fmt_date(now), crate::util::fmt_hm(now).replace(':', ""));
@@ -377,6 +391,7 @@ pub fn describe(a: &Approval) -> String {
         "project_create" => format!("Create the project {} ({}) in {}", s("name"), s("slug"), s("folder")),
         "backup" => "Back up the database and export every project".into(),
         "builder_create" => format!("Add {} as a builder (it runs agents' builds and tests)", a.machine),
+        "builder_remove" => format!("Remove the builder {}", s("name")),
         "import_prs" => format!("Import PRs #{}–#{} into {}", n("from"), n("to"), s("project")),
         other => other.to_owned(),
     }

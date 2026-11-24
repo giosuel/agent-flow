@@ -57,6 +57,13 @@ enum Command {
         #[command(flatten)]
         client: cli::ClientArgs,
     },
+    /// Build machines: add this one (with your approval), list, edit, remove.
+    Builder {
+        #[command(subcommand)]
+        command: BuilderCommand,
+        #[command(flatten)]
+        client: cli::ClientArgs,
+    },
     /// On the server itself: `sudo flow server add-passkey` makes a one-time link to add a passkey,
     /// when you've lost yours or have none yet.
     Server {
@@ -209,6 +216,47 @@ enum ProjectCommand {
 }
 
 #[derive(Subcommand)]
+enum BuilderCommand {
+    /// Make this machine a builder: asks whether it gets a user of its own (recommended), its
+    /// name, and your approval in the browser; then starts its service.
+    Add {
+        /// Its name (default: this machine's hostname; asked for when there's a terminal).
+        #[arg(long)]
+        name: Option<String>,
+        /// The user it runs as, made if it doesn't exist (default: asked; agentflow-builder).
+        #[arg(long, conflicts_with = "current_user")]
+        user: Option<String>,
+        /// Run it as you instead of a user of its own.
+        #[arg(long)]
+        current_user: bool,
+    },
+    /// All builders: online or not, jobs, limits.
+    List,
+    /// Change a builder's name or limits (this machine's if no name is given).
+    Edit {
+        name: Option<String>,
+        /// A new name.
+        #[arg(long = "name")]
+        rename: Option<String>,
+        /// Start another job only while at least this many threads are free…
+        #[arg(long)]
+        min_threads: Option<f64>,
+        /// …and this much memory (GB).
+        #[arg(long)]
+        min_memory: Option<f64>,
+        /// Pause jobs below this much free memory (GB).
+        #[arg(long)]
+        reserve_memory: Option<f64>,
+        /// Delete a project's work folder unused for this many days.
+        #[arg(long)]
+        keep_days: Option<i64>,
+    },
+    /// Remove a builder: on the builder itself, its service, token and (if you say so) folders;
+    /// from elsewhere, with your approval.
+    Remove { name: Option<String> },
+}
+
+#[derive(Subcommand)]
 enum ServerCommand {
     /// A one-time link to add a passkey (run as root, or as the server's user, on the server).
     AddPasskey {
@@ -250,6 +298,17 @@ fn main() -> anyhow::Result<()> {
         Command::Backup(client) => connect::backup(&config_path, &client),
         Command::ImportPrs { project, range, client } => connect::import_prs(&config_path, &client, &project, &range),
         Command::Server { command: ServerCommand::AddPasskey { socket } } => connect::add_passkey(socket.as_deref()),
+        Command::Builder { command, client } => {
+            use agentflow::builder_cmd as b;
+            match command {
+                BuilderCommand::Add { name, user, current_user } => b::add(&config_path, &client, b::AddArgs { name, user, current_user }),
+                BuilderCommand::List => b::list(&config_path, &client),
+                BuilderCommand::Edit { name, rename, min_threads, min_memory, reserve_memory, keep_days } => {
+                    b::edit(&config_path, &client, b::EditArgs { name, rename, min_threads, min_memory, reserve_memory, keep_days })
+                }
+                BuilderCommand::Remove { name } => b::remove(&config_path, &client, name),
+            }
+        }
         Command::Whoami(client) => cli::whoami(&config_path, client),
         Command::Publish(args) => cli::publish(&config_path, args),
         Command::Screenshot(args) => cli::screenshot(&config_path, args),

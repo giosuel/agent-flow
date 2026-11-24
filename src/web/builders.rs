@@ -266,3 +266,97 @@ async fn result_out(
         Err(_) => json_error(StatusCode::NOT_FOUND, "no such result"),
     }
 }
+
+pub fn admin_routes() -> Router<AppState> {
+    Router::new()
+        .route("/api/builders", get(list))
+        .route("/api/builders/self", axum::routing::delete(remove_self))
+        .route("/api/builders/edit/{name}", axum::routing::patch(edit))
+}
+
+/// `flow builder list`: every builder, online or not, with its limits.
+async fn list(State(state): State<AppState>, Extension(actor): Extension<Actor>) -> Response {
+    if !matches!(actor, Actor::Device { .. } | Actor::Owner { .. }) {
+        return json_error(StatusCode::FORBIDDEN, "for your machines");
+    }
+    let servers = crate::remote::servers(&state);
+    let live: std::collections::HashMap<String, bool> =
+        state.remote.lock().unwrap_or_else(|e| e.into_inner()).servers.iter().map(|(k, v)| (k.clone(), v.probe.online)).collect();
+    let jobs = state
+        .db
+        .call(|c| {
+            let mut st = c.prepare("SELECT server, count(*) FROM remote_jobs WHERE state IN ('queued', 'running', 'paused') GROUP BY server")?;
+            let v = st.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?.collect::<Result<std::collections::HashMap<_, _>, _>>()?;
+            Ok(v)
+        })
+        .await
+        .unwrap_or_default();
+    let rows: Vec<serde_json::Value> = servers
+        .iter()
+        .map(|b| {
+            let online = if b.kind == "daemon" { hub().is_online(&b.name) } else { live.get(&b.name).copied().unwrap_or(false) };
+            let hello = hub().hello(&b.name);
+            json!({
+                "name": b.name, "kind": b.kind, "online": online,
+                "version": hello.as_ref().map(|h| h.0.clone()), "threads": hello.as_ref().map(|h| h.1), "memory_gb": hello.as_ref().map(|h| h.2),
+                "min_threads": b.min_threads, "min_memory_gb": b.min_memory_gb, "reserve_memory_gb": b.reserve_memory_gb, "keep_days": b.keep_days,
+                "jobs": jobs.get(&b.name).copied().unwrap_or(0),
+            })
+        })
+        .collect();
+    Json(json!({"builders": rows})).into_response()
+}
+
+#[derive(Deserialize)]
+struct Edit {
+    name: Option<String>,
+    min_threads: Option<f64>,
+    min_memory_gb: Option<f64>,
+    reserve_memory_gb: Option<f64>,
+    keep_days: Option<i64>,
+}
+
+/// `flow builder edit`: its name and limits, from a connected machine (the owner, 2026-11-13).
+async fn edit(State(state): State<AppState>, Extension(actor): Extension<Actor>, Path(name): Path<String>, Json(e): Json<Edit>) -> Response {
+    if !matches!(actor, Actor::Device { .. } | Actor::Owner { .. }) {
+        return json_error(StatusCode::FORBIDDEN, "for your machines");
+    }
+    let Some(mut b) = crate::remote::servers(&state).into_iter().find(|s| s.name == name) else {
+        return json_error(StatusCode::NOT_FOUND, format!("no builder called {name}"));
+    };
+    if let Some(v) = e.min_threads { b.min_threads = v; }
+    if let Some(v) = e.min_memory_gb { b.min_memory_gb = v; }
+    if let Some(v) = e.reserve_memory_gb { b.reserve_memory_gb = v; }
+    if let Some(v) = e.keep_days { b.keep_days = v; }
+    let (n, b2) = (name.clone(), b.clone());
+    if let Err(err) = state.db.call(move |c| crate::remote::set_limits(c, &n, &b2)).await {
+        return json_error(StatusCode::BAD_REQUEST, format!("{err:#}"));
+    }
+    let mut now_called = name.clone();
+    if let Some(new) = e.name.filter(|n| n != &name) {
+        let (old, n2) = (name.clone(), new.clone());
+        if let Err(err) = state.db.call(move |c| crate::remote::rename_server(c, &old, &n2)).await {
+            return json_error(StatusCode::BAD_REQUEST, format!("{err:#}"));
+        }
+        hub().drop_builder(&name);
+        now_called = new;
+    }
+    crate::remote::reload(&state).await;
+    activity::write(&state.db, Entry::new(&actor, Via::Api, Action::Write, format!("builder {name} edited (now {now_called})"))).await;
+    Json(json!({"name": now_called})).into_response()
+}
+
+/// `flow builder remove` on the builder itself: it leaves, and its token stops working.
+async fn remove_self(State(state): State<AppState>, Extension(actor): Extension<Actor>) -> Response {
+    let Some(name) = builder_of(&state, &actor).await else {
+        return json_error(StatusCode::FORBIDDEN, "a builder removes itself with its own token");
+    };
+    let n = name.clone();
+    if let Err(e) = state.db.call(move |c| crate::remote::remove_server(c, &n)).await {
+        return json_error(StatusCode::CONFLICT, format!("{e:#}"));
+    }
+    hub().drop_builder(&name);
+    crate::remote::reload(&state).await;
+    activity::write(&state.db, Entry::new(&actor, Via::Api, Action::Write, format!("builder {name} removed itself"))).await;
+    Json(json!({"removed": name})).into_response()
+}

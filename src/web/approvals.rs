@@ -204,7 +204,7 @@ async fn decide(
         let id = a.id;
         let ok = done.is_ok();
         state.db.call(move |c| approvals::finish(c, id, &done)).await?;
-        if ok && a.action == "builder_create" {
+        if ok && (a.action == "builder_create" || a.action == "builder_remove") {
             crate::remote::reload(&state).await;
         }
         (ok, line)
