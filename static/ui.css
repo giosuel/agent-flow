@@ -32,17 +32,19 @@
   --tint-violet-bg: #1C1530; --tint-violet: #D2C4FF; --tint-teal-bg: #0E2A24; --tint-teal: #86E3C8;
   --tint-orange-bg: #2B1E0C; --tint-orange: #FDBA74; --tint-blue-bg: #0F2433; --tint-blue: #9ED8FF;
   --tint-green-bg: #102A16; --tint-green: #86EFAC; --tint-red-bg: #2E1212; --tint-red: #FCA5A5;
+  /* Ink on a filled red or amber (danger-solid, badges); a field's size on the phone (16 px stops iOS zooming in). */
+  --on-bad: #1A0505; --on-warn: #241A02;
   --shadow-pop: 0 16px 40px rgba(0, 0, 0, .55); --shadow-dialog: 0 24px 80px rgba(0, 0, 0, .6); --scrim: rgba(0, 0, 0, .62);
   --focus-ring: 0 0 0 3px rgba(167, 139, 250, .32); --bad-ring: 0 0 0 3px rgba(248, 113, 113, .28);
   /* Type: 9 sizes */
-  --fs-micro: 11px; --fs-label: 12px; --fs-sub: 13px; --fs-sm: 14px; --fs-body: 15px; --fs-h3: 16px; --fs-h2: 18px; --fs-h1: 24px; --fs-display: 30px;
+  --fs-micro: 11px; --fs-tiny: 10px; --fs-input: 16px; --fs-label: 12px; --fs-sub: 13px; --fs-sm: 14px; --fs-body: 15px; --fs-h3: 16px; --fs-h2: 18px; --fs-h1: 24px; --fs-display: 30px;
   --sans: "IBM Plex Sans", system-ui, sans-serif; --mono: "IBM Plex Mono", ui-monospace, monospace;
   /* Spacing: 4 px base, a 2 px half step */
   --sp-0_5: 2px; --sp-1: 4px; --sp-1_5: 6px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 20px; --sp-6: 24px; --sp-8: 32px; --sp-12: 48px;
   /* Radii */
   --r-xs: 4px; --r-sm: 6px; --r-md: 8px; --r-lg: 12px; --r-xl: 16px; --r-pill: 999px;
   /* Sizes: two control heights, one icon button, four icon sizes */
-  --h-md: 44px; --h-sm: 36px; --ib: 36px; --ic-xs: 14px; --ic-sm: 16px; --ic: 18px; --ic-lg: 22px;
+  --h-md: 44px; --h-sm: 36px; --ib: 36px; --ic-2xs: 12px; --ic-xs: 14px; --ic-sm: 16px; --ic: 18px; --ic-lg: 22px;
   /* Names from before the library, until their pages move over (M15.4) */
   --header: var(--sunken); --code: var(--sunken); --inset: var(--sunken); --nav-active: var(--selected); --nav-ink: var(--ink2);
   /* The select's caret and the checkbox's tick (icons.rs's caret and check, drawn in --muted and --on-accent) */
@@ -96,6 +98,7 @@ code, pre, .mono { font-family: var(--mono); }
 
 /* ---------------------------------------------------------------- Icon (icons.rs only) */
 .i { width: var(--ic); height: var(--ic); fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+.i.xxs { width: var(--ic-2xs); height: var(--ic-2xs); }
 .i.xs { width: var(--ic-xs); height: var(--ic-xs); }
 .i.sm { width: var(--ic-sm); height: var(--ic-sm); }
 .i.lg { width: var(--ic-lg); height: var(--ic-lg); }
@@ -113,8 +116,8 @@ code, pre, .mono { font-family: var(--mono); }
 .btn.quiet:hover { background: var(--hover-bg); color: var(--ink); }
 .btn.danger { background: var(--panel); border-color: var(--bad-line); color: var(--bad-ink); }
 .btn.danger:hover { background: var(--bad-bg); border-color: var(--bad); color: var(--bad-ink); }
-.btn.danger-solid { background: var(--bad); border-color: var(--bad); color: #1A0505; }
-.btn.danger-solid:hover { background: var(--bad-ink); border-color: var(--bad-ink); color: #1A0505; }
+.btn.danger-solid { background: var(--bad); border-color: var(--bad); color: var(--on-bad); }
+.btn.danger-solid:hover { background: var(--bad-ink); border-color: var(--bad-ink); color: var(--on-bad); }
 .btn.wide { width: 100%; }
 .btn[disabled], .btn[disabled]:hover { background: var(--panel); border-color: var(--line); color: var(--dim); cursor: default; }
 
@@ -181,7 +184,7 @@ select { appearance: none; -webkit-appearance: none; padding-right: 38px; cursor
 .numf-b button:hover { background: var(--accent-chip); color: var(--accent-chip-ink); }
 .numf-b button:active { background: var(--accent-bg); color: var(--ink); }
 .numf-b button:disabled { opacity: .35; cursor: default; background: var(--chip); color: var(--muted); }
-.numf-b .i { width: 12px; height: 12px; }
+.numf-b .i { width: var(--ic-2xs); height: var(--ic-2xs); }
 .numf-b [data-step="1"] .i { rotate: -90deg; }
 .numf-b [data-step="-1"] .i { rotate: 90deg; }
 
@@ -292,7 +295,7 @@ summary.card-head::-webkit-details-marker { display: none; }
 .dd-menu a.ck .grow { flex: 1; }
 .dd-menu .box { width: 18px; height: 18px; flex: none; border-radius: 5px; border: 1.5px solid var(--border); background: var(--sunken); display: inline-grid; place-items: center; }
 .dd-menu a.ck.on .box { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
-.dd-menu .box .i { width: 12px; height: 12px; stroke-width: 3; }
+.dd-menu .box .i { width: var(--ic-2xs); height: var(--ic-2xs); stroke-width: 3; }
 .dd-menu .dd-find { margin: 0 0 6px; }
 .dd-foot { border-top: 1px solid var(--line2); margin: 6px -6px 0; padding: 8px 16px 2px; display: flex; justify-content: space-between; gap: var(--sp-3); }
 .dd-foot a { display: inline; min-height: 0; padding: 0; color: var(--muted); text-decoration: underline; }
@@ -314,7 +317,7 @@ summary.card-head::-webkit-details-marker { display: none; }
 .chip.bad { background: var(--bad-bg); color: var(--bad-ink); }
 .chip.info { background: var(--info-bg); color: var(--info-ink); }
 .chip.quiet { background: transparent; box-shadow: inset 0 0 0 1px var(--line); color: var(--muted); }
-.chip .i { width: 12px; height: 12px; stroke-width: 2.2; }
+.chip .i { width: var(--ic-2xs); height: var(--ic-2xs); stroke-width: 2.2; }
 
 /* Tag: small metadata (scope, milestone, model, platform); .line bordered, .dashed for the unsure */
 .tag { display: inline-flex; align-items: center; height: 20px; padding: 0 7px; border-radius: var(--r-sm); font: 500 var(--fs-micro) var(--mono); background: var(--chip); color: var(--ink2); white-space: nowrap; vertical-align: middle; }
@@ -325,8 +328,8 @@ summary.card-head::-webkit-details-marker { display: none; }
 /* Counts: after a label (.count, .warn when it waits on you), on an icon (.badge) */
 .count { margin-left: var(--sp-1); font: var(--fs-label) var(--mono); color: var(--muted); }
 .count.warn { color: var(--warn-ink); }
-.badge { display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 5px; border-radius: var(--r-pill); background: var(--bad); color: #1A0505; font: 600 var(--fs-micro)/1 var(--sans); }
-.badge.warn { background: var(--warn); color: #241A02; }
+.badge { display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 5px; border-radius: var(--r-pill); background: var(--bad); color: var(--on-bad); font: 600 var(--fs-micro)/1 var(--sans); }
+.badge.warn { background: var(--warn); color: var(--on-warn); }
 
 /* Status dot: online, presence, severity, unread; .live with a ring */
 .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--dim); flex: none; }
@@ -457,8 +460,8 @@ a.item-row:hover { background: var(--hover-bg); }
 
 /* Avatar: a session's initials in a circle, tinted by its name (.sm in lists) */
 .av { display: inline-grid; place-items: center; width: 28px; height: 28px; flex: none; border-radius: 50%; background: var(--chip); color: var(--ink2); font-size: var(--fs-micro); font-weight: 600; letter-spacing: .02em; box-shadow: 0 0 0 2px var(--panel); }
-.av.sm { width: 22px; height: 22px; font-size: 10px; box-shadow: none; }
-.av .i { width: 15px; height: 15px; }
+.av.sm { width: 22px; height: 22px; font-size: var(--fs-tiny); box-shadow: none; }
+.av .i { width: var(--ic-xs); height: var(--ic-xs); }
 
 /* Tints, after the tile and the avatar so they win over their grey (any tile or avatar): t-violet, t-teal, t-orange, t-blue, t-green, t-red */
 .t-violet { background: var(--tint-violet-bg); color: var(--tint-violet); }
@@ -548,8 +551,8 @@ html.dlg-on { overflow: hidden; }
 
 /* ---------------------------------------------------------------- The phone (one breakpoint: 700) */
 @media (max-width: 700px) {
-  input, select, textarea { font-size: 16px; }
-  .field > input, .field > select, .field > textarea { font-size: 16px; }
+  input, select, textarea { font-size: var(--fs-input); }
+  .field > input, .field > select, .field > textarea { font-size: var(--fs-input); }
   .search { flex-basis: 100%; }
   .card.pad { padding: var(--sp-4); }
   .card-head, .card-body, .card-foot, .toolbar { padding-left: var(--sp-4); padding-right: var(--sp-4); }

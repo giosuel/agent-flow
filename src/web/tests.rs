@@ -4274,6 +4274,63 @@ async fn a_builders_token_is_only_for_building() {
 
 /// The UI library (M15): pages load its stylesheet first and carry the icon sprite scripts draw
 /// from, and the button and icon-button kinds it replaced are gone from templates and scripts.
+/// The tokens are the only place for a colour or a size (M15.5, T-120; the owner, 2026-11-23,
+/// D-245: "make sure that we reuse all these elements instead of writing new ones from scratch").
+/// Outside ui.css's token block there's no hex colour and no font size in px, and an icon's size
+/// is one of the four icon tokens. A new one-off value fails here; it goes into the tokens, or
+/// uses one that's there.
+#[test]
+fn colours_and_sizes_come_from_the_tokens() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("static");
+    let strip = |css: &str| {
+        let mut out = String::new();
+        let mut rest = css;
+        while let Some(i) = rest.find("/*") {
+            out.push_str(&rest[..i]);
+            rest = rest[i..].find("*/").map_or("", |j| &rest[i + j + 2..]);
+        }
+        out + rest
+    };
+    let ui = std::fs::read_to_string(root.join("ui.css")).unwrap();
+    let tokens_end =
+        ui.find(":root").and_then(|i| ui[i..].find('}').map(|j| i + j)).expect("ui.css starts with its tokens");
+    for (name, css) in [
+        ("ui.css", strip(&ui[tokens_end..])),
+        ("app.css", strip(&std::fs::read_to_string(root.join("app.css")).unwrap())),
+    ] {
+        for (n, line) in css.lines().enumerate() {
+            let hex = line.match_indices('#').any(|(i, _)| {
+                let h: String = line[i + 1..].chars().take_while(|c| c.is_ascii_hexdigit()).collect();
+                matches!(h.len(), 3 | 4 | 6 | 8)
+                    && !line[i + 1 + h.len()..].starts_with(|c: char| c.is_ascii_alphanumeric() || c == '-')
+            });
+            assert!(!hex, "{name}, line {} (comments stripped): a hex colour outside the tokens: {line}", n + 1);
+            let px_font = line.split("font-size:").skip(1).any(|v| {
+                let v = v.trim_start();
+                v.starts_with(|c: char| c.is_ascii_digit())
+                    && v.split([';', '}']).next().unwrap_or("").trim().ends_with("px")
+            });
+            assert!(!px_font, "{name}, line {}: a font size in px outside the tokens: {line}", n + 1);
+            // An icon's size: a rule whose selector names .i sets width and height with the tokens.
+            if let Some((sel, decls)) = line.split_once('{') {
+                let icon = sel
+                    .split(|c: char| c == ',' || c == '>' || c.is_whitespace())
+                    .any(|t| t == ".i" || t.starts_with(".i:") || t.starts_with(".i."));
+                for d in decls.split([';', '}']) {
+                    let Some((k, v)) = d.split_once(':') else { continue };
+                    let (k, v) = (k.trim(), v.trim());
+                    let px = v.starts_with(|c: char| c.is_ascii_digit()) && v.ends_with("px");
+                    assert!(
+                        !(icon && (k == "width" || k == "height") && px),
+                        "{name}, line {}: an icon size outside --ic-2xs/--ic-xs/--ic-sm/--ic/--ic-lg: {line}",
+                        n + 1
+                    );
+                }
+            }
+        }
+    }
+}
+
 #[test]
 fn the_ui_library_replaced_the_old_buttons() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -4367,6 +4424,22 @@ fn the_ui_library_replaced_the_old_buttons() {
         "hist-ev",
         "hist-pt",
         "hist-tl",
+        // Notices, empty states, numbers, meters, legends (PR 10); icon tiles and glyphs (PR 11).
+        "mp-bar",
+        "mp-80",
+        "class=\"tbar",
+        "ntf-empty",
+        "lempty",
+        "plan-empty",
+        "ovp-pad",
+        "ml-nothing",
+        "tip-sw",
+        "class=\"key\"",
+        "class=\"ico\"",
+        "meta-ico",
+        "‹ Newer",
+        "Older: {{ t }} ›",
+        "Usage ›",
     ];
     for dir in ["templates", "static"] {
         for entry in std::fs::read_dir(root.join(dir)).unwrap() {
@@ -4412,6 +4485,16 @@ async fn the_ui_catalogue_shows_the_library() {
     assert!(page.contains(r#"<span class="numf"><input id="ui-a" class="num" name="jobs" type="number" min="1" max="8" step="1" value="3">"#), "{page}");
     assert!(page.contains(r#"<span class="numf"><input id="ui-b" class="num" name="max" type="number" min="1" max="8" step="1" value="8">"#), "{page}");
     assert!(page.contains(r#"title="close">"#) && page.contains(r#"title="alert">"#), "every icon: {page}");
+    // Everything the pages are built from since part 6: cards, navigation, the dialog, tables and
+    // rows, messages and numbers, icon tiles (T-119).
+    for id in ["ui-card", "ui-nav", "ui-table", "ui-msg"] {
+        assert!(page.contains(&format!(r#"id="{id}""#)), "{id}: {page}");
+    }
+    assert!(
+        page.contains(r#"<div class="dlg sm ui-dlg" role="presentation">"#)
+            && page.contains(r#"<p class="notice bad">"#),
+        "{page}"
+    );
     let res = s.http.get(s.url("/ui")).send().await.unwrap();
     assert_ne!(res.status(), reqwest::StatusCode::OK, "not without signing in");
 }
