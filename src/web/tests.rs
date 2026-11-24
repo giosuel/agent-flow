@@ -1895,6 +1895,16 @@ async fn notes_are_files_or_text_and_come_back() {
     assert!(tab.contains("comes back when Loro updates") || tab.contains("2 versions"), "{tab}");
     let page = s.http.get(s.url("/p/vinculum/N-1")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
     assert!(page.contains("<li>T-5</li>") && page.contains("v1"), "the newest version rendered: {page}");
+    // Opened directly (a link in a notification, a reload), it's its project's page with the note
+    // in a dialog over it (the owner, 2026-11-17: "Notes are not consistent").
+    let direct = |path: &'static str| {
+        s.http.get(s.url(path)).header(COOKIE, &cookie).header("sec-fetch-mode", "navigate").send()
+    };
+    let note = direct("/p/vinculum/N-1").await.unwrap().text().await.unwrap();
+    assert!(note.contains(r#"data-open-dlg="rec" data-open-url="/p/vinculum/N-1" data-open-from="/p/vinculum""#));
+    assert!(!note.contains("<title>N-1") && !note.contains("<li>T-5</li>"), "the project's page, not the note's");
+    let settings = direct("/settings?s=clients").await.unwrap().text().await.unwrap();
+    assert!(settings.contains(r#"data-open-dlg="settings" data-open-url="/settings?s=clients" data-open-from="/""#));
     let f = s.http.get(s.url("/p/vinculum/N-2/file")).header(COOKIE, &cookie).send().await.unwrap();
     assert_eq!(f.headers()[CONTENT_TYPE], "application/octet-stream");
     assert!(f.headers()["content-disposition"].to_str().unwrap().starts_with("attachment"));

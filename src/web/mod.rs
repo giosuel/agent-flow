@@ -148,7 +148,7 @@ pub struct ClientIp(pub String);
 
 pub fn router(state: AppState) -> Router {
     let mcp = crate::mcp::service(state.clone());
-    Router::new()
+    let app = Router::new()
         .merge(pages::routes())
         .merge(settings::routes())
         .merge(projects::routes())
@@ -182,7 +182,86 @@ pub fn router(state: AppState) -> Router {
         .layer(middleware::from_fn_with_state(state.clone(), log_requests))
         .layer(middleware::from_fn_with_state(state.clone(), authenticate))
         .layer(middleware::from_fn(security_headers))
-        .with_state(state)
+        .with_state(state);
+    // Before routing (a Router's own layers run after it): a dialog's address opened directly is
+    // routed to the page it opens over.
+    Router::new().fallback_service(app).layer(middleware::from_fn(dialogs_over_pages))
+}
+
+/// What opens as a dialog, and over which page: (the page, the dialog's kind). Records (the record
+/// dialog), Settings (over the dashboard), and Add project (over Projects).
+fn dialog_parent(uri: &axum::http::Uri) -> Option<(String, &'static str)> {
+    let path = uri.path();
+    if path == "/settings" {
+        return Some(("/".into(), "settings"));
+    }
+    if uri.query().is_some() {
+        return None;
+    }
+    if path == "/projects/new" {
+        return Some(("/projects".into(), "dlg"));
+    }
+    let parts: Vec<&str> = path.split('/').collect();
+    let record = |s: &str| {
+        s.split_once('-').is_some_and(|(k, n)| {
+            ["T", "Q", "D", "ADR", "PR", "TT", "S", "F", "N"].contains(&k)
+                && !n.is_empty()
+                && n.bytes().all(|b| b.is_ascii_digit())
+        })
+    };
+    match parts.as_slice() {
+        ["", "p", slug, r] if record(r) => Some((format!("/p/{slug}"), "rec")),
+        ["", "p", slug, "steps", n] if !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()) => {
+            Some((format!("/p/{slug}"), "rec"))
+        }
+        _ => None,
+    }
+}
+
+/// Dialogs are dialogs wherever they're opened from (the owner, 2026-11-17: "Notes are not
+/// consistent. the link opens a page while clicking on one opens a dialog. how can we unify this? i
+/// also saw this with settings earlier"). Opened directly (a notification, the bell in a new tab, a
+/// reload), the address shows the page it belongs to with the dialog open over it; scripts still
+/// fetch the dialog's own page (they don't navigate).
+async fn dialogs_over_pages(req: axum::extract::Request, next: Next) -> Response {
+    // A browser going to the address: Sec-Fetch-Mode says so over https; over plain http (the dev
+    // instance) browsers leave it out but still send Upgrade-Insecure-Requests on navigations.
+    // Scripts' fetches and other clients send neither.
+    let h = req.headers();
+    let navigate = req.method() == axum::http::Method::GET
+        && match h.get("sec-fetch-mode") {
+            Some(m) => m.as_bytes() == b"navigate",
+            None => h.get("upgrade-insecure-requests").is_some_and(|v| v.as_bytes() == b"1"),
+        };
+    let Some((parent, kind)) = (if navigate { dialog_parent(req.uri()) } else { None }) else {
+        return next.run(req).await;
+    };
+    let target = req.uri().path_and_query().map(|p| p.as_str().to_owned()).unwrap_or_default();
+    let mut req = req;
+    match parent.parse() {
+        Ok(u) => *req.uri_mut() = u,
+        Err(_) => return next.run(req).await,
+    }
+    let res = next.run(req).await;
+    let html = res
+        .headers()
+        .get(axum::http::header::CONTENT_TYPE)
+        .is_some_and(|v| v.to_str().unwrap_or("").starts_with("text/html"));
+    if !res.status().is_success() || !html {
+        return res;
+    }
+    let (mut parts, body) = res.into_parts();
+    let Ok(bytes) = axum::body::to_bytes(body, 32 << 20).await else {
+        return pages::error_page(StatusCode::INTERNAL_SERVER_ERROR, "The page couldn't be read.");
+    };
+    let esc = |s: &str| s.replace('&', "&amp;").replace('"', "&quot;").replace('<', "&lt;");
+    let page = String::from_utf8_lossy(&bytes).replacen(
+        "<body",
+        &format!(r#"<body data-open-dlg="{kind}" data-open-url="{}" data-open-from="{}""#, esc(&target), esc(&parent)),
+        1,
+    );
+    parts.headers.remove(axum::http::header::CONTENT_LENGTH);
+    Response::from_parts(parts, axum::body::Body::from(page))
 }
 
 pub async fn serve(state: AppState) -> anyhow::Result<()> {

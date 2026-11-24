@@ -571,7 +571,7 @@ document.addEventListener("change", (e) => {
     shell.querySelector(".set-pane")?.scrollTo(0, 0);
     document.dispatchEvent(new CustomEvent("af:content", { detail: shell }));
   };
-  const load = async (url, init) => {
+  const load = async (url, init, soft) => {
     back.classList.add("busy");
     try {
       const res = await fetch(url, { credentials: "same-origin", ...init });
@@ -579,7 +579,7 @@ document.addEventListener("change", (e) => {
       if (!shell) throw new Error("no settings in the answer");
       show(shell);
     } catch (_) {
-      location.href = typeof url === "string" ? url : "/settings";
+      if (soft) close(); else location.href = typeof url === "string" ? url : "/settings";
     } finally {
       back && back.classList.remove("busy");
     }
@@ -597,7 +597,7 @@ document.addEventListener("change", (e) => {
   const onKey = (e) => {
     if (e.key === "Escape" && !document.querySelector(".cdlg-back")) { e.preventDefault(); close(); }
   };
-  const open = (url) => {
+  const open = (url, soft) => {
     opener = document.activeElement;
     back = document.createElement("div");
     back.className = "sdlg-back";
@@ -625,8 +625,14 @@ document.addEventListener("change", (e) => {
     document.documentElement.classList.add("no-scroll");
     requestAnimationFrame(() => back && back.classList.add("open"));
     back.querySelector(".sdlg-x").focus();
-    load(url);
+    load(url, undefined, soft);
   };
+  // A direct link to Settings: the server sent the dashboard; Settings opens over it.
+  const o = document.body.dataset;
+  if (o.openDlg === "settings" && o.openUrl && o.openFrom) {
+    history.replaceState(null, "", o.openFrom);
+    open(o.openUrl, true);
+  }
   document.addEventListener("click", (e) => {
     const a = e.target.closest("a[data-settings]");
     if (!a || e.metaKey || e.ctrlKey || e.shiftKey || e.button) return;
@@ -656,17 +662,17 @@ document.addEventListener("change", (e) => {
     setTimeout(() => b.remove(), 160);
   };
   const onKey = (e) => { if (e.key === "Escape" && !document.querySelector(".cdlg-back")) { e.preventDefault(); close(); } };
-  const show = async (url, init) => {
+  const show = async (url, init, soft) => {
     let res;
     try {
       res = await fetch(url, { credentials: "same-origin", ...init });
     } catch (_) {
-      location.href = url;
+      if (!soft) location.href = url;
       return;
     }
     const doc = new DOMParser().parseFromString(await res.text(), "text/html");
     const content = doc.querySelector("[data-dlg-content]");
-    if (!content) { location.href = res.url; return; }
+    if (!content) { if (!soft) location.href = res.url; return; }
     const h1 = content.querySelector(".head h1");
     const title = h1 ? h1.textContent : document.title;
     if (h1) h1.closest(".head").querySelector("h1").remove();
@@ -708,6 +714,12 @@ document.addEventListener("change", (e) => {
     e.preventDefault();
     show(form.action, { method: "POST", body: new URLSearchParams(new FormData(form, e.submitter)), headers: { "Content-Type": "application/x-www-form-urlencoded" } });
   });
+  // A direct link to such a page (Add project): the server sent the page it opens over.
+  const o = document.body.dataset;
+  if (o.openDlg === "dlg" && o.openUrl && o.openFrom) {
+    history.replaceState(null, "", o.openFrom);
+    show(o.openUrl, undefined, true);
+  }
 })();
 
 // The board on the phone: one column at a time, picked with the chips above it.
