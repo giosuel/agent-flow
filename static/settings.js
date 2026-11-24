@@ -30,7 +30,14 @@ async function post(url, body) {
 }
 
 async function turnOn(button, status) {
-  const say = (t, kind) => { status.textContent = t; status.className = "notice" + (kind ? " " + kind : ""); status.hidden = !t; };
+  // A notice in the library's look: its tone's icon and the text.
+  const say = (t, kind) => {
+    const name = kind === "ok" ? "check" : kind === "warn" || kind === "bad" ? "alert" : "info";
+    status.innerHTML = `<svg class="i" aria-hidden="true"><use href="#i-${name}"/></svg><span></span>`;
+    status.querySelector("span").textContent = t;
+    status.className = "notice" + (kind ? " " + kind : "");
+    status.hidden = !t;
+  };
   if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
     window.afDialog({
       title: "Notifications aren't available here",
@@ -60,7 +67,7 @@ async function turnOn(button, status) {
     await post("/settings/push/subscribe", { subscription: sub.toJSON(), device: deviceName() });
     window.location.reload();
   } catch (e) {
-    say("Couldn't turn notifications on: " + e.message, "warn");
+    say("Couldn't turn notifications on: " + e.message, "bad");
     button.disabled = false;
   }
 }

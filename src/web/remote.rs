@@ -859,6 +859,40 @@ pub async fn remove_server(
 mod tests {
     use super::*;
 
+    /// An online builder's meters are the build-server meter (.bmeter, its own stacked bar), and
+    /// their key is the library's legend with its swatches (PR 10: .key and the meter's old name
+    /// clashed with the library's .meter).
+    #[test]
+    fn an_online_builder_shows_its_meters_and_their_legend() {
+        let html = Section {
+            servers: vec![ServerView {
+                name: "headquarters".into(),
+                online: true,
+                paused: false,
+                line: "online".into(),
+                meters: vec![Meter { label: "CPU · threads", you: 4.0, builds: 8.0, total: 32.0, unit: "threads" }],
+                jobs: vec![],
+                min_threads: "8".into(),
+                min_memory: "16".into(),
+                folders: String::new(),
+                keep_days: 14,
+            }],
+            is_owner: true,
+        }
+        .render()
+        .unwrap();
+        assert!(
+            html.contains(r#"<div class="bmeters">"#)
+                && html.contains(r#"<div class="bmeter"><span class="label">CPU · threads</span>"#),
+            "{html}"
+        );
+        assert!(
+            html.contains(r#"<ul class="legend"><li><span class="swatch" style="--c: var(--bar-you)"></span>you"#),
+            "{html}"
+        );
+        assert!(!html.contains(r#"class="meter""#) && !html.contains(r#"class="key""#), "{html}");
+    }
+
     /// Build servers start folded, even a lone one (the owner, 2026-11-23).
     #[test]
     fn a_lone_builder_starts_folded() {

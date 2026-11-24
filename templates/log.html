@@ -32,7 +32,7 @@
   <div class="axis sub mono">{% for a in axis %}<span>{{ a }}</span>{% endfor %}</div>
   <div class="lhead grid-head" aria-hidden="true"><span>Time</span><span>Category</span><span>Actor</span><span>Project</span><span>What</span><span>Severity</span></div>
   <ol class="plain lrows" id="lrows">{% include "log_rows.html" %}</ol>
-  {% if rows.is_empty() %}<p class="sub lempty">Nothing matches in this range.</p>{% endif %}
+  {% if rows.is_empty() %}<p class="empty-in">Nothing matches in this range.</p>{% endif %}
 </section>
 <p class="sub">Reads older than 90 days are in the archive, one compressed file per month{% if !archive.is_empty() %}: {% for (m, n) in archive %}{% if !loop.first %}, {% endif %}{{ m }} ({{ n }}){% endfor %}{% endif %}. Nothing is ever deleted.</p>
 {% endblock %}

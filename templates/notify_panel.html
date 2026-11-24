@@ -1,5 +1,5 @@
 {# The bell's list: what's new (unread when it was opened), then earlier. #}
-{% if fresh.is_empty() && earlier.is_empty() %}<p class="ntf-empty sub">Nothing yet. Questions, builds and things to review show up here.</p>{% endif %}
+{% if fresh.is_empty() && earlier.is_empty() %}<p class="empty-in">Nothing yet. Questions, builds and things to review show up here.</p>{% endif %}
 {% if !fresh.is_empty() %}<p class="ntf-group">New</p>{% endif %}
 {% for r in fresh %}{% include "notify_row.html" %}{% endfor %}
 {% if !earlier.is_empty() %}<p class="ntf-group">Earlier</p>{% endif %}

@@ -12,14 +12,14 @@
   <a href="/p/{{ slug }}{% if *key == "settings" %}/settings" data-dlg{% else if *key == "plan" %}/plan"{% else %}{% if *key != "overview" %}?tab={{ key }}{% endif %}"{% endif %}{% if tab == *key %} class="on" aria-current="page"{% endif %}>{% if *key == "prs" %}<span class="hide-phone">{{ name }}</span><span class="only-phone">PRs</span>{% else if *key == "screenshots" %}<span class="hide-phone">{{ name }}</span><span class="only-phone">Shots</span>{% else if *key == "to-test" %}<span class="hide-phone">{{ name }}</span><span class="only-phone">Test</span>{% else %}{{ name }}{% endif %}{% if *key == "questions" && !open_questions.is_empty() %} <span class="count warn">{{ open_questions.len() }}</span>{% endif %}{% if *key == "prs" && prs_total > 0 %} <span class="count">{{ prs_total }}</span>{% endif %}{% if *key == "to-test" && to_test_open > 0 %} <span class="count warn">{{ to_test_open }}</span>{% endif %}</a>
   {% endfor %}
 </nav>
-{% if let Some(n) = notice %}<p class="notice{% if notice_bad %} warn{% else %} ok{% endif %}" role="status">{{ n }}</p>{% endif %}
+{% if let Some(n) = notice %}<p class="notice{% if notice_bad %} bad{% else %} ok{% endif %}" role="status">{% if notice_bad %}{{ crate::web::icons::icon("alert")|safe }}{% else %}{{ crate::web::icons::icon("check")|safe }}{% endif %}<span>{{ n }}</span></p>{% endif %}
 
 {% if tab == "overview" %}
 {# The overview (the owner, 2026-11-17, D-198): open questions on top in their own section, the
    milestones right away in one bounded list, the board, merge order and release; the project, its
    decisions and external PRs in a side card. On the phone the side comes last and the panels fold. #}
 <div class="ov ov2">
-{% if status == "archived" %}<p class="notice">Archived: it's out of the Dashboard and the project list. <a href="/p/{{ slug }}/settings" data-dlg>Restore it in Settings</a>.</p>{% endif %}
+{% if status == "archived" %}<p class="notice">{{ crate::web::icons::icon("info")|safe }}<span>Archived: it's out of the Dashboard and the project list. <a href="/p/{{ slug }}/settings" data-dlg>Restore it in Settings</a>.</span></p>{% endif %}
 {% if !qcards.is_empty() %}
 {# One row of questions a page, ‹ › to step (the owner, 2026-11-23, D-234); app.js pages them and
    keeps the page in ?q=. Without scripts every question shows. #}
@@ -82,7 +82,7 @@
     <details class="ov-fold" open>
       <summary class="card-head"><span class="ofi">{{ crate::web::icons::icon("decision")|safe }}</span><h2 id="dec-h">Latest decisions</h2><span class="sub of-phone mono">{% for d in decisions %}{% if loop.index <= 3 %}{% if !loop.first %}, {% endif %}{{ d.short }}{% endif %}{% endfor %}</span><span class="grow"></span><a class="act of-desk" href="/p/{{ slug }}?tab=decisions">All</a><span class="of-chev">{{ crate::web::icons::icon("chevron")|safe }}</span></summary>
       <div class="of-body rows flush">
-        {% if decisions.is_empty() %}<p class="sub ovp-pad">No decisions recorded yet.</p>{% endif %}
+        {% if decisions.is_empty() %}<p class="empty-in">No decisions recorded yet.</p>{% endif %}
         {% for d in decisions %}<a class="item-row dense dec-row" href="{{ d.url }}"><span class="ttl"><span class="sub mono">{{ d.id }} · {{ d.sub }}</span><span>{{ d.title }}</span></span></a>{% endfor %}
       </div>
     </details>
@@ -126,7 +126,7 @@
         {% if let Some(st) = b.step %}
         <div class="step-line card"><span class="srail-i {{ st.class }}" aria-hidden="true"></span><span class="chip mono">{{ st.name }}</span><strong class="sl-t">{{ st.title }}</strong><span class="chip{% if st.class == "now" %} {{ crate::web::tone::tone("doing") }}{% else if st.class == "done" %} {{ crate::web::tone::tone("done") }}{% endif %}">{% if st.class == "now" %}under way{% else if st.class == "done" %}done{% else %}next{% endif %}</span><span class="sub sl-sub">{{ st.sub }}</span><a class="btn sm secondary step-open" href="{{ st.url }}">{% if st.class == "done" %}Summary{% else %}Open step{% endif %}{{ crate::web::icons::icon("out")|safe }}</a></div>
         {% endif %}
-        {% if b.empty %}<div class="card pad ml-nothing"><h3>Nothing on the board yet</h3><p class="sub">It has no steps and no tasks. When the agent starts it, its steps show here as a rail and its tasks on the board.</p></div>{% else %}
+        {% if b.empty %}<div class="card empty-state"><span class="itile lg">{{ crate::web::icons::icon("task")|safe }}</span><h3 class="t">Nothing on the board yet</h3><p>It has no steps and no tasks. When the agent starts it, its steps show here as a rail and its tasks on the board.</p></div>{% else %}
         <div class="bchips fchips" role="tablist" aria-label="Columns">{% for col in b.columns %}<button type="button" role="tab" data-col="{{ loop.index0 }}" class="fchip{% if loop.index0 == b.first_col %} on{% endif %}"{% if loop.index0 == b.first_col %} aria-selected="true"{% endif %}>{{ col.title }} <span class="n">{{ col.count }}</span></button>{% endfor %}</div>
         <div class="board fixed" data-show="{{ b.first_col }}">
           {% for col in b.columns %}

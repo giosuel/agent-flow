@@ -58,8 +58,6 @@ pub struct Overview {
     busy: Option<f64>,
 }
 
-const TINTS: [&str; 3] = ["#60A5FA", "#A78BFA", "#86E3C8"];
-
 fn sum(rows: &[(Option<i64>, i64, Tokens)]) -> Tokens {
     let mut t = Tokens::default();
     for (_, _, r) in rows {
@@ -124,29 +122,26 @@ pub fn load(c: &Connection, now: i64, tz: &Tz, online: usize, agents: usize) -> 
     }
     let typical = crate::plan::median(daily).map(|d| format!("a day ≈ {} lately", dollars(d))).unwrap_or_default();
     let projects = crate::projects::list(c)?;
-    let mut per: Vec<(String, f64)> = rows
+    // Each project keeps its colour from Usage and Machine (charts::colors: by project, never by
+    // rank; N-20 #5: it took its rank's colour here).
+    let slugs: Vec<String> = projects.iter().map(|p| p.slug.clone()).collect();
+    let colors = super::charts::colors(&slugs);
+    let mut per: Vec<(String, &'static str, f64)> = rows
         .iter()
         .filter_map(|(p, _, t)| {
-            let name = projects
-                .iter()
-                .find(|x| Some(x.id) == *p)
-                .map(|x| x.name.clone())
-                .unwrap_or_else(|| "no project".into());
-            Some((name, t.usd())).filter(|(_, u)| *u > 0.0)
+            let (name, tint) = match projects.iter().position(|x| Some(x.id) == *p) {
+                Some(i) => (projects[i].name.clone(), colors[i]),
+                None => ("no project".into(), super::charts::OTHER),
+            };
+            Some((name, tint, t.usd())).filter(|(_, _, u)| *u > 0.0)
         })
         .collect();
-    per.sort_by(|a, b| b.1.total_cmp(&a.1));
-    let top_usd = per.first().map(|x| x.1).unwrap_or(1.0).max(0.01);
+    per.sort_by(|a, b| b.2.total_cmp(&a.2));
+    let top_usd = per.first().map(|x| x.2).unwrap_or(1.0).max(0.01);
     let top = per
         .into_iter()
         .take(3)
-        .enumerate()
-        .map(|(i, (name, u))| ProjectBar {
-            name,
-            usd: dollars(u),
-            width: (u / top_usd * 100.0).max(2.0),
-            tint: TINTS[i],
-        })
+        .map(|(name, tint, u)| ProjectBar { name, usd: dollars(u), width: (u / top_usd * 100.0).max(2.0), tint })
         .collect();
 
     // Build servers: online or not, and the job each runs.

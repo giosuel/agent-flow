@@ -16,6 +16,7 @@
 {% block head %}{% endblock %}
 </head>
 <body class="bare">
+{{ crate::web::icons::sprite()|safe }}
 <main class="bare-in">
   <div class="brand big"><img src="/static/logo.svg?v={{ version }}" width="56" height="56" alt=""><span>AgentFlow</span></div>
   {% block content %}{% endblock %}

@@ -27,9 +27,12 @@ async function postJson(url, body) {
   return data;
 }
 
+// A notice in the library's look: its tone's icon (from the page's sprite) and the text.
 function say(el, text, kind) {
   if (!el) return;
-  el.textContent = text;
+  const name = kind === "ok" ? "check" : kind === "warn" || kind === "bad" ? "alert" : "info";
+  el.innerHTML = `<svg class="i" aria-hidden="true"><use href="#i-${name}"/></svg><span></span>`;
+  el.querySelector("span").textContent = text;
   el.className = "notice" + (kind ? " " + kind : "");
   el.hidden = !text;
 }
@@ -61,7 +64,8 @@ async function signIn(button, status) {
     const next = new URLSearchParams(window.location.search).get("next") || "/";
     window.location.assign(/^\/[A-Za-z0-9\/_.-]*$/.test(next) && !next.startsWith("//") ? next : "/");
   } catch (e) {
-    say(status, e.name === "NotAllowedError" ? "Cancelled. Try again when you're ready." : "Couldn't sign in: " + e.message, "warn");
+    if (e.name === "NotAllowedError") say(status, "Cancelled. Try again when you're ready.");
+    else say(status, "Couldn't sign in: " + e.message, "bad");
     button.disabled = false;
   }
 }
@@ -91,7 +95,9 @@ async function enrol(button, nameInput, status) {
     await postJson("/settings/passkeys/finish", { id, name: nameInput ? nameInput.value : "", credential });
     window.location.reload();
   } catch (e) {
-    say(status, e.name === "NotAllowedError" ? "Cancelled." : e.name === "InvalidStateError" ? "This device already has a passkey here." : "Couldn't add the passkey: " + e.message, "warn");
+    if (e.name === "NotAllowedError") say(status, "Cancelled.");
+    else if (e.name === "InvalidStateError") say(status, "This device already has a passkey here.", "warn");
+    else say(status, "Couldn't add the passkey: " + e.message, "bad");
     button.disabled = false;
   }
 }

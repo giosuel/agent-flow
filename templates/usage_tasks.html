@@ -14,7 +14,7 @@
   </span>
 </div>
 {% if tasks.is_empty() && outside.is_empty() %}<p class="sub">No tokens in the last {{ days }} days.</p>{% else %}
-{% if tasks.is_empty() %}<p class="notice">No tokens are counted against a task yet: they are once an agent creates or updates its tasks through AgentFlow while it works. Until then everything is under "Not in a task".</p>{% endif %}
+{% if tasks.is_empty() %}<p class="sub">No tokens are counted against a task yet: they are once an agent creates or updates its tasks through AgentFlow while it works. Until then everything is under "Not in a task".</p>{% endif %}
 <div class="table-wrap"><table class="table nums tk-table" data-sortable>
   <thead><tr>{% call tbl::th("Task", "text", "", "") %}{% endcall %}{% if show_status %}{% call tbl::th("Status", "text", "hide-phone tk-l", "") %}{% endcall %}{% endif %}{% call tbl::th("Worked", "num", "hide-phone tk-l", "descending") %}{% endcall %}{% call tbl::th("Calls", "num", "hide-phone", "") %}{% endcall %}{% call tbl::th("New tokens", "num", "", "") %}{% endcall %}{% call tbl::th("Cache reads", "num", "hide-phone", "") %}{% endcall %}{% call tbl::th("Cost", "num", "", "") %}{% endcall %}{% if show_estimate %}{% call tbl::th("Estimate", "text", "hide-phone tk-l", "") %}{% endcall %}{% endif %}</tr></thead>
   <tbody>{% for r in tasks %}{% include "usage_task_row.html" %}{% endfor %}</tbody>

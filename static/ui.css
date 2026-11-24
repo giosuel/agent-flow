@@ -69,7 +69,8 @@ code, pre, .mono { font-family: var(--mono); }
 .sub { font-size: var(--fs-sub); color: var(--muted); }
 .label { font-size: var(--fs-label); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
 .t-display { font-size: var(--fs-display); font-weight: 600; letter-spacing: -.01em; line-height: 1.1; }
-.t-num { font-family: var(--mono); font-size: var(--fs-display); font-weight: 500; letter-spacing: -.01em; line-height: 1.1; }
+.t-num { font-family: var(--mono); font-size: var(--fs-display); font-weight: 500; letter-spacing: -.01em; line-height: 1.1; color: var(--ink); }
+.t-num.sm { font-size: var(--fs-h1); }
 .t-h1 { font-size: var(--fs-h1); font-weight: 600; line-height: 1.25; }
 .t-h2 { font-size: var(--fs-h2); font-weight: 600; line-height: 1.3; }
 .t-h3 { font-size: var(--fs-h3); font-weight: 600; line-height: 1.35; }
@@ -430,6 +431,61 @@ a.item-row:hover { background: var(--hover-bg); }
 .tl-day { display: flex; align-items: center; gap: var(--sp-2); padding: 10px 0 6px; font-size: var(--fs-label); color: var(--muted); }
 .tl-day::after { content: ""; flex: 1; border-top: 1px solid var(--line2); }
 
+/* ---------------------------------------------------------------- Icon tile: an icon on a tinted square
+   .itile (36), .sm (28), .lg (44); muted on the chip by default. */
+.itile { display: grid; place-items: center; width: 36px; height: 36px; flex: none; border-radius: var(--r-md); background: var(--chip); color: var(--muted); }
+.itile .i { width: var(--ic); height: var(--ic); }
+.itile.sm { width: 28px; height: 28px; }
+.itile.sm .i { width: var(--ic-sm); height: var(--ic-sm); }
+.itile.lg { width: 44px; height: 44px; }
+.itile.lg .i { width: var(--ic-lg); height: var(--ic-lg); }
+
+/* ---------------------------------------------------------------- Notice: one, in five tones
+   p.notice: an icon from icons.rs (info, check for ok, alert for warn and bad) and its text in a
+   span. Failures are .bad (they were all amber); warnings .warn; outcomes .ok; neutral and .info
+   for what's worth knowing. (N-20 §5.2) */
+.notice { display: flex; align-items: flex-start; gap: 10px; margin: 0; padding: 11px var(--sp-4); border: 1px solid var(--line); border-radius: var(--r-md); background: var(--chip); color: var(--ink2); font-size: var(--fs-sm); line-height: 1.45; }
+.notice[hidden] { display: none; }
+.notice > .i { width: var(--ic); height: var(--ic); flex: none; margin-top: 1px; }
+.notice > span { flex: 1; min-width: 0; }
+.notice a { color: inherit; }
+.notice.info { background: var(--info-bg); border-color: var(--info-line); color: var(--info-ink); }
+.notice.ok { background: var(--ok-bg); border-color: var(--ok-line); color: var(--ok-ink); }
+.notice.warn { background: var(--warn-bg); border-color: var(--warn-line); color: var(--warn-ink); }
+.notice.bad { background: var(--bad-bg); border-color: var(--bad-line); color: var(--bad-ink); }
+
+/* ---------------------------------------------------------------- Empty state: two
+   .empty-state: a whole card with nothing in it yet (a tile with an icon, a title, a line on what fills
+   it). .empty-in: one line where a list in a card is empty. Anywhere else a plain p.sub.
+   (N-20 §5.1: 13 treatments) */
+.empty-state { display: flex; flex-direction: column; align-items: center; gap: var(--sp-2); padding: var(--sp-8) var(--sp-6); text-align: center; }
+.empty-state > .itile { margin-bottom: var(--sp-1); }
+.empty-state > .t { margin: 0; font-size: var(--fs-h3); font-weight: 600; color: var(--ink); }
+.empty-state > p { margin: 0; max-width: 460px; font-size: var(--fs-sm); color: var(--muted); }
+.empty-in { margin: 0; padding: var(--sp-4) var(--sp-5); font-size: var(--fs-sm); color: var(--muted); }
+
+/* ---------------------------------------------------------------- Meter: one bar for a share
+   .meter > i (its width inline): 8 px, or 4 px .thin in rows; the fill accent, a tone (.warn,
+   .bad, .ok) or a project's colour (--c); a limit as .mark (left inline). (N-20 #13: eight
+   progress bars with seven heights, three tracks and two warn colours) */
+.meter { display: block; position: relative; height: 8px; border-radius: var(--r-pill); background: var(--chip); }
+.meter.thin { height: 4px; }
+.meter > i { position: absolute; left: 0; top: 0; bottom: 0; max-width: 100%; border-radius: var(--r-pill); background: var(--c, var(--accent)); }
+.meter > i.ok { background: var(--ok); }
+.meter > i.warn { background: var(--warn); }
+.meter > i.bad { background: var(--bad); }
+.meter > .mark { position: absolute; top: -3px; bottom: -3px; width: 2px; margin-left: -1px; border-radius: 1px; background: var(--warn-ink); }
+
+/* ---------------------------------------------------------------- Legend and swatch: one
+   ul.legend: a grid (the owner, 2026-11-23: many projects don't make a long column) of li, each a
+   .swatch (a square, .line, or a dashed .limit) in the series' colour (--c), its name, a value.
+   The chart tooltip uses the same swatch. (N-20 G3–G5: three swatch copies, two legends) */
+.legend { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 6px var(--sp-5); padding: 0; margin: 0; list-style: none; font-size: var(--fs-sub); color: var(--ink2); }
+.legend li { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.swatch { display: inline-block; width: 10px; height: 10px; margin-right: 6px; border-radius: 3px; background: var(--c); vertical-align: middle; flex: none; }
+.swatch.line { width: 14px; height: 3px; border-radius: 2px; }
+.swatch.limit { width: 14px; height: 0; border-radius: 0; border-top: 2px dashed var(--muted); background: none; }
+
 /* ---------------------------------------------------------------- Dialog: one, in four sizes
    A head (the title 18/600, its tools, the close icon button), a body, a foot (actions on the
    right: quiet first, then the primary or danger-solid). sm 440 confirms; md 760 records and
@@ -475,6 +531,8 @@ html.dlg-on { overflow: hidden; }
   .btn.sm { min-height: var(--h-md); }
   .ibtn { width: 44px; height: 44px; }
   .item-row { flex-wrap: wrap; }
+  .t-num, .t-num.sm { font-size: var(--fs-h1); }
+  .legend { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
   a.item-row:active, .rows > li.item-row:active { background: var(--selected); }
   .dlg-back { padding: 0; place-items: end stretch; }
   .dlg { width: 100%; max-height: calc(100dvh - 10px - env(safe-area-inset-top)); border-radius: 18px 18px 0 0; border-bottom: 0; transform: translateY(100%); transition: transform .26s cubic-bezier(.2, .8, .2, 1); }

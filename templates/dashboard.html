@@ -6,32 +6,32 @@
   <h1>Dashboard</h1>
   <p class="status-line"><span class="dot{% if online > 0 %} ok{% endif %}" aria-hidden="true"></span><span>{{ online }} of {{ agents }} agents online</span><span aria-hidden="true">·</span><a href="/machine">machine {{ machine }}</a>{% if warnings > 0 %}<span aria-hidden="true">·</span><a href="/log" class="warn-text">{{ warnings }} warning{% if warnings != 1 %}s{% endif %}</a>{% endif %}<span class="grow"></span><span>{{ today }}</span></p>
 </div>
-{% if let Some(n) = notice %}<p class="notice ok" role="status">{{ n }}. The agent gets your answer word for word.</p>{% endif %}
+{% if let Some(n) = notice %}<p class="notice ok" role="status">{{ crate::web::icons::icon("check")|safe }}<span>{{ n }}. The agent gets your answer word for word.</span></p>{% endif %}
 
 {# The overview (the owner, 2026-11-18, D-212): the plan, today, the machine, agents and builds. #}
 <div class="dov" aria-label="Overview">
   <a href="/usage" class="tile ov-plan">
     <div class="th"><span class="ic">{{ crate::web::icons::icon("chart")|safe }}</span><span class="label">Plan</span><span class="go">Usage ›</span></div>
     <div class="ov-desk">
-    {% for m in overview.plan %}<div class="mrow"><span class="sub">{{ m.label }}</span><div class="meter"><i class="{% if m.warn %}warn{% endif %}" style="width: {{ m.pct|fmt("{:.0}") }}%"></i>{% if let Some(k) = m.mark %}<b style="left: {{ k|fmt("{:.0}") }}%"></b>{% endif %}</div><span class="v">{{ m.value }}</span></div>{% endfor %}
+    {% for m in overview.plan %}<div class="mrow"><span class="sub">{{ m.label }}</span><div class="meter"><i class="{% if m.warn %}warn{% endif %}" style="width: {{ m.pct|fmt("{:.0}") }}%"></i>{% if let Some(k) = m.mark %}<span class="mark" style="left: {{ k|fmt("{:.0}") }}%"></span>{% endif %}</div><span class="v">{{ m.value }}</span></div>{% endfor %}
     <p class="sub ov-note">{{ overview.plan_note }}</p>
     </div>
-    <div class="ov-phone"><span class="big">{% if overview.plan_big.is_empty() %}—{% else %}{{ overview.plan_big }}{% endif %}</span><span class="sub">{% if overview.plan_sub.is_empty() %}5 hours{% else %}{{ overview.plan_sub }}{% endif %}</span></div>
+    <div class="ov-phone"><span class="big t-num">{% if overview.plan_big.is_empty() %}—{% else %}{{ overview.plan_big }}{% endif %}</span><span class="sub">{% if overview.plan_sub.is_empty() %}5 hours{% else %}{{ overview.plan_sub }}{% endif %}</span></div>
   </a>
   <a href="/usage" class="tile ov-today">
     <div class="th"><span class="ic">{{ crate::web::icons::icon("tag")|safe }}</span><span class="label">Today</span><span class="go">Usage ›</span></div>
-    <div class="row ov-bigrow"><span class="big">{{ overview.today_usd }}</span><span class="sub ov-desk">at API prices{% if !overview.typical.is_empty() %} · {{ overview.typical }}{% endif %}</span></div>
+    <div class="row ov-bigrow"><span class="big t-num">{{ overview.today_usd }}</span><span class="sub ov-desk">at API prices{% if !overview.typical.is_empty() %} · {{ overview.typical }}{% endif %}</span></div>
     <div class="ov-nums"><span><b>{{ overview.new_tokens }}</b> new tokens</span><span class="ov-desk"><b>{{ overview.calls }}</b> calls</span><span class="ov-desk"><b>{{ overview.cache_reads }}</b> cache reads</span></div>
-    <div class="ovbars ov-desk">{% for p in overview.top %}<div class="ovbar"><span>{{ p.name }}</span><span class="t"><i style="width: {{ p.width|fmt("{:.0}") }}%; background: {{ p.tint }}"></i></span><span class="v">{{ p.usd }}</span></div>{% endfor %}</div>
+    <div class="ovbars ov-desk">{% for p in overview.top %}<div class="ovbar"><span>{{ p.name }}</span><span class="meter"><i style="width: {{ p.width|fmt("{:.0}") }}%; --c: {{ p.tint }}"></i></span><span class="v">{{ p.usd }}</span></div>{% endfor %}</div>
   </a>
   <a href="/machine" class="tile ov-machine">
     <div class="th"><span class="ic">{{ crate::web::icons::icon("cpu")|safe }}</span><span class="label">Machine</span><span class="go">Machine ›</span></div>
     <div class="ov-desk">{% for m in overview.machine %}<div class="mrow"><span class="sub">{{ m.label }}</span><div class="meter"><i class="{% if m.warn %}warn{% endif %}" style="width: {{ m.pct|fmt("{:.0}") }}%"></i></div><span class="v">{{ m.value }}</span></div>{% endfor %}</div>
-    <div class="ov-phone"><span class="big">{{ overview.cpu_short }}</span><span class="sub">{{ overview.mem_short }}</span></div>
+    <div class="ov-phone"><span class="big t-num">{{ overview.cpu_short }}</span><span class="sub">{{ overview.mem_short }}</span></div>
   </a>
   <a href="/machine" class="tile ov-agents">
     <div class="th"><span class="ic">{{ crate::web::icons::icon("server")|safe }}</span><span class="label">Agents and builds</span><span class="go">Machine ›</span></div>
-    <div class="row ov-bigrow"><span class="big">{{ overview.online }}</span><span class="sub">of {{ overview.agents }} agents online</span></div>
+    <div class="row ov-bigrow"><span class="big t-num">{{ overview.online }}</span><span class="sub">of {{ overview.agents }} agents online</span></div>
     <div class="ov-desk stack-sm">
     {% for b in overview.builders %}<div class="srv"><span class="dot{% if b.online %} ok{% endif %}" aria-hidden="true"></span><b>{{ b.name }}</b><span class="sub">{{ b.job }}</span></div>{% endfor %}
     {% if !overview.spark.is_empty() %}<span class="sub ov-note">CPU over the last hour</span><div class="spark" aria-hidden="true">{% for h in overview.spark %}<i style="height: {{ h }}%"{% if loop.last %} class="now"{% endif %}></i>{% endfor %}</div>{% endif %}
@@ -65,7 +65,7 @@
     {% endif %}
 
     {% if featured.is_none() && groups.is_empty() %}
-    <section class="card pad empty"><h2>Nothing is waiting on you</h2><p class="sub">Questions, merges and builds from the project agents show up here, and on your phone as notifications.</p></section>
+    <section class="card empty-state"><span class="itile lg">{{ crate::web::icons::icon("check")|safe }}</span><h2 class="t">Nothing is waiting on you</h2><p>Questions, merges and builds from the project agents show up here, and on your phone as notifications.</p></section>
     {% endif %}
   </section>
 
@@ -83,7 +83,7 @@
     <section class="stack-sm" aria-labelledby="proj-h">
       <div class="sec"><h2 id="proj-h">Projects</h2><span class="sub">milestone · waiting</span></div>
       {% for p in projects %}
-      <div class="item-row dense prow"><span class="dot{% if p.online %} ok{% endif %}" aria-hidden="true"></span><a class="pn" href="/p/{{ p.slug }}">{{ p.name }}</a><span class="sub pm">{{ p.milestone }}</span><span class="bar" role="img" aria-label="{{ p.percent }}% of the milestone's tasks done"><i style="width: {{ p.percent }}%"></i></span><span class="mono pw{% if p.waiting > 0 %} warn-text{% endif %}">{{ p.waiting }}</span></div>
+      <div class="item-row dense prow"><span class="dot{% if p.online %} ok{% endif %}" aria-hidden="true"></span><a class="pn" href="/p/{{ p.slug }}">{{ p.name }}</a><span class="sub pm">{{ p.milestone }}</span><span class="meter thin pbar-s" role="img" aria-label="{{ p.percent }}% of the milestone's tasks done"><i style="width: {{ p.percent }}%"></i></span><span class="mono pw{% if p.waiting > 0 %} warn-text{% endif %}">{{ p.waiting }}</span></div>
       {% endfor %}
     </section>
   </aside>

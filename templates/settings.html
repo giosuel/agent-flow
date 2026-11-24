@@ -30,7 +30,7 @@
       <div class="row"><label class="vh" for="passkey-name">Name for the new passkey</label><input id="passkey-name" placeholder="Name" maxlength="60"><button class="btn sm" id="passkey-add" type="button">Add</button></div></div>
     <p class="notice" id="passkey-status" role="status" hidden></p>
     {% else %}
-    <p class="notice">Passkeys work only at AgentFlow's https address. This page is open at {{ public_url }}.</p>
+    <p class="notice">{{ crate::web::icons::icon("info")|safe }}<span>Passkeys work only at AgentFlow's https address. This page is open at {{ public_url }}.</span></p>
     {% endif %}
   </section>
 
@@ -148,8 +148,8 @@
   <section aria-labelledby="h-sec">
     <h2 id="h-sec">Consultant</h2>
     <p class="sub set-lead">A Claude Code session the server runs, as the server's user. Agents ask it with SendMessage ("AgentFlow Consultant").</p>
-    {% if let Some(e) = consultant.error %}<p class="notice warn" role="alert">{{ e }}</p>{% endif %}
-    {% if consultant.on && consultant.waiting_trust %}<p class="notice warn" role="alert">It's waiting at Claude Code's question whether to trust its folder. Open it with the terminal command below and choose "Yes, I trust this folder"; it starts then.</p>{% endif %}
+    {% if let Some(e) = consultant.error %}<p class="notice bad" role="alert">{{ crate::web::icons::icon("alert")|safe }}<span>{{ e }}</span></p>{% endif %}
+    {% if consultant.on && consultant.waiting_trust %}<p class="notice warn" role="alert">{{ crate::web::icons::icon("alert")|safe }}<span>It's waiting at Claude Code's question whether to trust its folder. Open it with the terminal command below and choose "Yes, I trust this folder"; it starts then.</span></p>{% endif %}
     <form method="post" action="/settings/consultant/{% if consultant.on %}off{% else %}on{% endif %}" data-autosubmit>
       <div class="set-row"><div class="set-txt"><strong id="c-on">Run the consultant</strong><span class="sub">{% if consultant.on && consultant.waiting_trust %}Waiting for you{% else if consultant.on && consultant.running %}Running{% else if consultant.on %}On, starting{% else %}Off{% endif %}</span></div>
         <label class="switch"><input type="checkbox" role="switch" name="on" aria-labelledby="c-on" {% if consultant.on %}checked data-confirm="Switch the consultant off? Its session ends; switching it on again continues it." data-confirm-ok="Switch off"{% endif %}><span aria-hidden="true"></span></label></div>

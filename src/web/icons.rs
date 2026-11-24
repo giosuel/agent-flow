@@ -201,7 +201,7 @@ pub const ALL: &[&str] = &[
 
 /// The icons scripts draw (dialogs, the copy button, the bell's panel), as symbols on every page, so
 /// static/*.js uses the same icons as the templates: `<svg class="i"><use href="#i-close"/></svg>`.
-pub const SPRITE: &[&str] = &["close", "prev", "chevron", "copy", "check", "gear", "caret", "alert"];
+pub const SPRITE: &[&str] = &["close", "prev", "chevron", "copy", "check", "gear", "caret", "alert", "info"];
 
 pub fn sprite() -> String {
     let mut out =
