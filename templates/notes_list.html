@@ -27,7 +27,7 @@
   {% if nv.none %}<p class="sub lempty">No notes yet. Agents add files with <span class="mono">flow note &lt;file&gt;</span> and short notes with <span class="mono">add_note</span>.</p>
   {% else %}
   <div class="ntable" role="table" aria-label="Notes" data-sortable>
-  {% if !nv.rows.is_empty() %}<div class="nhead" role="row"><span role="columnheader"><span class="vh">Type</span></span>{% for (label, kind, default) in nv.heads %}{% call tbl::ch(label, kind, default) %}{% endcall %}{% endfor %}<span role="columnheader"><span class="vh">Download</span></span></div>{% endif %}
+  {% if !nv.rows.is_empty() %}<div class="nhead grid-head" role="row"><span role="columnheader"><span class="vh">Type</span></span>{% for (label, kind, default) in nv.heads %}{% call tbl::ch(label, kind, default) %}{% endcall %}{% endfor %}<span role="columnheader"><span class="vh">Download</span></span></div>{% endif %}
   <div class="nrows" role="rowgroup">{% for n in nv.rows %}{% include "note_row.html" %}{% endfor %}</div>
   </div>
   {% endif %}

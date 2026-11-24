@@ -21,7 +21,7 @@
   <a href="/usage" class="tile ov-today">
     <div class="th"><span class="ic">{{ crate::web::icons::icon("tag")|safe }}</span><span class="label">Today</span><span class="go">Usage ›</span></div>
     <div class="row ov-bigrow"><span class="big">{{ overview.today_usd }}</span><span class="sub ov-desk">at API prices{% if !overview.typical.is_empty() %} · {{ overview.typical }}{% endif %}</span></div>
-    <div class="kv"><span><b>{{ overview.new_tokens }}</b> new tokens</span><span class="ov-desk"><b>{{ overview.calls }}</b> calls</span><span class="ov-desk"><b>{{ overview.cache_reads }}</b> cache reads</span></div>
+    <div class="ov-nums"><span><b>{{ overview.new_tokens }}</b> new tokens</span><span class="ov-desk"><b>{{ overview.calls }}</b> calls</span><span class="ov-desk"><b>{{ overview.cache_reads }}</b> cache reads</span></div>
     <div class="ovbars ov-desk">{% for p in overview.top %}<div class="ovbar"><span>{{ p.name }}</span><span class="t"><i style="width: {{ p.width|fmt("{:.0}") }}%; background: {{ p.tint }}"></i></span><span class="v">{{ p.usd }}</span></div>{% endfor %}</div>
   </a>
   <a href="/machine" class="tile ov-machine">
@@ -54,11 +54,11 @@
     {% endif %}
 
     {% if !groups.is_empty() %}
-    <div class="card list">
+    <div class="card list rows flush">
       {% for g in groups %}
-      <div class="grp"><span>{{ g.title }} · {{ g.items.len() }}</span></div>
+      <div class="grphead"><span>{{ g.title }} · {{ g.items.len() }}</span></div>
       {% for i in g.items %}
-      <div class="item"><span class="ico">{{ i.icon|safe }}</span><div class="ttl"><a href="{{ i.url }}">{{ i.title }}</a><span class="sub">{{ i.sub }}</span></div><a class="btn sm secondary" href="{{ i.url }}">{{ i.action }}</a></div>
+      <div class="item-row wait-row"><span class="ico">{{ i.icon|safe }}</span><div class="ttl"><a href="{{ i.url }}">{{ i.title }}</a><span class="sub">{{ i.sub }}</span></div><a class="btn sm secondary" href="{{ i.url }}">{{ i.action }}</a></div>
       {% endfor %}
       {% endfor %}
     </div>
@@ -75,7 +75,7 @@
       {% if activity.is_empty() %}<p class="sub">Nothing has happened yet.</p>{% else %}
       <ol class="tl">
         {% for a in activity %}
-        <li class="ev" style="--c: {{ a.color }}"><span class="mono sub">{{ a.time }}</span> <strong>{{ a.who }}</strong> {% if let Some(u) = a.url %}<a href="{{ u }}">{{ a.what }}</a>{% else %}{{ a.what }}{% endif %}</li>
+        <li class="ev"><span class="tm">{{ a.time }}</span><span class="rail"><span class="dot {{ a.tone }}"></span></span><span class="txt"><strong>{{ a.who }}</strong> {% if let Some(u) = a.url %}<a href="{{ u }}">{{ a.what }}</a>{% else %}{{ a.what }}{% endif %}</span></li>
         {% endfor %}
       </ol>
       {% endif %}
@@ -83,7 +83,7 @@
     <section class="stack-sm" aria-labelledby="proj-h">
       <div class="sec"><h2 id="proj-h">Projects</h2><span class="sub">milestone · waiting</span></div>
       {% for p in projects %}
-      <div class="prow"><span class="dot{% if p.online %} ok{% endif %}" aria-hidden="true"></span><a class="pn" href="/p/{{ p.slug }}">{{ p.name }}</a><span class="sub pm">{{ p.milestone }}</span><span class="bar" role="img" aria-label="{{ p.percent }}% of the milestone's tasks done"><i style="width: {{ p.percent }}%"></i></span><span class="mono pw{% if p.waiting > 0 %} warn-text{% endif %}">{{ p.waiting }}</span></div>
+      <div class="item-row dense prow"><span class="dot{% if p.online %} ok{% endif %}" aria-hidden="true"></span><a class="pn" href="/p/{{ p.slug }}">{{ p.name }}</a><span class="sub pm">{{ p.milestone }}</span><span class="bar" role="img" aria-label="{{ p.percent }}% of the milestone's tasks done"><i style="width: {{ p.percent }}%"></i></span><span class="mono pw{% if p.waiting > 0 %} warn-text{% endif %}">{{ p.waiting }}</span></div>
       {% endfor %}
     </section>
   </aside>

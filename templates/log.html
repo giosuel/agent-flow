@@ -30,7 +30,7 @@
   <div class="card-head flat lp-top"><h2 id="lp-h">{{ total }} entr{% if total == 1 %}y{% else %}ies{% endif %} · {{ span }}</h2><span class="sub">newest first · {{ tz }} · click a bar to zoom in</span></div>
   <div class="hist" role="img" aria-label="Entries over time">{% for b in bars %}<a href="{{ b.href }}" data-tip="{{ b.label }}" aria-label="{{ b.label }}"><i style="height: {{ b.height }}%"></i></a>{% endfor %}</div>
   <div class="axis sub mono">{% for a in axis %}<span>{{ a }}</span>{% endfor %}</div>
-  <div class="lhead" aria-hidden="true"><span>Time</span><span>Category</span><span>Actor</span><span>Project</span><span>What</span><span>Severity</span></div>
+  <div class="lhead grid-head" aria-hidden="true"><span>Time</span><span>Category</span><span>Actor</span><span>Project</span><span>What</span><span>Severity</span></div>
   <ol class="plain lrows" id="lrows">{% include "log_rows.html" %}</ol>
   {% if rows.is_empty() %}<p class="sub lempty">Nothing matches in this range.</p>{% endif %}
 </section>

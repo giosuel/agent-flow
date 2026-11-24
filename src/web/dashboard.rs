@@ -53,7 +53,9 @@ struct Activity {
     time: String,
     who: String,
     what: String,
-    color: &'static str,
+    /// The dot's tone on the timeline (the library's state tones): the owner accent, a failure
+    /// bad, a call for the owner warn, the rest quiet.
+    tone: &'static str,
     url: Option<String>,
 }
 
@@ -287,12 +289,14 @@ async fn dashboard(
                         "owner" => "you".into(),
                         a => names.get(a).cloned().unwrap_or_else(|| a.to_owned()),
                     },
-                    color: if e.kind == "question.answered" || e.actor == "owner" {
-                        "var(--accent)"
-                    } else if e.kind.contains("failed") || e.kind == "owner.notified" {
-                        "var(--warn)"
+                    tone: if e.kind == "question.answered" || e.actor == "owner" {
+                        "accent"
+                    } else if e.kind.contains("failed") {
+                        "bad"
+                    } else if e.kind == "owner.notified" {
+                        "warn"
                     } else {
-                        "var(--info)"
+                        "quiet"
                     },
                     url: e.record.as_ref().and_then(|r| r.split_once('/')).map(|(p, id)| format!("/p/{p}/{id}")),
                     what: lowercase_first(&plain(e.summary.strip_prefix("Owner ").unwrap_or(&e.summary))),

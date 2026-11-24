@@ -97,7 +97,7 @@
         <div class="sl-cols">
           <div class="sl-col">
             <h3 class="label">This client</h3>
-            <dl class="sl-facts">
+            <dl class="kv sl-facts">
               <dt>Machine</dt><dd>{{ c.token.holder }}</dd>
               <dt>Added</dt><dd>{{ c.token.added }}</dd>
               <dt>Last used</dt><dd>{{ c.token.used }}{% if !c.token.from.is_empty() %} <span class="sub">· from {{ c.token.from }}</span>{% endif %}</dd>

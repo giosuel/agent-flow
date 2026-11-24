@@ -22,7 +22,7 @@
       <div class="sl-cols">
         <div class="sl-col">
           {% if !s.facts.is_empty() %}<h3 class="label">Machine</h3>
-          <dl class="sl-facts">{% for (k, v, d) in s.facts %}<dt>{{ k }}</dt><dd>{{ v }}{% if !d.is_empty() %} <span class="sub">· {{ d }}</span>{% endif %}</dd>{% endfor %}</dl>{% endif %}
+          <dl class="kv sl-facts">{% for (k, v, d) in s.facts %}<dt>{{ k }}</dt><dd>{{ v }}{% if !d.is_empty() %} <span class="sub">· {{ d }}</span>{% endif %}</dd>{% endfor %}</dl>{% endif %}
           {% if !s.waiting %}<h3 class="label">Now</h3>
           {% if s.jobs.is_empty() %}<p class="sub">No jobs running or waiting.</p>{% endif %}
           {% for (id, what, st, sub) in s.jobs %}<a class="sl-job" href="/machine/jobs/{{ id }}"><span class="mono acc-ink">#{{ id }}</span><span class="sl-job-t"><span class="ell">{{ what }}</span><span class="sub ell">{{ sub }}</span></span><span class="chip {% if st == "running" %}ok{% else %}warn{% endif %}">{{ st }}</span></a>{% endfor %}

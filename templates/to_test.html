@@ -9,7 +9,7 @@
     <div class="tt-cat"><h3>{{ g.category }}</h3><span class="sub">{{ g.items.len() }}</span></div>
     <ul class="tt-list">
       {% for i in g.items %}
-      <li class="tt-item">{% if tt.is_owner %}<input type="checkbox" name="t{{ i.id }}" value="1" id="tt{{ i.id }}" aria-label="Tested and works: {{ i.title }}">{% endif %}
+      <li class="item-row tt-item">{% if tt.is_owner %}<input type="checkbox" name="t{{ i.id }}" value="1" id="tt{{ i.id }}" aria-label="Tested and works: {{ i.title }}">{% endif %}
         <div class="tt-body"><label class="t" for="tt{{ i.id }}">{{ i.title }}</label>{% if !i.how.is_empty() %}<span class="sub">{{ i.how }}</span>{% endif %}
           {% for p in i.problems %}<span class="tt-problem">{{ p }}</span>{% endfor %}
           <div class="tt-meta"><span class="chip {{ i.chip.0 }}">{{ i.chip.1 }}</span><a class="sub mono" href="{{ i.url }}">{{ i.short }}</a></div></div></li>
