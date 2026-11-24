@@ -548,7 +548,7 @@ mod tests {
             assert!(from.iter().any(|(label, n)| label.starts_with("B-2 ") && *n == "1"), "{from:?}");
             let item = &v.groups[0].items[0];
             assert_eq!(item.chip.as_ref().map(|x| x.1.as_str()), Some("in B-2"));
-            let picked = Filter::new(None, None, Some("B-2"), None, false);
+            let picked = Filter::new(None, None, Some("B-2"), None);
             let v = view(c, "vinculum", p, &picked, true, false, 300, &Tz::default())?;
             assert_eq!(v.groups.iter().map(|g| g.items.len()).sum::<usize>(), 1);
             Ok(())
