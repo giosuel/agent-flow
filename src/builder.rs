@@ -32,6 +32,9 @@ pub struct Config {
     /// Its token (default ~/.config/agentflow/builder.token).
     #[serde(default)]
     pub token_file: String,
+    /// Where it works and keeps its files; its user's home when left out (tests set it).
+    #[serde(skip)]
+    pub home: Option<PathBuf>,
 }
 
 impl Config {
@@ -57,9 +60,16 @@ impl Config {
     }
 }
 
-/// Where the builder keeps files by content.
-fn store() -> Store {
-    Store::new(expand_home("~/.local/share/agentflow-builder/store"))
+impl Config {
+    /// Its home: where scripts and jobs run and work folders lie.
+    fn home(&self) -> PathBuf {
+        self.home.clone().unwrap_or_else(crate::util::home_dir)
+    }
+
+    /// Where the builder keeps files by content.
+    fn store(&self) -> Store {
+        Store::new(self.home().join(".local/share/agentflow-builder/store"))
+    }
 }
 
 #[derive(Default)]
@@ -99,11 +109,13 @@ pub async fn run(cfg: Config) -> anyhow::Result<()> {
     let token = cfg.token()?;
     let me = Arc::new(Builder { cfg, token, out: Outbox::default(), kills: Mutex::new(HashMap::new()) });
     // Blobs no snapshot used for two weeks go (checked daily).
-    tokio::spawn(async {
+    let gc_cfg = me.cfg.clone();
+    tokio::spawn(async move {
         let mut tick = tokio::time::interval(Duration::from_secs(86400));
         loop {
             tick.tick().await;
-            let _ = tokio::task::spawn_blocking(|| store().gc(Duration::from_secs(14 * 86400))).await;
+            let st = gc_cfg.store();
+            let _ = tokio::task::spawn_blocking(move || st.gc(Duration::from_secs(14 * 86400))).await;
         }
     });
     let mut pause = 1u64;
@@ -237,7 +249,8 @@ const MAX_OUTPUT: usize = 4 * 1024 * 1024;
 async fn sh(me: &Arc<Builder>, id: u64, script: &str, stream: bool, timeout_s: u64) -> anyhow::Result<Reply> {
     let mut cmd = tokio::process::Command::new("sh");
     cmd.arg("-s")
-        .current_dir(crate::util::home_dir())
+        .current_dir(me.cfg.home())
+        .env("HOME", me.cfg.home())
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
@@ -315,10 +328,10 @@ async fn sh(me: &Arc<Builder>, id: u64, script: &str, stream: bool, timeout_s: u
 }
 
 /// A folder under the builder's home, from the server: relative and plain.
-fn under_home(rel: &str) -> anyhow::Result<PathBuf> {
+fn under_home(me: &Builder, rel: &str) -> anyhow::Result<PathBuf> {
     let r = crate::builds::safe_relative(Path::new(rel))
         .with_context(|| format!("{rel:?} isn't a folder in the builder's home"))?;
-    Ok(crate::util::home_dir().join(r))
+    Ok(me.cfg.home().join(r))
 }
 
 fn client(me: &Builder) -> crate::cli::Client {
@@ -327,7 +340,7 @@ fn client(me: &Builder) -> crate::cli::Client {
 
 /// Downloads what the store lacks, checking each blob. Returns the bytes received.
 fn fetch_blobs(me: &Builder, shas: &[String]) -> anyhow::Result<u64> {
-    let st = store();
+    let st = me.cfg.store();
     let missing = st.missing(shas.iter().map(String::as_str));
     if missing.is_empty() {
         return Ok(0);
@@ -356,7 +369,7 @@ fn fetch_blobs(me: &Builder, shas: &[String]) -> anyhow::Result<u64> {
 fn sync(me: &Builder, work: &str, manifest: &str, bundle: &str) -> anyhow::Result<serde_json::Value> {
     crate::blobs::check_sha(manifest)?;
     let mut received = fetch_blobs(me, &[manifest.to_owned()])?;
-    let m: Manifest = serde_json::from_slice(&std::fs::read(store().path(manifest))?)?;
+    let m: Manifest = serde_json::from_slice(&std::fs::read(me.cfg.store().path(manifest))?)?;
     for e in &m.files {
         crate::blobs::check_path(&e.path)?;
         crate::blobs::check_sha(&e.sha)?;
@@ -367,7 +380,7 @@ fn sync(me: &Builder, work: &str, manifest: &str, bundle: &str) -> anyhow::Resul
         wanted.push(bundle.to_owned());
     }
     received += fetch_blobs(me, &wanted)?;
-    let dir = under_home(work)?;
+    let dir = under_home(me, work)?;
     std::fs::create_dir_all(&dir)?;
     let git = |args: &[&str]| std::process::Command::new("git").arg("-C").arg(&dir).args(args).output();
     if !dir.join(".git").exists() {
@@ -376,7 +389,7 @@ fn sync(me: &Builder, work: &str, manifest: &str, bundle: &str) -> anyhow::Resul
     let state_file = dir.join(".git").join("af-manifest.json");
     let before: HashMap<String, String> =
         std::fs::read(&state_file).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
-    let st = store();
+    let st = me.cfg.store();
     let mut changed = 0;
     let mut now = HashMap::new();
     for e in &m.files {
@@ -423,7 +436,7 @@ fn sync(me: &Builder, work: &str, manifest: &str, bundle: &str) -> anyhow::Resul
 
 /// Packs a path of a finished job and sends it to the server.
 fn upload(me: &Builder, job: i64, from: &str, name: &str) -> anyhow::Result<()> {
-    let path = under_home(from)?;
+    let path = under_home(me, from)?;
     if !path.exists() {
         bail!("{from} isn't there");
     }

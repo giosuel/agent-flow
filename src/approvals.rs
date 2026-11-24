@@ -125,11 +125,10 @@ pub fn check_args(c: &Connection, action: &str, args: &Value) -> anyhow::Result<
         }
         "builder_create" => {
             let name = s("name");
-            let b = crate::config::BuildServer { name: name.clone(), ssh: "daemon".into(), ..Default::default() };
+            let b = crate::config::BuildServer { name: name.clone(), ..Default::default() };
             crate::remote::check_server(&b)?;
-            let taken: bool =
-                c.query_row("SELECT EXISTS (SELECT 1 FROM build_servers WHERE name = ?1)", [&name], |r| r.get(0))?;
-            if taken {
+            // One waiting for its machine (a former SSH builder) is taken over.
+            if crate::remote::has_token(c, &name)? {
                 bail!("a builder called {name} exists already");
             }
             Ok(())

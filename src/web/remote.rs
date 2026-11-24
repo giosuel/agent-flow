@@ -29,9 +29,6 @@ pub fn routes() -> Router<AppState> {
         .route("/machine/jobs/{id}/cancel", post(cancel_page))
         .route("/machine/servers/{name}/pause", post(pause))
         .route("/machine/servers/{name}/resume", post(resume))
-        .route("/settings/build-servers", post(add_server))
-        .route("/settings/build-servers/{name}/check", post(check_server))
-        .route("/settings/build-servers/{name}/setup/{step}", post(setup_step))
         .route("/settings/build-servers/{name}/limits", post(save_limits))
         .route("/settings/build-servers/{name}/rename", post(rename_server))
         .route("/settings/build-servers/{name}/remove", post(remove_server))
@@ -82,21 +79,15 @@ async fn start(State(state): State<AppState>, Extension(actor): Extension<Actor>
         };
         return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({"error": why, "offline": true}))).into_response();
     };
-    let online = if server.kind == "daemon" {
-        Some(crate::builders::hub().is_online(&server.name))
-    } else {
-        state.remote.lock().unwrap_or_else(|e| e.into_inner()).servers.get(&server.name).map(|l| l.probe.online)
-    };
-    if online == Some(false) {
+    if !crate::builders::hub().is_online(&server.name) {
         return (
             StatusCode::SERVICE_UNAVAILABLE,
             Json(json!({"error": format!("{} is offline; build here instead", server.name), "offline": true})),
         )
             .into_response();
     }
-    // A builder that connects itself takes the snapshot; an SSH one reads the checkout here.
-    let new = if s.setup || server.kind == "daemon" {
-        // From anywhere: what runs comes with the job, the server reads no checkout.
+    // The builder takes a snapshot: what runs comes with the job, the server reads no checkout.
+    let new = {
         if !s.setup && s.manifest.is_empty() {
             return json_error(
                 StatusCode::BAD_REQUEST,
@@ -124,38 +115,6 @@ async fn start(State(state): State<AppState>, Extension(actor): Extension<Actor>
             manifest: s.manifest,
             bundle: s.bundle,
             setup: s.setup,
-        }
-    } else {
-        // The SSH path: the checkout on this machine. Its top level and where in it to run.
-        let dir = std::path::Path::new(&s.dir);
-        if !dir.is_absolute() || !dir.is_dir() {
-            return json_error(StatusCode::BAD_REQUEST, "dir is the absolute path of a folder in your checkout");
-        }
-        let top = tokio::process::Command::new("git")
-            .arg("-C")
-            .arg(dir)
-            .args(["rev-parse", "--show-toplevel"])
-            .output()
-            .await;
-        let top = match top {
-            Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).trim().to_owned(),
-            _ => return json_error(StatusCode::BAD_REQUEST, "dir isn't in a git checkout"),
-        };
-        let subdir = dir
-            .canonicalize()
-            .ok()
-            .and_then(|d| d.strip_prefix(&top).ok().map(|p| p.to_string_lossy().to_string()))
-            .unwrap_or_default();
-        NewJob {
-            server: server.name.clone(),
-            project_id: *project_id,
-            actor: slug.clone(),
-            dir: top,
-            subdir,
-            command: s.command,
-            fetch: s.fetch,
-            gpu: s.gpu,
-            ..Default::default()
         }
     };
     let created = state.db.call(move |c| remote::create(c, &new)).await;
@@ -326,7 +285,6 @@ pub struct JobRow {
 
 pub struct ServerView {
     pub name: String,
-    pub ssh: String,
     pub online: bool,
     pub paused: bool,
     pub line: String,
@@ -442,8 +400,7 @@ pub async fn section_data(state: &AppState, actor: &Actor) -> anyhow::Result<Sec
             }
             ServerView {
                 name: b.name.clone(),
-                ssh: b.ssh.clone(),
-                online: p.online,
+                online: crate::builders::hub().is_online(&b.name),
                 paused: l.is_some_and(|l| l.paused),
                 line: facts.join(" · "),
                 meters,
@@ -573,22 +530,14 @@ async fn job_page(
 }
 
 // ---------------------------------------------------------------------------------------------
-// The Settings page's Build servers card: add a machine, its key, its tools, its limits
+// The Settings page's Build servers card: the builders, their limits
 
 pub struct ServerSetting {
     pub name: String,
-    pub ssh: String,
-    /// It connects itself (agentflow-builder); else the server reaches it by SSH.
-    pub daemon: bool,
+    /// No token yet: waits for `flow builder add` on its machine (a former SSH builder).
+    pub waiting: bool,
     pub online: bool,
     pub line: String,
-    pub cargo: String,
-    pub sccache: String,
-    pub checked: bool,
-    pub setup: String,
-    pub setup_running: bool,
-    /// The line to add to the build user's authorized_keys there, when AgentFlow made the key.
-    pub key_line: Option<String>,
     pub min_threads: String,
     pub min_memory: String,
     pub reserve_memory: String,
@@ -606,22 +555,14 @@ pub struct ServersCard {
 /// Messages after the card's buttons; the query names one, never free text.
 fn card_notice(code: &str) -> Option<(bool, String)> {
     Some(match code {
-        "added" => (
-            true,
-            "Added. If AgentFlow made a key for it, add the line below on that machine; then press Check.".into(),
-        ),
         "removed" => (true, "Removed. Projects that used it build where their agent is.".into()),
         "saved" => (true, "Limits saved.".into()),
         "renamed" => (true, "Renamed. It reconnects under the new name.".into()),
-        "checking" => (true, "Checking; the result shows here in a few seconds (reload).".into()),
-        "started" => (true, "Started. It runs in the background; the result shows here and in the Log.".into()),
         c if c.starts_with("error-") => (
             false,
             match c {
                 "error-name" => "That name is taken, or isn't letters, digits, - _ .".into(),
-                "error-target" => "Connect to user@host, or a Host from ~/.ssh/config.".into(),
                 "error-busy" => "It has jobs waiting or running; cancel them first.".into(),
-                "error-key" => "Couldn't make a key (is ssh-keygen installed?).".into(),
                 "error-limits" => "The limits can't be negative, and folders are kept at least a day.".into(),
                 _ => "That didn't work; see the Log.".into(),
             },
@@ -632,12 +573,14 @@ fn card_notice(code: &str) -> Option<(bool, String)> {
 
 pub async fn servers_card(state: &AppState, code: Option<&str>) -> anyhow::Result<String> {
     let list = remote::servers(state);
-    let picks: Vec<(String, String)> = state
+    let (picks, with_token): (Vec<(String, String)>, Vec<String>) = state
         .db
         .call(|c| {
             let mut st = c.prepare("SELECT b.server, p.name FROM project_build_server b JOIN projects p ON p.id = b.project_id ORDER BY p.name")?;
             let rows = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<Result<_, _>>()?;
-            Ok(rows)
+            let mut st = c.prepare("SELECT DISTINCT name FROM tokens WHERE kind = 'builder' AND revoked_at IS NULL")?;
+            let names = st.query_map([], |r| r.get(0))?.collect::<Result<_, _>>()?;
+            Ok((rows, names))
         })
         .await?;
     let now = now_ms();
@@ -647,8 +590,12 @@ pub async fn servers_card(state: &AppState, code: Option<&str>) -> anyhow::Resul
         .map(|b| {
             let l = live.servers.get(&b.name);
             let p = l.map(|l| l.probe.clone()).unwrap_or_default();
-            let line = match (p.at, p.online) {
-                (0, _) => "not reached yet".to_owned(),
+            let waiting = !with_token.contains(&b.name);
+            let online = crate::builders::hub().is_online(&b.name);
+            let line = match (p.at, online) {
+                _ if waiting => "waiting for flow builder add on its machine".to_owned(),
+                (_, false) => "not connected".to_owned(),
+                (0, true) => "connected".to_owned(),
                 (t, true) => format!(
                     "online, checked {} · {} · {} threads · {:.0} GB{}",
                     ago(t, now),
@@ -661,21 +608,12 @@ pub async fn servers_card(state: &AppState, code: Option<&str>) -> anyhow::Resul
                         format!(" · {}", p.gpu_name.replace("NVIDIA GeForce ", ""))
                     }
                 ),
-                (t, false) => format!("can't be reached (checked {}): {}", ago(t, now), p.error),
             };
-            let tools = l.map(|l| l.tools.clone()).unwrap_or_default();
             ServerSetting {
                 name: b.name.clone(),
-                ssh: b.ssh.clone(),
-                daemon: b.kind == "daemon",
-                online: p.online,
+                waiting,
+                online,
                 line,
-                cargo: tools.cargo.clone(),
-                sccache: tools.sccache.clone(),
-                checked: l.is_some_and(|l| l.tools_checked()),
-                setup: l.map(|l| l.setup.clone()).unwrap_or_default(),
-                setup_running: l.is_some_and(|l| l.setup_running),
-                key_line: remote::public_key(&b.key_file).map(|k| format!("restrict {k}")),
                 min_threads: num(b.min_threads),
                 min_memory: num(b.min_memory_gb),
                 reserve_memory: num(b.reserve_memory_gb),
@@ -692,96 +630,8 @@ fn back_to_card(code: &str) -> Response {
     Redirect::to(&format!("/settings?bs={code}#s-builds")).into_response()
 }
 
-#[derive(Deserialize)]
-pub struct AddServer {
-    name: String,
-    ssh: String,
-    #[serde(default)]
-    make_key: Option<String>,
-}
-
-pub async fn add_server(
-    State(state): State<AppState>,
-    Extension(actor): Extension<Actor>,
-    axum::Form(f): axum::Form<AddServer>,
-) -> AppResult<Response> {
-    actor.require_owner()?;
-    let mut b = crate::config::BuildServer {
-        name: f.name.trim().to_owned(),
-        ssh: f.ssh.trim().to_owned(),
-        ..Default::default()
-    };
-    if remote::check_server(&b).is_err() {
-        let code = if b.ssh.is_empty()
-            || remote::check_server(&crate::config::BuildServer { ssh: "x".into(), ..b.clone() }).is_ok()
-        {
-            "error-target"
-        } else {
-            "error-name"
-        };
-        return Ok(back_to_card(code));
-    }
-    if remote::servers(&state).iter().any(|s| s.name == b.name) {
-        return Ok(back_to_card("error-name"));
-    }
-    if f.make_key.is_some() {
-        match remote::make_key(&state.config.data_dir(), &b.name).await {
-            Ok((path, _)) => b.key_file = path,
-            Err(e) => {
-                tracing::warn!("making a key for {}: {e:#}", b.name);
-                return Ok(back_to_card("error-key"));
-            }
-        }
-    }
-    let b2 = b.clone();
-    if state.db.call(move |c| remote::add_server(c, &b2)).await.is_err() {
-        return Ok(back_to_card("error-name"));
-    }
-    remote::reload(&state).await;
-    activity::write(
-        &state.db,
-        Entry::new(&actor, Via::Page, Action::Write, format!("added build server {} ({})", b.name, b.ssh)),
-    )
-    .await;
-    Ok(back_to_card("added"))
-}
-
 fn find_server(state: &AppState, name: &str) -> AppResult<crate::config::BuildServer> {
     remote::servers(state).into_iter().find(|b| b.name == name).ok_or(AppError::NotFound)
-}
-
-pub async fn check_server(
-    State(state): State<AppState>,
-    Extension(actor): Extension<Actor>,
-    Path(name): Path<String>,
-) -> AppResult<Response> {
-    actor.require_owner()?;
-    let b = find_server(&state, &name)?;
-    let st = state.clone();
-    tokio::spawn(async move {
-        if let Err(e) = remote::refresh_tools(&st, &b).await {
-            let mut live = st.remote.lock().unwrap_or_else(|e| e.into_inner());
-            live.servers.entry(b.name.clone()).or_default().setup = format!("couldn't connect: {e:#}");
-        }
-    });
-    Ok(back_to_card("checking"))
-}
-
-pub async fn setup_step(
-    State(state): State<AppState>,
-    Extension(actor): Extension<Actor>,
-    Path((name, step)): Path<(String, String)>,
-) -> AppResult<Response> {
-    actor.require_owner()?;
-    let b = find_server(&state, &name)?;
-    let what = match step.as_str() {
-        "sccache" => "installing sccache",
-        "rust" => "setting up Rust",
-        _ => return Err(AppError::NotFound),
-    };
-    activity::write(&state.db, Entry::new(&actor, Via::Page, Action::Run, format!("{what} on {name}"))).await;
-    remote::spawn_setup(state, b, what);
-    Ok(back_to_card("started"))
 }
 
 #[derive(Deserialize)]
@@ -848,14 +698,10 @@ pub async fn remove_server(
     Path(name): Path<String>,
 ) -> AppResult<Response> {
     actor.require_owner()?;
-    let b = find_server(&state, &name)?;
+    find_server(&state, &name)?;
     let n = name.clone();
     if state.db.call(move |c| remote::remove_server(c, &n)).await.is_err() {
         return Ok(back_to_card("error-busy"));
-    }
-    if !b.key_file.is_empty() {
-        let _ = tokio::fs::remove_file(&b.key_file).await;
-        let _ = tokio::fs::remove_file(format!("{}.pub", b.key_file)).await;
     }
     crate::builders::hub().drop_builder(&name);
     remote::reload(&state).await;

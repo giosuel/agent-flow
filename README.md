@@ -80,14 +80,6 @@ hands_socket = "/run/agentflow-hands/hands.sock"  # as its own user: the agents'
 external_token_file = "~/.config/gh/external-token"  # public_repo token; used only on the owner's Send
 git_host = "https://github.com"             # where drafts' repositories are fetched and pushed
 
-[[build_servers]]                           # machines agents build and test on (flow remote)
-name = "headquarters"
-ssh = "headquarters"                        # a Host from ~/.ssh/config, or user@host
-root = "agentflow"                          # its work folders, in that user's home
-min_threads = 8                             # another job starts while this many threads…
-min_memory_gb = 16                          # …and this much memory are free
-reserve_memory_gb = 8                       # below this, running jobs pause until there's room
-keep_days = 14                              # a project's folder unused this long is deleted
 ```
 
 ## Behind Caddy (passkeys and push)
@@ -190,22 +182,24 @@ presses Send and never shown or logged.
 ## Build servers
 
 Agents run builds and tests on a stronger machine with `flow remote -- cargo build --release`
-(`--fetch target/release/app` brings files back, `--gpu` waits for an idle GPU). AgentFlow does the
-work over ssh. Each project has one work folder there: the commit goes over with git (only new
-objects), then every file is compared by content with rsync, so only what changed is sent and
-rewritten, and cargo rebuilds only that. The target folder stays there between jobs; sccache is used
-when it's installed there. Jobs run in a systemd unit of their own at low CPU and IO weight: they
-take what the machine's user isn't using, several at once when there's room, and pause when memory
-runs short. Output streams to the agent, the job's page and the Log (`via:build`; the job's entry
-has its warnings and errors). When the server is offline, the command exits with 75 at once, so
-the agent builds locally.
+(`--fetch target/release/app` brings files back, `--gpu` waits for an idle GPU). A build server is
+a builder that connects itself to AgentFlow (`agentflow-builder`, set up with `flow builder add` on
+that machine); SSH build servers are gone. Each project has one work folder there: `flow remote`
+sends a snapshot of the checkout, and only files the server and the builder don't have yet travel
+(by content, zstd-compressed, checked by SHA-256), with new commits as a git bundle. Only files
+that changed are rewritten, so cargo rebuilds only that. The target folder stays there between
+jobs; sccache is used when it's installed there (`flow remote --setup -- …` installs tools in the
+builder's home). Jobs run in a systemd unit of their own at low CPU and IO weight: they take what
+the machine's user isn't using, several at once when there's room, and pause when memory runs
+short. Output streams to the agent, the job's page and the Log (`via:build`; the job's entry has
+its warnings and errors). When the builder is offline, the command exits with 75 at once, so the
+agent builds locally.
 
-Build servers are managed on the Settings page: **Add** one by name and `user@host` (or a Host
-from `~/.ssh/config`); AgentFlow can make a key for it and shows the one line to add to that user's
-`authorized_keys` (with `restrict`). **Check** shows whether it has Rust and sccache, **Set up
-Rust** and **Install sccache** do that in the background, and **Limits** sets when jobs start and
-pause. Each project picks its build server in its own Settings; a project without one builds
-where its agent is (`flow remote` exits with 75). Servers in `config.toml` are added at start.
+Builders show on the Settings page with their limits (when jobs start and pause), and `flow builder
+list/edit/remove` manage them from a connected machine. Each project picks its build server in its
+own Settings; a project without one builds where its agent is (`flow remote` exits with 75). A
+builder that used to be an SSH build server waits for `flow builder add` on its machine, which takes
+it over with its projects and jobs; `build_servers` in `config.toml` are no longer read.
 
 For the low priority to hold against the machine's own user, give the build user's slice a low
 weight once (as root there): `systemctl set-property user-<uid>.slice CPUWeight=10 IOWeight=10`.
