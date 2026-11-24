@@ -6,7 +6,7 @@
   <h1>Handbook</h1>
 </div>
 {% if files.is_empty() %}
-<section class="card pad empty"><h2>No files yet</h2><p class="sub">The handbook's files come in once from the ai-handbook folder at the next start, or the consultant adds them with <span class="mono">handbook_edit</span>.</p></section>
+<section class="card empty-state"><span class="itile lg">{{ crate::web::icons::icon("book")|safe }}</span><h2 class="t">No files yet</h2><p>The handbook's files come in once from the ai-handbook folder at the next start, or the consultant adds them with <span class="mono">handbook_edit</span>.</p></section>
 {% else %}
 <div class="split guides hb{% if picked %} picked{% endif %}">
   <nav class="split-side stack" aria-label="Handbook">
@@ -30,7 +30,7 @@
       {% if rev > 1 %}<a class="btn sm secondary" href="/handbook?f={{ name }}&amp;history=1">{{ crate::web::icons::icon("history")|safe }}<span>History</span></a>{% endif %}
       {% else %}<span class="dirty" data-dirty hidden><span class="dot warn" aria-hidden="true"></span>Not saved</span>{% endif %}
     </div>
-    {% if let Some((ok, text)) = notice %}<p class="notice{% if *ok %} ok{% else %} warn{% endif %}" role="status">{{ text }}</p>{% endif %}
+    {% if let Some((ok, text)) = notice %}<p class="notice{% if *ok %} ok{% else %} bad{% endif %}" role="status">{% if *ok %}{{ crate::web::icons::icon("check")|safe }}{% else %}{{ crate::web::icons::icon("alert")|safe }}{% endif %}<span>{{ text }}</span></p>{% endif %}
     {% if let Some(ed) = editor %}
     {% include "md_editor.html" %}
     {% else if let Some((r, secs)) = old %}

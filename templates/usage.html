@@ -13,14 +13,14 @@
 <section class="card plan-card" aria-labelledby="plan-h">
   <div class="card-head"><h2 id="plan-h">Plan</h2>{% if !plan_seen.is_empty() %}<span class="sub">from a status line {{ plan_seen }}</span>{% endif %}<span class="grow"></span>{% if !est_rows.is_empty() %}<a class="act" href="#est-h">How big a window is</a>{% endif %}</div>
   {% if meters.is_empty() %}
-  <p class="sub plan-empty">The plan's 5-hour and weekly usage comes from Claude Code's status line in the agents' sessions. Run <span class="mono">flow project setup</span> again in a project's folder to add it there; the next reply of a session there sends it.</p>
+  <p class="empty-in">The plan's 5-hour and weekly usage comes from Claude Code's status line in the agents' sessions. Run <span class="mono">flow project setup</span> again in a project's folder to add it there; the next reply of a session there sends it.</p>
   {% else %}
-  <div class="meters">
+  <div class="plan-meters">
     {% for m in meters %}
     <div class="meter-p">
       <div class="mp-top"><span class="label">{{ m.label }}</span><span class="sub">resets <span class="ink">{{ m.reset }}</span></span></div>
-      <div class="mp-pct"><strong class="mono{% if m.warn %} warn-text{% endif %}">{{ m.pct }}</strong><span class="sub">used</span></div>
-      <div class="mp-bar" role="meter" aria-valuenow="{{ m.width }}" aria-valuemin="0" aria-valuemax="100" aria-label="{{ m.label }}: {{ m.pct }} used"><i style="width: {{ m.width }}%"{% if m.warn %} class="warn"{% endif %}></i><span class="mp-80" title="80%: a push"></span></div>
+      <div class="mp-pct"><strong class="t-num{% if m.warn %} warn-text{% endif %}">{{ m.pct }}</strong><span class="sub">used</span></div>
+      <div class="meter" role="meter" aria-valuenow="{{ m.width }}" aria-valuemin="0" aria-valuemax="100" aria-label="{{ m.label }}: {{ m.pct }} used"><i style="width: {{ m.width }}%"{% if m.warn %} class="warn"{% endif %}></i><span class="mark" style="left: 80%" title="80%: a push"></span></div>
       <p class="mp-sofar"><span class="sub">So far</span> <span class="mono">{{ m.so_far }}</span> <span class="sub">· {{ m.so_far_sub }}</span></p>
       <p class="mp-est">{{ crate::web::icons::icon("info")|safe }}<span>{{ m.estimate }}</span>{% if !m.basis.is_empty() %}<span class="sub">{{ m.basis }}</span>{% endif %}</p>
     </div>
@@ -30,7 +30,7 @@
 </section>
 
 <div class="tiles">
-  {% for t in tiles %}<div class="card pad tile"><span class="label">{{ t.label }}</span><strong class="tile-v mono">{{ t.value }}</strong><span class="sub">{{ t.hint }}</span></div>{% endfor %}
+  {% for t in tiles %}<div class="card pad tile"><span class="label">{{ t.label }}</span><strong class="tile-v t-num sm">{{ t.value }}</strong><span class="sub">{{ t.hint }}</span></div>{% endfor %}
 </div>
 
 <section class="card pad stack" aria-labelledby="chart-h">
@@ -43,7 +43,7 @@
     </span>
   </div>
   {% if empty %}<p class="sub">No tokens counted in this window yet. The transcripts are read every five minutes.</p>{% else %}
-  <ul class="legend plain" aria-label="Projects">{% for l in legend %}<li><span class="swatch" style="--c: {{ l.color }}"></span>{{ l.name }} <span class="sub mono">{{ l.total }}</span></li>{% endfor %}</ul>
+  <ul class="legend" aria-label="Projects">{% for l in legend %}<li><span class="swatch" style="--c: {{ l.color }}"></span>{{ l.name }} <span class="sub mono">{{ l.total }}</span></li>{% endfor %}</ul>
   <div class="chart">
     <span class="y-max mono sub">{{ bars_max }}</span><span class="y-zero mono sub">0</span>
     {{ bars|safe }}
@@ -62,7 +62,7 @@
 {% if !empty %}
 <section class="card pad stack" aria-labelledby="lines-h">
   <div class="sec"><h2 id="lines-h">Model calls</h2><span class="sub">per {% if zoomed %}hour{% else %}day{% endif %}, one line per project's agent</span></div>
-  <ul class="legend plain" aria-label="Agents">{% for l in legend %}<li><span class="swatch line" style="--c: {{ l.color }}"></span>{{ l.name }}</li>{% endfor %}</ul>
+  <ul class="legend" aria-label="Agents">{% for l in legend %}<li><span class="swatch line" style="--c: {{ l.color }}"></span>{{ l.name }}</li>{% endfor %}</ul>
   <div class="chart">
     <span class="y-max mono sub">{{ lines_max }}</span><span class="y-zero mono sub">0</span>
     {{ lines|safe }}
@@ -94,7 +94,7 @@
   {% else %}
   <div class="table-wrap"><table class="table nums tk-table" data-sortable>
     <thead><tr>{% call tbl::th("Task", "text", "", "") %}{% endcall %}{% call tbl::th("Worked", "num", "hide-phone tk-l", "") %}{% endcall %}{% call tbl::th("New tokens", "num", "hide-phone", "") %}{% endcall %}{% call tbl::th("Cost", "num", "", "descending") %}{% endcall %}</tr></thead>
-    <tbody>{% for r in top_tasks %}<tr><th scope="row" data-v="{{ r.title }}"><a href="{{ r.url }}"><span class="mono sub">{{ r.id }}</span> {{ r.title }}</a></th><td class="sub hide-phone tk-l" data-v="{{ r.last_at }}">{{ r.worked }}</td><td class="hide-phone" data-v="{{ r.t.raw.new_tokens() }}">{{ r.t.new_tokens }}</td><td data-v="{{ r.t.raw.cost_micro }}"><span class="tk-cost"><strong>{{ r.t.cost }}</strong><span class="cbar" aria-hidden="true"><i style="width: {{ r.bar }}%; --c: {{ r.color }}"></i></span></span></td></tr>{% endfor %}</tbody>
+    <tbody>{% for r in top_tasks %}<tr><th scope="row" data-v="{{ r.title }}"><a href="{{ r.url }}"><span class="mono sub">{{ r.id }}</span> {{ r.title }}</a></th><td class="sub hide-phone tk-l" data-v="{{ r.last_at }}">{{ r.worked }}</td><td class="hide-phone" data-v="{{ r.t.raw.new_tokens() }}">{{ r.t.new_tokens }}</td><td data-v="{{ r.t.raw.cost_micro }}"><span class="tk-cost"><strong>{{ r.t.cost }}</strong><span class="meter thin cbar" aria-hidden="true"><i style="width: {{ r.bar }}%; --c: {{ r.color }}"></i></span></span></td></tr>{% endfor %}</tbody>
   </table></div>
   {% endif %}
   <div class="tk-foot"><span class="sub">{% if tasks_more > 0 %}{{ tasks_more }} more task{% if tasks_more != 1 %}s{% endif %}{% if !not_in_task.is_empty() %} · {% endif %}{% endif %}{% if !not_in_task.is_empty() %}"Not in a task" {{ not_in_task }}{% endif %}</span>

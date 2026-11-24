@@ -8,7 +8,7 @@
   <p class="status-line">{{ host }}</p>
 </div>
 <div class="mtiles" id="tiles" aria-live="off">
-  {% for t in tiles %}<div class="card pad mtile{% if t.warn %} warn-card{% endif %}"><div class="mtile-top"><span class="mtile-ico{% if t.warn %} warn{% endif %}">{{ crate::web::icons::icon(t.icon)|safe }}</span><span class="label">{{ t.label }}</span></div><div class="mtile-big"><span class="mtile-v">{{ t.big }}</span> <small>{{ t.small }}</small></div><span class="mtile-trend">{{ t.trend }}</span>{{ t.spark|safe }}</div>{% endfor %}
+  {% for t in tiles %}<div class="card pad mtile{% if t.warn %} warn-card{% endif %}"><div class="mtile-top"><span class="mtile-ico{% if t.warn %} warn{% endif %}">{{ crate::web::icons::icon(t.icon)|safe }}</span><span class="label">{{ t.label }}</span></div><div class="mtile-big"><span class="mtile-v t-num">{{ t.big }}</span> <small>{{ t.small }}</small></div><span class="mtile-trend">{{ t.trend }}</span>{{ t.spark|safe }}</div>{% endfor %}
 </div>
 
 {{ builds|safe }}
@@ -19,7 +19,7 @@
   </div>
   {% if !sampled %}<p class="sub">No samples yet; the first comes a minute or two after AgentFlow starts.</p>{% else %}
   {% if let Some(c) = collecting %}<p class="sub">{{ c }}</p>{% endif %}
-  <ul class="legend plain" aria-label="Projects">{% for l in legend %}<li><span class="swatch" style="--c: {{ l.color }}"></span>{{ l.name }}</li>{% endfor %}<li><span class="swatch limit"></span>the machine: {{ cores }} cores, {{ mem_total }} GB</li></ul>
+  <ul class="legend" aria-label="Projects">{% for l in legend %}<li><span class="swatch" style="--c: {{ l.color }}"></span>{{ l.name }}</li>{% endfor %}<li><span class="swatch limit"></span>the machine: {{ cores }} cores, {{ mem_total }} GB</li></ul>
   <div class="duo-charts">
     <div class="stack-sm"><span class="label">CPU · cores</span>
       <div class="chart"><span class="y-max mono sub">{{ cpu_max }}</span><span class="y-zero mono sub">0</span>{{ cpu|safe }}<div class="x-labels edges mono sub" aria-hidden="true">{% for l in x_labels %}<span>{{ l }}</span>{% endfor %}</div></div></div>

@@ -11,9 +11,9 @@
   {% endif %}
 </div>
 {% if cards.is_empty() && archived %}
-<section class="card pad empty"><p class="sub">No archived projects.</p></section>
+<section class="card empty-state"><span class="itile lg">{{ crate::web::icons::icon("archive")|safe }}</span><p>No archived projects.</p></section>
 {% else if cards.is_empty() %}
-<section class="card pad empty"><h2>No projects yet</h2><p class="sub">Start one with Add project, or bring in an existing folder the same way.</p></section>
+<section class="card empty-state"><span class="itile lg">{{ crate::web::icons::icon("folder")|safe }}</span><h2 class="t">No projects yet</h2><p>Start one with Add project, or bring in an existing folder the same way.</p></section>
 {% else %}
 {% if archived %}
 <div class="prow-list">{% for c in cards %}{% include "project_row.html" %}{% endfor %}</div>

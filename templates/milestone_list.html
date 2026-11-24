@@ -4,7 +4,7 @@
    to the picked milestone, which is lit and open in its place. #}
 <section class="ovp ms-panel ml{% if tab == "plan" %} ml-plan{% endif %}" aria-labelledby="ms-h">
   <div class="card-head"><h2 id="ms-h">Milestones</h2><span class="sub">{{ ms_counts }}</span></div>
-  {% if ms_done.is_empty() && ms_list.is_empty() && loose_count == 0 %}<p class="sub ovp-pad">The agent hasn't set milestones yet.</p>{% endif %}
+  {% if ms_done.is_empty() && ms_list.is_empty() && loose_count == 0 %}<p class="empty-in">The agent hasn't set milestones yet.</p>{% endif %}
   <div class="ml-scroll" data-ml>
     {% if !ms_done.is_empty() %}
     <details class="ml-done"{% if tab == "plan" %} open{% endif %} data-ml-done>
@@ -13,6 +13,6 @@
     </details>
     {% endif %}
     {% for m in ms_list %}{% include "milestone_row.html" %}{% endfor %}
-    {% if loose_count > 0 %}<a class="ml-row loose{% if loose_selected %} picked{% endif %}" href="/p/{{ slug }}/plan/none"{% if tab == "plan" %} data-ms{% endif %}{% if loose_selected %} aria-current="true"{% endif %}><span class="ml-i loose" aria-hidden="true" title="Tasks without a milestone">{{ crate::web::icons::icon("inbox")|safe }}</span><span class="mono k">–</span><span class="t">Without a milestone <span class="sub">· parked</span></span><span class="sub c">{{ loose_count }} task{% if loose_count != 1 %}s{% endif %}</span><span class="pbar none" aria-hidden="true"></span><span class="tg"></span>{{ crate::web::icons::icon("chevron")|safe }}</a>{% endif %}
+    {% if loose_count > 0 %}<a class="ml-row loose{% if loose_selected %} picked{% endif %}" href="/p/{{ slug }}/plan/none"{% if tab == "plan" %} data-ms{% endif %}{% if loose_selected %} aria-current="true"{% endif %}><span class="ml-i loose" aria-hidden="true" title="Tasks without a milestone">{{ crate::web::icons::icon("inbox")|safe }}</span><span class="mono k">–</span><span class="t">Without a milestone <span class="sub">· parked</span></span><span class="sub c">{{ loose_count }} task{% if loose_count != 1 %}s{% endif %}</span><span class="meter thin pbar none" aria-hidden="true"></span><span class="tg"></span>{{ crate::web::icons::icon("chevron")|safe }}</a>{% endif %}
   </div>
 </section>

@@ -24,7 +24,7 @@
   {% if let Some(r) = nv.reset %}<a class="sub" href="{{ r }}">Clear</a>{% endif %}
 </form>
   <div class="card-head flat lp-top"><h2 id="notes-h">Notes</h2><span class="sub">{{ nv.summary }}</span><span class="grow"></span><span class="sub hide-phone">files and short notes the agent hands in</span></div>
-  {% if nv.none %}<p class="sub lempty">No notes yet. Agents add files with <span class="mono">flow note &lt;file&gt;</span> and short notes with <span class="mono">add_note</span>.</p>
+  {% if nv.none %}<p class="empty-in">No notes yet. Agents add files with <span class="mono">flow note &lt;file&gt;</span> and short notes with <span class="mono">add_note</span>.</p>
   {% else %}
   <div class="ntable" role="table" aria-label="Notes" data-sortable>
   {% if !nv.rows.is_empty() %}<div class="nhead grid-head" role="row"><span role="columnheader"><span class="vh">Type</span></span>{% for (label, kind, default) in nv.heads %}{% call tbl::ch(label, kind, default) %}{% endcall %}{% endfor %}<span role="columnheader"><span class="vh">Download</span></span></div>{% endif %}

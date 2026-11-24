@@ -1,7 +1,7 @@
 {# The To test checklist (tab, release, build). The owner ticks what they tried and works, then sends. #}
 <section class="card pad stack" aria-labelledby="tt-h" id="to-test">
   <div class="sec"><h2 id="tt-h">{{ tt.heading }}</h2><span class="sub">{{ tt.sub }}</span></div>
-  {% if !tt.note.is_empty() %}<p class="notice">{{ tt.note }}</p>{% endif %}
+  {% if !tt.note.is_empty() %}<p class="notice">{{ crate::web::icons::icon("info")|safe }}<span>{{ tt.note }}</span></p>{% endif %}
   {% if tt.groups.is_empty() %}<p class="sub">Nothing to test right now. The agent adds things here as it builds them.</p>{% else %}
   <form method="post" action="/p/{{ tt.slug }}/to-test" class="stack" data-tt>
     <input type="hidden" name="back" value="{{ tt.back }}">

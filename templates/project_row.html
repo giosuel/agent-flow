@@ -9,7 +9,7 @@
     {% if let Some((n, t)) = c.milestone %}
     <div class="mss" aria-hidden="true">{% for (m, cls) in c.ms_chips %}<span class="tag{% if *cls == "n" %} accent{% else if *cls != "d" %} line{% endif %}">{{ m }}</span>{% endfor %}</div>
     <strong><span class="mono">{{ n }}</span> · {{ t }}</strong>
-    <div class="pbar" role="img" aria-label="{{ c.percent }}% of the milestone's tasks done"><i style="width: {{ c.percent }}%"></i></div>
+    <div class="meter pbar" role="img" aria-label="{{ c.percent }}% of the milestone's tasks done"><i style="width: {{ c.percent }}%"></i></div>
     <span class="sub">{{ c.progress }}</span>
     {% else %}<span class="sub">no milestones yet</span>{% endif %}
   </div>

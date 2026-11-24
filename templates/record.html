@@ -7,7 +7,7 @@
   <p class="row wrap"><span class="mono sub">{{ id }}</span>{% if let Some(d) = draft %}<span class="chip{% if d.waiting %} accent{% endif %}">{% if d.waiting %}waiting on you{% else if d.with_agent %}changes asked{% else %}being sent{% endif %}</span>{% else %}<span class="chip{% if state == "open" %} warn{% endif %}{% if state == "current" || state == "answered" || state == "done" %} ok{% endif %}">{{ state }}</span>{% endif %}{% for t in tags %}<span class="chip">{{ t }}</span>{% endfor %}{% if kind == "decision" && !scope.is_empty() %}<span class="chip" title="Scope">{{ scope }}</span>{% endif %}</p>
   <h1 class="rec-title">{{ title }}</h1>
 </div>
-{% if let Some(e) = error %}<p class="notice warn" role="alert">{{ e }}</p>{% endif %}
+{% if let Some(e) = error %}<p class="notice bad" role="alert">{{ crate::web::icons::icon("alert")|safe }}<span>{{ e }}</span></p>{% endif %}
 {% if !blocking.is_empty() %}
 <section class="blocking" aria-labelledby="blocking-h">
   <h2 class="label" id="blocking-h">Blocking</h2>
@@ -16,9 +16,9 @@
 </section>
 {% endif %}
 {% if !waits_for.is_empty() || !blocked_note.is_empty() %}
-<p class="notice warn blocked-line">{% for q in waits_for %}Blocked by <a href="{{ q.url }}"><span class="mono">{{ q.short }}</span> {{ q.title }} ›</a>{% if !loop.last %}<br>{% endif %}{% endfor %}{% if !blocked_note.is_empty() %}{% if !waits_for.is_empty() %}<br>{% endif %}Blocked: {{ blocked_note }}{% endif %}</p>
+<p class="notice warn blocked-line">{{ crate::web::icons::icon("alert")|safe }}<span>{% for q in waits_for %}Blocked by <a href="{{ q.url }}"><span class="mono">{{ q.short }}</span> {{ q.title }} ›</a>{% if !loop.last %}<br>{% endif %}{% endfor %}{% if !blocked_note.is_empty() %}{% if !waits_for.is_empty() %}<br>{% endif %}Blocked: {{ blocked_note }}{% endif %}</span></p>
 {% endif %}
-{% if let Some((ok, text)) = draft_notice %}<p class="notice{% if *ok %} ok{% else %} warn{% endif %}" role="status">{{ text }}</p>{% endif %}
+{% if let Some((ok, text)) = draft_notice %}<p class="notice{% if *ok %} ok{% else %} bad{% endif %}" role="status">{% if *ok %}{{ crate::web::icons::icon("check")|safe }}{% else %}{{ crate::web::icons::icon("alert")|safe }}{% endif %}<span>{{ text }}</span></p>{% endif %}
 
 <div class="split">
   <div class="split-main stack-lg">
@@ -52,7 +52,7 @@
     <section class="stack-sm" aria-labelledby="time-h">
       <h2 class="label" id="time-h">Time</h2>
       <p>{% if tv.spans.is_empty() %}Not in doing yet{% else %}<span class="mono">{{ tv.spent }}</span>{% endif %}{% if !tv.est.is_empty() %} {% if tv.spans.is_empty() %}; estimated{% else %} of an estimated{% endif %} <span class="mono">{{ tv.est }}</span>{% endif %}{% if tv.corrected %} <span class="sub">(corrected by the agent; see History)</span>{% endif %}</p>
-      {% if !tv.est.is_empty() %}<div class="tbar" role="img" aria-label="{{ tv.spent }} of {{ tv.est }}"><i class="{% if tv.over %}over{% endif %}" style="width: {{ tv.pct }}%"></i></div>{% endif %}
+      {% if !tv.est.is_empty() %}<div class="meter" role="img" aria-label="{{ tv.spent }} of {{ tv.est }}"><i class="{% if tv.over %}warn{% endif %}" style="width: {{ tv.pct }}%"></i></div>{% endif %}
       {% if !tv.spans.is_empty() %}<p class="sub">In doing: {{ tv.spans }}. Counted from its state changes; blocked, review and time the agent is away don't count.</p>{% endif %}
       {% if !tv.raw.is_empty() %}<p class="sub">{{ tv.raw }}.</p>{% endif %}
     </section>
@@ -99,7 +99,7 @@
       <dl class="kv">{% for (k, v) in b.facts %}<dt>{{ k }}</dt><dd>{{ v }}</dd>{% endfor %}</dl>
     </section>
     {% if let Some(tt) = to_test %}{% include "to_test.html" %}{% endif %}
-    {% if b.sent %}<p class="notice ok" role="status">Feedback sent. The agent gets your words as you wrote them and turns problems into tasks.</p>{% endif %}
+    {% if b.sent %}<p class="notice ok" role="status">{{ crate::web::icons::icon("check")|safe }}<span>Feedback sent. The agent gets your words as you wrote them and turns problems into tasks.</span></p>{% endif %}
     {% if !b.features.is_empty() && b.can_feedback && is_owner %}
     <form method="post" action="/p/{{ project_slug }}/{{ short }}/feedback" class="stack fb" aria-labelledby="fb-h">
       <div class="sec"><h2 id="fb-h">How did it go?</h2><span class="sub" data-fb-count>{{ b.features.len() }} feature{% if b.features.len() != 1 %}s{% endif %} to mark</span></div>
@@ -141,7 +141,7 @@
       </form>
       {% else if !scope.is_empty() %}<p class="sub">Scope: {{ scope }}</p>{% endif %}
       {% if !related.is_empty() %}<p class="sub">It touches {% for d in related %}<a href="{{ d.url }}">{{ d.short }} {{ d.title }}</a>{% if !loop.last %}, {% endif %}{% endfor %}.</p>{% endif %}
-      {% if let Some(d) = going_ahead %}<p class="notice" role="status">The agent is going ahead with <strong>{{ d }}</strong> meanwhile, built so it's easy to change. Pick it to confirm, or another (or your own words) to change course.</p>{% endif %}
+      {% if let Some(d) = going_ahead %}<p class="notice" role="status">{{ crate::web::icons::icon("info")|safe }}<span>The agent is going ahead with <strong>{{ d }}</strong> meanwhile, built so it's easy to change. Pick it to confirm, or another (or your own words) to change course.</span></p>{% endif %}
       {% if can_answer %}
       {# Pick an option or write your own answer, never both; nothing is sent until Send answer. #}
       {% call ui::choices("/p/{}/{}/answer"|format(project_slug, short), "", options.as_slice(), true, "words") %}{% endcall %}

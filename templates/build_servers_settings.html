@@ -5,7 +5,7 @@
   <div class="sl-head"><div><h2 id="h-sec">Build servers</h2>
     <p class="sub set-lead">Machines agents build and test on with <span class="mono">flow remote</span>. Each project picks one in its own Settings.</p></div>
     <button class="btn sm sl-add-btn" type="button" data-open="add-builder">{{ crate::web::icons::icon("plus")|safe }} Add a builder</button></div>
-  {% if let Some((ok, text)) = notice %}<p class="notice{% if *ok %} ok{% else %} warn{% endif %}" role="status">{{ text }}</p>{% endif %}
+  {% if let Some((ok, text)) = notice %}<p class="notice{% if *ok %} ok{% else %} bad{% endif %}" role="status">{% if *ok %}{{ crate::web::icons::icon("check")|safe }}{% else %}{{ crate::web::icons::icon("alert")|safe }}{% endif %}<span>{{ text }}</span></p>{% endif %}
   <div class="slist">
   {% for s in servers %}
   <details class="sl-item">

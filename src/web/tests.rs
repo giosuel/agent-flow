@@ -701,7 +701,10 @@ async fn the_usage_page_shows_the_plan_and_the_cost() {
     // No subtitle saying what the page is; Reload is an icon on the right (the owner, 2026-11-23).
     assert!(page.contains(r#"<button class="ibtn" type="submit""#) && page.contains("newest call"), "{page}");
     assert!(!page.contains("Tokens and their cost at API prices"), "the subtitle is gone");
-    assert!(page.contains("42%") && page.contains("81%") && page.contains("mp-bar"), "{page}");
+    assert!(
+        page.contains("42%") && page.contains("81%") && page.contains(r#"<div class="meter" role="meter""#),
+        "{page}"
+    );
     assert!(page.contains(r#"class="warn""#), "the week is past 80%: {page}");
     assert!(page.contains("pct-marks"), "the strip under the bars: {page}");
     let page = get("/usage?metric=cost").await;
@@ -1995,7 +1998,12 @@ async fn the_dashboard_has_an_overview_of_the_plan_today_the_machine_and_builds(
     .await
     .unwrap();
     let html = s.http.get(s.url("/")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
-    assert!(html.contains("42% · ") && html.contains("71% · ") && html.contains("<b style=\"left: 80%\">"), "{html}");
+    assert!(
+        html.contains("42% · ")
+            && html.contains("71% · ")
+            && html.contains("<span class=\"mark\" style=\"left: 80%\">"),
+        "{html}"
+    );
 }
 
 #[tokio::test]
