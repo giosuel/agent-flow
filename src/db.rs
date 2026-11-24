@@ -30,6 +30,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/017_merge_method.sql"),
     include_str!("../migrations/018_scopes_archive.sql"),
     include_str!("../migrations/019_session_log.sql"),
+    include_str!("../migrations/020_approvals.sql"),
 ];
 
 const POOL_SIZE: usize = 6;

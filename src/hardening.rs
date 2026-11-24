@@ -29,7 +29,7 @@ pub fn managed_settings(config: &Config) -> serde_json::Value {
     serde_json::json!({ "permissions": { "deny": deny } })
 }
 
-/// Writes the settings to a file in the data folder and returns the text `agentflow admin
+/// Writes the settings to a file in the data folder and returns the text `agentflow
 /// managed-settings` prints: the settings, and the root command for the owner to run (fish works
 /// too). The command only names files, so nothing in the config ends up inside a root command.
 pub fn managed_settings_command(config: &Config) -> anyhow::Result<String> {

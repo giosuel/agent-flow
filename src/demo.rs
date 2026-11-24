@@ -1,4 +1,4 @@
-//! `agentflow admin demo`: a complete made-up project, "Lumen (demo)", to try every page with
+//! A complete made-up project, "Lumen (demo)", to try every page with
 //! before real agents use AgentFlow (the owner, 2026-11-11: "please create a complete fake project so
 //! I can test the UI before the onboarding"). Archive it from its page when done.
 //!

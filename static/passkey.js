@@ -57,7 +57,9 @@ async function signIn(button, status) {
       extensions: cred.getClientExtensionResults(),
     };
     await postJson("/login/passkey/finish", { id, credential });
-    window.location.assign("/");
+    // Back where the owner was going (an approval link), if it's a page of this site.
+    const next = new URLSearchParams(window.location.search).get("next") || "/";
+    window.location.assign(/^\/[A-Za-z0-9\/_.-]*$/.test(next) && !next.startsWith("//") ? next : "/");
   } catch (e) {
     say(status, e.name === "NotAllowedError" ? "Cancelled. Try again when you're ready." : "Couldn't sign in: " + e.message, "warn");
     button.disabled = false;

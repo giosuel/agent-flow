@@ -39,8 +39,9 @@ a single-user instance's data along.
 The server runs as `agentflow`; what has to happen as the agents' user goes to `agentflow hands`
 over a Unix socket that only `agentflow` may use (`src/hands.rs`). That covers the buttons, `gh`
 with the agents' login, guide edits, token files, new projects' folders, transcripts and the
-agents' process folders. Admin commands then run as the server's user:
-`sudo -u agentflow agentflow --config /etc/agentflow/config.toml admin login-link`.
+agents' process folders. To sign in the first time (or after losing every passkey):
+`sudo flow server add-passkey` on the server prints a one-time link; the first start also logs one
+(`journalctl -u agentflow`) while no passkey exists.
 
 **Packages.** `scripts/deb.sh` makes a `.deb` from a release binary, and `packaging/arch/PKGBUILD`
 builds the AUR package from a release tag. Both install the two programs (`agentflow`, `flow`), the two services and the user;
@@ -107,17 +108,26 @@ ready to try, something to review, and urgent calls from an agent.
 
 ## Access
 
-Every request is authenticated, nothing is public but the sign-in page:
+Every request is authenticated. Public are only the sign-in page, asking to connect a machine,
+the install script and the `flow` download.
 
 - **The owner** signs in in the browser with a passkey (enrolled in Settings). On a new device, or
-  if every passkey is lost, run `agentflow admin login-link` on the server and open the one-time
-  link it prints (valid 15 minutes).
-- **Tokens** for everything else: `agentflow admin token create --kind device|project|admin
-  --name … [--project …] [--out FILE]`. A project token may change its own project and read the
-  rest; an admin token (the consultant) may change anything. Only the owner's browser session can
-  press merge and tag buttons. `agentflow admin token list` and `… revoke ID` manage them, and so
-  does Settings, where project and consultant tokens can be rotated: the new token is written to
-  `~/.config/agentflow/tokens/<project>.token` for the agent's `headersHelper`.
+  if every passkey is lost, run `sudo flow server add-passkey` on the server and open the one-time
+  link it prints (valid 15 minutes): it leads straight to adding a passkey. It goes through a local
+  socket only root and the server's user may use, and every link is logged and pushed.
+- **Machines** get `flow` and connect with one command, `curl -fsSL <server>/install.sh | sh`
+  (or `flow connect <server>`): the owner approves the machine in the browser, where the page shows
+  the same short code as the terminal, and the machine gets a token of its own (read-only).
+  `flow disconnect` revokes it, `flow status` shows the server, both versions and who you are,
+  `flow update` fetches the matching `flow`.
+- **The owner's admin jobs** from a connected machine also wait for approval in the browser, each
+  time: `flow token create project <project> [--file F]` or `consultant`, `flow token list`,
+  `revoke ID`, `rotate ID`, `flow project add <slug> --name …`, `flow backup`,
+  `flow import-prs <project> 300-374`. Agents' tokens can't ask for them.
+- **Tokens** stand for a project's agent (changes its own project, reads the rest), the consultant
+  (changes anything) or a machine (reads). Only the owner's browser session presses merge and tag
+  buttons. Settings lists them and rotates project and consultant tokens: the new token is written
+  to `~/.config/agentflow/tokens/<project>.token` for the agent's `headersHelper`.
 
 ## Connecting an agent
 
@@ -136,7 +146,7 @@ Start the agent in that folder with `env AGENTFLOW_TOKEN_FILE=~/.config/agentflo
 claude` (the page shows this command too), so the `agentflow` commands it runs (publish, screenshot,
 contribute, remote, wait) use the same token. `hello` tells the agent where the file is as well.
 
-`agentflow admin managed-settings` prints Claude Code managed settings that keep every session's
+`agentflow managed-settings` prints Claude Code managed settings that keep every session's
 Read and Edit tools away from AgentFlow's tokens, data and config, and the root command to
 install them. Shell commands run as the same user can still read those files; running AgentFlow
 as its own Unix user is the stronger fence.
@@ -213,8 +223,8 @@ process under the agent session that started it.
 ## Backups
 
 Once a day the database is copied to `<data_dir>/backups/flow-<date>.db` (the last 30 are kept)
-and every project is exported to `<data_dir>/export/<slug>.md`. `agentflow admin backup` does
-both now. Reads older than 90 days move to monthly compressed archives in `<data_dir>/log-archive/`;
+and every project is exported to `<data_dir>/export/<slug>.md`. `flow backup` does
+both now (with the owner's approval). Reads older than 90 days move to monthly compressed archives in `<data_dir>/log-archive/`;
 nothing in the log is ever deleted.
 
 ## Development

@@ -22,6 +22,13 @@ pub fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
+/// N random bytes from the system's generator.
+pub fn random_bytes<const N: usize>() -> [u8; N] {
+    let mut bytes = [0u8; N];
+    rand::rng().fill_bytes(&mut bytes);
+    bytes
+}
+
 /// A random secret with a readable prefix, e.g. `af_dev_…`. 32 random bytes, so guessing one is hopeless.
 pub fn new_secret(prefix: &str) -> String {
     let mut bytes = [0u8; 32];

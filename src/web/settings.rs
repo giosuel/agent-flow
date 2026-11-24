@@ -14,7 +14,7 @@ use webauthn_rs::prelude::RegisterPublicKeyCredential;
 use super::pages::{Nav, nav, render};
 use super::{AppError, AppResult, AppState, ClientIp, json_error};
 use crate::activity::{self, Action, Entry, Via};
-use crate::auth::{self, Actor, TokenKind};
+use crate::auth::{self, Actor};
 use crate::push::{self, Kind, Notification};
 use crate::util::{ago, now_ms};
 use crate::{passkey, tokens};
@@ -29,7 +29,6 @@ pub fn routes() -> Router<AppState> {
         .route("/settings/push/{id}/remove", post(push_remove))
         .route("/settings/push/test", post(push_test))
         .route("/settings/notify", post(notify_save))
-        .route("/settings/devices", post(device_create))
         .route("/settings/tokens/{id}/revoke", post(token_revoke))
         .route("/settings/tokens/{id}/rotate", post(token_rotate))
         .route("/settings/sessions/{id}/end", post(session_end))
@@ -93,7 +92,8 @@ struct SessionView {
 struct SettingsPage {
     nav: Nav,
     notice: Option<&'static str>,
-    new_token: Option<(String, String)>,
+    /// Requests from `flow` waiting for approval: (code, what, machine).
+    approvals: Vec<(String, String, String)>,
     passkeys_available: bool,
     public_url: String,
     /// This server's glibc: the downloaded program needs one at least as new.
@@ -114,6 +114,8 @@ struct PageQuery {
     done: Option<String>,
     /// What happened on the Build servers card.
     bs: Option<String>,
+    /// Signed in with a link from `flow server add-passkey`: add one now.
+    add_passkey: Option<String>,
 }
 
 /// Messages after a form post; the query names one of these, never free text.
@@ -137,15 +139,18 @@ async fn page(
     Query(q): Query<PageQuery>,
 ) -> AppResult<Response> {
     actor.require_owner()?;
-    let notice = q.done.as_deref().and_then(notice_for);
-    render_page(&state, &actor, notice, None, q.bs.as_deref()).await
+    let notice = if q.add_passkey.is_some() {
+        Some("You're signed in with a one-time link. Add a passkey for this device below, so you can sign in again.")
+    } else {
+        q.done.as_deref().and_then(notice_for)
+    };
+    render_page(&state, &actor, notice, q.bs.as_deref()).await
 }
 
 async fn render_page(
     state: &AppState,
     actor: &Actor,
     notice: Option<&'static str>,
-    new_token: Option<(String, String)>,
     bs: Option<&str>,
 ) -> AppResult<Response> {
     let current = match actor {
@@ -204,7 +209,13 @@ async fn render_page(
     let page = SettingsPage {
         nav: nav(state, actor, "/settings").await,
         notice,
-        new_token,
+        approvals: state
+            .db
+            .call(|c| crate::approvals::pending(c))
+            .await?
+            .iter()
+            .map(|a| (a.code.clone(), crate::approvals::describe(a), a.machine.clone()))
+            .collect(),
         build_servers: super::remote::servers_card(state, bs).await?,
         passkeys_available: state.passkeys.available(),
         public_url: state.config.public_url.clone(),
@@ -410,28 +421,6 @@ async fn notify_save(
 // ---------------------------------------------------------------------------------------------
 // Tokens and sessions
 
-#[derive(Deserialize)]
-struct NewDevice {
-    name: String,
-}
-
-async fn device_create(
-    State(state): State<AppState>,
-    Extension(actor): Extension<Actor>,
-    Extension(ip): Extension<ClientIp>,
-    Form(form): Form<NewDevice>,
-) -> AppResult<Response> {
-    actor.require_owner()?;
-    let name = form.name.trim().to_owned();
-    if name.is_empty() {
-        return Err(AppError::BadRequest("Give the device a name, e.g. \"HEADQUARTERS viber-run\".".into()));
-    }
-    let n = name.clone();
-    let (id, secret) = state.db.call(move |c| auth::create_token(c, TokenKind::Device, &n, None)).await?;
-    log(&state, &actor, &ip, Action::Write, format!("device token {id} created: {name}")).await;
-    render_page(&state, &actor, None, Some((name, secret)), None).await
-}
-
 async fn token_revoke(
     State(state): State<AppState>,
     Extension(actor): Extension<Actor>,
@@ -482,7 +471,7 @@ async fn session_end(
 }
 
 /// "2.43", from `ldd --version`; empty if it can't be told.
-fn glibc_version() -> String {
+pub(crate) fn glibc_version() -> String {
     static V: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     V.get_or_init(|| {
         let out = std::process::Command::new("ldd").arg("--version").output();

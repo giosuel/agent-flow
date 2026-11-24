@@ -36,12 +36,9 @@ pub fn routes() -> Router<AppState> {
         .route("/download/flow", get(download_self))
 }
 
-/// The `flow` program installed next to this server, for the owner's machines (`flow run`).
-/// Signed-in only: the owner, or a device's or agent's token.
-async fn download_self(State(state): State<AppState>, Extension(actor): Extension<Actor>) -> Response {
-    if matches!(actor, Actor::Anonymous) {
-        return StatusCode::UNAUTHORIZED.into_response();
-    }
+/// The `flow` program installed next to this server: public, like the install script (the
+/// repository is public; flow holds no secrets, a machine gets its token by `flow connect`).
+async fn download_self(State(state): State<AppState>) -> Response {
     let path = state.config.flow_bin();
     if !path.is_absolute() {
         return StatusCode::NOT_FOUND.into_response();
