@@ -31,7 +31,9 @@
   };
 
   // The dialog is the library's (app.js afDlg, md): its head holds the record's path, ‹ › and the
-  // close button; Esc, ✕, the scrim and a pull on the phone go Back, which closes it.
+  // close button; Esc, ✕, the scrim and a pull on the phone go Back, which closes it. An answer
+  // typed in it and not sent is asked about first (afDlg.leave), there and before ‹ › or a link
+  // shows another record in its place.
   function build() {
     box = window.afDlg.open({ size: "md", cls: "rdlg", opener, dismiss: () => close(), closed: () => { box = null; } });
     box.tools.innerHTML = `<span class="rdlg-nav"><button type="button" class="ibtn" data-step="-1" aria-label="Previous"><svg class="i" aria-hidden="true"><use href="#i-prev"/></svg></button><button type="button" class="ibtn" data-step="1" aria-label="Next"><svg class="i" aria-hidden="true"><use href="#i-chevron"/></svg></button></span>`;
@@ -85,8 +87,9 @@
     if (!box.el.contains(document.activeElement)) box.el.querySelector(".dlg-x").focus({ preventScroll: true });
   }
 
-  function go(i) {
+  async function go(i) {
     if (i < 0 || i >= list.length) return;
+    if (box && !(await window.afDlg.leave(box))) return;
     at = i;
     open(list[i]);
   }
@@ -124,18 +127,22 @@
     const path = record(a);
     if (!path || path === location.pathname && !(box && box.el.contains(a))) return;
     e.preventDefault();
-    if (!(box && box.el.contains(a))) {
-      // The list it came from: links to such records in the same list or card.
-      const scope = a.closest("ul, ol, tbody, .card, section") || document;
-      list = [...new Set([...scope.querySelectorAll("a[href]")].map(record).filter(Boolean))];
-      opener = a;
-    }
-    at = list.indexOf(path);
-    if (at < 0) {
-      list = [path];
-      at = 0;
-    }
-    open(path);
+    const inside = !!box && box.el.contains(a);
+    (async () => {
+      if (inside && !(await window.afDlg.leave(box))) return;
+      if (!inside) {
+        // The list it came from: links to such records in the same list or card.
+        const scope = a.closest("ul, ol, tbody, .card, section") || document;
+        list = [...new Set([...scope.querySelectorAll("a[href]")].map(record).filter(Boolean))];
+        opener = a;
+      }
+      at = list.indexOf(path);
+      if (at < 0) {
+        list = [path];
+        at = 0;
+      }
+      open(path);
+    })();
   });
 
   // A direct link to a record: the server sent its project's page; the record opens over it, and
