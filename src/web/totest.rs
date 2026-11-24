@@ -1,5 +1,6 @@
-//! The To test checklist: on the project's tab, on release pages and on build pages. The owner
-//! ticks what they tried and works and sends; see `crate::totest`.
+//! What the owner has to try: on the Builds tab, on release pages and on build pages. The owner
+//! marks each item Works, Problem (a note to the agent; the item stays open) or Skip (the owner,
+//! 2026-11-23, Q-8: built as drawn on S-40); see `crate::totest`.
 
 use std::collections::HashMap;
 
@@ -10,25 +11,109 @@ use axum::{Extension, Form, Router};
 use rusqlite::Connection;
 use serde_json::Value;
 
-use super::{AppResult, AppState, ClientIp};
+use super::{AppError, AppResult, AppState, ClientIp};
 use crate::activity::{self, Action, Entry, Via};
 use crate::auth::Actor;
 use crate::records::{self, Kind, Query, Record};
 use crate::util::ago;
 
 pub fn routes() -> Router<AppState> {
-    Router::new().route("/p/{slug}/to-test", post(send))
+    Router::new().route("/p/{slug}/{id}/try", post(mark))
 }
 
+/// One thing to try, as a row with its verdict buttons.
 pub struct Item {
-    pub id: i64,
     pub short: String,
     pub url: String,
     pub title: String,
     pub how: String,
-    /// (class, text): "new in v0.0.4", "from v0.0.2" (yellow: waiting since an older release).
-    pub chip: (&'static str, String),
+    /// (tone, text): "in B-66" (the build it came with, when that isn't the newest), "from
+    /// v0.0.2" (yellow: waiting since an older release), "new in v0.0.4" (on a release's page).
+    pub chip: Option<(&'static str, String)>,
+    /// The problems found so far: "2 px lower than the status bar (you, 21 Nov)".
     pub problems: Vec<String>,
+    pub open: bool,
+    /// For one that's done: "works · 2 days ago", "skipped · …", "dropped · …".
+    pub outcome: String,
+    pub category: String,
+}
+
+/// The newest release's label (its tag, else its title) for a project.
+pub fn latest_release(c: &Connection, project_id: i64) -> anyhow::Result<Option<String>> {
+    let mut list = records::query(
+        c,
+        &Query { project_id: Some(project_id), kinds: vec![Kind::Release], limit: 0, ..Default::default() },
+    )?;
+    list.sort_by_key(|r| r.created_at);
+    Ok(list.last().map(|r| if r.str("tag").is_empty() { r.title.clone() } else { r.str("tag").to_owned() }))
+}
+
+/// The project's builds that are still offered, oldest first.
+pub fn builds_oldest_first(c: &Connection, project_id: i64) -> anyhow::Result<Vec<Record>> {
+    let mut list = records::query(
+        c,
+        &Query { project_id: Some(project_id), kinds: vec![Kind::Build], limit: 0, ..Default::default() },
+    )?;
+    list.retain(|b| b.state != "withdrawn");
+    list.sort_by_key(|b| (b.created_at, b.number));
+    Ok(list)
+}
+
+/// Where an item reads from: the newest build (no chip for its own items), the current release
+/// ("new in v0.4" on a release's page), or neither.
+pub struct Context<'a> {
+    pub builds: &'a [&'a Record],
+    pub newest: Option<&'a str>,
+    pub release: Option<&'a str>,
+    /// On a release's page its own items say "new in …".
+    pub release_page: bool,
+    pub now: i64,
+}
+
+pub fn item(r: &Record, cx: &Context<'_>) -> Item {
+    let build = crate::totest::build_of(r, cx.builds);
+    let first = r.str("first_release");
+    let chip = if !first.is_empty() && Some(first) != cx.release {
+        Some((super::tone::tone("waiting"), format!("from {first}")))
+    } else if cx.release_page && !first.is_empty() {
+        Some((super::tone::tone("new"), format!("new in {first}")))
+    } else {
+        match &build {
+            Some(b) if Some(b.as_str()) != cx.newest => Some(("info", format!("in {b}"))),
+            _ => None,
+        }
+    };
+    let problems = r
+        .data
+        .get("problems")
+        .and_then(Value::as_array)
+        .map(|ps| {
+            ps.iter()
+                .filter_map(|p| {
+                    let at = p.get("at").and_then(Value::as_i64).unwrap_or(0);
+                    let by = if p.get("by").and_then(Value::as_str) == Some("owner") { "you, " } else { "" };
+                    Some(format!("{} ({by}{})", p.get("note")?.as_str()?, ago(at, cx.now)))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let outcome = match r.state.as_str() {
+        "open" => String::new(),
+        "tested" => format!("works · {}", ago(r.updated_at, cx.now)),
+        _ if r.str("dropped_because") == "skipped by the owner" => format!("skipped · {}", ago(r.updated_at, cx.now)),
+        _ => format!("dropped · {}", ago(r.updated_at, cx.now)),
+    };
+    Item {
+        short: r.short_id(),
+        url: r.url(),
+        title: r.title.clone(),
+        how: r.body.clone(),
+        chip,
+        problems,
+        open: r.state == "open",
+        outcome,
+        category: r.str("category").to_owned(),
+    }
 }
 
 pub struct Group {
@@ -36,35 +121,34 @@ pub struct Group {
     pub items: Vec<Item>,
 }
 
+/// Items by category, in the order categories first appear.
+pub fn grouped(items: Vec<Item>) -> Vec<Group> {
+    let mut groups: Vec<Group> = Vec::new();
+    for i in items {
+        match groups.iter_mut().find(|g| g.category == i.category) {
+            Some(g) => g.items.push(i),
+            None => groups.push(Group { category: i.category.clone(), items: vec![i] }),
+        }
+    }
+    groups
+}
+
+/// The list on a release's or a build's page.
 pub struct View {
     pub slug: String,
     pub heading: String,
     pub sub: String,
     pub note: String,
     pub groups: Vec<Group>,
-    /// Tested or dropped, newest first: (title, "Albums · tested 2 days ago, works").
-    pub done: Vec<(String, String)>,
-    pub done_total: i64,
-    /// Where Send comes back to.
+    /// Where a verdict comes back to.
     pub back: String,
     pub is_owner: bool,
 }
 
 /// Where the list shows; it decides the heading and how items' releases read.
 pub enum Place<'a> {
-    Tab,
     Release(&'a Record),
     Build,
-}
-
-/// The newest release's label (its tag, else its title) for a project.
-fn latest_release(c: &Connection, project_id: i64) -> anyhow::Result<Option<String>> {
-    let mut list = records::query(
-        c,
-        &Query { project_id: Some(project_id), kinds: vec![Kind::Release], limit: 0, ..Default::default() },
-    )?;
-    list.sort_by_key(|r| r.created_at);
-    Ok(list.last().map(|r| if r.str("tag").is_empty() { r.title.clone() } else { r.str("tag").to_owned() }))
 }
 
 pub fn view(
@@ -79,56 +163,24 @@ pub fn view(
     let items = crate::totest::open_items(c, project_id)?;
     let current = match &place {
         Place::Release(r) => Some(if r.str("tag").is_empty() { r.title.clone() } else { r.str("tag").to_owned() }),
-        _ => latest_release(c, project_id)?,
+        Place::Build => latest_release(c, project_id)?,
     };
-    let mut groups: Vec<Group> = Vec::new();
-    for r in &items {
-        let first = r.str("first_release");
-        let chip = match (first, &current) {
-            ("", _) => (super::tone::tone("new"), "new".to_owned()),
-            (f, Some(cur)) if f == cur => (super::tone::tone("new"), format!("new in {f}")),
-            // Waiting since an older release.
-            (f, _) => (super::tone::tone("waiting"), format!("from {f}")),
-        };
-        let problems = r
-            .data
-            .get("problems")
-            .and_then(Value::as_array)
-            .map(|ps| {
-                ps.iter()
-                    .filter_map(|p| {
-                        let at = p.get("at").and_then(Value::as_i64).unwrap_or(0);
-                        Some(format!("Problem ({}): {}", ago(at, now), p.get("note")?.as_str()?))
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
-        let item = Item {
-            id: r.id,
-            short: r.short_id(),
-            url: r.url(),
-            title: r.title.clone(),
-            how: r.body.clone(),
-            chip,
-            problems,
-        };
-        let cat = r.str("category").to_owned();
-        match groups.iter_mut().find(|g| g.category == cat) {
-            Some(g) => g.items.push(item),
-            None => groups.push(Group { category: cat, items: vec![item] }),
-        }
-    }
+    let builds = builds_oldest_first(c, project_id)?;
+    let refs: Vec<&Record> = builds.iter().collect();
+    let cx = Context {
+        builds: &refs,
+        newest: None,
+        release: current.as_deref(),
+        release_page: matches!(place, Place::Release(_)),
+        now,
+    };
     let older = items
         .iter()
         .filter(|r| !r.str("first_release").is_empty() && Some(r.str("first_release")) != current.as_deref())
         .count();
     let open = items.len();
+    let groups = grouped(items.iter().map(|r| item(r, &cx)).collect());
     let (heading, sub, note) = match &place {
-        Place::Tab => (
-            "To test".to_owned(),
-            format!("{open} open · the agent adds them as it builds; each new release and build carries them until tested"),
-            String::new(),
-        ),
         Place::Release(r) => (
             if r.str("tag").is_empty() { "To test in this release".to_owned() } else { format!("To test before tagging {}", r.str("tag")) },
             format!("{open} open: {} new, {older} from older releases", open - older),
@@ -137,51 +189,58 @@ pub fn view(
         Place::Build => (
             "To test in this build".to_owned(),
             format!("{open} open: what's new, and what's still untested from before"),
-            "Everything not tested yet comes along with each new build. General feedback goes to the agent in its session.".to_owned(),
+            "Everything not tried yet comes along with each new build. Works or Skip takes an item off the list; Problem tells the agent and keeps it.".to_owned(),
         ),
     };
-    let done_items = crate::totest::done_items(c, project_id, 10)?;
-    let done_total: i64 = c.query_row(
-        "SELECT count(*) FROM records WHERE project_id = ?1 AND kind = 'test' AND state IN ('tested', 'dropped')",
-        [project_id],
-        |r| r.get(0),
-    )?;
-    let done = done_items
-        .iter()
-        .map(|r| {
-            let how = if r.state == "dropped" { "dropped".to_owned() } else { "tested, works".to_owned() };
-            (r.title.clone(), format!("{} · {how} {}", r.str("category"), ago(r.updated_at, now)))
-        })
-        .collect();
-    Ok(View { slug: slug.to_owned(), heading, sub, note, groups, done, done_total, back, is_owner })
+    Ok(View { slug: slug.to_owned(), heading, sub, note, groups, back, is_owner })
 }
 
-/// The owner sends what they ticked: tested, works.
-async fn send(
+/// The owner's verdict on one item: works, problem (with a note) or skip.
+async fn mark(
     State(state): State<AppState>,
     Extension(actor): Extension<Actor>,
     Extension(ip): Extension<ClientIp>,
-    Path(slug): Path<String>,
+    Path((slug, id)): Path<(String, String)>,
     Form(f): Form<HashMap<String, String>>,
 ) -> AppResult<Response> {
     actor.require_owner()?;
-    let ids: Vec<i64> = f.keys().filter_map(|k| k.strip_prefix("t").and_then(|n| n.parse().ok())).collect();
+    let verdict = f.get("v").cloned().unwrap_or_default();
     let note = f.get("note").cloned().unwrap_or_default();
-    let back = super::local_path(f.get("back").map(String::as_str)).unwrap_or_else(|| format!("/p/{slug}?tab=to-test"));
-    let s = slug.clone();
+    if note.chars().count() > 2000 {
+        return Err(AppError::BadRequest("keep the note under 2,000 characters".into()));
+    }
+    let back = super::local_path(f.get("back").map(String::as_str)).unwrap_or_else(|| format!("/p/{slug}?tab=builds"));
+    let (s, i, v) = (slug.clone(), id.clone(), verdict.clone());
     let done = state
         .db
         .call(move |c| {
-            let p = crate::projects::require(c, &s)?;
-            crate::totest::owner_tested(c, p.id, &ids, &note)
+            let r = records::find_str(c, &format!("{s}/{i}"), None)?;
+            crate::totest::owner_mark(c, &r, &v, &note)
         })
-        .await?;
-    if !done.is_empty() {
-        let what =
-            format!("tested {}: {}", done.len(), done.iter().map(|r| r.short_id()).collect::<Vec<_>>().join(", "));
-        activity::write(&state.db, Entry::new(&actor, Via::Page, Action::Write, what).project(slug).ip(Some(ip.0)))
-            .await;
+        .await
+        .map_err(|e| AppError::BadRequest(format!("{e:#}")))?;
+    let what = format!("marked {} {verdict}", done.short_id());
+    activity::write(
+        &state.db,
+        Entry::new(&actor, Via::Page, Action::Write, what).project(slug).target(done.ref_id.clone()).ip(Some(ip.0)),
+    )
+    .await;
+    let (path, frag) =
+        back.split_once('#').map(|(a, b)| (a.to_owned(), format!("#{b}"))).unwrap_or((back.clone(), String::new()));
+    let sep = if path.contains('?') { '&' } else { '?' };
+    Ok(Redirect::to(&format!("{path}{sep}tried={}.{verdict}{frag}", done.short_id())).into_response())
+}
+
+/// The line shown after a verdict, from the redirect's `tried=TT-5.works`.
+pub fn tried_notice(tried: &str) -> Option<String> {
+    let (id, verdict) = tried.split_once('.')?;
+    if id.len() > 20 || !id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-') {
+        return None;
     }
-    let sep = if back.contains('?') { '&' } else { '?' };
-    Ok(Redirect::to(&format!("{back}{sep}tested={}", done.len())).into_response())
+    Some(match verdict {
+        "works" => format!("{id} works: off the list. The agent hears it."),
+        "problem" => format!("{id}: the agent hears the problem in your words. It stays to try."),
+        "skip" => format!("{id} skipped: off the list. The agent hears it."),
+        _ => return None,
+    })
 }

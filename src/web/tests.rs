@@ -1417,39 +1417,27 @@ async fn a_build_goes_from_agent_to_owner_and_feedback_comes_back() {
     assert!(try_it < list, "Try it comes first");
     assert!(page.contains("print a document with a table") && page.contains(">Pictures<"));
 
-    // The owner ticks one and sends; the agent hears it, with the note.
-    let (tables, pictures) =
-        s.db.call(|c| {
-            let id = |n: i64| -> anyhow::Result<i64> {
-                Ok(crate::records::try_find(
-                    c,
-                    &crate::records::RecordRef::parse(&format!("imaginarium/TT-{n}"))?,
-                    None,
-                )?
-                .unwrap()
-                .id)
-            };
-            Ok((id(1)?, id(2)?))
-        })
-        .await
-        .unwrap();
-    let res = s
-        .http
-        .post(s.url("/p/imaginarium/to-test"))
-        .header(COOKIE, &cookie)
-        .header(ORIGIN, &s.base)
-        .form(&[
-            (format!("t{tables}"), "1".to_owned()),
-            ("note".into(), "crisp".into()),
-            ("back".into(), "/p/imaginarium/B-1".into()),
-        ])
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(res.headers()[LOCATION], "/p/imaginarium/B-1?tested=1");
+    // Each item has the owner's verdict right there (Q-8): Works; the agent hears it, with a note.
+    assert!(page.contains(r#"action="/p/imaginarium/TT-1/try""#) && page.contains(">Works</button>"), "{page}");
+    let mark = |id: &'static str, form: Vec<(&'static str, &'static str)>| {
+        let (http, url, cookie, origin) =
+            (s.http.clone(), s.url(&format!("/p/imaginarium/{id}/try")), cookie.clone(), s.base.clone());
+        async move { http.post(url).header(COOKIE, &cookie).header(ORIGIN, &origin).form(&form).send().await.unwrap() }
+    };
+    let res = mark("TT-1", vec![("v", "works"), ("note", "crisp"), ("back", "/p/imaginarium/B-1")]).await;
+    assert_eq!(res.headers()[LOCATION], "/p/imaginarium/B-1?tried=TT-1.works");
+    let page = owner_page(&s, &cookie, "/p/imaginarium/B-1?tried=TT-1.works").await;
+    assert!(page.contains("TT-1 works: off the list. The agent hears it."), "{page}");
     let sess = mcp_session(&s, &token).await;
     let (_, news) = mcp_tool(&s, &token, &sess, "since_last_check", json!({})).await;
     assert!(news.to_string().contains("Owner tested, works: TT-1 Tables. Note: \\\"crisp\\\""), "{news}");
+    // Done is done; a problem needs the owner's words, and the item stays open with them.
+    assert_eq!(mark("TT-1", vec![("v", "skip")]).await.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(mark("TT-2", vec![("v", "problem"), ("note", " ")]).await.status(), StatusCode::BAD_REQUEST);
+    let res = mark("TT-2", vec![("v", "problem"), ("note", "blurry at 200 %")]).await;
+    assert_eq!(res.headers()[LOCATION], "/p/imaginarium?tab=builds&tried=TT-2.problem");
+    let (_, news) = mcp_tool(&s, &token, &sess, "since_last_check", json!({})).await;
+    assert!(news.to_string().contains("Owner found a problem in TT-2 Pictures"), "{news}");
 
     // The owner told the agent about a problem: it stays open, with the problem.
     let (ok, r) = mcp_tool(
@@ -1470,25 +1458,26 @@ async fn a_build_goes_from_agent_to_owner_and_feedback_comes_back() {
     )
     .await;
     assert!(ok);
+    let (ok, r) =
+        mcp_tool(&s, &token, &sess, "add_to_test", json!({"title": "Zoom", "category": "Tables", "build": "B-9"}))
+            .await;
+    assert!(!ok && r.to_string().contains("B-9"), "a build that isn't there: {r}");
     // A new release takes what's open along.
     let (ok, r) = mcp_tool(&s, &token, &sess, "add_release", json!({"tag": "v0.9.0", "title": "M9"})).await;
     assert!(ok, "{r}");
     assert_eq!(r["to_test"], 2);
-    let page = s
-        .http
-        .get(s.url("/p/imaginarium?tab=to-test"))
-        .header(COOKIE, &cookie)
-        .send()
-        .await
-        .unwrap()
-        .text()
-        .await
-        .unwrap();
-    assert!(
-        page.contains("the border is cut off") && page.contains("new in v0.9.0") && !page.contains(">Tables</label>"),
-        "{page}"
-    );
-    let _ = pictures;
+    // The Builds tab: the newest build with what came with it, the rest still to try. To test is
+    // part of it now (Q-6): its old links open Builds.
+    let page = owner_page(&s, &cookie, "/p/imaginarium?tab=builds").await;
+    assert!(page.contains("New in B-1") && page.contains("2 of 2 tried"), "{page}");
+    assert!(page.contains("blurry at 200 % (you, ") && page.contains("the border is cut off"), "{page}");
+    assert!(page.contains("Still to try") && page.contains("Undo a table edit"), "{page}");
+    assert!(!page.contains(r#"class="tt-t">Tables</span>"#), "tested, off the list: {page}");
+    assert!(page.contains("<pre class=\"cmd\">flow run imaginarium 1</pre>"), "{page}");
+    let found = owner_page(&s, &cookie, "/p/imaginarium?tab=builds&tstate=tested").await;
+    assert!(found.contains(r#"class="tt-t">Tables</span>"#) && found.contains("works · "), "{found}");
+    let old = s.http.get(s.url("/p/imaginarium?tab=to-test")).header(COOKIE, &cookie).send().await.unwrap();
+    assert_eq!(old.headers()[LOCATION], "/p/imaginarium?tab=builds");
 
     // A Windows build: not for flow run, a download on its page, with what it needs.
     let exe = tempfile::tempdir().unwrap();
@@ -1545,6 +1534,26 @@ async fn a_build_goes_from_agent_to_owner_and_feedback_comes_back() {
         s.http.get(s.url(&format!("/p/imaginarium/B-{n}/download"))).header(COOKIE, &cookie).send().await.unwrap();
     assert!(file.headers()["content-disposition"].to_str().unwrap().contains("lumen.exe"));
     assert_eq!(file.bytes().await.unwrap().as_ref(), b"MZ fake exe");
+    // On the Builds tab it's the newest build, a download only, and what was added without a
+    // build since the one before goes with it (Q-8: matched by publish time). B-1 is earlier now,
+    // with your verdicts, its run command and a download (D-243); a Linux build downloads too.
+    let page = owner_page(&s, &cookie, "/p/imaginarium?tab=builds").await;
+    let new = &page[page.find(r#"class="bn-new""#).unwrap()..page.find(r#"id="to-try""#).unwrap()];
+    assert!(new.contains(&format!("New in B-{n}")) && new.contains("Undo a table edit"), "{new}");
+    assert!(
+        page.contains(&format!(r#"<a class="btn secondary" href="/p/imaginarium/B-{n}/download" download>"#))
+            && page.contains("needs Vulkan")
+            && !page.contains(&format!("flow run imaginarium {n}")),
+        "{page}"
+    );
+    let earlier = &page[page.find(r#"id="earlier""#).unwrap()..];
+    assert!(
+        earlier.contains("flow run imaginarium 1") && earlier.contains("1 works") && earlier.contains("1 problem<"),
+        "{earlier}"
+    );
+    assert!(earlier.contains(r#"href="/p/imaginarium/B-1/download""#), "{earlier}");
+    let linux = s.http.get(s.url("/p/imaginarium/B-1/download")).header(COOKIE, &cookie).send().await.unwrap();
+    assert_eq!(linux.status(), StatusCode::OK);
 }
 
 #[tokio::test]
@@ -4498,6 +4507,14 @@ async fn the_ui_catalogue_shows_the_library() {
     assert!(
         page.contains(r#"<div class="dlg sm ui-dlg" role="presentation">"#)
             && page.contains(r#"<p class="notice bad">"#),
+        "{page}"
+    );
+    // Works, the split button, a form from a button, a group that folds (M16.2).
+    assert!(
+        page.contains(r#"class="btn sm ok""#)
+            && page.contains(r#"<div class="btn-split">"#)
+            && page.contains(r#"class="dd-menu form""#)
+            && page.contains(r#"<details class="fold" open>"#),
         "{page}"
     );
     // The owner's words, and a menu's group head (M16.1).

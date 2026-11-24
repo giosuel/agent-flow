@@ -1,0 +1,70 @@
+{% import "table.html" as tbl %}
+{# The Builds tab with To test merged in (the owner, 2026-11-23, Q-6, Q-8; S-40 to S-47): the
+   newest build, what's new in it, everything else still to try under the filter band, and the
+   earlier builds in the table component. src/web/buildstab.rs builds it. #}
+{% let tt_slug = slug.as_str() %}{% let tt_back = bv.back.as_str() %}{% let tt_owner = bv.is_owner %}
+{% if bv.none %}
+<section class="card"><div class="empty-state"><span class="itile lg accent">{{ crate::web::icons::icon("build")|safe }}</span><p class="t">No builds yet</p><p>The agent publishes them with <span class="mono">flow publish</span>, and adds what to try with <span class="mono">add_to_test</span>.</p></div></section>
+{% else %}
+{% if let Some(n) = bv.newest %}
+<section class="card bnew" aria-labelledby="bn-h">
+  <div class="bn-main">
+    <div class="bn-meta"><a class="mono" href="{{ n.url }}">{{ n.short }}</a><span class="chip info">newest</span><span class="sub">published {{ n.when }} by {{ n.by }}</span></div>
+    <h2 class="bn-t" id="bn-h"><a href="{{ n.url }}">{{ n.title }}</a></h2>
+    {% if !n.name.is_empty() %}<span class="mono sub bn-name">{{ n.name }}</span>{% endif %}
+    <div class="bn-chips">{% for p in n.platforms %}<span class="chip quiet">{{ crate::web::icons::icon("platform")|safe }}{{ p.name }}</span>{% endfor %}{% for x in n.needs %}<span class="chip quiet">needs {{ x }}</span>{% endfor %}</div>
+    <div class="bn-run">{% if !n.run.is_empty() %}<pre class="cmd">{{ n.run }}</pre>{% endif %}
+      {% if let Some(first) = n.platforms.first() %}<div class="btn-split"><a class="btn secondary" href="{{ first.href }}" download>{{ crate::web::icons::icon("download")|safe }}Download<span class="sub">{{ first.os }} · {{ first.size }}</span></a>{% if n.platforms.len() > 1 %}<details class="dd"><summary class="btn secondary" aria-label="Other platforms" title="Other platforms">{{ crate::web::icons::icon("caret")|safe }}</summary><div class="dd-menu end wide">{% for p in n.platforms %}<a href="{{ p.href }}" download>{{ crate::web::icons::icon("download")|safe }}<span class="grow dl-name">{{ p.name }}<span class="sub">{{ p.what }}</span></span><span class="mono sub">{{ p.size }}</span></a>{% endfor %}</div></details>{% endif %}</div>{% endif %}
+    </div>
+    {% if !n.run.is_empty() %}<p class="sub">flow run fetches the build and starts it on any of your machines with flow; Download is the file itself, for a machine without it.</p>{% endif %}
+  </div>
+  <div class="bn-new">
+    <div class="card-head"><h2 class="label">New in {{ n.short }}</h2><span class="grow"></span><span class="sub">{{ bv.new_items.len() }} to try</span></div>
+    {% if bv.new_items.is_empty() %}<p class="empty-in">{% if bv.new_total == 0 %}Nothing new to try came with this build.{% else %}All {{ bv.new_total }} tried.{% endif %}</p>
+    {% else %}<div class="rows flush">{% for i in bv.new_items %}{% include "tt_item.html" %}{% endfor %}</div>{% endif %}
+    {% if bv.new_total > 0 %}<div class="bn-foot"><span class="sub">{{ bv.new_tried }} of {{ bv.new_total }} tried</span><span class="meter thin"><i class="ok" style="width: {{ bv.new_tried * 100 / bv.new_total }}%"></i></span></div>{% endif %}
+  </div>
+</section>
+{% endif %}
+
+<section class="card lpanel" aria-labelledby="try-h" id="to-try">
+<form method="get" action="/p/{{ slug }}" class="toolbar">
+  <input type="hidden" name="tab" value="builds">
+  {% for (k, v) in bv.keep %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
+  <label class="search{% if !bv.q.is_empty() %} set{% endif %}">{{ crate::web::icons::icon("search")|safe }}<span class="vh">Search what to try</span><input name="tq" value="{{ bv.q }}" placeholder="Search what to try" autocomplete="off"></label>
+  <details class="dd{% if bv.cats_clear.is_some() %} set{% endif %}"><summary><span class="sub">Category</span> {{ bv.cat_label }}</summary>
+    <div class="dd-menu wide">
+      {% if bv.cats.len() > 6 %}<label class="search sm dd-find">{{ crate::web::icons::icon("search")|safe }}<span class="vh">Find a category</span><input type="search" placeholder="Find a category" data-find autocomplete="off"></label>{% endif %}
+      {% for (c, n, href, on) in bv.cats %}<a href="{{ href }}" class="ck{% if *on %} on{% endif %}" data-name="{{ c }}"{% if *on %} aria-current="true"{% endif %}><span class="box" aria-hidden="true">{% if *on %}{{ crate::web::icons::icon("check")|safe }}{% endif %}</span><span class="grow">{{ c }}</span><span class="mono sub">{{ n }}</span></a>{% endfor %}
+      {% if bv.cats.is_empty() %}<p class="sub dd-none">No categories yet.</p>{% endif %}
+      {% if let Some(r) = bv.cats_clear %}<div class="dd-foot"><a href="{{ r }}">Clear</a></div>{% endif %}
+    </div>
+  </details>
+  <details class="dd{% if bv.from_label != "Any build" %} set{% endif %}"><summary><span class="sub">From</span> {{ bv.from_label }}</summary>
+    <div class="dd-menu">{% for (label, n, href, on) in bv.froms %}<a href="{{ href }}"{% if *on %} class="on" aria-current="true"{% endif %}><span>{{ label }}</span><span class="mono sub">{{ n }}</span></a>{% endfor %}</div>
+  </details>
+  <details class="dd{% if bv.state_label != "Open" %} set{% endif %}"><summary><span class="sub">State</span> {{ bv.state_label }}</summary>
+    <div class="dd-menu">{% for (label, n, href, on) in bv.states %}<a href="{{ href }}"{% if *on %} class="on" aria-current="true"{% endif %}><span>{{ label }}</span><span class="mono sub">{{ n }}</span></a>{% endfor %}</div>
+  </details>
+  {% if let Some(r) = bv.reset %}<a class="act subtle" href="{{ r }}">Clear</a>{% endif %}
+</form>
+  <div class="card-head flat lp-top"><h2 id="try-h">{{ bv.list_title }}</h2><span class="sub">{{ bv.list_sub }}</span><span class="grow"></span><span class="sub hide-phone">Works or Skip takes it off the list; Problem tells the agent and keeps it</span></div>
+  {% if bv.groups.is_empty() %}<p class="empty-in">{% if bv.filtering %}Nothing matches.{% else %}Nothing else to try.{% endif %}</p>{% endif %}
+  {% for g in bv.groups %}
+  <details class="fold"{% if bv.filtering || loop.first %} open{% endif %}><summary class="grphead"><span>{{ g.category }} · {{ g.items.len() }}</span><span class="peek">{% for i in g.items %}{% if loop.index <= 3 %}{% if !loop.first %} · {% endif %}{{ i.title }}{% endif %}{% endfor %}{% if g.items.len() > 3 %} …{% endif %}</span></summary>
+    <div class="rows flush">{% for i in g.items %}{% include "tt_item.html" %}{% endfor %}</div>
+  </details>
+  {% endfor %}
+</section>
+
+{% if bv.earlier_total > 0 %}
+<section class="card" aria-labelledby="eb-h" id="earlier">
+  <div class="card-head"><h2 id="eb-h">Earlier builds</h2><span class="sub">{{ bv.earlier_total }}</span><span class="grow"></span><span class="sub hide-phone">click a header to sort</span></div>
+  <div class="table-wrap"><table class="table eb" data-sortable>
+    <thead><tr>{% call tbl::th("Build", "num", "", "") %}{% endcall %}{% call tbl::th("What's in it", "text", "", "") %}{% endcall %}{% call tbl::th("Platforms", "text", "hide-phone", "") %}{% endcall %}{% call tbl::th("Published", "num", "hide-phone", "descending") %}{% endcall %}{% call tbl::th("Your feedback", "num", "hide-phone", "") %}{% endcall %}<th scope="col" class="eb-run"><span class="hide-phone">Run</span><span class="vh">Download</span></th></tr></thead>
+    <tbody>{% for e in bv.earlier %}<tr><th scope="row" data-v="{{ e.number }}"><a class="mono" href="{{ e.url }}">{{ e.short }}</a></th><td class="eb-what"><a href="{{ e.url }}">{{ e.title }}</a><span class="mono sub">{{ e.name }}</span><span class="sub only-phone">{{ e.published }}{% if e.feedback.is_empty() %} · not tried{% endif %}{% for (_t, x) in e.feedback %} · {{ x }}{% endfor %}</span></td><td class="hide-phone">{{ e.platforms }}</td><td class="hide-phone" data-v="{{ e.published_at }}">{{ e.published }}</td><td class="hide-phone" data-v="{{ e.feedback_n }}">{% if e.feedback.is_empty() %}<span class="sub">not tried</span>{% else %}{% for (t, x) in e.feedback %}{% if !loop.first %} <span class="sub">·</span> {% endif %}<span class="{% if t.is_empty() %}sub{% else %}{{ t }}-text{% endif %}">{{ x }}</span>{% endfor %}{% endif %}</td><td class="eb-run"><div class="eb-acts">{% if !e.run.is_empty() %}<div class="hide-phone"><pre class="cmd">{{ e.run }}</pre></div>{% endif %}<a class="ibtn" href="{{ e.download }}" download aria-label="Download {{ e.short }}" title="Download">{{ crate::web::icons::icon("download")|safe }}</a></div></td></tr>{% endfor %}</tbody>
+  </table></div>
+  {% if let Some(h) = bv.earlier_all %}<p class="sub nfoot">{{ bv.earlier_total - bv.earlier.len() }} more · <a href="{{ h }}">Show all</a></p>{% endif %}
+</section>
+{% endif %}
+{% endif %}

@@ -384,7 +384,7 @@ async fn upload(
             )?;
             let category: String = r.title.chars().take(40).collect();
             for (title, what) in &to_try {
-                crate::totest::add(c, p.id, &a.name(), title, what, &category)?;
+                crate::totest::add(c, p.id, &a.name(), title, what, &category, Some(&r))?;
             }
             Ok(r)
         })

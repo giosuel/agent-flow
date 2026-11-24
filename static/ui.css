@@ -105,7 +105,8 @@ code, pre, .mono { font-family: var(--mono); }
 
 /* ---------------------------------------------------------------- Button: four variants, two sizes
    primary (one per view) · secondary (other actions) · quiet (changes nothing: Cancel, Close)
-   · danger (removes, revokes, signs out) · danger-solid (only the confirm of a confirm dialog) */
+   · danger (removes, revokes, signs out) · danger-solid (only the confirm of a confirm dialog)
+   · ok (says something works: Works on what to try). A muted note inside a button: <span class="sub">. */
 .btn { display: inline-flex; align-items: center; justify-content: center; gap: var(--sp-2); min-height: var(--h-md); padding: 0 18px; border-radius: var(--r-md); border: 1px solid var(--accent); background: var(--accent); color: var(--on-accent); font: inherit; font-weight: 600; line-height: 1.2; white-space: nowrap; cursor: pointer; text-decoration: none; }
 .btn .i { width: var(--ic-sm); height: var(--ic-sm); }
 .btn:hover { background: var(--accent-ink); border-color: var(--accent-ink); color: var(--on-accent); }
@@ -118,7 +119,15 @@ code, pre, .mono { font-family: var(--mono); }
 .btn.danger:hover { background: var(--bad-bg); border-color: var(--bad); color: var(--bad-ink); }
 .btn.danger-solid { background: var(--bad); border-color: var(--bad); color: var(--on-bad); }
 .btn.danger-solid:hover { background: var(--bad-ink); border-color: var(--bad-ink); color: var(--on-bad); }
+.btn.ok { background: var(--panel); border-color: var(--ok-line); color: var(--ok-ink); }
+.btn.ok:hover { background: var(--ok-bg); border-color: var(--ok); color: var(--ok-ink); }
+.btn > .sub { font-weight: 400; color: inherit; opacity: .75; }
 .btn.wide { width: 100%; }
+/* A split button: the action, and a menu of the others beside it (Download, other platforms).
+   <div class="btn-split"><a class="btn secondary">…</a><details class="dd"><summary class="btn secondary">caret</summary><div class="dd-menu end">…</div></details></div> */
+.btn-split { display: inline-flex; align-items: stretch; }
+.btn-split > .btn { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.btn-split > .dd > summary.btn { height: 100%; padding: 0 12px; border-left-width: 0; border-top-left-radius: 0; border-bottom-left-radius: 0; box-shadow: inset 1px 0 0 var(--accent-line); }
 .btn[disabled], .btn[disabled]:hover { background: var(--panel); border-color: var(--line); color: var(--dim); cursor: default; }
 
 /* Icon button: one square, bordered; bare inside fields, bars and dialog heads */
@@ -297,6 +306,14 @@ summary.card-head::-webkit-details-marker { display: none; }
 .dd-menu a.ck.on .box { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
 .dd-menu .box .i { width: var(--ic-2xs); height: var(--ic-2xs); stroke-width: 3; }
 .dd-menu .dd-find { margin: 0 0 6px; }
+/* A button that opens a menu or a small form (Problem: what went wrong): summary.btn in any variant;
+   .dd-menu.end lines up with the button's right edge, .dd-menu.form holds fields. */
+.dd > summary.btn { padding: 0 18px; background-image: none; }
+.dd > summary.btn.sm { padding: 0 14px; }
+.dd[open] > summary.btn { border-color: currentColor; }
+.dd-menu.end { left: auto; right: 0; }
+.dd-menu.form { width: min(360px, 86vw); padding: var(--sp-3); display: flex; flex-direction: column; gap: var(--sp-3); align-items: flex-end; }
+.dd-menu.form .field { align-self: stretch; }
 .dd-foot { border-top: 1px solid var(--line2); margin: 6px -6px 0; padding: 8px 16px 2px; display: flex; justify-content: space-between; gap: var(--sp-3); }
 .dd-foot a { display: inline; min-height: 0; padding: 0; color: var(--muted); text-decoration: underline; }
 .dd-foot a:hover { background: none; color: var(--ink); }
@@ -415,6 +432,17 @@ a.item-row:hover { background: var(--hover-bg); }
 .ttl a:hover, .rows a:not(.item-row):hover { color: var(--accent-ink); text-decoration: underline; }
 .grphead { display: flex; align-items: center; gap: var(--sp-2); min-height: 36px; padding: 0 var(--sp-5); background: var(--band); border-top: 1px solid var(--line2); border-bottom: 1px solid var(--line2); font-size: var(--fs-label); font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
 .grphead:first-child { border-top: 0; }
+/* A group that folds: <details class="fold" [open]><summary class="grphead">Name · 9<span class="peek">first titles</span></summary>…</details>.
+   Folded, the head shows a peek at what's inside. */
+.fold > summary { list-style: none; cursor: pointer; }
+.fold > summary::-webkit-details-marker { display: none; }
+.fold > summary::before { content: ""; width: 14px; height: 14px; flex: none; background: var(--caret) no-repeat center / 14px 14px; transform: rotate(-90deg); transition: transform .15s; }
+.fold[open] > summary::before { transform: none; }
+.fold > summary:hover { color: var(--ink2); }
+.fold .peek { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-left: var(--sp-2); font-weight: 400; letter-spacing: 0; text-transform: none; color: var(--dim); font-size: var(--fs-sub); }
+.fold[open] .peek { display: none; }
+.fold > summary.grphead { border-top: 0; }
+.fold[open] + .fold > summary.grphead { border-top: 1px solid var(--line2); }
 
 /* ---------------------------------------------------------------- Quote: the owner's words
    <blockquote class="quote">“…”</blockquote> on a record; .sm in a list or a timeline. */
@@ -560,6 +588,7 @@ html.dlg-on { overflow: hidden; }
 
 /* ---------------------------------------------------------------- The phone (one breakpoint: 700) */
 @media (max-width: 700px) {
+  .fold .peek { display: none; }
   input, select, textarea { font-size: var(--fs-input); }
   .field > input, .field > select, .field > textarea { font-size: var(--fs-input); }
   .search { flex-basis: 100%; }

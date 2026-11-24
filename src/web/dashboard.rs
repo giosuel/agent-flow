@@ -237,7 +237,7 @@ async fn dashboard(
                         icon: icon("task"),
                         title: format!("{pname}: {n} to test"),
                         sub: cats.unwrap_or_default().replace(',', ", "),
-                        url: format!("/p/{slug}?tab=to-test"),
+                        url: format!("/p/{slug}?tab=builds"),
                         action: "Test",
                     })
                     .collect()

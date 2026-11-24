@@ -301,6 +301,20 @@ pub struct AddToTest {
     /// A category of your choosing, a few words, e.g. "Import", "Albums", "Print and PDF". Keep
     /// using the same ones; the owner sees the list grouped by them.
     pub category: String,
+    /// The build it comes with, e.g. "B-67", so the Builds tab shows it as new in that build.
+    /// Left out, it goes with the next build you publish. `flow publish --feature` links its own.
+    #[serde(default)]
+    pub build: Option<String>,
+}
+
+/// A build of the project named as "B-67" or "67".
+fn named_build(c: &rusqlite::Connection, slug: &str, b: &str) -> anyhow::Result<crate::records::Record> {
+    let b = b.trim();
+    let n = b.strip_prefix("B-").or_else(|| b.strip_prefix("b-")).unwrap_or(b);
+    if n.is_empty() || !n.bytes().all(|x| x.is_ascii_digit()) {
+        anyhow::bail!("build {b:?} isn't a build id, e.g. B-67");
+    }
+    crate::records::find_str(c, &format!("{slug}/B-{n}"), None)
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -1583,9 +1597,10 @@ impl FlowMcp {
         self.finish(&actor, "ask_question", Action::Write, outcome).await
     }
 
-    #[tool(description = "Add something the owner needs to test, with a category of your choosing. It stays \
-        on your project's To test list, and comes along with every release and build, until the owner tested it: \
-        they tick it on a page (you hear it as news) or tell you, and you mark it with resolve_tests.")]
+    #[tool(description = "Add something the owner needs to test, with a category of your choosing, and the \
+        build it comes with if there is one. It stays on your project's Builds tab, and comes along with every \
+        release and build, until the owner tried it: they mark it Works, Problem (with their words; it stays open) \
+        or Skip on a page, and you hear it as news; or they tell you, and you mark it with resolve_tests.")]
     async fn add_to_test(
         &self,
         Extension(parts): Extension<Parts>,
@@ -1598,7 +1613,8 @@ impl FlowMcp {
             .db
             .call(move |c| {
                 let project = target_project(c, &a, None, true)?;
-                let r = crate::totest::add(c, project.id, &a.name(), &p.title, &p.how, &p.category)?;
+                let build = p.build.as_deref().filter(|b| !b.trim().is_empty()).map(|b| named_build(c, &project.slug, b)).transpose()?;
+                let r = crate::totest::add(c, project.id, &a.name(), &p.title, &p.how, &p.category, build.as_ref())?;
                 Ok(Outcome::new(json!({"id": r.ref_id, "category": r.str("category"), "open": crate::totest::open_count(c, project.id)?}))
                     .summary(format!("to test {}: {}", r.short_id(), r.title))
                     .project(project.slug)
@@ -1609,8 +1625,8 @@ impl FlowMcp {
     }
 
     #[tool(description = "After the owner told you how testing went: mark items works (done), problem (stays \
-        open with the problem noted, in their words) or dropped (no longer needed). Items they ticked on a page \
-        are done already; you hear those as news.")]
+        open with the problem noted, in their words) or dropped (no longer needed). What they marked on a page \
+        (Works, Problem, Skip) is recorded already; you hear it as news.")]
     async fn resolve_tests(
         &self,
         Extension(parts): Extension<Parts>,
@@ -1813,8 +1829,16 @@ impl FlowMcp {
                 let project = target_project(&tx, &a, None, true)?;
                 let mut ids = Vec::new();
                 for (i, t) in p.items.iter().enumerate() {
-                    let r = crate::totest::add(&tx, project.id, &a.name(), &t.title, &t.how, &t.category)
+                    let build = t
+                        .build
+                        .as_deref()
+                        .filter(|b| !b.trim().is_empty())
+                        .map(|b| named_build(&tx, &project.slug, b))
+                        .transpose()
                         .map_err(|e| anyhow::anyhow!("nothing added; #{}: {e:#}", i + 1))?;
+                    let r =
+                        crate::totest::add(&tx, project.id, &a.name(), &t.title, &t.how, &t.category, build.as_ref())
+                            .map_err(|e| anyhow::anyhow!("nothing added; #{}: {e:#}", i + 1))?;
                     ids.push(r.short_id());
                 }
                 let open = crate::totest::open_count(&tx, project.id)?;
