@@ -437,10 +437,14 @@ document.addEventListener("click", async (e) => {
     const next = doc.getElementById("board");
     if (!next) throw new Error("no board");
     board.replaceWith(next);
-    for (const m of document.querySelectorAll("a[data-ms]")) {
-      const on = m === a;
-      m.classList.toggle("sel", on);
-      if (on) m.setAttribute("aria-current", "true"); else m.removeAttribute("aria-current");
+    // On the overview the link stays and is marked; on Plan the whole area was swapped and the new
+    // one marks itself.
+    if (document.contains(a)) {
+      for (const m of document.querySelectorAll("a[data-ms]")) {
+        const on = m === a;
+        m.classList.toggle("sel", on);
+        if (on) m.setAttribute("aria-current", "true"); else m.removeAttribute("aria-current");
+      }
     }
     history.replaceState(history.state, "", a.href.replace(/#.*$/, ""));
     document.dispatchEvent(new CustomEvent("af:content", { detail: next }));
@@ -448,6 +452,40 @@ document.addEventListener("click", async (e) => {
     location.href = a.href;
   }
 });
+
+// Plan (the owner, 2026-11-18, D-219; 2026-11-19, D-226): the milestone list scrolls to the picked
+// milestone, the one before it just above; on the phone there's no scroll box, the done ones and
+// the step rail start folded (unless the picked one is among them).
+// A fade on each side of the list's box with more to scroll to.
+const fadeList = (box) => {
+  box.classList.toggle("more-up", box.scrollTop > 2);
+  box.classList.toggle("more-down", box.scrollTop + box.clientHeight < box.scrollHeight - 2);
+};
+const foldRail = (root) => {
+  for (const box of root.querySelectorAll(".ml-plan [data-ml]")) {
+    if (!box.dataset.fade) {
+      box.dataset.fade = "1";
+      box.addEventListener("scroll", () => fadeList(box), { passive: true });
+    }
+    const picked = box.querySelector(".ml-row.picked");
+    if (picked && box.scrollHeight > box.clientHeight) {
+      // The row before it, among the rows shown (the done ones sit in their own fold).
+      const rows = [...box.querySelectorAll(".ml-row")].filter((r) => r.offsetHeight > 0);
+      const before = rows[rows.indexOf(picked) - 1];
+      box.scrollTop = Math.max(0, picked.offsetTop - (before ? before.offsetHeight : 0) - 4);
+    }
+    fadeList(box);
+  }
+  if (!window.matchMedia("(max-width: 700px)").matches) return;
+  for (const d of root.querySelectorAll("details[data-srail]")) d.open = false;
+  for (const d of root.querySelectorAll("details[data-ml-done]")) {
+    if (!d.querySelector(".picked")) d.open = false;
+  }
+};
+document.addEventListener("DOMContentLoaded", () => foldRail(document));
+// Again once the styles are in: before that the list's box has no height to scroll in.
+window.addEventListener("load", () => foldRail(document));
+document.addEventListener("af:content", (e) => foldRail(e.detail));
 
 // Project tabs on the phone switch in place (the owner, 2026-11-12: "on mobile clicking a tab in a
 // project page doesn't add navigation and instead just switches tabs"): the tab's page is fetched,

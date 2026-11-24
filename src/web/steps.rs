@@ -7,7 +7,7 @@ use axum::response::Response;
 use axum::routing::get;
 use axum::{Extension, Router};
 
-use super::pages::{Nav, nav, render};
+use super::pages::{Nav, PathPart, nav, render};
 use super::{AppError, AppResult, AppState};
 use crate::auth::Actor;
 use crate::markdown;
@@ -59,8 +59,7 @@ struct StepPage {
     project_slug: String,
     name: String,
     milestone: String,
-    /// Back to the overview, with this step on the board (the Tasks tab went, D-218).
-    back: String,
+    path: Vec<PathPart>,
     title: String,
     state: &'static str,
     when: String,
@@ -253,11 +252,17 @@ async fn step(
     let back = if parent.is_empty() {
         format!("/p/{}", p.slug)
     } else {
-        format!("/p/{}?ms={}&step={}#board", p.slug, parent, m.name)
+        format!("/p/{}/plan/{}?step={}", p.slug, parent, m.name)
     };
+    // Its path (D-222): Projects / the project / Plan / its milestone / the step.
+    let mut path =
+        vec![PathPart::link("Projects", "/projects"), PathPart::link(p.name.clone(), format!("/p/{}", p.slug))];
+    // Plan, opened with this step picked; then the step.
+    path.push(PathPart::link("Plan", back.clone()));
+    path.push(PathPart::here(format!("{} {}", m.name, m.title)));
     render(StepPage {
-        nav: nav(&state, &actor, "/projects").await.back_to(back.clone(), &p.name),
-        back,
+        nav: nav(&state, &actor, "/projects").await.back_to(back, "Plan"),
+        path,
         project_name: p.name.clone(),
         project_slug: p.slug.clone(),
         name: m.name.clone(),

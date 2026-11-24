@@ -201,6 +201,19 @@ pre code { background: none; padding: 0; }
    2026-11-11: "so on the project page and all its subpages i can get to the agent discussion
    quickly"). */
 .crumb-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+/* A page's path (the owner, 2026-11-18, D-222): each part a link up; the last is where you are. */
+.path ol { display: flex; align-items: center; flex-wrap: wrap; gap: 2px 0; margin: 0; padding: 0; list-style: none; font-size: 14px; min-width: 0; }
+.path li { display: inline-flex; align-items: center; min-width: 0; }
+.path li + li::before { content: "/"; color: var(--muted); opacity: .6; padding: 0 8px; }
+.path a, .path [aria-current] { max-width: 28ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.path a { color: var(--ink2); text-decoration: none; border-radius: 6px; padding: 2px 4px; margin: -2px -4px; }
+.path a:hover { color: var(--hover); background: var(--soft); }
+.path [aria-current] { color: var(--ink); font-weight: 500; }
+/* In a dialog's header: the last three parts, the rest behind "…". */
+#rdlg-title { min-width: 0; flex: 1; }
+#rdlg-title .path ol { flex-wrap: nowrap; overflow: hidden; }
+#rdlg-title .path li:nth-last-child(n+4) { display: none; }
+#rdlg-title .path li:nth-last-child(3):not(:first-child)::before { content: "… /"; color: var(--muted); padding: 0 8px 0 0; }
 .session-link {
   margin-left: auto; display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 0 12px;
   border: 1px solid var(--accent); border-radius: 18px; background: var(--soft);
@@ -1534,6 +1547,89 @@ html.no-scroll { overflow: hidden; }
 .msa .t { font-size: 18px; font-weight: 600; }
 .msa-r { display: flex; flex-direction: column; gap: 8px; align-items: flex-end; justify-content: center; }
 .msa-r b { color: var(--ink); font-weight: 600; }
+.msa-go { margin-top: 2px; }
+.msa-go .i { width: 14px; height: 14px; }
+/* The milestone list (the owner, 2026-11-19, D-226): one component, in the milestones' own order. */
+.ml-scroll { position: relative; }
+.ml-row { display: grid; grid-template-columns: 18px 64px minmax(0, 1fr) minmax(0, 260px) 150px 96px 16px; gap: 12px; align-items: center; min-height: 46px; padding: 0 18px; border-top: 1px solid var(--line2); color: var(--ink); text-decoration: none; font-size: 14px; }
+.ml-row:hover { background: var(--inset); }
+.ml-row .k { font-size: 13px; color: var(--muted); }
+.ml-row .t { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ml-row .c { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ml-row .tg { font-size: 12px; text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ml-row > .i { width: 16px; height: 16px; color: var(--muted); }
+.ml-row .pbar { width: 100%; height: 4px; }
+.ml-row.done .t, .ml-row.empty .t { color: var(--ink2); }
+.ml-row.done .pbar i { background: #3F7D55; }
+.ml-row.now .k { color: var(--chip-accent-ink); }
+.ml-row.open, .ml-row.picked { background: var(--soft); }
+.ml-row.picked { box-shadow: inset 3px 0 0 var(--accent); }
+.ml-row.picked .t { font-weight: 600; color: var(--ink); }
+.ml-i { width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--muted); box-sizing: border-box; justify-self: center; }
+.ml-i.now { border-color: var(--accent); background: var(--accent); box-shadow: 0 0 0 3px rgba(167, 139, 250, .2); }
+.ml-i.empty { border-style: dashed; opacity: .7; }
+.ml-i.done { border: 0; width: 13px; height: 8px; border-radius: 0; border-left: 2px solid var(--ok); border-bottom: 2px solid var(--ok); transform: rotate(-45deg) translate(1px, -2px); }
+.ml-i.loose { border: 0; width: auto; height: auto; border-radius: 0; display: inline-flex; color: var(--muted); }
+.ml-i.loose .i { width: 16px; height: 16px; }
+.ml-open { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 16px; align-items: center; padding: 0 18px 12px 124px; background: var(--soft); }
+.ml-open.picked { box-shadow: inset 3px 0 0 var(--accent); }
+.ml-open-l { display: flex; flex-direction: column; gap: 2px; min-width: 0; font-size: 13.5px; }
+.ml-open .btn .i { width: 14px; height: 14px; }
+.ml-done > summary { list-style: none; cursor: pointer; }
+.ml-done > summary::-webkit-details-marker { display: none; }
+.ml-done > summary { grid-template-columns: 18px 64px minmax(0, 1fr) auto 16px; }
+.ml-done > summary .ks { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ml-done > summary .i { transform: rotate(90deg); }
+.ml-done[open] > summary .i { transform: rotate(-90deg); }
+.ml-done[open] .ml-show { visibility: hidden; }
+.ml-row.loose .t .sub { font-size: 13px; }
+/* On Plan the list scrolls in a box (about five rows) with fades at its edges; the done ones are listed. */
+.ml-plan .ml-scroll { max-height: 330px; overflow-y: auto; scrollbar-width: thin; }
+/* A fade only on a side with more to scroll to, so the first and last rows aren't dimmed (the
+   owner, 2026-11-19: "the first and last entries look a bit weird when selected"). */
+.ml-plan .ml-scroll.more-down { -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 26px), transparent 100%); mask-image: linear-gradient(to bottom, #000 calc(100% - 26px), transparent 100%); }
+.ml-plan .ml-scroll.more-up { -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 18px); mask-image: linear-gradient(to bottom, transparent 0, #000 18px); }
+.ml-plan .ml-scroll.more-up.more-down { -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 18px, #000 calc(100% - 26px), transparent 100%); mask-image: linear-gradient(to bottom, transparent 0, #000 18px, #000 calc(100% - 26px), transparent 100%); }
+.ml-plan .ml-done > summary { display: none; }
+.ml-plan .ml-done > .ml-row:first-of-type { border-top: 0; }
+.ml-nothing h3 { margin: 0 0 4px; font-size: 16px; }
+/* The overview's Project card, full width on top (D-226): about, the facts, the links on the right. */
+.pcard { border: 1px solid var(--line); border-radius: 14px; background: var(--panel); padding: 0; }
+.pcard-b { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1.6fr) 300px; gap: 18px 32px; padding: 18px 22px; align-items: start; }
+.pcard-about { display: flex; flex-direction: column; gap: 10px; color: var(--ink2); font-size: 14.5px; }
+.pcard-about p { margin: 0; }
+.pcard .pcard-facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px 22px; margin: 0; }
+.pcard .pcard-facts dt { font-size: 12.5px; color: var(--muted); grid-row: auto; }
+.pcard .pcard-facts > div, .pcard .pcard-facts dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.pcard .pcard-links { display: flex; border: 0; padding: 0; margin: 0; flex-direction: column; gap: 8px; }
+.pcard .pcard-links > a, .pcard .pcard-links > form > button { display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 0 12px; border: 1px solid var(--line); border-radius: 10px; color: var(--chip-accent-ink); text-decoration: none; width: 100%; box-sizing: border-box; background: none; font: inherit; font-size: 14px; cursor: pointer; }
+.pcard .pcard-links > a:hover, .pcard .pcard-links > form > button:hover { border-color: var(--accent); background: var(--soft); }
+.pcard .pcard-links .pd-rev { margin-left: auto; }
+/* The Plan tab (the owner, 2026-11-18, D-219): milestone cards to pick from, the step rail, the board. */
+.plan { display: flex; flex-direction: column; gap: 16px; }
+.plan-card:hover { background: #140F24; }
+.plan-card .t { margin: 0; font-size: 20px; line-height: 1.3; }
+.plan-lay { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 16px; align-items: start; }
+.plan-lay.norail { grid-template-columns: minmax(0, 1fr); }
+.srail { border: 1px solid var(--line); border-radius: 12px; background: var(--panel); overflow: hidden; }
+.srail > summary { display: none; }
+.srail-row { display: grid; grid-template-columns: 16px 50px minmax(0, 1fr) auto; gap: 8px; align-items: start; padding: 11px 14px; border-top: 1px solid var(--line2); color: var(--ink); text-decoration: none; font-size: 14px; line-height: 1.4; }
+.srail-row:first-child { border-top: 0; }
+.srail-row:hover { background: var(--inset); }
+.srail-row.on { background: var(--soft); box-shadow: inset 3px 0 0 var(--accent); }
+.srail-row .k { color: var(--chip-accent-ink); font-size: 12.5px; padding-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.srail-row .t { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.srail-row.done .t { color: var(--ink2); }
+.srail-row .n { font-size: 12px; white-space: nowrap; padding-top: 1px; }
+.srail-i { width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--muted); box-sizing: border-box; margin-top: 5px; justify-self: center; }
+.srail-i.now { border-color: var(--accent); background: var(--accent); }
+.srail-i.done { border: 0; width: 12px; height: 7px; border-radius: 0; border-left: 2px solid var(--ok); border-bottom: 2px solid var(--ok); transform: rotate(-45deg); margin-top: 4px; }
+.step-line { display: flex; align-items: center; gap: 8px 12px; flex-wrap: wrap; padding: 10px 14px; }
+.step-line .srail-i { margin-top: 0; }
+.sl-t { font-weight: 600; flex: 1 1 320px; min-width: 0; }
+.sl-sub { flex: 0 1 auto; }
+.step-open { margin-left: auto; }
+.step-open .i { width: 14px; height: 14px; }
 .pbar { display: block; height: 6px; width: 240px; max-width: 100%; border-radius: 3px; background: var(--line); overflow: hidden; }
 .pbar i { display: block; height: 100%; background: var(--accent); }
 .msr { display: grid; grid-template-columns: 20px 64px minmax(0, 1fr) auto auto; gap: 12px; align-items: center; min-height: 46px; padding: 0 18px; border-top: 1px solid var(--line2); color: var(--ink2); text-decoration: none; font-size: 14px; }
@@ -1596,6 +1692,35 @@ html.no-scroll { overflow: hidden; }
   .msr.now .tg, .msr.up .tg { display: inline; }
   .msr.loose { grid-template-columns: 18px minmax(0, 1fr) auto; }
   .msr.loose .tg { display: inline; }
+  /* The phone: the back bar goes up one level; the path shows its end. */
+  .crumb-row .path li:nth-last-child(n+3) { display: none; }
+  .crumb-row .path li:nth-last-child(2):not(:first-child)::before { content: "… /"; padding: 0 8px 0 0; }
+  .ml-row { grid-template-columns: 16px 44px minmax(0, 1fr) 16px; gap: 10px; padding: 8px 14px; }
+  .ml-row .c { grid-column: 3; grid-row: 2; }
+  .ml-row .pbar, .ml-row .tg { display: none; }
+  .ml-row > .i { grid-column: 4; grid-row: 1 / 3; }
+  .ml-open { grid-template-columns: minmax(0, 1fr); padding: 0 14px 12px 94px; }
+  .ml-plan .ml-scroll { max-height: none; overflow: visible; -webkit-mask-image: none; mask-image: none; }
+  .ml-plan .ml-done > summary { display: grid; }
+  .ml-done > summary { grid-template-columns: 16px auto minmax(0, 1fr) 16px; }
+  .ml-done > summary .ml-show { display: none; }
+  .ml-done > summary > .i { grid-column: auto; grid-row: auto; }
+  .pcard-b { grid-template-columns: minmax(0, 1fr); padding: 14px; }
+  .pcard .pcard-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .plan-lay { grid-template-columns: minmax(0, 1fr); }
+  .plan-card { grid-template-columns: minmax(0, 1fr); }
+  .plan-card .msa-r { align-items: stretch; }
+  .plan-card .pbar { width: 100%; }
+  .srail > summary { display: grid; grid-template-columns: 16px auto minmax(0, 1fr) auto 18px; gap: 8px; align-items: center; padding: 12px 14px; list-style: none; cursor: pointer; }
+  .srail > summary::-webkit-details-marker { display: none; }
+  .srail > summary .t { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
+  .srail > summary .k { color: var(--chip-accent-ink); font-size: 12.5px; }
+  .srail > summary .srail-i { margin-top: 0; }
+  .srail > summary .i { width: 18px; height: 18px; color: var(--chip-accent-ink); transform: rotate(90deg); }
+  .srail[open] > summary .i { transform: rotate(-90deg); }
+  .srail[open] > summary { border-bottom: 1px solid var(--line2); }
+  .srail-row { min-height: 44px; }
+  .step-open { margin-left: 0; }
   .ov-fold > summary { cursor: pointer; min-height: 56px; border-bottom: 0; }
   .ov-fold[open] > summary { border-bottom: 1px solid var(--line2); }
   .ofi, .of-phone { display: inline-flex; }

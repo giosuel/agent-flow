@@ -116,7 +116,38 @@ impl Nav {
     }
 }
 
+/// One part of a page's path at the top left (the owner, 2026-11-18, D-222: "it should really be
+/// like a path. and going back should be intuitive"): a link up to that level, or, last, where
+/// you are.
+pub struct PathPart {
+    pub label: String,
+    pub href: Option<String>,
+}
+
+impl PathPart {
+    pub fn link(label: impl Into<String>, href: impl Into<String>) -> Self {
+        PathPart { label: label.into(), href: Some(href.into()) }
+    }
+
+    pub fn here(label: impl Into<String>) -> Self {
+        PathPart { label: label.into(), href: None }
+    }
+}
+
+/// Where the phone's back goes: the level above the page, the last link in its path.
+pub fn up(path: &[PathPart]) -> Option<(String, String)> {
+    path.iter().rev().find_map(|p| p.href.clone().map(|h| (h, p.label.clone())))
+}
+
 impl Nav {
+    /// The phone's back goes up one level of the page's path.
+    pub fn up(self, path: &[PathPart]) -> Self {
+        match up(path) {
+            Some((href, label)) => self.back_to(href, label),
+            None => self,
+        }
+    }
+
     /// A back bar to `href` on the phone.
     pub fn back_to(mut self, href: impl Into<String>, label: impl Into<String>) -> Self {
         self.back = Some((href.into(), label.into()));

@@ -86,7 +86,12 @@
     const body = box.querySelector(".rdlg-body");
     body.replaceChildren(...[...main.childNodes].map((n) => document.importNode(n, true)));
     for (const el of body.querySelectorAll(".crumb-row, .back-bar")) el.remove();
-    box.querySelector("#rdlg-title").textContent = (doc.querySelector(".crumb-where") || {}).textContent || "";
+    // The page's path continues in the dialog's header (D-222): its earlier parts go there, the
+    // last is the record.
+    const title = box.querySelector("#rdlg-title");
+    const where = doc.querySelector("nav.path");
+    if (where) title.replaceChildren(document.importNode(where, true));
+    else title.textContent = (doc.querySelector(".crumb-where") || {}).textContent || "";
     const nav = box.querySelector(".rdlg-nav");
     nav.hidden = list.length < 2;
     box.querySelector("[data-step='-1']").disabled = at <= 0;

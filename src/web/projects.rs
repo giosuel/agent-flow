@@ -25,6 +25,8 @@ pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/projects", get(list))
         .route("/p/{slug}", get(project))
+        .route("/p/{slug}/plan", get(plan))
+        .route("/p/{slug}/plan/{ms}", get(plan_of))
         .route("/p/{slug}/{id}", get(record))
         .route("/p/{slug}/{id}/answer", post(answer))
         .route("/p/{slug}/{id}/scope", post(set_scope))
@@ -552,38 +554,35 @@ struct QCard {
 }
 
 /// The milestone under way, large at the top of the overview's list.
-struct MsNow {
+struct MsItem {
     name: String,
     title: String,
     href: String,
-    sub: String,
-    /// The step under way: name and title.
-    step: Option<(String, String)>,
-    done: usize,
-    total: usize,
-    steps_done: usize,
-    steps_total: usize,
+    /// done, now (under way), up (planned) or empty (planned, no tasks yet).
+    kind: &'static str,
+    /// "25 of 31 tasks · 3 of 5 steps · step D", "no tasks yet".
+    counts: String,
     pct: usize,
-    selected: bool,
-}
-
-/// A planned, other active, or closed milestone: one row.
-struct MsRow {
-    name: String,
-    title: String,
-    href: String,
-    note: String,
-    state: &'static str,
-    date: String,
-    selected: bool,
+    /// The release it ends with, or its state.
+    tag: String,
+    /// On Plan: the milestone the board shows.
+    picked: bool,
+    /// Shown open: on the overview the ones under way, on Plan the picked one.
+    open: bool,
+    /// "Step D · Screens in …".
+    step: String,
+    /// "since 6 Nov · estimated 279 h · 17 h of agent time".
+    sub: String,
 }
 
 struct StepView {
     name: String,
     title: String,
     class: &'static str,
-    /// The step's page, opened as a dialog from the step bar (D-218).
+    /// The step's page, opened as a dialog (D-218).
     url: String,
+    /// "1 to do · 4 in progress · 10 tasks · 4 done · estimated 31 h".
+    sub: String,
 }
 
 struct TaskCard {
@@ -606,32 +605,28 @@ struct Column {
 
 struct Board {
     title: String,
+    /// The milestone's totals.
     summary: String,
     /// A line under the heading: for the tasks without a milestone.
     note: String,
+    /// The step rail (the owner, 2026-11-18, D-219): every step; none for a milestone without.
+    rail: Vec<RailStep>,
+    /// The picked step, described above the board.
+    step: Option<StepView>,
+    /// A milestone with no steps and no tasks: "Nothing on the board yet" instead of columns.
+    empty: bool,
     columns: Vec<Column>,
-    /// The step bar (the owner, 2026-11-17: "find an alternative way to show the steps as there
-    /// can be many"): the step under way (or next), dots for every step, the menu.
-    step_now: Option<StepView>,
-    step_now_sub: String,
-    dots: Vec<&'static str>,
-    steps_done: usize,
-    steps_total: usize,
-    /// What the board shows: "All 12 steps" or a step's name.
-    showing: String,
-    /// The menu: "All", then under way and next, then the newest done, the rest folded.
-    menu_all: (String, String, bool),
-    menu_open: Vec<StepItem>,
-    menu_done: Vec<StepItem>,
-    menu_done_more: Vec<StepItem>,
     /// The column shown first on the phone.
     first_col: usize,
 }
 
-struct StepItem {
+struct RailStep {
     name: String,
     title: String,
-    sub: String,
+    /// done, now or next.
+    class: &'static str,
+    /// "4 of 10", "no tasks".
+    count: String,
     href: String,
     on: bool,
 }
@@ -727,7 +722,6 @@ fn external_rows(c: &Connection, all: &[Record], now: i64) -> anyhow::Result<(Ve
 }
 
 struct AgentCard {
-    machine: String,
     model: String,
     working_on: String,
     seen: String,
@@ -782,6 +776,8 @@ pub struct Connect {
 #[derive(Template)]
 #[template(path = "project.html")]
 struct ProjectPage {
+    /// The path at the top left: Projects / the project / the tab / the milestone / the step.
+    path: Vec<super::pages::PathPart>,
     /// The To test checklist (its tab), and how many are open (the tab's count).
     to_test: Option<super::totest::View>,
     to_test_open: i64,
@@ -805,13 +801,10 @@ struct ProjectPage {
     headline: String,
     tab: String,
     about: Vec<MetaRow>,
-    /// The overview's milestone list (D-198): the one under way, the planned (and other active)
-    /// ones, and the closed ones folded, newest first.
-    ms_now: Option<MsNow>,
-    ms_rows: Vec<MsRow>,
-    ms_closed: Vec<MsRow>,
-    /// The closed ones start open when the board shows one of them.
-    ms_closed_open: bool,
+    /// The milestone list (D-226): the done ones (folded on the overview and the phone), then
+    /// those under way and the planned ones, in their order.
+    ms_done: Vec<MsItem>,
+    ms_list: Vec<MsItem>,
     /// "Without a milestone": how many tasks, and whether the board shows them (D-218).
     loose_count: usize,
     loose_selected: bool,
@@ -845,6 +838,47 @@ struct ProjectPage {
     notice_bad: bool,
     /// Where a pressed button returns to.
     next: String,
+}
+
+/// The project page's path: Projects / the project, then the tab, and on Plan the milestone and
+/// the step (D-222).
+fn project_path(page: &ProjectPage, tab: &str) -> Vec<super::pages::PathPart> {
+    use super::pages::PathPart;
+    let mut path = vec![PathPart::link("Projects", "/projects")];
+    if tab == "overview" {
+        path.push(PathPart::here(page.name.clone()));
+        return path;
+    }
+    path.push(PathPart::link(page.name.clone(), format!("/p/{}", page.slug)));
+    let label = TABS.iter().find(|(k, _)| *k == tab).map(|(_, l)| *l).unwrap_or("");
+    // On Plan the milestone and the step are picks on the same page, so the path ends at the tab
+    // (the owner, 2026-11-19: "these all do the same, lets leave it at "plan"").
+    path.push(PathPart::here(label));
+    path
+}
+
+/// The Plan tab (the owner, 2026-11-18, D-219): the milestone under way, or the one named.
+async fn plan(
+    state: State<AppState>,
+    actor: Extension<Actor>,
+    slug: Path<String>,
+    Query(mut q): Query<TabQuery>,
+    tz: Tz,
+) -> AppResult<Response> {
+    q.tab = Some("plan".into());
+    project(state, actor, slug, Query(q), tz).await
+}
+
+async fn plan_of(
+    state: State<AppState>,
+    actor: Extension<Actor>,
+    Path((slug, ms)): Path<(String, String)>,
+    Query(mut q): Query<TabQuery>,
+    tz: Tz,
+) -> AppResult<Response> {
+    q.tab = Some("plan".into());
+    q.ms = Some(ms);
+    project(state, actor, Path(slug), Query(q), tz).await
 }
 
 #[derive(Deserialize)]
@@ -915,6 +949,7 @@ const LOOSE: &str = "none";
 
 const TABS: &[(&str, &str)] = &[
     ("overview", "Overview"),
+    ("plan", "Plan"),
     ("questions", "Questions"),
     ("prs", "Pull requests"),
     ("builds", "Builds"),
@@ -937,9 +972,15 @@ async fn project(
         let code = q.settings.as_deref().map(|c| format!("?settings={}", super::log::enc(c))).unwrap_or_default();
         return Ok(Redirect::to(&format!("/p/{slug}/settings{code}")).into_response());
     }
-    // The Tasks tab went (the owner, 2026-11-18, D-218): its links open the overview.
+    // The Tasks tab went (the owner, 2026-11-18, D-218): its links open Plan.
     if q.tab.as_deref() == Some("tasks") {
-        return Ok(Redirect::to(&format!("/p/{slug}")).into_response());
+        return Ok(Redirect::to(&format!("/p/{slug}/plan")).into_response());
+    }
+    // The overview's board moved to Plan (D-219): old milestone links open it there.
+    if q.tab.is_none() && q.ms.is_some() {
+        let step = q.step.as_deref().map(|s| format!("?step={}", super::log::enc(s))).unwrap_or_default();
+        let ms = super::log::enc(q.ms.as_deref().unwrap_or_default());
+        return Ok(Redirect::to(&format!("/p/{slug}/plan/{ms}{step}")).into_response());
     }
     let tab = q.tab.filter(|t| TABS.iter().any(|(k, _)| k == t)).unwrap_or_else(|| "overview".into());
     let now = now_ms();
@@ -1025,8 +1066,10 @@ async fn project(
     }
     page.has_stack_button = page.prs.iter().any(|p| p.up_to.is_some());
     let next = if tab == "overview" { format!("/p/{}", page.slug) } else { format!("/p/{}?tab={tab}", page.slug) };
+    let path = project_path(&page, &tab);
     let page = ProjectPage {
-        nav: nav(&state, &actor, "/projects").await.back_to("/projects", "Projects"),
+        nav: nav(&state, &actor, "/projects").await.up(&path),
+        path,
         tab,
         notice,
         notice_bad,
@@ -1093,7 +1136,6 @@ fn build_project_page(
             .or_else(|| current_milestone(&ms))
             .cloned()
     };
-    let now_ms_id = current_milestone(&ms).map(|m| m.id);
     // Open questions that block a task, for "blocked by Q-31" on its card.
     let mut blockers: HashMap<i64, Vec<(String, String)>> = HashMap::new();
     {
@@ -1141,99 +1183,177 @@ fn build_project_page(
     };
     let tasks: Vec<&Record> = all.iter().filter(|r| r.kind == Kind::Task).collect();
 
-    // The overview's milestone list (the owner, 2026-11-17: "start with the milestones right
-    // away? also we could make it scrollable or something?").
-    let ms_href = |name: &str| format!("/p/{}?ms={name}#board", p.slug);
-    let selected = |m: &Milestone| current.as_ref().is_some_and(|c| c.id == m.id);
+    // The milestones (the owner, 2026-11-19, D-226): one list in their own order on the overview
+    // and on Plan: the done ones first, then those under way, then the planned ones. On the
+    // overview the ones under way are open; on Plan the picked one is, lit in its place.
+    let plan = tab == "plan";
+    let ms_href = |name: &str| format!("/p/{}/plan/{name}", p.slug);
     let top: Vec<&Milestone> = ms.iter().filter(|m| m.parent_id.is_none() && m.archived_at.is_none()).collect();
-    let ms_now = top.iter().find(|m| Some(m.id) == now_ms_id && m.state == "active").map(|m| {
+    let item = |m: &Milestone| -> anyhow::Result<MsItem> {
         let ids = projects::with_steps(&ms, m.id);
-        let mine: Vec<&&Record> = tasks.iter().filter(|t| t.milestone_id.is_some_and(|x| ids.contains(&x))).collect();
-        let done = mine.iter().filter(|t| t.state == "done").count();
-        let counted = mine.iter().filter(|t| !matches!(t.state.as_str(), "skipped" | "archived")).count();
+        let mine: Vec<&Record> =
+            tasks.iter().copied().filter(|t| t.milestone_id.is_some_and(|x| ids.contains(&x))).collect();
+        let counted: Vec<&Record> =
+            mine.iter().copied().filter(|t| !matches!(t.state.as_str(), "skipped" | "archived")).collect();
+        let done = counted.iter().filter(|t| t.state == "done").count();
         let steps: Vec<&Milestone> =
             ms.iter().filter(|s| s.parent_id == Some(m.id) && s.archived_at.is_none()).collect();
-        let mut sub = Vec::new();
-        if let Some(t) = m.started_at {
-            sub.push(format!("since {}", tz.day(t)));
-        }
-        sub.push(if m.tag.is_empty() { "ends with a tag".into() } else { format!("ends with {}", m.tag) });
-        MsNow {
+        let steps_done = steps.iter().filter(|s| s.state == "closed").count();
+        let step_now =
+            steps.iter().find(|s| s.state == "active").or_else(|| steps.iter().find(|s| s.state != "closed")).copied();
+        let kind = match m.state.as_str() {
+            "closed" => "done",
+            "active" => "now",
+            _ if counted.is_empty() && steps.is_empty() => "empty",
+            _ => "up",
+        };
+        let plural_steps = |n: usize| if n == 1 { "1 step".to_owned() } else { format!("{n} steps") };
+        let counts = match kind {
+            "done" => {
+                let mut c = plural(counted.len() as i64, "task", "tasks");
+                if let Some(t) = m.closed_at {
+                    c.push_str(&format!(" · {}", tz.day(t)));
+                }
+                c
+            }
+            "now" => {
+                let mut c = format!("{done} of {} tasks", counted.len());
+                if !steps.is_empty() {
+                    c.push_str(&format!(" · {steps_done} of {} steps", steps.len()));
+                }
+                if let Some(s) = step_now {
+                    c.push_str(&format!(" · step {}", s.name));
+                }
+                c
+            }
+            "empty" => "no tasks yet".into(),
+            _ => {
+                let mut c = plural(counted.len() as i64, "task", "tasks");
+                if !steps.is_empty() {
+                    c.push_str(&format!(" · {}", plural_steps(steps.len())));
+                }
+                c
+            }
+        };
+        let picked = plan && current.as_ref().is_some_and(|c| c.id == m.id);
+        let open = if plan { picked } else { kind == "now" };
+        // What an open row says: the step under way, then since when, the totals, the release.
+        let (step, sub) = if open {
+            let step = step_now.map(|s| format!("Step {} · {}", s.name, s.title)).unwrap_or_default();
+            let mut sub = Vec::new();
+            if let Some(t) = m.started_at {
+                sub.push(format!("since {}", tz.day(t)));
+            }
+            let est: i64 = counted.iter().map(|t| crate::times::estimate_min(t)).sum();
+            if est > 0 {
+                sub.push(format!("estimated {}", crate::times::fmt_min(est)));
+            }
+            let spent = crate::times::times_of(c, &p.slug, &counted, now)?.total_ms;
+            if spent > 0 {
+                sub.push(format!("{} of agent time", crate::times::fmt_ms(spent)));
+            }
+            if kind == "empty" {
+                sub.push("not planned in detail yet: the agent adds its steps and tasks when it comes up".into());
+            }
+            (step, sub.join(" · "))
+        } else {
+            (String::new(), String::new())
+        };
+        Ok(MsItem {
             name: m.name.clone(),
             title: m.title.clone(),
             href: ms_href(&m.name),
-            sub: sub.join(" · "),
-            step: steps.iter().find(|s| s.state == "active").map(|s| (s.name.clone(), s.title.clone())),
-            done,
-            total: counted,
-            steps_done: steps.iter().filter(|s| s.state == "closed").count(),
-            steps_total: steps.len(),
-            pct: (done * 100).checked_div(counted).unwrap_or(0),
-            selected: selected(m),
-        }
-    });
-    let ms_row = |m: &Milestone| MsRow {
-        name: m.name.clone(),
-        title: m.title.clone(),
-        href: ms_href(&m.name),
-        note: match m.state.as_str() {
-            "active" => "under way".into(),
-            "closed" => m.tag.clone(),
-            _ => "planned".into(),
-        },
-        state: match m.state.as_str() {
-            "active" => "now",
-            "closed" => "done",
-            _ => "up",
-        },
-        date: m.closed_at.map(|t| tz.day(t)).unwrap_or_default(),
-        selected: selected(m),
+            kind,
+            counts,
+            pct: if kind == "done" { 100 } else { (done * 100).checked_div(counted.len()).unwrap_or(0) },
+            tag: match (kind, m.tag.as_str()) {
+                ("done" | "now", t) if !t.is_empty() => t.to_owned(),
+                ("done", _) => "done".into(),
+                ("now", _) => "under way".into(),
+                _ => "planned".into(),
+            },
+            picked,
+            open,
+            step,
+            sub,
+        })
     };
-    let ms_rows: Vec<MsRow> = top
-        .iter()
-        .filter(|m| m.state != "closed" && ms_now.as_ref().is_none_or(|n| n.name != m.name))
-        .map(|m| ms_row(m))
-        .collect();
-    let mut closed: Vec<&&Milestone> = top.iter().filter(|m| m.state == "closed").collect();
-    closed.sort_by_key(|m| std::cmp::Reverse((m.closed_at.unwrap_or(0), (m.position * 1000.0) as i64)));
-    let ms_closed: Vec<MsRow> = closed.iter().map(|m| ms_row(m)).collect();
+    let mut ms_done: Vec<MsItem> = Vec::new();
+    let mut ms_list: Vec<MsItem> = Vec::new();
+    for m in top.iter().filter(|m| m.state == "closed") {
+        ms_done.push(item(m)?);
+    }
+    for m in top.iter().filter(|m| m.state == "active") {
+        ms_list.push(item(m)?);
+    }
+    for m in top.iter().filter(|m| !matches!(m.state.as_str(), "active" | "closed")) {
+        ms_list.push(item(m)?);
+    }
     let ms_counts = {
         let active = top.iter().filter(|m| m.state == "active").count();
         let planned = top.iter().filter(|m| !matches!(m.state.as_str(), "active" | "closed")).count();
         let mut parts = Vec::new();
+        if !ms_done.is_empty() {
+            parts.push(format!("{} done", ms_done.len()));
+        }
         if active > 0 {
             parts.push(format!("{active} under way"));
         }
         if planned > 0 {
             parts.push(format!("{planned} planned"));
         }
-        if !ms_closed.is_empty() {
-            parts.push(format!("{} closed", ms_closed.len()));
-        }
         parts.join(" · ")
     };
 
     let loose_count =
         tasks.iter().filter(|t| t.milestone_id.is_none() && !matches!(t.state.as_str(), "archived")).count();
+    // "31 tasks · 25 done · estimated 279 h · 17 h of agent time" for a list of tasks.
+    let totals = |list: &[&Record]| -> anyhow::Result<String> {
+        let n = |st: &str| list.iter().filter(|t| t.state == st).count();
+        let mut parts = vec![plural(list.len() as i64, "task", "tasks")];
+        if n("done") > 0 {
+            parts.push(format!("{} done", n("done")));
+        }
+        let counted: Vec<&Record> =
+            list.iter().copied().filter(|t| !matches!(t.state.as_str(), "skipped" | "archived")).collect();
+        let est: i64 = counted.iter().map(|t| crate::times::estimate_min(t)).sum();
+        if est > 0 {
+            parts.push(format!("estimated {}", crate::times::fmt_min(est)));
+        }
+        let spent = crate::times::times_of(c, &p.slug, &counted, now)?.total_ms;
+        if spent > 0 {
+            parts.push(format!("{} of agent time", crate::times::fmt_ms(spent)));
+        }
+        Ok(parts.join(" · "))
+    };
     let build_board = |cur: Option<&Milestone>| -> anyhow::Result<Board> {
         let steps: Vec<&Milestone> = match cur {
-            Some(cur) => ms.iter().filter(|s| s.parent_id == Some(cur.id)).collect(),
+            Some(cur) => ms.iter().filter(|s| s.parent_id == Some(cur.id) && s.archived_at.is_none()).collect(),
             None => Vec::new(),
         };
-        let step = chosen_step.and_then(|n| steps.iter().find(|s| s.name.eq_ignore_ascii_case(n)).copied());
-        let ids: Vec<i64> = match (step, cur) {
-            (Some(s), _) => vec![s.id],
-            (None, Some(cur)) => projects::with_steps(&ms, cur.id),
-            (None, None) => Vec::new(),
+        let tasks_of = |s: &Milestone| -> Vec<&Record> {
+            let mut l: Vec<&Record> = tasks.iter().copied().filter(|t| t.milestone_id == Some(s.id)).collect();
+            l.sort_by(|a, b| a.position.partial_cmp(&b.position).unwrap_or(std::cmp::Ordering::Equal));
+            l
         };
-        let mut mine: Vec<&Record> = tasks
-            .iter()
-            .copied()
-            .filter(|t| match cur {
-                Some(_) => t.milestone_id.is_some_and(|m| ids.contains(&m)),
-                None => t.milestone_id.is_none(),
-            })
-            .collect();
+        // One step is always picked (D-219): the chosen one, else the one under way, else the
+        // next planned one, else the last.
+        let step = chosen_step
+            .and_then(|n| steps.iter().find(|s| s.name.eq_ignore_ascii_case(n)).copied())
+            .or_else(|| steps.iter().find(|s| s.state == "active").copied())
+            .or_else(|| steps.iter().find(|s| s.state != "closed").copied())
+            .or_else(|| steps.last().copied());
+        let all_mine: Vec<&Record> = match cur {
+            Some(cur) => {
+                let ids = projects::with_steps(&ms, cur.id);
+                tasks.iter().copied().filter(|t| t.milestone_id.is_some_and(|m| ids.contains(&m))).collect()
+            }
+            None => tasks.iter().copied().filter(|t| t.milestone_id.is_none()).collect(),
+        };
+        let mut mine: Vec<&Record> = match step {
+            Some(s) => tasks_of(s),
+            None => all_mine.clone(),
+        };
         mine.sort_by(|a, b| a.position.partial_cmp(&b.position).unwrap_or(std::cmp::Ordering::Equal));
         let col = |title: &'static str, states: &[&str]| {
             let mut list: Vec<&Record> = mine.iter().copied().filter(|t| states.contains(&t.state.as_str())).collect();
@@ -1253,69 +1373,55 @@ fn build_project_page(
                 more: more.into_iter().map(&task_card).collect(),
             }
         };
-        let count = |s: &str| mine.iter().filter(|t| t.state == s).count() as i64;
-        let mut summary = vec![plural(mine.len() as i64, "task", "tasks")];
-        if count("done") > 0 {
-            summary.push(format!("{} done", count("done")));
-        }
-        // The totals the Tasks tab had (D-218): estimated, and the agent's time in doing.
-        let counted: Vec<&Record> =
-            mine.iter().copied().filter(|t| !matches!(t.state.as_str(), "skipped" | "archived")).collect();
-        let est: i64 = counted.iter().map(|t| crate::times::estimate_min(t)).sum();
-        if est > 0 {
-            summary.push(format!("estimated {}", crate::times::fmt_min(est)));
-        }
-        let spent = crate::times::times_of(c, &p.slug, &counted, now)?.total_ms;
-        if spent > 0 {
-            summary.push(format!("{} of agent time", crate::times::fmt_ms(spent)));
-        }
-        // The step under way, else the next planned one, else the last.
-        let now_step = steps
-            .iter()
-            .find(|s| s.state == "active")
-            .or_else(|| steps.iter().find(|s| s.state != "closed"))
-            .or_else(|| steps.last())
-            .copied();
-        let tasks_of = |s: &Milestone| -> Vec<&Record> {
-            tasks.iter().copied().filter(|t| t.milestone_id == Some(s.id)).collect()
-        };
-        let step_sub = |s: &Milestone| {
-            let t = tasks_of(s);
-            let n = |st: &str| t.iter().filter(|x| x.state == st).count();
-            let mut parts = vec![plural(t.len() as i64, "task", "tasks")];
-            if n("todo") > 0 {
-                parts.push(format!("{} to do", n("todo")));
-            }
-            if n("doing") > 0 {
-                parts.push(format!("{} in progress", n("doing")));
-            }
-            if s.state == "closed" {
-                parts = vec!["done".into()];
-            }
-            parts.join(" · ")
-        };
         let ms_name = cur.map(|c| c.name.as_str()).unwrap_or(LOOSE);
-        let href = |step: Option<&str>| match step {
-            Some(n) => format!("/p/{}?ms={}&step={}#board", p.slug, ms_name, n),
-            None => format!("/p/{}?ms={}#board", p.slug, ms_name),
+        let class = |s: &Milestone| match s.state.as_str() {
+            "closed" => "done",
+            "active" => "now",
+            _ => "next",
         };
-        let item = |s: &&Milestone| StepItem {
-            name: s.name.clone(),
-            title: s.title.clone(),
-            sub: step_sub(s),
-            href: href(Some(&s.name)),
-            on: step.is_some_and(|x| x.id == s.id),
-        };
-        let open: Vec<StepItem> = steps.iter().filter(|s| s.state != "closed").map(item).collect();
-        let mut done: Vec<&&Milestone> = steps.iter().filter(|s| s.state == "closed").collect();
-        done.reverse();
-        let done_items: Vec<StepItem> = done.iter().map(|s| item(s)).collect();
-        let (recent, older) = if done_items.len() > 3 {
-            let mut d = done_items;
-            let older = d.split_off(3);
-            (d, older)
-        } else {
-            (done_items, Vec::new())
+        let rail = steps
+            .iter()
+            .map(|s| {
+                let t = tasks_of(s);
+                let counted = t.iter().filter(|x| !matches!(x.state.as_str(), "skipped" | "archived")).count();
+                let done = t.iter().filter(|x| x.state == "done").count();
+                RailStep {
+                    name: s.name.clone(),
+                    title: s.title.clone(),
+                    class: class(s),
+                    count: if t.is_empty() { "no tasks".into() } else { format!("{done} of {counted}") },
+                    href: format!("/p/{}/plan/{}?step={}", p.slug, ms_name, s.name),
+                    on: step.is_some_and(|x| x.id == s.id),
+                }
+            })
+            .collect();
+        let step_line = match step {
+            Some(s) => {
+                let t = tasks_of(s);
+                let n = |st: &str| t.iter().filter(|x| x.state == st).count();
+                let mut parts = Vec::new();
+                if s.state == "closed" {
+                    if let Some(at) = s.closed_at {
+                        parts.push(format!("done {}", tz.day(at)));
+                    }
+                } else {
+                    if n("todo") > 0 {
+                        parts.push(format!("{} to do", n("todo")));
+                    }
+                    if n("doing") > 0 {
+                        parts.push(format!("{} in progress", n("doing")));
+                    }
+                }
+                parts.push(totals(&t)?);
+                Some(StepView {
+                    name: s.name.clone(),
+                    title: s.title.clone(),
+                    class: class(s),
+                    url: format!("/p/{}/steps/{}", p.slug, s.id),
+                    sub: parts.join(" · "),
+                })
+            }
+            None => None,
         };
         let columns = vec![
             col("To do", &["todo"]),
@@ -1326,56 +1432,29 @@ fn build_project_page(
         ];
         // On the phone: the column with work in it first.
         let first_col = [1, 0, 2, 3, 4].into_iter().find(|&i| columns[i].count > 0).unwrap_or(0);
-        // The step bar shows the step the board shows, else the one under way (or next).
-        let bar_step = step.or(now_step);
         Ok(Board {
             title: match cur {
                 Some(cur) => format!("{} · {}", cur.name, cur.title),
                 None => "Without a milestone".into(),
             },
-            summary: summary.join(" · "),
+            summary: totals(&all_mine)?,
             note: if cur.is_none() {
                 "Tasks the agent parked without putting them in a milestone.".into()
             } else {
                 String::new()
             },
-            step_now_sub: bar_step.map(step_sub).unwrap_or_default(),
-            step_now: bar_step.map(|s| StepView {
-                name: s.name.clone(),
-                title: s.title.clone(),
-                class: match s.state.as_str() {
-                    "closed" => "done",
-                    "active" => "now",
-                    _ => "next",
-                },
-                url: format!("/p/{}/steps/{}", p.slug, s.id),
-            }),
-            dots: steps
-                .iter()
-                .map(|s| match s.state.as_str() {
-                    "closed" => "done",
-                    "active" => "now",
-                    _ => "",
-                })
-                .collect(),
-            steps_done: steps.iter().filter(|s| s.state == "closed").count(),
-            steps_total: steps.len(),
-            showing: match step {
-                Some(s) => format!("{} {}", s.name, s.title),
-                None => format!("All {} steps", steps.len()),
-            },
-            menu_all: (format!("All {} steps", steps.len()), href(None), step.is_none()),
-            menu_open: open,
-            menu_done: recent,
-            menu_done_more: older,
+            empty: cur.is_some() && steps.is_empty() && all_mine.is_empty(),
+            rail,
+            step: step_line,
             columns,
             first_col,
         })
     };
-    let board = match (loose_chosen, current.as_ref()) {
-        (true, _) => Some(build_board(None)?),
-        (false, Some(cur)) => Some(build_board(Some(cur))?),
-        (false, None) => None,
+    let board = match (plan, loose_chosen, current.as_ref()) {
+        (false, ..) => None,
+        (true, true, _) => Some(build_board(None)?),
+        (true, false, Some(cur)) => Some(build_board(Some(cur))?),
+        (true, false, None) => None,
     };
 
     let row = |r: &Record| {
@@ -1549,6 +1628,7 @@ fn build_project_page(
         None
     };
     Ok(ProjectPage {
+        path: Vec::new(),
         to_test_open: crate::totest::open_count(c, p.id)?,
         doc_line: super::projectdoc::short_line(&crate::projectdoc::get(c, p.id)?, now_ms()),
         notes: None,
@@ -1565,12 +1645,10 @@ fn build_project_page(
         headline,
         tab: tab.into(),
         about,
-        ms_now,
-        ms_rows,
-        ms_closed_open: ms_closed.iter().any(|r| r.selected),
+        ms_done,
+        ms_list,
         loose_count,
         loose_selected: loose_chosen,
-        ms_closed,
         ms_counts,
         qcards,
         server: if tab == "overview" {
@@ -1580,7 +1658,6 @@ fn build_project_page(
         },
         board,
         agent: AgentCard {
-            machine: if p.agent.machine.is_empty() { "–".into() } else { p.agent.machine.clone() },
             model: [p.agent.model.as_str(), p.agent.effort.as_str()]
                 .iter()
                 .filter(|s| !s.is_empty())
@@ -1631,7 +1708,7 @@ fn build_project_page(
         shot_cats: Vec::new(),
         // The overview counts them for its tab; the Pull requests tab lists them (the owner,
         // 2026-11-18: "lets remove the merge panel from the project dashboard").
-        prs_total: if tab == "overview" {
+        prs_total: if matches!(tab, "overview" | "plan") {
             c.query_row(
                 "SELECT count(*) FROM records WHERE project_id = ?1 AND kind = 'pr' AND state = 'open'",
                 [p.id],
@@ -1715,6 +1792,8 @@ struct HistoryEvent {
 #[template(path = "record.html")]
 struct RecordPage {
     nav: Nav,
+    /// Projects / the project / where the record lives / the record (D-222).
+    path: Vec<super::pages::PathPart>,
     session_url: Option<String>,
     /// A draft for someone else's repository, with Send, Ask for changes and Drop.
     draft: Option<super::outgoing::DraftView>,
@@ -1723,7 +1802,6 @@ struct RecordPage {
     to_test: Option<super::totest::View>,
     project_slug: String,
     project_name: String,
-    kind_label: &'static str,
     kind: &'static str,
     id: String,
     short: String,
@@ -1821,6 +1899,43 @@ async fn record(
         page.draft_notice = Some((true, tested_notice(n)));
     }
     render(page)
+}
+
+/// A record's path (D-222): Projects / the project / where it lives (a task: Plan, its milestone and
+/// step; others: their tab) / the record.
+fn record_path(c: &Connection, r: &Record, project: &Project) -> anyhow::Result<Vec<super::pages::PathPart>> {
+    use super::pages::PathPart;
+    let slug = &project.slug;
+    let mut path =
+        vec![PathPart::link("Projects", "/projects"), PathPart::link(project.name.clone(), format!("/p/{slug}"))];
+    let tab = match r.kind {
+        Kind::Task => None,
+        Kind::Question => Some("questions"),
+        Kind::Decision | Kind::Adr => Some("decisions"),
+        Kind::Pr => Some("prs"),
+        Kind::Build | Kind::Feedback => Some("builds"),
+        Kind::Screenshot => Some("screenshots"),
+        Kind::Test => Some("to-test"),
+        Kind::Note => Some("notes"),
+        Kind::Release | Kind::Contribution => None,
+    };
+    if let Some(t) = tab {
+        let label = TABS.iter().find(|(k, _)| *k == t).map(|(_, l)| *l).unwrap_or(t);
+        path.push(PathPart::link(label, format!("/p/{slug}?tab={t}")));
+    }
+    // A task: Plan, opened with its milestone and step picked.
+    if r.kind == Kind::Task {
+        let href = match r.milestone_id.map(|id| projects::get_milestone(c, id)).transpose()? {
+            Some(m) => match m.parent_id.map(|id| projects::get_milestone(c, id)).transpose()? {
+                Some(parent) => format!("/p/{slug}/plan/{}?step={}", parent.name, m.name),
+                None => format!("/p/{slug}/plan/{}", m.name),
+            },
+            None => format!("/p/{slug}/plan/{LOOSE}"),
+        };
+        path.push(PathPart::link("Plan", href));
+    }
+    path.push(PathPart::here(r.short_id()));
+    Ok(path)
 }
 
 async fn load_record_page(
@@ -1946,13 +2061,14 @@ async fn load_record_page(
             } else {
                 Vec::new()
             };
+            let path = record_path(c, &r, &project)?;
             Ok(Some((
                 r,
                 project,
                 links,
                 history,
                 buttons,
-                (session_url, draft, draft_notice, to_test, time, timings, scope, scope_choices),
+                (session_url, draft, draft_notice, to_test, time, timings, scope, scope_choices, path),
             )))
         })
         .await?
@@ -1963,7 +2079,7 @@ async fn load_record_page(
         links,
         history,
         buttons,
-        (session_url, draft, draft_notice, to_test, time, timings, scope, scope_choices),
+        (session_url, draft, draft_notice, to_test, time, timings, scope, scope_choices, path),
     ) = page;
 
     let mut blocking = Vec::new();
@@ -2102,15 +2218,8 @@ async fn load_record_page(
     };
 
     Ok(RecordPage {
-        nav: nav(state, actor, "/projects").await.back_to(
-            // A screenshot goes back to the Screenshots it was opened from.
-            if r.kind == Kind::Screenshot {
-                format!("/p/{}?tab=screenshots", project.slug)
-            } else {
-                format!("/p/{}", project.slug)
-            },
-            project.name.clone(),
-        ),
+        nav: nav(state, actor, "/projects").await.up(&path),
+        path,
         session_url,
         // A text note's body is its text, shown in its own section.
         body_html: if draft.is_some() || (r.kind == Kind::Note && r.str("ext").is_empty()) {
@@ -2123,7 +2232,6 @@ async fn load_record_page(
         to_test,
         project_slug: project.slug,
         project_name: project.name,
-        kind_label: r.kind.label(),
         kind: r.kind.as_str(),
         id: r.ref_id.clone(),
         short: r.short_id(),
