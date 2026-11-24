@@ -287,6 +287,9 @@ mod tests {
         let unit = read("etc/systemd/system/agentflow.service");
         assert!(unit.contains("User=agentflow") && unit.contains("ProtectHome=yes") && !unit.contains("@BIN@"));
         assert!(read("etc/systemd/user/agentflow-hands.service").contains(" hands"));
+        // A shell for the consultant's tmux session: sysusers gives nologin when the line has none.
+        let user = read("etc/sysusers.d/agentflow.conf");
+        assert!(user.lines().any(|l| l.starts_with("u agentflow ") && l.ends_with(" /bin/bash")), "{user}");
         // A second run keeps the config.
         std::fs::write(root.path().join("etc/agentflow/config.toml"), "listen = \"127.0.0.1:9\"\n").unwrap();
         setup(args(root.path())).unwrap();

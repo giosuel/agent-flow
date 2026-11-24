@@ -622,7 +622,10 @@ struct Board {
     /// A line under the heading: for the tasks without a milestone.
     note: String,
     /// The step rail (the owner, 2026-11-18, D-219): every step; none for a milestone without.
+    /// Last, "Not in a step" when tasks sit on the milestone itself.
     rail: Vec<RailStep>,
+    /// How many steps the milestone has.
+    steps: usize,
     /// The picked step, described above the board.
     step: Option<StepView>,
     /// A milestone with no steps and no tasks: "Nothing on the board yet" instead of columns.
@@ -1389,13 +1392,26 @@ fn build_project_page(
             l.sort_by(|a, b| a.position.partial_cmp(&b.position).unwrap_or(std::cmp::Ordering::Equal));
             l
         };
+        // Tasks put on a milestone that has steps, not on one of them: one more entry on the
+        // rail (`?step=none`), or they'd be in no step's columns and nowhere on Plan.
+        let own: Vec<&Record> = match cur {
+            Some(cur) if !steps.is_empty() => {
+                let mut l: Vec<&Record> =
+                    tasks.iter().copied().filter(|t| t.milestone_id == Some(cur.id) && t.state != "archived").collect();
+                l.sort_by(|a, b| a.position.partial_cmp(&b.position).unwrap_or(std::cmp::Ordering::Equal));
+                l
+            }
+            _ => Vec::new(),
+        };
+        let own_picked = !own.is_empty() && chosen_step.is_some_and(|n| n.eq_ignore_ascii_case(LOOSE));
         // One step is always picked (D-219): the chosen one, else the one under way, else the
         // next planned one, else the last.
         let step = chosen_step
             .and_then(|n| steps.iter().find(|s| s.name.eq_ignore_ascii_case(n)).copied())
             .or_else(|| steps.iter().find(|s| s.state == "active").copied())
             .or_else(|| steps.iter().find(|s| s.state != "closed").copied())
-            .or_else(|| steps.last().copied());
+            .or_else(|| steps.last().copied())
+            .filter(|_| !own_picked);
         let all_mine: Vec<&Record> = match cur {
             Some(cur) => {
                 let ids = projects::with_steps(&ms, cur.id);
@@ -1405,6 +1421,7 @@ fn build_project_page(
         };
         let mut mine: Vec<&Record> = match step {
             Some(s) => tasks_of(s),
+            None if own_picked => own.clone(),
             None => all_mine.clone(),
         };
         mine.sort_by(|a, b| a.position.partial_cmp(&b.position).unwrap_or(std::cmp::Ordering::Equal));
@@ -1432,7 +1449,7 @@ fn build_project_page(
             "active" => "now",
             _ => "next",
         };
-        let rail = steps
+        let mut rail: Vec<RailStep> = steps
             .iter()
             .map(|s| {
                 let t = tasks_of(s);
@@ -1448,6 +1465,24 @@ fn build_project_page(
                 }
             })
             .collect();
+        if let (Some(cur), false) = (cur, own.is_empty()) {
+            let counted = own.iter().filter(|x| !matches!(x.state.as_str(), "skipped" | "archived")).count();
+            let done = own.iter().filter(|x| x.state == "done").count();
+            rail.push(RailStep {
+                name: cur.name.clone(),
+                title: "Not in a step".into(),
+                class: if own.iter().any(|x| x.state == "doing") {
+                    "now"
+                } else if done == counted {
+                    "done"
+                } else {
+                    "next"
+                },
+                count: format!("{done} of {counted}"),
+                href: format!("/p/{}/plan/{}?step={LOOSE}", p.slug, ms_name),
+                on: own_picked,
+            });
+        }
         let step_line = match step {
             Some(s) => {
                 let t = tasks_of(s);
@@ -1497,6 +1532,7 @@ fn build_project_page(
                 String::new()
             },
             empty: cur.is_some() && steps.is_empty() && all_mine.is_empty(),
+            steps: steps.len(),
             rail,
             step: step_line,
             columns,
@@ -1894,7 +1930,8 @@ fn record_path(c: &Connection, r: &Record, project: &Project) -> anyhow::Result<
         let href = match r.milestone_id.map(|id| projects::get_milestone(c, id)).transpose()? {
             Some(m) => match m.parent_id.map(|id| projects::get_milestone(c, id)).transpose()? {
                 Some(parent) => format!("/p/{slug}/plan/{}?step={}", parent.name, m.name),
-                None => format!("/p/{slug}/plan/{}", m.name),
+                // Under "Not in a step" when the milestone has steps; without, its board has them all.
+                None => format!("/p/{slug}/plan/{}?step={LOOSE}", m.name),
             },
             None => format!("/p/{slug}/plan/{LOOSE}"),
         };
