@@ -24,6 +24,32 @@ pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/api/sync/state", post(state_of))
         .route("/api/sync", post(upload).layer(DefaultBodyLimit::max(MAX_UPLOAD)))
+        .route("/api/sync/split", post(split).layer(DefaultBodyLimit::max(MAX_UPLOAD)))
+}
+
+#[derive(Deserialize)]
+struct SplitBody {
+    /// (message id, cache writes kept for an hour, fast mode)
+    calls: Vec<(String, i64, bool)>,
+}
+
+/// Cache writes by duration and fast mode for calls AgentFlow stored before it kept them (M13):
+/// flow sends them once per folder; only the project's own calls change.
+async fn split(
+    State(state): State<AppState>,
+    Extension(actor): Extension<Actor>,
+    Json(b): Json<SplitBody>,
+) -> Response {
+    let Some((project_id, _)) = project_of(&actor) else {
+        return json_error(StatusCode::FORBIDDEN, "flow sync runs with a project's token");
+    };
+    if b.calls.len() > 100_000 {
+        return json_error(StatusCode::BAD_REQUEST, "at most 100000 calls at once");
+    }
+    match state.db.call(move |c| crate::usage::fill_split(c, project_id, &b.calls)).await {
+        Ok(n) => Json(json!({"filled": n})).into_response(),
+        Err(e) => json_error(StatusCode::BAD_REQUEST, format!("{e:#}")),
+    }
 }
 
 /// The key a file's offset is kept under: the project's own, so one project's token can never
