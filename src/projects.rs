@@ -252,6 +252,26 @@ pub fn update(
             bail!("another project publishes builds as {product:?} already");
         }
     }
+    if let Some(v) = patch.repo.as_deref().map(str::trim)
+        && !v.is_empty()
+        && v != get_by_id(conn, project_id)?.repo
+    {
+        // AgentFlow's Merge and Push tag buttons act on this repository with the server's token,
+        // and its PRs become this project's: it must be a real owner/name, and no other project's.
+        if !looks_like_repo(v) || crate::github::check_repo(v).is_err() {
+            bail!("repo {v:?} isn't owner/name, e.g. \"giosuel/vinculum\"");
+        }
+        let taken: Option<String> = conn
+            .query_row(
+                "SELECT slug FROM projects WHERE id != ?2 AND lower(trim(repo)) = lower(?1)",
+                params![v, project_id],
+                |r| r.get(0),
+            )
+            .optional()?;
+        if let Some(slug) = taken {
+            bail!("{v} is the repository of the project {slug} already");
+        }
+    }
     if let Some(v) = &patch.merge_method {
         if !["merge", "squash", "rebase"].contains(&v.trim()) {
             bail!("merge_method is merge, squash or rebase");
@@ -747,6 +767,28 @@ pub fn update_milestone(
 mod tests {
     use super::*;
     use crate::db::Db;
+
+    #[test]
+    fn a_repository_belongs_to_one_project() {
+        let db = Db::open_memory();
+        db.call_blocking(|c| {
+            let a = create(c, "a", "A", "t")?;
+            let b = create(c, "b", "B", "t")?;
+            let repo = |v: &str| ProjectPatch { repo: Some(v.into()), ..Default::default() };
+            update(c, b.id, &repo("giosuel/b"), "b")?;
+            for bad in ["giosuel/b", "Giosuel/B", "not a repo", "a/b/c", "https://github.com/giosuel/a", "x"] {
+                assert!(update(c, a.id, &repo(bad), "a").is_err(), "{bad}");
+            }
+            assert_eq!(get_by_id(c, a.id)?.repo, "");
+            update(c, a.id, &repo(" giosuel/a "), "a")?;
+            assert_eq!(get_by_id(c, a.id)?.repo, "giosuel/a");
+            // Saying the same again, or taking it away, is fine.
+            update(c, b.id, &repo("giosuel/b"), "b")?;
+            update(c, a.id, &repo(""), "a")?;
+            Ok(())
+        })
+        .unwrap();
+    }
 
     #[test]
     fn slugs() {
