@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "ui.html" as ui %}
 {% block title %}{{ name }}{% endblock %}
 {% block content %}
 <div class="head proj-head">
@@ -29,14 +30,8 @@
   <article class="qc{% if !loop.first %} qc-more{% endif %}" aria-labelledby="qt-{{ q.short }}">
     <div class="qh"><a class="mono qid" href="{{ q.url }}">{{ q.short }}</a><span class="chip">{{ q.scope }}</span><span class="qwhen">{{ q.asked }}</span>{% if !q.blocks.is_empty() %}<span class="warn-text qblocks">· blocks {% for (t, u) in q.blocks %}{% if !loop.first %}, {% endif %}<a class="warn-text" href="{{ u }}">{{ t }}</a>{% endfor %}</span>{% endif %}</div>
     <h3 class="qt" id="qt-{{ q.short }}"><a href="{{ q.url }}">{{ q.title }}</a></h3>
-    {% if !q.options.is_empty() %}
-    <div class="qopts" role="list" aria-label="Answers">
-      {% for (n, t, rec) in q.options %}
-      <form method="post" action="/p/{{ slug }}/{{ q.short }}/answer" role="listitem"><input type="hidden" name="option" value="{{ n }}"><input type="hidden" name="next" value="/p/{{ slug }}?answered={{ q.short }}"><button class="qopt{% if *rec %} rec{% endif %}" type="submit"><span class="n mono">{{ n }}</span><span class="t">{{ t }}</span>{% if *rec %}<span class="chip accent">recommended</span>{% endif %}</button></form>
-      {% endfor %}
-    </div>
-    {% endif %}
-    <div class="qf"><span class="sub">{% if q.options.is_empty() %}No options: answer in your own words{% else %}Pick one to answer{% endif %}</span><a class="sub" href="{{ q.url }}">{% if q.options.is_empty() %}Answer{% else if q.more > 0 %}{{ q.more }} more, or your own{% else %}or write your own{% endif %}</a></div>
+    {% if !q.options.is_empty() %}{% call ui::choices("/p/{}/{}/answer"|format(slug, q.short), "/p/{}?answered={}"|format(slug, q.short), q.options.as_slice(), false, "") %}{% endcall %}{% endif %}
+    <div class="qf"><span class="sub">{% if q.options.is_empty() %}No options: answer in your own words{% else %}Answer one here{% endif %}</span><a class="sub" href="{{ q.url }}">{% if q.options.is_empty() %}Answer{% else if q.more > 0 %}{{ q.more }} more, or your own{% else %}or write your own{% endif %}</a></div>
   </article>
   {% if !loop.first %}<a class="qmini" href="{{ q.url }}"><span><span class="mono qid">{{ q.short }}</span> <span class="sub">· {{ q.scope }} · {{ q.asked }}</span><br><span class="qm-t">{{ q.title }}</span></span><span class="of-chev">{{ crate::web::icons::icon("chevron")|safe }}</span></a>{% endif %}
   {% endfor %}

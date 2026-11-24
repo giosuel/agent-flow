@@ -12,6 +12,15 @@ use super::pages::{Nav, nav, render};
 use super::{AppResult, AppState};
 use crate::auth::Actor;
 
+/// One answer to a question, for the answer control (templates/ui.html, `choices`): the same on
+/// the Dashboard, the overview and the question's page (N-19 #1: it was three controls).
+pub struct Choice {
+    pub n: usize,
+    pub title: String,
+    pub detail: String,
+    pub recommended: bool,
+}
+
 pub fn routes() -> Router<AppState> {
     Router::new().route("/ui", get(page))
 }
@@ -110,6 +119,7 @@ struct UiPage {
     type_roles: &'static [(&'static str, &'static str, &'static str, &'static str, &'static str)],
     buttons: &'static [(&'static str, &'static str, &'static str)],
     states: &'static [&'static str],
+    choices: Vec<Choice>,
     spacing: &'static [u32],
     radii: &'static [(&'static str, &'static str)],
     icons: &'static [&'static str],
@@ -131,6 +141,15 @@ async fn page(State(state): State<AppState>, Extension(actor): Extension<Actor>)
         type_roles: TYPE,
         buttons: BUTTONS,
         states: STATES,
+        choices: vec![
+            Choice {
+                n: 1,
+                title: "One Decisions tab: questions on top, answered in place".into(),
+                detail: "The answer becomes a decision quoting you".into(),
+                recommended: true,
+            },
+            Choice { n: 2, title: "Both stay, each made better".into(), detail: String::new(), recommended: false },
+        ],
         spacing: &[2, 4, 6, 8, 12, 16, 20, 24, 32, 48],
         radii: &[("xs", "4"), ("sm", "6"), ("md", "8"), ("lg", "12"), ("xl", "16"), ("pill", "999")],
         icons: super::icons::ALL,

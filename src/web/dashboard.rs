@@ -33,7 +33,7 @@ struct Featured {
     blocks: Vec<(String, String)>,
     title: String,
     body_html: String,
-    options: Vec<(usize, String, String, bool)>,
+    options: Vec<super::uilib::Choice>,
 }
 
 struct Item {
@@ -381,7 +381,7 @@ fn featured(q: &Record, project: String, blocks: Vec<(String, String)>, now: i64
                 .enumerate()
                 .map(|(i, o)| {
                     let s = |k: &str| o.get(k).and_then(Value::as_str).unwrap_or("").to_owned();
-                    (i + 1, s("title"), s("detail"), rec == i + 1)
+                    super::uilib::Choice { n: i + 1, title: s("title"), detail: s("detail"), recommended: rec == i + 1 }
                 })
                 .collect()
         })

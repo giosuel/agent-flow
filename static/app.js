@@ -27,6 +27,39 @@
   if (document.cookie.split("; ").includes(want)) location.reload();
 })();
 
+// Answering a question: pick an option or write your own answer, never both, and nothing goes
+// out until Send answer (the owner, 2026-11-11). Choosing an option empties the text; typing
+// clears the option; Send is enabled only when exactly one of them is given. The server refuses
+// both as well, so this holds without the script too.
+const wireAnswers = (root) => {
+  for (const form of root.querySelectorAll("form[data-answer]")) {
+    const words = form.querySelector("[name=words]");
+    const radios = [...form.querySelectorAll("input[name=option]")];
+    const send = form.querySelector("button[type=submit]");
+    const update = () => {
+      const picked = radios.some((r) => r.checked);
+      const typed = words && words.value.trim() !== "";
+      send.disabled = !(picked !== typed);
+    };
+    for (const r of radios) {
+      r.addEventListener("change", () => {
+        if (words) words.value = "";
+        update();
+      });
+    }
+    if (words) {
+      words.addEventListener("input", () => {
+        if (words.value.trim() !== "") for (const r of radios) r.checked = false;
+        update();
+      });
+    }
+    update();
+  }
+};
+document.addEventListener("DOMContentLoaded", () => wireAnswers(document));
+document.addEventListener("af:content", (e) => wireAnswers(e.detail));
+
+
 // Dialogs in the page's own style instead of the browser's (the owner, 2026-11-17: "remove all
 // the simple alerts and replace them with actual styled dialogs that fit into the design"): a
 // centred card over a dimmed page, on the phone too. window.afDialog({title, text, ok, cancel,
@@ -371,37 +404,6 @@ document.addEventListener("af:content", (e) => wireCopy(e.detail));
   });
 })();
 
-// Answering a question: pick an option or write your own answer, never both, and nothing goes
-// out until Send answer (the owner, 2026-11-11). Choosing an option empties the text; typing
-// clears the option; Send is enabled only when exactly one of them is given. The server refuses
-// both as well, so this holds without the script too.
-const wireAnswers = (root) => {
-  for (const form of root.querySelectorAll("form[data-answer]")) {
-    const words = form.querySelector("[name=words]");
-    const radios = [...form.querySelectorAll("input[name=option]")];
-    const send = form.querySelector("button[type=submit]");
-    const update = () => {
-      const picked = radios.some((r) => r.checked);
-      const typed = words && words.value.trim() !== "";
-      send.disabled = !(picked !== typed);
-    };
-    for (const r of radios) {
-      r.addEventListener("change", () => {
-        if (words) words.value = "";
-        update();
-      });
-    }
-    if (words) {
-      words.addEventListener("input", () => {
-        if (words.value.trim() !== "") for (const r of radios) r.checked = false;
-        update();
-      });
-    }
-    update();
-  }
-};
-document.addEventListener("DOMContentLoaded", () => wireAnswers(document));
-document.addEventListener("af:content", (e) => wireAnswers(e.detail));
 
 // To test: count what's ticked; Send needs at least one.
 const wireToTest = (root) => {

@@ -5,3 +5,12 @@
 {# Number: the field with its own steppers (static/ui.css .numf; app.js steps within min and max).
    id is prefix-key; max may be "" for none. #}
 {% macro number(prefix, key, name, min, max, value) %}<span class="numf"><input id="{{ prefix }}-{{ key }}" class="num" name="{{ name }}" type="number" min="{{ min }}"{% if !max.is_empty() %} max="{{ max }}"{% endif %} step="1" value="{{ value }}"><span class="numf-b"><button type="button" tabindex="-1" data-step="1" aria-label="One more">{{ crate::web::icons::icon("chevron")|safe }}</button><button type="button" tabindex="-1" data-step="-1" aria-label="One less">{{ crate::web::icons::icon("chevron")|safe }}</button></span></span>{% endmacro %}
+
+{# Answer a question: pick one option or write your own words, never both, and nothing goes out
+   until Send answer (the owner, 2026-11-11); one control on the Dashboard, the overview and the
+   question's page (N-19 #1). app.js enables Send when exactly one of them is given; the server
+   refuses both too. Fields an item needs: n, title, detail, recommended. #}
+{% macro choices(action, next, items, own, own_id) %}<form method="post" action="{{ action }}" class="choices" data-answer>{% if !next.is_empty() %}<input type="hidden" name="next" value="{{ next }}">{% endif %}
+{% if !items.is_empty() %}<fieldset class="choice-list"><legend class="vh">Options</legend>{% for c in items %}<label class="choice{% if c.recommended %} rec{% endif %}"><input type="radio" name="option" value="{{ c.n }}"><span class="num">{{ c.n }}</span><span class="txt">{{ c.title }}{% if !c.detail.is_empty() %}<span class="sub">{{ c.detail }}</span>{% endif %}</span>{% if c.recommended %}<span class="chip accent">recommended</span>{% endif %}</label>{% endfor %}</fieldset>{% endif %}
+<div class="choice-own">{% if own %}<label class="vh" for="{{ own_id }}">Answer in your own words</label><input id="{{ own_id }}" name="words" autocomplete="off" placeholder="{% if items.is_empty() %}Your answer{% else %}Or answer in your own words{% endif %}">{% endif %}<button class="btn" type="submit">Send answer</button></div>
+</form>{% endmacro %}
