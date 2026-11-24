@@ -36,6 +36,39 @@ pub struct Manifest {
     pub total: u64,
 }
 
+/// What a build runs on, e.g. "linux-x86_64" or "windows-x86_64" (Imaginarium's agent, 2026-11-12:
+/// a Windows exe mustn't be offered to flow-run on Linux). Older builds without one are Linux.
+pub const DEFAULT_PLATFORM: &str = "linux-x86_64";
+
+pub fn check_platform(p: &str) -> anyhow::Result<()> {
+    let ok = p.len() <= 40
+        && p.split_once('-').is_some_and(|(os, arch)| {
+            !os.is_empty() && !arch.is_empty() && os.chars().all(|c| c.is_ascii_lowercase())
+                && arch.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+        });
+    if !ok {
+        bail!("a platform is os-arch, e.g. linux-x86_64, windows-x86_64 or linux-aarch64");
+    }
+    Ok(())
+}
+
+/// The platform this program runs on, in the same words.
+pub fn this_platform() -> String {
+    format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH)
+}
+
+/// "Linux · x86_64".
+pub fn platform_label(p: &str) -> String {
+    let (os, arch) = p.split_once('-').unwrap_or((p, ""));
+    let os = match os {
+        "linux" => "Linux",
+        "windows" => "Windows",
+        "macos" => "macOS",
+        o => o,
+    };
+    if arch.is_empty() { os.to_owned() } else { format!("{os} · {arch}") }
+}
+
 /// Product names: lowercase letters, digits and dashes, like viber-run's.
 pub fn check_product(product: &str) -> anyhow::Result<()> {
     let ok = !product.is_empty()
@@ -318,6 +351,17 @@ pub fn entry_path(dir: &Path, manifest: &Manifest, entry: &str) -> anyhow::Resul
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn platforms() {
+        for ok in ["linux-x86_64", "windows-x86_64", "linux-aarch64", "macos-aarch64"] {
+            assert!(check_platform(ok).is_ok(), "{ok}");
+        }
+        for bad in ["linux", "Linux-x86_64", "linux x86", "-x86", "linux-"] {
+            assert!(check_platform(bad).is_err(), "{bad}");
+        }
+        assert_eq!(platform_label("windows-x86_64"), "Windows · x86_64");
+    }
 
     fn tar_with(entries: &[(&str, &[u8], u32)]) -> Vec<u8> {
         let mut b = tar::Builder::new(Vec::new());

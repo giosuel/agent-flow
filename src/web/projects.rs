@@ -1465,6 +1465,10 @@ struct RecordPage {
 /// A build's page: how to start it and what to try.
 struct BuildView {
     run: String,
+    /// "Linux · x86_64"; a build that isn't for flow-run is a download instead.
+    platform: String,
+    download: String,
+    needs: Vec<String>,
     facts: Vec<(String, String)>,
     /// (index, title, what to try)
     features: Vec<(usize, String, String)>,
@@ -1794,6 +1798,7 @@ fn build_view(r: &Record, links: &[records::LinkView], sent: bool) -> BuildView 
     };
     facts.push(("Size".into(), size));
     facts.push(("Starts".into(), r.str("entry").into()));
+    let platform = if r.str("platform").is_empty() { crate::builds::DEFAULT_PLATFORM } else { r.str("platform") };
     if !r.str("tag").is_empty() {
         facts.push(("Tag".into(), r.str("tag").into()));
     }
@@ -1818,6 +1823,9 @@ fn build_view(r: &Record, links: &[records::LinkView], sent: bool) -> BuildView 
         .collect();
     BuildView {
         run: format!("flow-run {} {}", r.str("product"), r.number),
+        platform: crate::builds::platform_label(platform),
+        download: if platform == crate::builds::DEFAULT_PLATFORM { String::new() } else { format!("{}/download", r.url()) },
+        needs: r.data.get("needs").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_str).map(str::to_owned).collect()).unwrap_or_default(),
         facts,
         features,
         given,

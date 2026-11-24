@@ -30,6 +30,7 @@ pub fn routes() -> Router<AppState> {
         .route("/api/builds/{product}", get(list))
         .route("/api/builds/{product}/{number}", get(one))
         .route("/api/builds/{product}/{number}/archive", get(archive))
+        .route("/p/{slug}/{id}/download", get(download))
         .route("/p/{slug}/{id}/feedback", post(feedback))
         .route("/download/agentflow", get(download_self))
 }
@@ -89,6 +90,12 @@ struct UploadQuery {
     /// "Title: what to try", repeatable via `feature=`; JSON list here.
     #[serde(default)]
     features: String,
+    /// What it runs on, e.g. "windows-x86_64"; Linux x86_64 if left out.
+    #[serde(default)]
+    platform: String,
+    /// What it needs, e.g. ["glibc 2.39 or newer", "Vulkan"]: a JSON list.
+    #[serde(default)]
+    needs: String,
     /// The consultant names the project; agents publish to their own.
     project: Option<String>,
 }
@@ -222,7 +229,7 @@ async fn upload(
         anyhow::Ok(manifest)
     }
     .await;
-    let manifest = match result.and_then(|m| pick_entry(&m, q.entry.trim()).map(|e| (m, e))) {
+    let manifest = match result.and_then(|m| pick_entry(&m, q.entry.trim(), q.platform.trim().is_empty() || q.platform.trim() == builds::DEFAULT_PLATFORM).map(|e| (m, e))) {
         Ok(m) => m,
         Err(e) => return json_error(StatusCode::BAD_REQUEST, format!("{e:#}")),
     };
@@ -269,6 +276,18 @@ async fn upload(
         })
         .filter(|(t, _)| !t.is_empty())
         .collect();
+    let platform = if q.platform.trim().is_empty() { builds::DEFAULT_PLATFORM.to_owned() } else { q.platform.trim().to_owned() };
+    if let Err(e) = builds::check_platform(&platform) {
+        return json_error(StatusCode::BAD_REQUEST, format!("{e:#}"));
+    }
+    let needs: Vec<String> = if q.needs.trim().is_empty() {
+        Vec::new()
+    } else {
+        match serde_json::from_str::<Vec<String>>(&q.needs) {
+            Ok(n) if n.len() <= 12 && n.iter().all(|x| x.chars().count() <= 200) => n.into_iter().map(|x| x.trim().to_owned()).filter(|x| !x.is_empty()).collect(),
+            _ => return json_error(StatusCode::BAD_REQUEST, "needs is a list of up to 12 short lines"),
+        }
+    };
     let (a, p, nm, ent) = (actor.clone(), project.clone(), name.clone(), entry.clone());
     let created = state
         .db
@@ -282,6 +301,10 @@ async fn upload(
             data.insert("size".into(), manifest.total.into());
             data.insert("files_count".into(), manifest.files.len().into());
             data.insert("features".into(), features.into());
+            data.insert("platform".into(), platform.clone().into());
+            if !needs.is_empty() {
+                data.insert("needs".into(), needs.clone().into());
+            }
             data.insert("ready_for_feedback".into(), false.into());
             if !q.tag.trim().is_empty() {
                 data.insert("tag".into(), q.tag.trim().into());
@@ -320,7 +343,12 @@ async fn upload(
     if ready {
         notify_build(&state, &project.name, &r);
     }
-    Json(json!({"id": r.ref_id, "number": r.number, "name": name, "run": format!("flow-run {} {}", r.str("product"), r.number)})).into_response()
+    let run = if r.str("platform") == builds::DEFAULT_PLATFORM {
+        format!("flow-run {} {}", r.str("product"), r.number)
+    } else {
+        format!("download it from {}{}", state.config.public_url.trim_end_matches('/'), r.url())
+    };
+    Json(json!({"id": r.ref_id, "number": r.number, "name": name, "run": run})).into_response()
 }
 
 pub fn notify_build(state: &AppState, project_name: &str, r: &Record) {
@@ -336,17 +364,19 @@ pub fn notify_build(state: &AppState, project_name: &str, r: &Record) {
 }
 
 /// The file that starts the build: given, or the only file when it's a single binary.
-fn pick_entry(m: &Manifest, entry: &str) -> anyhow::Result<String> {
+/// The file that starts the build. On Linux it must be executable (flow-run starts it); other
+/// platforms' builds are downloads, where the mode doesn't travel.
+fn pick_entry(m: &Manifest, entry: &str, linux: bool) -> anyhow::Result<String> {
     if entry.is_empty() {
         return match m.files.as_slice() {
-            [only] if only.executable => Ok(only.path.clone()),
+            [only] if only.executable || !linux => Ok(only.path.clone()),
             [_] => anyhow::bail!("the file isn't executable"),
             _ => anyhow::bail!("a folder needs --entry, the executable that starts it"),
         };
     }
     let e = entry.trim_start_matches("./");
     match m.files.iter().find(|f| f.path == e) {
-        Some(f) if f.executable => Ok(f.path.clone()),
+        Some(f) if f.executable || !linux => Ok(f.path.clone()),
         Some(_) => anyhow::bail!("{e} isn't executable"),
         None => anyhow::bail!("{e} isn't in the build"),
     }
@@ -370,6 +400,7 @@ fn summary(r: &Record) -> Value {
     json!({
         "number": r.number, "name": r.str("name"), "summary": r.title, "commit": r.str("commit"), "branch": r.str("branch"),
         "entry": r.str("entry"), "size": r.data.get("size"), "tag": r.data.get("tag"), "published": crate::util::fmt_utc(r.created_at),
+        "platform": if r.str("platform").is_empty() { builds::DEFAULT_PLATFORM } else { r.str("platform") }, "needs": r.data.get("needs"),
         "project": r.project, "page": r.url(),
     })
 }
@@ -601,4 +632,57 @@ async fn feedback(
         }
         Err(e) => Err(AppError::BadRequest(format!("{e:#}"))),
     }
+}
+
+/// A build for the owner to download (one that isn't for flow-run, like a Windows exe): its one
+/// file when it's a single file, else the whole archive.
+async fn download(
+    State(state): State<AppState>,
+    Extension(actor): Extension<Actor>,
+    Path((slug, id)): Path<(String, String)>,
+) -> Response {
+    let s = slug.clone();
+    let found = state
+        .db
+        .call(move |c| {
+            let Ok(rref) = records::RecordRef::parse(&format!("{s}/{id}")) else { return Ok(None) };
+            Ok(records::try_find(c, &rref, None)?.filter(|r| r.kind == Kind::Build))
+        })
+        .await;
+    let Ok(Some(r)) = found else { return StatusCode::NOT_FOUND.into_response() };
+    let dir = builds_dir(&state);
+    let (product, name, entry) = (r.str("product").to_owned(), r.str("name").to_owned(), r.str("entry").to_owned());
+    let archive = builds::archive_path(&dir, &product, &name);
+    let manifest: Option<Manifest> =
+        std::fs::read(builds::manifest_path(&dir, &product, &name)).ok().and_then(|b| serde_json::from_slice(&b).ok());
+    let single = manifest.as_ref().is_some_and(|m| m.files.len() == 1);
+    let bytes = tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<u8>> {
+        if !single {
+            return Ok(std::fs::read(&archive)?);
+        }
+        let mut t = tar::Archive::new(std::fs::File::open(&archive)?);
+        for e in t.entries()? {
+            let mut e = e?;
+            if e.header().entry_type().is_file() {
+                let mut out = Vec::new();
+                std::io::Read::read_to_end(&mut e, &mut out)?;
+                return Ok(out);
+            }
+        }
+        anyhow::bail!("the archive is empty")
+    })
+    .await;
+    let Ok(Ok(bytes)) = bytes else { return StatusCode::GONE.into_response() };
+    let file: String = if single { entry.rsplit('/').next().unwrap_or(&entry).to_owned() } else { format!("{name}.tar") };
+    let file: String = file.chars().filter(|c| c.is_ascii_alphanumeric() || "-_.".contains(*c)).collect();
+    let e = Entry::new(&actor, Via::Page, Action::Read, format!("build {} downloaded", r.short_id())).project(r.project.clone()).target(r.ref_id.clone());
+    activity::write(&state.db, e).await;
+    let mut res = bytes.into_response();
+    let h = res.headers_mut();
+    h.insert(header::CONTENT_TYPE, HeaderValue::from_static("application/octet-stream"));
+    if let Ok(v) = HeaderValue::from_str(&format!("attachment; filename=\"{file}\"")) {
+        h.insert(header::CONTENT_DISPOSITION, v);
+    }
+    h.insert("x-content-type-options", HeaderValue::from_static("nosniff"));
+    res
 }

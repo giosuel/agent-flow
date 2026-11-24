@@ -874,6 +874,37 @@ async fn a_build_goes_from_agent_to_owner_and_feedback_comes_back() {
         "{page}"
     );
     let _ = pictures;
+
+    // A Windows build: not for flow-run, a download on its page, with what it needs.
+    let exe = tempfile::tempdir().unwrap();
+    std::fs::write(exe.path().join("lumen.exe"), b"MZ fake exe").unwrap();
+    let mut wtar = Vec::new();
+    crate::builds::pack(&exe.path().join("lumen.exe"), &mut wtar).unwrap();
+    let wurl = |q: &str| s.url(&format!("/api/builds?product=imaginarium&summary=Windows&commit=b2c3d4e&branch=m8&{q}"));
+    let res = s.http.post(wurl("entry=lumen.exe&platform=windows%20x86")).bearer_auth(&token).body(wtar.clone()).send().await.unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST, "a platform is os-arch");
+    let res: Value = s
+        .http
+        .post(wurl("entry=lumen.exe&platform=windows-x86_64&needs=%5B%22Windows%2010%22%2C%22Vulkan%22%5D"))
+        .bearer_auth(&token)
+        .body(wtar)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(res["run"].as_str().is_some_and(|r| r.starts_with("download it from")), "{res}");
+    let n = res["number"].as_i64().unwrap();
+    let list: Value = s.http.get(s.url("/api/builds/imaginarium")).bearer_auth(&device).send().await.unwrap().json().await.unwrap();
+    let w = list["builds"].as_array().unwrap().iter().find(|b| b["number"] == n).cloned().unwrap();
+    assert_eq!(w["platform"], "windows-x86_64");
+    let cookie = s.owner_cookie().await;
+    let page = s.http.get(s.url(&format!("/p/imaginarium/B-{n}"))).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
+    assert!(page.contains("Windows · x86_64") && page.contains("/download") && page.contains("Vulkan") && !page.contains(&format!("flow-run imaginarium {n}")), "{page}");
+    let file = s.http.get(s.url(&format!("/p/imaginarium/B-{n}/download"))).header(COOKIE, &cookie).send().await.unwrap();
+    assert!(file.headers()["content-disposition"].to_str().unwrap().contains("lumen.exe"));
+    assert_eq!(file.bytes().await.unwrap().as_ref(), b"MZ fake exe");
 }
 
 #[tokio::test]
