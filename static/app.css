@@ -1702,7 +1702,7 @@ html.no-scroll { overflow: hidden; }
   .bmi > span:first-of-type { overflow: hidden; text-overflow: ellipsis; }
   .bmi .dot, .bmi .count { margin-left: auto; }
   .bmi[hidden], .btabs > a[hidden] { display: none; }
-  .btabs { align-self: stretch; flex: 0 1 auto; min-width: 0; overflow: hidden; margin-left: 6px; }
+  .btabs { display: flex; align-self: stretch; flex: 0 1 auto; min-width: 0; overflow: hidden; margin-left: 6px; }
   .btabs-more > summary { display: flex; align-items: center; gap: 6px; padding: 0 13px; box-shadow: inset 0 -2px 0 transparent; color: var(--ink2); font-weight: 500; white-space: nowrap; }
   .btabs-more > summary:hover { color: var(--ink); }
   .btabs-more.on > summary { color: var(--ink); box-shadow: inset 0 -2px 0 var(--accent); }

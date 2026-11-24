@@ -1027,6 +1027,13 @@ async fn prs_merge_in_order_from_the_owners_buttons() {
 /// on a global page the switcher says All projects and that page's icon is a pill with its name.
 #[tokio::test]
 async fn the_bar_shows_the_project_its_tabs_and_the_global_pages() {
+    // The project's tabs are hidden on the phone (app.css, outside the desktop query) and shown
+    // again on the desktop: that rule has to say display, or the hiding one wins over the
+    // library's .tabs (it did in PR 7, 2026-11-24: the bar lost its tabs).
+    let css = std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("static/app.css")).unwrap();
+    assert!(css.contains(".pswitch, .btabs, .btabs-more, .vsep { display: none; }"), "the phone hides them");
+    let desk = css.lines().find(|l| l.trim_start().starts_with(".btabs { ")).expect("the desktop rule for the bar's tabs");
+    assert!(desk.contains("display: flex"), "the desktop shows the bar's tabs: {desk}");
     let s = TestServer::start().await;
     let token = s.token(TokenKind::Project, Some("vinculum")).await;
     let sess = mcp_session(&s, &token).await;
