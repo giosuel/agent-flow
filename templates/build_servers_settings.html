@@ -1,5 +1,5 @@
 {# The Settings dialog's Build servers section: a list, each builder a row that opens (the owner,
-   2026-11-17, D-190, the "Build servers and clients" mockups); a lone builder is open. #}
+   2026-11-17, D-190, the "Build servers and clients" mockups); all folded, even a lone one (the owner, 2026-11-23). #}
 <section aria-labelledby="h-sec">
   <div class="sl-head"><div><h2 id="h-sec">Build servers</h2>
     <p class="sub set-lead">Machines agents build and test on with <span class="mono">flow remote</span>. Each project picks one in its own Settings.</p></div>
@@ -7,7 +7,7 @@
   {% if let Some((ok, text)) = notice %}<p class="notice{% if *ok %} ok{% else %} warn{% endif %}" role="status">{{ text }}</p>{% endif %}
   <div class="slist">
   {% for s in servers %}
-  <details class="sl-item"{% if servers.len() == 1 %} open{% endif %}>
+  <details class="sl-item">
     <summary>
       <span class="dot{% if s.online %} ok{% else if s.waiting %} warn{% endif %}" aria-hidden="true"></span>
       <span class="sl-name"><strong>{{ s.name }}</strong><span class="sub">{{ s.state }}</span></span>
