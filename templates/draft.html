@@ -8,7 +8,7 @@
     <div class="sec"><h2 id="txt-h">What gets posted</h2><span class="sub">{% if d.waiting %}you can edit it; your words are what's sent{% else %}as the agent drafted it{% endif %}</span></div>
     {% if d.has_title %}<label class="field">Title<input name="title" value="{{ d.title }}" maxlength="256"{% if !d.waiting %} readonly{% endif %}></label>{% else %}<input type="hidden" name="title" value="">{% endif %}
     <label class="field">{% if d.kind == "commits" %}A note with the commits (optional; posted as a comment){% else if d.kind == "comment" %}The comment{% else %}Description{% endif %}<textarea name="body" rows="{% if d.kind == "comment" %}7{% else %}10{% endif %}" class="mono-text"{% if !d.waiting %} readonly{% endif %}>{{ d.body }}</textarea></label>
-    <ul class="checks">{% for k in d.checks %}<li><span class="{% if k.ok %}y{% else %}n{% endif %}" aria-hidden="true">{% if k.ok %}✓{% else %}!{% endif %}</span><span>{{ k.text }}{% if let Some((t, u)) = k.link %} <a href="{{ u }}">{{ t }}</a>{% endif %}</span></li>{% endfor %}</ul>
+    <ul class="checks">{% for k in d.checks %}<li><span class="{% if k.ok %}y{% else %}n{% endif %}" aria-hidden="true">{% if k.ok %}{{ crate::web::icons::icon("check")|safe }}{% else %}{{ crate::web::icons::icon("alert")|safe }}{% endif %}</span><span>{{ k.text }}{% if let Some((t, u)) = k.link %} <a href="{{ u }}">{{ t }}</a>{% endif %}</span></li>{% endfor %}</ul>
   </section>
 
   {% if !d.commits.is_empty() %}

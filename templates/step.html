@@ -11,7 +11,7 @@
   {% if let Some(rv) = review %}
   <dl class="kv">
     <dt>Reviewed</dt><dd><span class="mono">{{ rv.commit }}</span></dd>
-    <dt>Reviewers</dt><dd><span class="who">{% for r in rv.reviewers %}<span class="chip">{{ r }}</span> {% endfor %}</span><span class="sub">fresh agents, no context of the work</span></dd>
+    <dt>Reviewers</dt><dd><span class="rv-chips">{% for r in rv.reviewers %}<span class="chip">{{ r }}</span> {% endfor %}</span><span class="sub">fresh agents, no context of the work</span></dd>
     {% if !rv.owner_words.is_empty() %}<dt>You said</dt><dd><blockquote class="quote">“{{ rv.owner_words }}”</blockquote></dd>{% endif %}
     {% if !rv.reports.is_empty() %}<dt>Reports</dt><dd>{% for (t, u) in rv.reports %}{% if u.is_empty() %}{{ t }}{% else %}<a href="{{ u }}">{{ t }}</a>{% endif %}{% if !loop.last %}, {% endif %}{% endfor %}</dd>{% endif %}
     <dt>Findings</dt><dd>{{ rv.counts }}</dd>

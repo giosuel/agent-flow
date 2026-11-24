@@ -247,20 +247,36 @@ const icon = (name) => `<svg class="i" aria-hidden="true"><use href="#i-${name}"
 const COPY_ICON = icon("copy");
 const DONE_ICON = icon("check");
 
-async function copyText(pre) {
+// The one copy routine (T-113): an element's text or a string. Without the clipboard API (http),
+// the text is selected and copied; a string goes through a hidden field for that.
+async function copyText(what) {
+  const text = typeof what === "string" ? what : what.textContent.trim();
   try {
     if (navigator.clipboard && window.isSecureContext) {
-      await navigator.clipboard.writeText(pre.textContent.trim());
+      await navigator.clipboard.writeText(text);
       return true;
     }
   } catch {
     // fall through to the selection
   }
-  const range = document.createRange();
-  range.selectNodeContents(pre);
+  let el = what;
+  let temp = null;
+  if (typeof what === "string") {
+    temp = document.createElement("textarea");
+    temp.value = text;
+    temp.setAttribute("readonly", "");
+    temp.style.cssText = "position: fixed; top: 0; left: 0; opacity: 0";
+    document.body.append(temp);
+    el = temp;
+  }
   const sel = window.getSelection();
-  sel.removeAllRanges();
-  sel.addRange(range);
+  if (temp) temp.select();
+  else {
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }
   let ok = false;
   try {
     ok = document.execCommand("copy");
@@ -268,8 +284,10 @@ async function copyText(pre) {
     ok = false;
   }
   sel.removeAllRanges();
+  if (temp) temp.remove();
   return ok;
 }
+window.afCopy = copyText;
 
 // Wired on load, and again for content that arrives later (a record in a dialog): `af:content`.
 const wireCopy = (root) => {

@@ -11,7 +11,7 @@
     <li><p class="sub">In the project's folder (made if it doesn't exist):</p>
       <pre class="cmd mono">mkdir -p ~/{{ slug }} && cd ~/{{ slug }} && flow project setup --url {{ public_url }}</pre></li>
     <li><p class="sub">When it asks, paste the setup code. It works once, for {{ minutes }} minutes:</p>
-      <p class="setup-code mono" id="setup-code">{{ code }}</p></li>
+      <pre class="cmd mono setup-code" id="setup-code">{{ code }}</pre></li>
   </ol>
   <p class="sub">Then start the agent there with <span class="mono">claude</span>. The first time, Claude Code asks whether you trust the folder: say yes once.</p>
   <p class="dlg-hide"><a href="/p/{{ slug }}">Back to {{ name }}</a></p>

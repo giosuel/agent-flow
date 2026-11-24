@@ -65,7 +65,7 @@
   {% endif %}
   <section class="split-main card cv-main" aria-labelledby="thread-h">
     {% if let Some(s) = selected %}
-    <a class="back phone-only" href="{{ list_href }}">← Conversations</a>
+    <a class="back phone-only ilink" href="{{ list_href }}">{{ crate::web::icons::icon("back")|safe }}<span>Conversations</span></a>
     <div class="card-head cv-head">
       <span class="avs" aria-hidden="true">{% for a in s.avatars %}<span class="av t-{{ a.tint }}">{{ a.initials }}</span>{% endfor %}{% if s.fork %}<span class="av fork">{{ crate::web::icons::icon("fork")|safe }}</span>{% endif %}</span>
       <div class="grow"><h2 id="thread-h">{{ s.title.0 }}{% if !s.title_models.0.is_empty() %} <span class="tag line">{{ s.title_models.0 }}</span>{% endif %} <span class="sep">{{ s.title.1 }}</span> {{ s.title.2 }}{% if !s.title_models.1.is_empty() %} <span class="tag line">{{ s.title_models.1 }}</span>{% endif %}</h2><span class="sub">{{ s.line }}</span></div>
@@ -92,8 +92,8 @@
       </ol>
     </div>
     <div class="cv-foot">
-      <span class="cf-l">{% if let Some((t, href)) = s.newer %}<a href="{{ href }}">‹ Newer: {{ t }}</a>{% else %}This is the newest {{ s.noun }}{% endif %}</span>
-      <span class="cf-r">{% if let Some((t, href)) = s.older %}<a href="{{ href }}">Older: {{ t }} ›</a>{% else %}This is the oldest{% endif %}</span>
+      <span class="cf-l">{% if let Some((t, href)) = s.newer %}<a class="ilink" href="{{ href }}">{{ crate::web::icons::icon("prev")|safe }}<span>Newer: {{ t }}</span></a>{% else %}This is the newest {{ s.noun }}{% endif %}</span>
+      <span class="cf-r">{% if let Some((t, href)) = s.older %}<a class="ilink" href="{{ href }}"><span>Older: {{ t }}</span>{{ crate::web::icons::icon("chevron")|safe }}</a>{% else %}This is the oldest{% endif %}</span>
     </div>
     {% else %}
     <p class="empty-in cv-none">Nothing to show with these filters.</p>
