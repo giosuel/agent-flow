@@ -801,8 +801,9 @@ async fn the_owner_answers_on_the_page_and_the_agent_reads_it() {
     let (none, decided) = (tab.find("No open questions.").unwrap(), tab.find("A or B?").unwrap());
     assert!(none < decided && !tab.contains("Waiting on you"), "{tab}");
     // The tab is the page's title; the project's name is the overview's.
-    assert!(tab.contains("<h1>Questions</h1>") && !tab.contains("<h1>Vinculum"), "{tab}");
-    assert!(owner_page(&s, &cookie, "/p/vinculum").await.contains("<h1>Vinculum</h1>"));
+    assert!(tab.contains("<h1>Questions</h1>"), "{tab}");
+    let overview = owner_page(&s, &cookie, "/p/vinculum").await;
+    assert!(overview.contains("<h1>") && !overview.contains("<h1>Overview"), "{overview}");
     // Answering twice goes back to the question with the reason.
     let res = s
         .http
