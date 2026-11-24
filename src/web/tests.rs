@@ -2052,6 +2052,80 @@ async fn the_log_page_filters_and_streams() {
     assert_eq!(res.headers()["content-type"], "text/event-stream");
 }
 
+/// Writes a Log entry by the owner, and returns its seq.
+async fn log_entry(s: &TestServer, action: crate::activity::Action, summary: &str) -> i64 {
+    let summary = summary.to_owned();
+    s.db.call(move |c| {
+        let owner = crate::auth::Actor::Owner { session_id: 1, method: "passkey".into() };
+        let e = crate::activity::Entry::new(&owner, crate::activity::Via::Page, action, summary);
+        crate::activity::write_conn(c, &e)?;
+        crate::logview::latest_seq(c)
+    })
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+async fn archived_reads_take_their_place_among_older_entries() {
+    use crate::activity::Action;
+    let s = TestServer::start().await;
+    let cookie = s.owner_cookie().await;
+    // A change, thirty reads, a change: the reads go to the archive, the changes stay.
+    log_entry(&s, Action::Write, "probe first").await;
+    for i in 0..30 {
+        log_entry(&s, Action::Read, &format!("probe read {i}")).await;
+    }
+    log_entry(&s, Action::Write, "probe last").await;
+    let data = s.state.config.data_dir();
+    s.db.call(move |c| {
+        c.execute("UPDATE log SET at = at - 100 * 86400000 WHERE summary LIKE 'probe %'", [])?;
+        crate::logview::archive_old_reads(c, &data, crate::util::now_ms())
+    })
+    .await
+    .unwrap();
+    let html = s
+        .http
+        .get(s.url("/log/rows?q=probe&range=all"))
+        .header(COOKIE, &cookie)
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert_eq!(html.matches("data-seq=").count(), 32, "{html}");
+    assert_eq!(html.matches("<span class=\"tag\">archived</span>").count(), 30);
+    // Newest first, the archived reads between the two changes.
+    let first = html.find("probe first").unwrap();
+    assert!(html.find("probe last").unwrap() < html.find("probe read 29").unwrap());
+    assert!(html.find("probe read 0").unwrap() < first);
+}
+
+#[tokio::test]
+async fn the_live_log_picks_up_where_it_left_off() {
+    use crate::activity::Action;
+    let s = TestServer::start().await;
+    let cookie = s.owner_cookie().await;
+    let seen = log_entry(&s, Action::Write, "probe shown before").await;
+    // EventSource reconnects to the URL it opened, and says which event it got last.
+    let mut res = s
+        .http
+        .get(s.url("/log/stream?after=0"))
+        .header(COOKIE, &cookie)
+        .header("last-event-id", seen.to_string())
+        .send()
+        .await
+        .unwrap();
+    log_entry(&s, Action::Write, "probe new").await;
+    let mut got = String::new();
+    while !got.contains("probe new") {
+        let chunk = tokio::time::timeout(std::time::Duration::from_secs(10), res.chunk()).await.expect("an event");
+        got.push_str(&String::from_utf8_lossy(&chunk.unwrap().expect("still open")));
+    }
+    assert!(!got.contains("probe shown before"), "{got}");
+    assert!(got.contains("\nid: ") || got.starts_with("id: "), "events carry their seq: {got}");
+}
+
 #[tokio::test]
 async fn usage_and_machine_pages_show_the_counts() {
     let s = TestServer::start().await;
