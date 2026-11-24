@@ -12,6 +12,7 @@
 <div class="split">
   <div class="split-main stack-lg">
     {% if let Some(d) = draft %}{% include "draft.html" %}{% endif %}
+    {% if kind == "release" %}{% if let Some(tt) = to_test %}{% include "to_test.html" %}{% endif %}{% endif %}
     {% if let Some(sv) = shot %}
     <figure class="shot-full">
       <a href="{{ sv.image }}" target="_blank" rel="noopener" title="Open the full image"><img src="{{ sv.image }}" alt="{{ title }}"></a>
@@ -49,10 +50,11 @@
     {% if let Some(b) = build %}
     <section class="card pad stack" aria-labelledby="try-h">
       <h2 id="try-h">Try it</h2>
-      <p class="sub">Run this on any of your machines that has the <span class="mono">agentflow</span> command. It downloads the build once, checks it, and starts it.</p>
+      <p class="sub">Run this on any of your machines that has <span class="mono">flow-run</span> (Settings › Your devices shows how to set it up). It downloads the build once, checks it, and starts it.</p>
       <pre class="cmd mono">{{ b.run }}</pre>
       <dl class="kv">{% for (k, v) in b.facts %}<dt>{{ k }}</dt><dd>{{ v }}</dd>{% endfor %}</dl>
     </section>
+    {% if let Some(tt) = to_test %}{% include "to_test.html" %}{% endif %}
     {% if b.sent %}<p class="notice ok" role="status">Feedback sent. The agent gets your words as you wrote them and turns problems into tasks.</p>{% endif %}
     {% if !b.features.is_empty() && b.can_feedback && is_owner %}
     <form method="post" action="/p/{{ project_slug }}/{{ short }}/feedback" class="stack fb" aria-labelledby="fb-h">

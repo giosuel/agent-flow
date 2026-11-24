@@ -211,6 +211,35 @@ async fn dashboard(
             if !builds.is_empty() {
                 groups.push(Group { title: "Builds to try", items: builds });
             }
+            // What the owner can test, per project (not counted: they test when they can).
+            let to_test: Vec<Item> = {
+                let mut st = c.prepare(
+                    "SELECT p.slug, p.name, count(*), group_concat(DISTINCT json_extract(r.data, '$.category'))
+                     FROM records r JOIN projects p ON p.id = r.project_id
+                     WHERE r.kind = 'test' AND r.state = 'open' AND p.status != 'archived'
+                     GROUP BY p.id ORDER BY min(r.created_at)",
+                )?;
+                let rows = st.query_map([], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, i64>(2)?,
+                        row.get::<_, Option<String>>(3)?,
+                    ))
+                })?;
+                rows.filter_map(Result::ok)
+                    .map(|(slug, pname, n, cats)| Item {
+                        icon: icon("task"),
+                        title: format!("{pname}: {n} to test"),
+                        sub: cats.unwrap_or_default().replace(',', ", "),
+                        url: format!("/p/{slug}?tab=to-test"),
+                        action: "Test",
+                    })
+                    .collect()
+            };
+            if !to_test.is_empty() {
+                groups.push(Group { title: "To test", items: to_test });
+            }
             if !guide_prs.is_empty() {
                 groups.push(Group { title: "Guides to review", items: guide_prs });
             }

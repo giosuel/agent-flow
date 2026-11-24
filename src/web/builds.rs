@@ -258,6 +258,17 @@ async fn upload(
     }
 
     let ready = !features.is_empty();
+    // What the agent wants tried becomes To test items, carried along until tested (the owner,
+    // 2026-11-11); the build itself no longer waits for a feedback form.
+    let to_try: Vec<(String, String)> = features
+        .iter()
+        .map(|f| {
+            let t = f.get("title").and_then(Value::as_str).unwrap_or("").to_owned();
+            let w = f.get("what_to_try").and_then(Value::as_str).unwrap_or("").to_owned();
+            (t, w)
+        })
+        .filter(|(t, _)| !t.is_empty())
+        .collect();
     let (a, p, nm, ent) = (actor.clone(), project.clone(), name.clone(), entry.clone());
     let created = state
         .db
@@ -271,7 +282,7 @@ async fn upload(
             data.insert("size".into(), manifest.total.into());
             data.insert("files_count".into(), manifest.files.len().into());
             data.insert("features".into(), features.into());
-            data.insert("ready_for_feedback".into(), ready.into());
+            data.insert("ready_for_feedback".into(), false.into());
             if !q.tag.trim().is_empty() {
                 data.insert("tag".into(), q.tag.trim().into());
             }
@@ -287,6 +298,10 @@ async fn upload(
                     ..Default::default()
                 },
             )?;
+            let category: String = r.title.chars().take(40).collect();
+            for (title, what) in &to_try {
+                crate::totest::add(c, p.id, &a.name(), title, what, &category)?;
+            }
             Ok(r)
         })
         .await;

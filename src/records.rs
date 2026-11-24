@@ -25,10 +25,13 @@ pub enum Kind {
     /// A screenshot an agent uploaded (the owner, 2026-11-11): its name is the title, its
     /// description the body, its category and file in the data.
     Screenshot,
+    /// Something for the owner to test, with a category the agent picks (the owner, 2026-11-11:
+    /// "a log of things that i need to test"). Open ones come along with every release and build.
+    Test,
 }
 
 impl Kind {
-    pub const ALL: [Kind; 10] = [
+    pub const ALL: [Kind; 11] = [
         Kind::Question,
         Kind::Decision,
         Kind::Task,
@@ -39,6 +42,7 @@ impl Kind {
         Kind::Feedback,
         Kind::Contribution,
         Kind::Screenshot,
+        Kind::Test,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -53,6 +57,7 @@ impl Kind {
             Kind::Feedback => "feedback",
             Kind::Contribution => "contribution",
             Kind::Screenshot => "screenshot",
+            Kind::Test => "test",
         }
     }
 
@@ -69,6 +74,7 @@ impl Kind {
             Kind::Feedback => "F",
             Kind::Contribution => "C",
             Kind::Screenshot => "S",
+            Kind::Test => "TT",
         }
     }
 
@@ -84,6 +90,7 @@ impl Kind {
             Kind::Feedback => "Feedback",
             Kind::Contribution => "External contribution",
             Kind::Screenshot => "Screenshot",
+            Kind::Test => "To test",
         }
     }
 
@@ -107,6 +114,8 @@ impl Kind {
             // draft: back with the agent; shown: waiting for the owner's Send; approved: being sent.
             Kind::Contribution => &["draft", "shown", "approved", "sent", "merged", "closed", "dropped"],
             Kind::Screenshot => &["current", "withdrawn"],
+            // open: to test; tested: the owner tried it and it works; dropped: no longer needed.
+            Kind::Test => &["open", "tested", "dropped"],
         }
     }
 
@@ -138,6 +147,7 @@ pub fn finished_word(kind: Kind) -> &'static str {
         Kind::Build => "tried",
         Kind::Contribution => "merged",
         Kind::Decision | Kind::Adr | Kind::Screenshot => "current",
+        Kind::Test => "tested",
         Kind::Feedback => "works",
         Kind::Task => "done",
     }
@@ -634,6 +644,7 @@ pub const RELATIONS: &[(&str, &str, &str)] = &[
     ("feedback_on", "Feedback on", "Feedback"),
     ("relates", "Related", "Related"),
     ("shows", "Shows", "Screenshots"),
+    ("tests", "To test in", "To test"),
 ];
 
 pub fn check_relation(relation: &str) -> anyhow::Result<()> {

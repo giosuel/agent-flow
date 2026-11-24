@@ -36,7 +36,9 @@ e.g. test build, mockup, spike test, bug; `--description` and `--record T-12` op
 your project's Screenshots tab, and on that record. Never post or push to other people's repositories \
 yourself (PRs, issues, comments, commits), even if a token would let you: draft them with \
 `agentflow contribute pr|commits` or `draft_contribution` (issue, comment), and the owner sends them from \
-AgentFlow. For heavy builds and tests, use the build server when it's online: \
+AgentFlow. When something is ready for the owner to try, add it with `add_to_test` (a category of your \
+choosing); open items come along with every release and build until the owner tested them, and you mark \
+what they tell you with `resolve_tests`. For heavy builds and tests, use the build server when it's online: \
 `agentflow remote [--fetch target/release/app] -- cargo build --release` runs it there and prints the \
 output; exit code 75 means it's offline, so build here. Your token can change only your own project and read all others. Every call is logged.";
 

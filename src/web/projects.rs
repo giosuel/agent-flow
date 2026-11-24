@@ -32,6 +32,14 @@ pub fn routes() -> Router<AppState> {
         .route("/p/{slug}/settings", post(save_settings))
 }
 
+fn tested_notice(n: usize) -> String {
+    if n == 0 {
+        "Nothing was ticked, so nothing was sent.".into()
+    } else {
+        format!("Sent: {n} tested, works. The agent hears which.")
+    }
+}
+
 /// The Settings tab's form: every detail an agent can set with update_project, the owner here (the
 /// owner, 2026-11-11: "a settings tab for projects where the user can archive it or rename it in
 /// agent flow, or add / edit other metadata"). Lists are one per line; the stack is comma-separated.
@@ -496,6 +504,9 @@ pub struct Connect {
 #[derive(Template)]
 #[template(path = "project.html")]
 struct ProjectPage {
+    /// The To test checklist (its tab), and how many are open (the tab's count).
+    to_test: Option<super::totest::View>,
+    to_test_open: i64,
     /// External PRs and issues: open ones and drafts, and the finished ones.
     external: Vec<ExtRow>,
     external_done: Vec<ExtRow>,
@@ -551,10 +562,15 @@ struct TabQuery {
     cat: Option<String>,
     /// The Settings tab's outcome: saved, or why not.
     settings: Option<String>,
+    /// After Send on the To test list: how many were marked tested.
+    tested: Option<usize>,
 }
 
 /// The line shown after pressing a button, from the redirect's query.
 fn press_notice(q: &TabQuery) -> (Option<String>, bool) {
+    if let Some(n) = q.tested {
+        return (Some(tested_notice(n)), false);
+    }
     // The Settings tab's outcome: only fixed messages come from the address.
     match q.settings.as_deref() {
         Some("saved") => {
@@ -593,6 +609,7 @@ const TABS: &[(&str, &str)] = &[
     ("prs", "Pull requests"),
     ("builds", "Builds"),
     ("decisions", "Decisions"),
+    ("to-test", "To test"),
     ("screenshots", "Screenshots"),
     ("settings", "Settings"),
 ];
@@ -1000,7 +1017,22 @@ fn build_project_page(
     };
 
     let (external, external_done) = external_rows(c, &all, now)?;
+    let to_test = if tab == "to-test" {
+        Some(super::totest::view(
+            c,
+            p.id,
+            &p.slug,
+            super::totest::Place::Tab,
+            format!("/p/{}?tab=to-test", p.slug),
+            true,
+            now,
+        )?)
+    } else {
+        None
+    };
     Ok(ProjectPage {
+        to_test_open: crate::totest::open_count(c, p.id)?,
+        to_test,
         external,
         external_done,
         session_url: crate::usage::session_link(c, p.id)?.map(|(u, _)| u),
@@ -1094,6 +1126,8 @@ struct RecordPage {
     /// A draft for someone else's repository, with Send, Ask for changes and Drop.
     draft: Option<super::outgoing::DraftView>,
     draft_notice: Option<(bool, String)>,
+    /// The To test checklist, on a release's or a build's page.
+    to_test: Option<super::totest::View>,
     project_slug: String,
     project_name: String,
     kind_label: &'static str,
@@ -1145,6 +1179,8 @@ struct RecordQuery {
     sent: Option<u8>,
     /// What happened to a draft for someone else's repository (sent, asked, dropped, …).
     draft: Option<String>,
+    /// After Send on the To test list.
+    tested: Option<usize>,
 }
 
 async fn record(
@@ -1165,6 +1201,9 @@ async fn record(
     let mut page = load_record_page(&state, &actor, slug, id, error, q.draft.clone(), tz).await?;
     if let Some(b) = page.build.as_mut() {
         b.sent = q.sent == Some(1);
+    }
+    if let Some(n) = q.tested {
+        page.draft_notice = Some((true, tested_notice(n)));
     }
     render(page)
 }
@@ -1192,15 +1231,37 @@ async fn load_record_page(
             let buttons = super::buttons::views(c, r.id, now)?;
             let session_url = crate::usage::session_link(c, project.id)?.map(|(u, _)| u);
             let draft = super::outgoing::draft_view(c, &r, now)?;
+            // Everything still to test, on a release that isn't tagged yet and on every build.
+            let to_test = match (r.kind, r.state.as_str()) {
+                (Kind::Release, "planned" | "waiting") => Some(super::totest::view(
+                    c,
+                    r.project_id,
+                    &project.slug,
+                    super::totest::Place::Release(&r),
+                    r.url(),
+                    is_owner,
+                    now,
+                )?),
+                (Kind::Build, "published" | "tried") => Some(super::totest::view(
+                    c,
+                    r.project_id,
+                    &project.slug,
+                    super::totest::Place::Build,
+                    r.url(),
+                    is_owner,
+                    now,
+                )?),
+                _ => None,
+            };
             let draft_notice = match &draft_code {
                 Some(code) if r.kind == Kind::Contribution => super::outgoing::notice(c, &r, code)?,
                 _ => None,
             };
-            Ok(Some((r, project, links, history, buttons, (session_url, draft, draft_notice))))
+            Ok(Some((r, project, links, history, buttons, (session_url, draft, draft_notice, to_test))))
         })
         .await?
         .ok_or(AppError::NotFound)?;
-    let (r, project, links, history, buttons, (session_url, draft, draft_notice)) = page;
+    let (r, project, links, history, buttons, (session_url, draft, draft_notice, to_test)) = page;
 
     let mut groups: Vec<LinkGroup> = Vec::new();
     let mut stale = Vec::new();
@@ -1303,6 +1364,7 @@ async fn load_record_page(
         body_html: if draft.is_some() { String::new() } else { markdown::to_html(&r.body) },
         draft,
         draft_notice,
+        to_test,
         project_slug: project.slug,
         project_name: project.name,
         kind_label: r.kind.label(),
@@ -1399,7 +1461,9 @@ fn build_view(r: &Record, links: &[records::LinkView], sent: bool) -> BuildView 
         facts,
         features,
         given,
-        can_feedback: r.state == "published",
+        // No feedback form any more (the owner, 2026-11-11: "i can give general feedback to the
+        // agent via chat"): what to try is in the To test list below Try it.
+        can_feedback: false,
         sent,
     }
 }

@@ -7,6 +7,7 @@ mod builds;
 pub mod outgoing;
 pub mod remote;
 mod screenshots;
+mod totest;
 pub use builds::notify_build;
 mod buttons;
 mod charts;
@@ -148,6 +149,7 @@ pub fn router(state: AppState) -> Router {
         .merge(screenshots::routes())
         .merge(outgoing::routes())
         .merge(remote::routes())
+        .merge(totest::routes())
         .merge(conversations::routes())
         .merge(guides::routes())
         .merge(log::routes())
