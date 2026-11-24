@@ -89,8 +89,10 @@ async function copyText(pre) {
   return ok;
 }
 
-document.addEventListener("DOMContentLoaded", () => {
-  for (const pre of document.querySelectorAll("pre.cmd")) {
+// Wired on load, and again for content that arrives later (a record in a dialog): `af:content`.
+const wireCopy = (root) => {
+  for (const pre of root.querySelectorAll("pre.cmd")) {
+    if (pre.parentElement && pre.parentElement.classList.contains("copy-wrap")) continue;
     const wrap = document.createElement("div");
     wrap.className = "copy-wrap";
     pre.replaceWith(wrap);
@@ -116,7 +118,9 @@ document.addEventListener("DOMContentLoaded", () => {
       }, 2000);
     });
   }
-});
+};
+document.addEventListener("DOMContentLoaded", () => wireCopy(document));
+document.addEventListener("af:content", (e) => wireCopy(e.detail));
 
 // Charts: the exact numbers under the pointer or finger (the owner, 2026-11-11: "allow hover to
 // see exact datapoints"). Each chart's SVG carries its columns' numbers in data-tips; for bars the
@@ -306,8 +310,8 @@ document.addEventListener("DOMContentLoaded", () => {
 // out until Send answer (the owner, 2026-11-11). Choosing an option empties the text; typing
 // clears the option; Send is enabled only when exactly one of them is given. The server refuses
 // both as well, so this holds without the script too.
-document.addEventListener("DOMContentLoaded", () => {
-  for (const form of document.querySelectorAll("form[data-answer]")) {
+const wireAnswers = (root) => {
+  for (const form of root.querySelectorAll("form[data-answer]")) {
     const words = form.querySelector("[name=words]");
     const radios = [...form.querySelectorAll("input[name=option]")];
     const send = form.querySelector("button[type=submit]");
@@ -330,11 +334,13 @@ document.addEventListener("DOMContentLoaded", () => {
     }
     update();
   }
-});
+};
+document.addEventListener("DOMContentLoaded", () => wireAnswers(document));
+document.addEventListener("af:content", (e) => wireAnswers(e.detail));
 
 // To test: count what's ticked; Send needs at least one.
-document.addEventListener("DOMContentLoaded", () => {
-  for (const form of document.querySelectorAll("form[data-tt]")) {
+const wireToTest = (root) => {
+  for (const form of root.querySelectorAll("form[data-tt]")) {
     const boxes = [...form.querySelectorAll("input[type=checkbox]")];
     const count = form.querySelector("[data-tt-count]");
     const send = form.querySelector("[data-tt-send]");
@@ -348,4 +354,6 @@ document.addEventListener("DOMContentLoaded", () => {
     for (const b of boxes) b.addEventListener("change", update);
     update();
   }
-});
+};
+document.addEventListener("DOMContentLoaded", () => wireToTest(document));
+document.addEventListener("af:content", (e) => wireToTest(e.detail));
