@@ -350,6 +350,86 @@ summary.card-head::-webkit-details-marker { display: none; }
 .copy-wrap .cmd { padding-right: 48px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .copy-wrap > .ibtn { position: absolute; top: 5px; right: 5px; width: 34px; height: 34px; }
 
+/* ---------------------------------------------------------------- Table: one look for every table
+   Data, timings, comparisons, and the grids that are tables (Notes, Log): headers 12/600 caps,
+   muted; rows ruled with --line2; cells 12/16 (8 when .dense); numbers right and tabular (.n on a
+   cell, or .nums for every cell after the first); a row's own header th[scope=row]; totals in the
+   foot; the row under the pointer lit. Sorting: table.html th()/ch() and app.js. (N-20 §3) */
+.table-wrap { overflow-x: auto; }
+.table { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
+.table th, .grid-head { font-size: var(--fs-label); font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.table th { text-align: left; padding: 0 var(--sp-4) 10px; white-space: nowrap; vertical-align: bottom; }
+.table td, .table tbody th, .table tfoot th { padding: 12px var(--sp-4); border-top: 1px solid var(--line2); vertical-align: middle; }
+.table tbody th, .table tfoot th { font-size: var(--fs-sm); font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--ink); white-space: normal; }
+.table.dense td, .table.dense tbody th, .table.dense tfoot th { padding-top: 8px; padding-bottom: 8px; }
+.table.flush th:first-child, .table.flush td:first-child { padding-left: 0; }
+.table tbody tr:hover > td, .table tbody tr:hover > th { background: var(--hover-bg); }
+.table tfoot td, .table tfoot th { border-top: 1px solid var(--line); font-weight: 600; color: var(--ink); }
+.table.nums tbody th { white-space: nowrap; }
+.table .n, .table.nums td, .table.nums thead th:not(:first-child) { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.table .m { font-family: var(--mono); white-space: nowrap; }
+.table td.actions { text-align: right; white-space: nowrap; }
+.grid-head { min-height: 38px; border-bottom: 1px solid var(--line2); }
+.th-sort { appearance: none; background: none; border: 0; padding: 0; margin: 0; font: inherit; color: inherit; letter-spacing: inherit; text-transform: inherit; display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+.th-sort:hover, [aria-sort] > .th-sort { color: var(--ink); }
+.th-sort:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--r-xs); }
+.sort-i { font-size: var(--fs-sub); letter-spacing: 0; opacity: .45; min-width: 1ch; }
+.sort-i::before { content: "\2195"; }
+[aria-sort=ascending] > .th-sort .sort-i::before { content: "\2191"; }
+[aria-sort=descending] > .th-sort .sort-i::before { content: "\2193"; }
+[aria-sort] > .th-sort .sort-i { opacity: 1; color: var(--accent-ink); }
+.th-sort:hover .sort-i { opacity: .9; }
+
+/* ---------------------------------------------------------------- List row: one row for every list
+   ul.rows > li.item-row, or a.item-row where the row opens something: a leading id (.id-col) or
+   icon, the title and its sub (.ttl), chips or an action at the end. One rule between rows, one
+   hover, one picked look (.on); .dense for short rows; .rows.flush when the card has no padding of
+   its own. A group of rows: .grphead. (N-20 §4.1: 19 row lists) */
+.rows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.item-row { display: flex; align-items: center; gap: var(--sp-3); min-height: 56px; padding: 10px 0; border-top: 1px solid var(--line2); color: inherit; text-decoration: none; }
+.rows > .item-row:first-child, .grphead + .item-row { border-top: 0; }
+.item-row.dense { min-height: 44px; padding-top: 6px; padding-bottom: 6px; }
+.flush > .item-row { padding-left: var(--sp-5); padding-right: var(--sp-5); }
+a.item-row:hover { background: var(--hover-bg); }
+.item-row.on { background: var(--selected); box-shadow: inset 3px 0 0 var(--accent); }
+.ttl { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.ttl strong { font-weight: 500; overflow-wrap: anywhere; }
+.id-col { flex: none; min-width: 56px; }
+.ttl a, .rows a:not(.item-row) { color: var(--ink); text-decoration: none; }
+.ttl a:hover, .rows a:not(.item-row):hover { color: var(--accent-ink); text-decoration: underline; }
+.grphead { display: flex; align-items: center; gap: var(--sp-2); min-height: 36px; padding: 0 var(--sp-5); background: var(--band); border-top: 1px solid var(--line2); border-bottom: 1px solid var(--line2); font-size: var(--fs-label); font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.grphead:first-child { border-top: 0; }
+
+/* ---------------------------------------------------------------- Key-value list: one
+   dl.kv: names muted, values in ink, side by side; .stack puts each name over its value in
+   columns (the project card). (N-20 §4.3: four styles) */
+.kv { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: var(--sp-2) var(--sp-5); margin: 0; font-size: var(--fs-sm); }
+.kv dt { color: var(--muted); }
+.kv dd { margin: 0; min-width: 0; color: var(--ink); overflow-wrap: anywhere; }
+.kv.stack { grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 14px var(--sp-6); }
+.kv.stack > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.kv.stack dt { font-size: var(--fs-sub); }
+
+/* ---------------------------------------------------------------- Timeline: one
+   ol.tl > li.ev: the time, a rail with a dot in a state tone (.dot: accent the owner, ok made,
+   bad or warn a failure, quiet the rest), the text; .tl-day heads a day. History and activity.
+   (N-20 §4.2: two timelines with two colour meanings) */
+.tl { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.tl .ev { display: grid; grid-template-columns: 48px 14px minmax(0, 1fr); gap: 0 10px; }
+.tl .tm { font: var(--fs-label) var(--mono); color: var(--muted); padding-top: 2px; text-align: right; white-space: nowrap; }
+.tl .rail { position: relative; display: flex; justify-content: center; }
+.tl .rail::before { content: ""; position: absolute; top: 0; bottom: 0; width: 1px; background: var(--line); }
+.tl .ev:first-child .rail::before { top: 8px; }
+.tl .ev:last-child .rail::before { bottom: calc(100% - 8px); }
+.tl .rail .dot { position: relative; margin-top: 5px; box-shadow: 0 0 0 3px var(--panel); }
+.tl .txt { min-width: 0; padding-bottom: 14px; font-size: var(--fs-sm); color: var(--ink2); overflow-wrap: anywhere; }
+.tl .txt strong { color: var(--ink); font-weight: 500; }
+.tl .txt a { color: var(--ink2); text-decoration: none; }
+.tl .txt a:hover { color: var(--accent-ink); text-decoration: underline; }
+.tl .ev-meta { display: block; margin-top: 2px; font-size: var(--fs-sub); color: var(--muted); }
+.tl-day { display: flex; align-items: center; gap: var(--sp-2); padding: 10px 0 6px; font-size: var(--fs-label); color: var(--muted); }
+.tl-day::after { content: ""; flex: 1; border-top: 1px solid var(--line2); }
+
 /* ---------------------------------------------------------------- Dialog: one, in four sizes
    A head (the title 18/600, its tools, the close icon button), a body, a foot (actions on the
    right: quiet first, then the primary or danger-solid). sm 440 confirms; md 760 records and
@@ -394,6 +474,8 @@ html.dlg-on { overflow: hidden; }
   .dd-menu { position: fixed; left: 16px; right: 16px; top: auto; bottom: calc(90px + env(safe-area-inset-bottom)); max-height: 50vh; }
   .btn.sm { min-height: var(--h-md); }
   .ibtn { width: 44px; height: 44px; }
+  .item-row { flex-wrap: wrap; }
+  a.item-row:active, .rows > li.item-row:active { background: var(--selected); }
   .dlg-back { padding: 0; place-items: end stretch; }
   .dlg { width: 100%; max-height: calc(100dvh - 10px - env(safe-area-inset-top)); border-radius: 18px 18px 0 0; border-bottom: 0; transform: translateY(100%); transition: transform .26s cubic-bezier(.2, .8, .2, 1); }
   .dlg.sm { width: 100%; }

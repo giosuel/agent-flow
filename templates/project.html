@@ -45,7 +45,7 @@
   <div class="pcard-b">
     <div class="pcard-about">{% for m in about %}{% if m.label == "About" %}<p class="info-about">{{ m.value }}</p>{% endif %}{% endfor %}
       {% if session_url.is_none() %}<p class="sub">The link to its Claude Code session shows up once the agent runs with <span class="mono">/remote-control</span>.</p>{% endif %}</div>
-    <dl class="info-dl pcard-facts">
+    <dl class="kv stack pcard-facts">
           <div><dt>Agent</dt><dd><span class="dot{% if agent.online %} ok{% endif %}" aria-hidden="true"></span> {% if agent.online %}online{% else %}last seen {{ agent.seen }}{% endif %}{% if !agent.model.is_empty() %} · {{ agent.model }}{% endif %}</dd></div>
           {% if !agent.working_on.is_empty() %}<div><dt>Working on</dt><dd>{{ agent.working_on }}</dd></div>{% endif %}
           {% if !repo.is_empty() %}<div><dt>Repository</dt><dd><a href="https://github.com/{{ repo }}">{{ repo }}</a></dd></div>{% endif %}
@@ -81,9 +81,9 @@
     {% endfor %}
     <details class="ov-fold" open>
       <summary class="card-head"><span class="ofi">{{ crate::web::icons::icon("decision")|safe }}</span><h2 id="dec-h">Latest decisions</h2><span class="sub of-phone mono">{% for d in decisions %}{% if loop.index <= 3 %}{% if !loop.first %}, {% endif %}{{ d.short }}{% endif %}{% endfor %}</span><span class="grow"></span><a class="act of-desk" href="/p/{{ slug }}?tab=decisions">All</a><span class="of-chev">{{ crate::web::icons::icon("chevron")|safe }}</span></summary>
-      <div class="of-body">
+      <div class="of-body rows flush">
         {% if decisions.is_empty() %}<p class="sub ovp-pad">No decisions recorded yet.</p>{% endif %}
-        {% for d in decisions %}<a class="dec-row" href="{{ d.url }}"><span class="sub mono">{{ d.id }} · {{ d.sub }}</span><span>{{ d.title }}</span></a>{% endfor %}
+        {% for d in decisions %}<a class="item-row dense dec-row" href="{{ d.url }}"><span class="ttl"><span class="sub mono">{{ d.id }} · {{ d.sub }}</span><span>{{ d.title }}</span></span></a>{% endfor %}
       </div>
     </details>
     {% if !external.is_empty() || !external_done.is_empty() %}

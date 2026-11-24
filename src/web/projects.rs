@@ -1809,7 +1809,8 @@ struct HistoryEvent {
     chips: Vec<(String, String, bool)>,
     /// The file a new version replaced: ("v11", its address).
     replaced: Option<(String, String)>,
-    /// "first" for the creation, "owner" for the owner's own changes.
+    /// The dot's tone on the timeline: "ok" for the creation, "accent" for the owner's own
+    /// changes, "quiet" for the rest.
     dot: &'static str,
 }
 
@@ -2441,11 +2442,11 @@ fn history_event(h: &records::Revision, r: &Record, tz: &Tz) -> HistoryEvent {
         what: String::new(),
         chips: Vec::new(),
         replaced: None,
-        dot: if h.author == "owner" { "owner" } else { "" },
+        dot: if h.author == "owner" { "accent" } else { "quiet" },
     };
     if h.rev == 1 {
         e.what = format!("Created the {}", r.kind.label().to_lowercase());
-        e.dot = "first";
+        e.dot = "ok";
         // A note a subagent uploaded (D-229): its session's subagent, with its model.
         let sub = super::notes::subagent_line(r);
         if r.kind == Kind::Note && !sub.is_empty() {

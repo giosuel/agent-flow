@@ -4349,6 +4349,16 @@ fn the_ui_library_replaced_the_old_buttons() {
         "ntf-back",
         "ntf-head",
         "no-scroll",
+        // One table, one list row, one key-value list, one timeline (PR 9).
+        "class=\"timing\"",
+        "class=\"cmp\"",
+        "class=\"grp\"",
+        "class=\"item\"",
+        "class=\"item ",
+        "info-dl",
+        "hist-ev",
+        "hist-pt",
+        "hist-tl",
     ];
     for dir in ["templates", "static"] {
         for entry in std::fs::read_dir(root.join(dir)).unwrap() {

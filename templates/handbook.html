@@ -10,9 +10,9 @@
 {% else %}
 <div class="split guides hb{% if picked %} picked{% endif %}">
   <nav class="split-side stack" aria-label="Handbook">
-    <div class="card list navlist">
+    <div class="card list navlist rows flush">
       {% for f in files %}
-      <a class="item conv-row{% if f.selected %} on{% endif %}" href="/handbook?f={{ f.name }}"{% if f.selected %} aria-current="true"{% endif %}>
+      <a class="item-row conv-row{% if f.selected %} on{% endif %}" href="/handbook?f={{ f.name }}"{% if f.selected %} aria-current="true"{% endif %}>
         <div class="ttl"><strong class="mono">{{ f.name }}</strong>{% if !f.blurb.is_empty() %}<span class="sub">{{ f.blurb }}</span>{% endif %}</div>
       </a>
       {% endfor %}

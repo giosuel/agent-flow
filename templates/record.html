@@ -159,8 +159,8 @@
     <details class="rhist">
       <summary><h2 class="label">History</h2><span class="hs"><b>{{ history.count }} change{% if history.count != 1 %}s{% endif %}</b> · last: {{ history.last }}</span>{{ crate::web::icons::icon("chevron")|safe }}</summary>
       <div class="hist-body">
-        {% for d in history.days %}<div class="hist-day">{{ d.label }}</div>
-        <ol class="plain hist-tl">{% for e in d.events %}<li class="hist-ev"><span class="hist-pt {{ e.dot }}" aria-hidden="true"></span><span class="hist-w">{{ e.what }}{% for (k, v, acc) in e.chips %} <span class="hist-chip{% if *acc %} acc{% endif %}">{{ k }}{% if !v.is_empty() %} <b>{{ v }}</b>{% endif %}</span>{% endfor %}{% if let Some((label, url)) = e.replaced %} <a class="mono hist-v" href="{{ url }}" title="The file this version replaced">{{ label }}</a>{% endif %}</span><span class="hist-r">{{ e.who }} · {{ e.time }}<span class="mono">r{{ e.rev }}</span></span></li>{% endfor %}</ol>
+        {% for d in history.days %}<div class="tl-day">{{ d.label }}</div>
+        <ol class="tl">{% for e in d.events %}<li class="ev"><span class="tm">{{ e.time }}</span><span class="rail"><span class="dot {{ e.dot }}" aria-hidden="true"></span></span><span class="txt">{{ e.what }}{% for (k, v, acc) in e.chips %} <span class="hist-chip{% if *acc %} acc{% endif %}">{{ k }}{% if !v.is_empty() %} <b>{{ v }}</b>{% endif %}</span>{% endfor %}{% if let Some((label, url)) = e.replaced %} <a class="mono hist-v" href="{{ url }}" title="The file this version replaced">{{ label }}</a>{% endif %}<span class="ev-meta">{{ e.who }} · <span class="mono">r{{ e.rev }}</span></span></span></li>{% endfor %}</ol>
         {% endfor %}
       </div>
     </details>
