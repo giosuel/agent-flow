@@ -330,6 +330,9 @@ pub fn sweep_incoming(builds_dir: &Path) -> usize {
 pub fn pack(source: &Path, out: impl std::io::Write) -> anyhow::Result<()> {
     let mut b = tar::Builder::new(out);
     b.follow_symlinks(true);
+    // A sparse file (cargo leaves some release binaries so) is read whole, holes as zeros: the
+    // server takes only plain entries, and the archive is compressed anyway.
+    b.sparse(false);
     if source.is_dir() {
         b.append_dir_all(".", source).with_context(|| format!("packing {}", source.display()))?;
     } else {
@@ -465,6 +468,27 @@ mod tests {
         let mut tampered = m.clone();
         tampered.files[0].sha256 = "00".into();
         assert!(unpack_verified(ar.as_slice(), tempfile::tempdir().unwrap().path(), &tampered).is_err());
+    }
+
+    /// Cargo can leave a release binary as a sparse file; packing it must still give plain
+    /// entries the server accepts, holes read as zeros (Imaginarium, 2026-11-19).
+    #[test]
+    fn sparse_files_pack_as_plain_files() {
+        use std::io::{Seek, SeekFrom, Write};
+        let src = tempfile::tempdir().unwrap();
+        let path = src.path().join("app");
+        let mut f = std::fs::File::create(&path).unwrap();
+        f.write_all(b"head").unwrap();
+        f.seek(SeekFrom::Start(1 << 20)).unwrap();
+        f.write_all(b"tail").unwrap();
+        drop(f);
+        let mut ar = Vec::new();
+        pack(&path, &mut ar).unwrap();
+        let m = inspect(std::io::Cursor::new(&ar)).unwrap();
+        assert_eq!(m.total, (1 << 20) + 4);
+        let out = tempfile::tempdir().unwrap();
+        unpack_verified(ar.as_slice(), out.path(), &m).unwrap();
+        assert_eq!(std::fs::read(out.path().join("app")).unwrap(), std::fs::read(&path).unwrap());
     }
 
     #[test]
