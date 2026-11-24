@@ -16,10 +16,17 @@ pub fn routes() -> Router<AppState> {
     Router::new().route("/settings/consultant/on", post(on)).route("/settings/consultant/off", post(off))
 }
 
+/// Does the server run as a user of its own (not the agents')?
+fn separate_user(state: &AppState) -> bool {
+    !state.config.agents_home.is_empty() && consultant::own_home() != std::path::Path::new(&state.config.agents_home)
+}
+
 /// What the Settings section shows.
 pub struct View {
     pub on: bool,
     pub running: bool,
+    /// Waiting at Claude Code's trust question.
+    pub waiting_trust: bool,
     pub link: Option<String>,
     pub attach: String,
     pub error: Option<String>,
@@ -37,9 +44,11 @@ pub async fn view(state: &AppState) -> View {
         })
         .await
         .unwrap_or((false, None, None));
+    let running = consultant::running(&state.config.data_dir()).await;
     View {
         on,
-        running: consultant::running(&state.config.data_dir()).await,
+        running,
+        waiting_trust: running && consultant::waiting_for_trust(&state.config.data_dir()).await,
         link,
         attach: consultant::attach_command(&state.config.data_dir()),
         error,
@@ -64,7 +73,18 @@ async fn bring_up(state: &AppState) -> anyhow::Result<()> {
     let token = state.db.call(consultant::new_token).await?;
     let folder = consultant::write_folder(&data, &token, &state.config.public_url, &state.config.flow_bin())?;
     let resume = state.db.call(|c| consultant::resume_first(c)).await?;
-    let history = consultant::has_history(&crate::usage::root(&state.config), &folder);
+    // With a user of its own, the server trusts the folder for Claude Code (no question to answer
+    // on the first start); sharing the agents' user, the owner answers it once in tmux.
+    if separate_user(state) {
+        match consultant::trust_folder(&folder) {
+            Ok(true) => tracing::info!("trusted the consultant's folder for Claude Code"),
+            Ok(false) => {}
+            Err(e) => {
+                tracing::warn!("couldn't trust the consultant's folder ({e:#}); answer the trust question in tmux")
+            }
+        }
+    }
+    let history = consultant::has_history(&consultant::transcripts_root(), &folder);
     consultant::start(&data, &folder, resume.as_deref(), history).await?;
     if resume.is_some() {
         state
@@ -131,7 +151,7 @@ pub fn spawn_watchdog(state: AppState) {
                     note_error(&state, &format!("{e:#}")).await;
                 }
             }
-            let (root, folder) = (crate::usage::root(&state.config), consultant::dir(&state.config.data_dir()));
+            let (root, folder) = (consultant::transcripts_root(), consultant::dir(&state.config.data_dir()));
             if let Err(e) = state.db.call(move |c| consultant::ingest(c, &root, &folder)).await {
                 tracing::warn!("the consultant's conversations: {e:#}");
             }
