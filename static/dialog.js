@@ -30,39 +30,15 @@
     return url.pathname;
   };
 
+  // The dialog is the library's (app.js afDlg, md): its head holds the record's path, ‹ › and the
+  // close button; Esc, ✕, the scrim and a pull on the phone go Back, which closes it.
   function build() {
-    box = document.createElement("div");
-    box.className = "rdlg-back";
-    box.innerHTML = `<div class="rdlg" role="dialog" aria-modal="true" aria-labelledby="rdlg-title">
-      <div class="rdlg-grab" aria-hidden="true"></div>
-      <div class="rdlg-head"><span class="sub" id="rdlg-title"></span><span class="grow"></span>
-        <span class="rdlg-nav"><button type="button" class="ibtn" data-step="-1" aria-label="Previous"><svg class="i" aria-hidden="true"><use href="#i-prev"/></svg></button><button type="button" class="ibtn" data-step="1" aria-label="Next"><svg class="i" aria-hidden="true"><use href="#i-chevron"/></svg></button></span>
-        <button type="button" class="ibtn rdlg-x" aria-label="Close"><svg class="i" aria-hidden="true"><use href="#i-close"/></svg></button></div>
-      <div class="rdlg-body"></div></div>`;
-    box.addEventListener("click", (e) => {
-      if (e.target === box || e.target.closest(".rdlg-x")) close();
+    box = window.afDlg.open({ size: "md", cls: "rdlg", opener, dismiss: () => close(), closed: () => { box = null; } });
+    box.tools.innerHTML = `<span class="rdlg-nav"><button type="button" class="ibtn" data-step="-1" aria-label="Previous"><svg class="i" aria-hidden="true"><use href="#i-prev"/></svg></button><button type="button" class="ibtn" data-step="1" aria-label="Next"><svg class="i" aria-hidden="true"><use href="#i-chevron"/></svg></button></span>`;
+    box.tools.addEventListener("click", (e) => {
       const step = e.target.closest("[data-step]");
       if (step) go(at + Number(step.dataset.step));
     });
-    // On the phone, pulling the sheet down by its handle or head closes it.
-    let y0 = null;
-    box.addEventListener("touchstart", (e) => {
-      if (e.target.closest(".rdlg-grab, .rdlg-head") && !e.target.closest("button, a")) y0 = e.touches[0].clientY;
-    }, { passive: true });
-    box.addEventListener("touchmove", (e) => {
-      if (y0 === null) return;
-      const dy = Math.max(0, e.touches[0].clientY - y0);
-      box.querySelector(".rdlg").style.transform = `translateY(${dy}px)`;
-    }, { passive: true });
-    box.addEventListener("touchend", (e) => {
-      if (y0 === null) return;
-      const dy = e.changedTouches[0].clientY - y0;
-      y0 = null;
-      const sheet = box.querySelector(".rdlg");
-      sheet.style.transform = "";
-      if (dy > 110) close();
-    });
-    document.body.append(box);
   }
 
   // `soft`: opened by the page itself (a direct link); if it can't be shown, stay on the page
@@ -83,34 +59,30 @@
       return false;
     }
     if (!box) build();
-    const body = box.querySelector(".rdlg-body");
+    const body = box.body;
     body.replaceChildren(...[...main.childNodes].map((n) => document.importNode(n, true)));
     for (const el of body.querySelectorAll(".crumb-row, .back-bar")) el.remove();
     // The page's path continues in the dialog's header (D-222): its earlier parts go there, the
     // last is the record.
-    const title = box.querySelector("#rdlg-title");
+    const title = box.title;
     const where = doc.querySelector("nav.path");
     if (where) title.replaceChildren(document.importNode(where, true));
     else title.textContent = (doc.querySelector(".crumb-where") || {}).textContent || "";
-    const nav = box.querySelector(".rdlg-nav");
+    const nav = box.tools.querySelector(".rdlg-nav");
     nav.hidden = list.length < 2;
-    box.querySelector("[data-step='-1']").disabled = at <= 0;
-    box.querySelector("[data-step='1']").disabled = at < 0 || at >= list.length - 1;
+    nav.querySelector("[data-step='-1']").disabled = at <= 0;
+    nav.querySelector("[data-step='1']").disabled = at < 0 || at >= list.length - 1;
     body.scrollTop = 0;
     document.dispatchEvent(new CustomEvent("af:content", { detail: body }));
     return true;
   }
 
   async function open(path, soft) {
+    const was = !!box;
     if (!(await show(path, soft))) return;
-    if (!box.classList.contains("open")) {
-      document.documentElement.classList.add("rdlg-on");
-      requestAnimationFrame(() => box.classList.add("open"));
-      history.pushState({ rdlg: path }, "", path);
-    } else {
-      history.replaceState({ rdlg: path }, "", path);
-    }
-    box.querySelector(".rdlg-x").focus({ preventScroll: true });
+    if (!was) history.pushState({ rdlg: path }, "", path);
+    else history.replaceState({ rdlg: path }, "", path);
+    if (!box.el.contains(document.activeElement)) box.el.querySelector(".dlg-x").focus({ preventScroll: true });
   }
 
   function go(i) {
@@ -126,27 +98,21 @@
   }
 
   function hide() {
-    if (!box) return;
-    box.classList.remove("open");
-    document.documentElement.classList.remove("rdlg-on");
-    setTimeout(() => {
-      if (box && !box.classList.contains("open")) box.querySelector(".rdlg-body").replaceChildren();
-    }, 250);
-    if (opener && document.contains(opener)) opener.focus({ preventScroll: true });
+    if (box) box.close();
   }
 
   window.addEventListener("popstate", (e) => {
     if (e.state && e.state.rdlg) {
       // Forward again into a dialog: show it.
-      show(e.state.rdlg).then((ok) => ok && box.classList.add("open"));
-    } else if (box && box.classList.contains("open")) {
+      show(e.state.rdlg);
+    } else if (box) {
       hide();
     }
   });
 
+  // ← → step through the list while the record is the top dialog (Esc is the controller's).
   document.addEventListener("keydown", (e) => {
-    if (!box || !box.classList.contains("open")) return;
-    if (e.key === "Escape") close();
+    if (!box || window.afDlg.top() !== box) return;
     if (e.target.closest("input, textarea, select")) return;
     if (e.key === "ArrowLeft") go(at - 1);
     if (e.key === "ArrowRight") go(at + 1);
@@ -156,9 +122,9 @@
     if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
     const a = e.target.closest("a[href]");
     const path = record(a);
-    if (!path || path === location.pathname && !(box && box.contains(a))) return;
+    if (!path || path === location.pathname && !(box && box.el.contains(a))) return;
     e.preventDefault();
-    if (!(box && box.contains(a))) {
+    if (!(box && box.el.contains(a))) {
       // The list it came from: links to such records in the same list or card.
       const scope = a.closest("ul, ol, tbody, .card, section") || document;
       list = [...new Set([...scope.querySelectorAll("a[href]")].map(record).filter(Boolean))];
