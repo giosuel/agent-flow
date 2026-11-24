@@ -2065,7 +2065,11 @@ async fn usage_and_machine_pages_show_the_counts() {
     assert!(html.contains(r#"<table class="table nums" data-sortable>"#), "{html}");
     assert!(html.contains(r#"<button type="button" class="th-sort" data-sort="num">Cost<span class="sort-i" aria-hidden="true"></span></button>"#), "{html}");
     let all = get("/usage/tasks").await.text().await.unwrap();
-    assert!(all.contains("<div data-dlg-content data-dlg-size=\"lg\" class=\"tasks-all\">") && all.contains("Not in a task"), "{all}");
+    assert!(
+        all.contains("<div data-dlg-content data-dlg-size=\"lg\" class=\"tasks-all\">")
+            && all.contains("Not in a task"),
+        "{all}"
+    );
     assert!(all.contains("in the last 7 days, last worked on first"), "{all}");
     assert!(all.contains(r#"<th scope="col" class="hide-phone tk-l" aria-sort="descending" data-default="descending"><button type="button" class="th-sort" data-sort="num">Worked"#), "{all}");
     assert!(all.contains("<tfoot><tr class=\"tk-out\">"), "Not in a task stays under the tasks: {all}");
@@ -4364,7 +4368,10 @@ fn the_ui_library_replaced_the_old_buttons() {
                 );
                 // Confirms are the app's dialog (afDialog), never the browser's.
                 assert!(
-                    !text.contains(" confirm(") && !text.contains("(confirm(") && !text.contains(" alert(") && !text.contains(" prompt("),
+                    !text.contains(" confirm(")
+                        && !text.contains("(confirm(")
+                        && !text.contains(" alert(")
+                        && !text.contains(" prompt("),
                     "{}: the browser's own dialogs",
                     path.display()
                 );
