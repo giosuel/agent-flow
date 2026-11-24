@@ -4611,3 +4611,29 @@ async fn rotate_is_offered_only_where_the_token_file_is() {
         .unwrap();
     assert!(!res.status().is_redirection() && !res.status().is_success(), "{}", res.status());
 }
+
+/// Withdrawing a question gives back the tasks it blocked, as answering or archiving it does:
+/// they stayed blocked by nothing, and the step couldn't be concluded.
+#[tokio::test]
+async fn withdrawing_a_question_unblocks_its_tasks() {
+    let s = TestServer::start().await;
+    let token = s.token(TokenKind::Project, Some("vinculum")).await;
+    let sess = mcp_session(&s, &token).await;
+    let call = |name: &'static str, args: Value| {
+        let (s, token, sess) = (&s, token.clone(), sess.clone());
+        async move { mcp_tool(s, &token, &sess, name, args).await }
+    };
+    assert!(call("add_milestone", json!({"name": "M1", "title": "Keybinds"})).await.0);
+    assert!(call("add_milestone", json!({"name": "K1", "title": "Read binds", "step_of": "M1"})).await.0);
+    let (ok, r) = call("add_tasks", json!({"milestone": "K1", "tasks": [{"title": "Parse", "estimate": "1 h"}]})).await;
+    assert!(ok, "{r}");
+    let (ok, q) = call("ask_question", json!({"title": "Wide or narrow?", "blocks": ["T-1"]})).await;
+    assert!(ok, "{q}");
+    let (ok, w) = call("withdraw_question", json!({"id": "Q-1", "reason": "found it in the docs"})).await;
+    assert!(ok, "{w}");
+    let (_, t1) = call("get_record", json!({"id": "T-1"})).await;
+    assert_eq!(t1["state"], "todo", "{t1}");
+    assert!(call("update_task", json!({"id": "T-1", "state": "done"})).await.0);
+    let (ok, c) = call("conclude_step", json!({"step": "K1", "summary": "Binds are read."})).await;
+    assert!(ok, "{c}");
+}

@@ -450,7 +450,13 @@ pub fn unblock_after_answer(conn: &Connection, q: &Record, actor: &str) -> anyho
     unblock_after(conn, q, &format!("{} answered", q.short_id()), actor)
 }
 
-/// Unblocks the tasks a question blocked (answered or archived), unless something else still does.
+/// The same after the agent withdrew a question: there's nothing left to wait for.
+pub fn unblock_after_withdraw(conn: &Connection, q: &Record, actor: &str) -> anyhow::Result<Vec<String>> {
+    unblock_after(conn, q, &format!("{} withdrawn", q.short_id()), actor)
+}
+
+/// Unblocks the tasks a question blocked (answered, withdrawn or archived), unless something else
+/// still does.
 fn unblock_after(conn: &Connection, q: &Record, why: &str, actor: &str) -> anyhow::Result<Vec<String>> {
     let mut stmt = conn.prepare(
         "SELECT l.to_id FROM links l JOIN records r ON r.id = l.to_id
