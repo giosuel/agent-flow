@@ -83,6 +83,8 @@ pub trait GitHub: Send + Sync {
     /// Merges a PR (the owner's Merge button) and deletes its branch, but only if
     /// its branch is still at `head`: a push after the owner looked makes it fail.
     fn merge<'a>(&'a self, repo: &'a str, number: i64, head: &'a str) -> BoxFuture<'a, anyhow::Result<String>>;
+    /// Whether the repository has this tag already (pushed by hand, or by an earlier press).
+    fn tag_exists<'a>(&'a self, repo: &'a str, tag: &'a str) -> BoxFuture<'a, anyhow::Result<bool>>;
 }
 
 const FIELDS: &str = "number,title,url,state,isDraft,baseRefName,headRefName,mergeable,statusCheckRollup";
@@ -339,6 +341,21 @@ impl GitHub for GhCli {
             Ok(prs.into_iter().map(Into::into).collect())
         })
     }
+
+    fn tag_exists<'a>(&'a self, repo: &'a str, tag: &'a str) -> BoxFuture<'a, anyhow::Result<bool>> {
+        Box::pin(async move {
+            check_repo(repo)?;
+            if tag.is_empty() || !tag.chars().all(|c| c.is_ascii_alphanumeric() || "._-+".contains(c)) {
+                bail!("{tag:?} isn't a tag name");
+            }
+            // matching-refs answers an empty list rather than 404, but matches by prefix
+            // ("v0.0.1" finds "v0.0.10"), so the exact ref is looked for in it.
+            let out =
+                Self::run(&["api", &format!("repos/{repo}/git/matching-refs/tags/{tag}"), "--jq", ".[].ref"]).await?;
+            let want = format!("refs/tags/{tag}");
+            Ok(String::from_utf8_lossy(&out).lines().any(|l| l.trim() == want))
+        })
+    }
 }
 
 #[cfg(test)]
@@ -357,6 +374,8 @@ pub mod fake {
         pub prs: Mutex<HashMap<(String, i64), PrInfo>>,
         /// PRs reported merged the next time they're fetched one by one (as after a merge button).
         pub merge_on_fetch: Mutex<std::collections::HashSet<i64>>,
+        /// Tags on GitHub, as (repo, tag).
+        pub tags: Mutex<std::collections::HashSet<(String, String)>>,
     }
 
     impl FakeGitHub {
@@ -411,6 +430,11 @@ pub mod fake {
                 .collect();
             v.sort_by_key(|p| p.number);
             Box::pin(async move { Ok(v) })
+        }
+
+        fn tag_exists<'a>(&'a self, repo: &'a str, tag: &'a str) -> BoxFuture<'a, anyhow::Result<bool>> {
+            let has = self.tags.lock().unwrap().contains(&(repo.to_owned(), tag.to_owned()));
+            Box::pin(async move { Ok(has) })
         }
     }
 

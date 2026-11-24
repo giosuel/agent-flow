@@ -389,27 +389,37 @@ pub fn finish(conn: &Connection, a: &ActionRow, r: &RunResult) -> anyhow::Result
         )
     };
     records::event(conn, Some(record.project_id), Some(record.id), kind, &what, "owner")?;
-    // A release whose tag command ran is tagged, and the milestone it closes is closed with that
-    // tag (Imaginarium's agent, 2026-11-12).
     if r.ok && record.kind == Kind::Release && a.kind == ButtonKind::Tag {
-        records::update(
-            conn,
-            &record,
-            "owner",
-            records::Patch { state: Some("tagged".into()), quiet: true, ..Default::default() },
-        )?;
-        if let Some(mid) = record.milestone_id {
-            let m = crate::projects::get_milestone(conn, mid)?;
-            if m.state != "closed" {
-                let patch = crate::projects::MilestonePatch {
-                    state: Some("closed".into()),
-                    tag: Some(record.str("tag").to_owned()),
-                    ..Default::default()
-                };
-                crate::projects::update_milestone(conn, &m, &patch, "owner")?;
-            }
+        mark_tagged(conn, &record, "owner")?;
+    }
+    Ok(())
+}
+
+/// A release whose tag is pushed is tagged, and the milestone it closes is closed with that tag
+/// (Imaginarium's agent, 2026-11-12). Its tag buttons still waiting are withdrawn: pressed, they
+/// would only collide with the tag (the consultant, 2026-11-19, Imaginarium's R-1).
+pub fn mark_tagged(conn: &Connection, record: &Record, by: &str) -> anyhow::Result<()> {
+    records::update(
+        conn,
+        record,
+        by,
+        records::Patch { state: Some("tagged".into()), quiet: true, ..Default::default() },
+    )?;
+    if let Some(mid) = record.milestone_id {
+        let m = crate::projects::get_milestone(conn, mid)?;
+        if m.state != "closed" {
+            let patch = crate::projects::MilestonePatch {
+                state: Some("closed".into()),
+                tag: Some(record.str("tag").to_owned()),
+                ..Default::default()
+            };
+            crate::projects::update_milestone(conn, &m, &patch, by)?;
         }
     }
+    conn.execute(
+        "UPDATE actions SET state = 'withdrawn' WHERE record_id = ?1 AND kind = 'tag' AND state IN ('waiting', 'failed')",
+        [record.id],
+    )?;
     Ok(())
 }
 

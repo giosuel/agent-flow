@@ -1025,6 +1025,39 @@ async fn the_bar_shows_the_project_its_tabs_and_the_global_pages() {
     assert!(bar.contains("<span>Usage</span>"), "the current page's icon carries its name");
 }
 
+/// A release's tag pushed by hand, outside AgentFlow: the poller sees it on GitHub, marks the
+/// release tagged, closes its milestone and withdraws the Push tag button, which would collide
+/// (the consultant, 2026-11-19: Imaginarium's R-1).
+#[tokio::test]
+async fn a_tag_pushed_by_hand_marks_its_release_tagged() {
+    let s = TestServer::start().await;
+    let token = s.token(TokenKind::Project, Some("vinculum")).await;
+    let sess = mcp_session(&s, &token).await;
+    let call = |tool: &'static str, args: Value| {
+        let (s, token, sess) = (&s, &token, &sess);
+        async move { mcp_tool(s, token, sess, tool, args).await }
+    };
+    assert!(call("update_project", json!({"repo": "giosuel/vinculum"})).await.0);
+    assert!(call("add_milestone", json!({"name": "M4", "title": "Keybinds"})).await.0);
+    let (ok, r) = call("add_release", json!({"tag": "v0.0.10-m4", "title": "M4", "milestone": "M4"})).await;
+    assert!(ok, "{r}");
+    let (id, button) = (r["id"].as_str().unwrap().to_owned(), r["tag_button"]["id"].as_i64().unwrap());
+
+    // Not on GitHub yet: it waits.
+    s.github.tags.lock().unwrap().insert(("giosuel/vinculum".into(), "v0.0.9-m3".into()));
+    crate::poller::check_pushed_tags(&s.state).await.unwrap();
+    assert_eq!(call("get_record", json!({"id": id})).await.1["state"], "waiting");
+
+    s.github.tags.lock().unwrap().insert(("giosuel/vinculum".into(), "v0.0.10-m4".into()));
+    crate::poller::check_pushed_tags(&s.state).await.unwrap();
+    let (_, got) = call("get_record", json!({"id": id})).await;
+    assert_eq!(got["state"], "tagged", "{got}");
+    let (_, m) = call("get_milestone", json!({"milestone": "M4"})).await;
+    assert_eq!(m["state"], "closed", "{m}");
+    let row = s.state.db.call(move |c| crate::actions::get(c, button)).await.unwrap().unwrap();
+    assert_eq!(row.state, "withdrawn");
+}
+
 async fn owner_page(s: &TestServer, cookie: &str, path: &str) -> String {
     s.http.get(s.url(path)).header(COOKIE, cookie).send().await.unwrap().text().await.unwrap()
 }
