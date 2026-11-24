@@ -1,0 +1,205 @@
+name: Release
+
+# A v* tag publishes a release (the owner, 2026-11-24, Q-13): on GitHub Releases the Linux x86_64
+# programs as a tarball, the two .deb packages and SHA256SUMS, with the tag's message as the title
+# and notes (D-254); then the AUR packages agentflow (built from the tag's source) and
+# agentflow-bin (the release's programs). A tag with a "-" is a pre-release: no AUR.
+#
+# Run it by hand (Actions › Release › Run workflow) for a dry run: it builds and tests everything,
+# keeps the files as workflow artifacts and publishes nothing.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  linux:
+    # The oldest Ubuntu GitHub offers: the programs run where its glibc (2.35) or a newer one is.
+    runs-on: ubuntu-22.04
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The version comes from `git describe`.
+          fetch-depth: 0
+      - name: Fetch the tag itself
+        if: github.ref_type == 'tag'
+        # checkout turns an annotated tag into a lightweight one
+        run: git fetch --force origin "refs/tags/${GITHUB_REF_NAME}:refs/tags/${GITHUB_REF_NAME}"
+      - id: v
+        run: echo "version=$(scripts/version.sh)" >> "$GITHUB_OUTPUT"
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: false
+      - run: cargo test --locked
+      - run: cargo build --release --locked
+      - name: The programs say their version
+        env:
+          VERSION: ${{ steps.v.outputs.version }}
+        run: |
+          for b in agentflow flow agentflow-builder; do
+            target/release/$b --version | tee /dev/stderr | grep -qF " $VERSION" || { echo "::error::$b isn't $VERSION"; exit 1; }
+          done
+      - name: Package
+        env:
+          VERSION: ${{ steps.v.outputs.version }}
+        run: |
+          name="agentflow-${VERSION}-linux-x86_64"
+          mkdir -p dist "$name"
+          cp target/release/agentflow target/release/flow target/release/agentflow-builder LICENSE README.md "$name/"
+          cp -r packaging/system "$name/system"
+          tar -czf "dist/$name.tar.gz" "$name"
+          CARGO_TARGET_DIR="$PWD/target" scripts/deb.sh
+          cp target/*.deb dist/
+          ls -l dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: dist/*
+          if-no-files-found: error
+
+  github-release:
+    needs: linux
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux
+          path: dist
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          git fetch --force origin "refs/tags/$TAG:refs/tags/$TAG"
+          (cd dist && sha256sum * > SHA256SUMS)
+          # The tag's message is the release's title (its first line) and notes (D-254); GitHub's
+          # list of merged PRs follows them.
+          title="$(git tag -l --format='%(contents:subject)' "$TAG")"
+          git tag -l --format='%(contents:body)' "$TAG" > notes.md
+          flags=(--verify-tag --title "${title:-$TAG}" --notes-file notes.md --generate-notes)
+          if [[ "$TAG" == *-* ]]; then flags+=(--prerelease); fi
+          gh release create "$TAG" "${flags[@]}" dist/*
+
+  aur-build:
+    needs: [linux, github-release]
+    # Dry runs too (to test the packages); tags only when stable and released.
+    if: >-
+      always() && needs.linux.result == 'success' &&
+      (github.ref_type != 'tag' || (needs.github-release.result == 'success' && !contains(github.ref_name, '-')))
+    runs-on: ubuntu-24.04
+    container: archlinux:base-devel
+    steps:
+      - name: Install tools
+        run: pacman -Syu --noconfirm --needed git cargo openssl zlib zstd
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux
+          path: dist
+      - name: Fill in the version and checksums
+        env:
+          TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+          VERSION: ${{ needs.linux.outputs.version }}
+        run: |
+          mkdir -p out/agentflow out/agentflow-bin
+          cp packaging/arch/PKGBUILD packaging/arch/*.install out/agentflow/
+          cp packaging/arch-bin/PKGBUILD packaging/arch/*.install out/agentflow-bin/
+          if [ -n "$TAG" ]; then
+            pkgver="${TAG#v}"
+            url="https://github.com/${GITHUB_REPOSITORY}/archive/refs/tags/${TAG}.tar.gz"
+            # the archive can 404 for a short while after the tag is pushed
+            for i in $(seq 1 30); do curl -sSfL -o src.tar.gz "$url" && break; sleep 10; done
+          else
+            # a dry run: the checked-out commit, as version 0.0.0 (pacman takes no "-")
+            pkgver="0.0.0"
+            git config --global --add safe.directory "$PWD"
+            git archive --prefix="agent-flow-${pkgver}/" -o src.tar.gz HEAD
+            cp src.tar.gz "out/agentflow/agentflow-${pkgver}.tar.gz"
+            sed -i 's|^source=.*|source=("$pkgname-$pkgver.tar.gz")|' out/agentflow/PKGBUILD
+            # the release tarball, renamed to what the -bin PKGBUILD looks for
+            mkdir bin && tar -xzf "dist/agentflow-${VERSION}-linux-x86_64.tar.gz" -C bin
+            mv "bin/agentflow-${VERSION}-linux-x86_64" "bin/agentflow-${pkgver}-linux-x86_64"
+            tar -czf "dist/agentflow-${pkgver}-linux-x86_64.tar.gz" -C bin "agentflow-${pkgver}-linux-x86_64"
+            cp "dist/agentflow-${pkgver}-linux-x86_64.tar.gz" out/agentflow-bin/
+            sed -i 's|^source=.*|source=("agentflow-$pkgver-linux-x86_64.tar.gz")|' out/agentflow-bin/PKGBUILD
+          fi
+          src_sum="$(sha256sum src.tar.gz | cut -d' ' -f1)"
+          bin_sum="$(sha256sum "dist/agentflow-${pkgver}-linux-x86_64.tar.gz" | cut -d' ' -f1)"
+          sed -i -e "s/^pkgver=.*/pkgver=${pkgver}/" -e "s/^pkgrel=.*/pkgrel=1/" \
+                 -e "s/^sha256sums=.*/sha256sums=('${src_sum}')/" out/agentflow/PKGBUILD
+          sed -i -e "s/^pkgver=.*/pkgver=${pkgver}/" -e "s/^pkgrel=.*/pkgrel=1/" \
+                 -e "s/^sha256sums=.*/sha256sums=('${bin_sum}')/" out/agentflow-bin/PKGBUILD
+      - name: Build both packages
+        run: |
+          # makepkg refuses to run as root; the tests ran in the linux job
+          useradd -m builder
+          chown -R builder: out
+          su builder -c 'cd out/agentflow && makepkg -f --nodeps --nocheck && makepkg --printsrcinfo > .SRCINFO'
+          su builder -c 'cd out/agentflow-bin && makepkg -f --nodeps && makepkg --printsrcinfo > .SRCINFO'
+          ls -l out/*/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aur
+          path: |
+            out/*/PKGBUILD
+            out/*/.SRCINFO
+            out/*/*.install
+            out/*/*.pkg.tar.zst
+          include-hidden-files: true
+
+  # Pushes PKGBUILD, .SRCINFO and the install scripts to the AUR. The only job that sees the AUR
+  # key: it builds nothing and runs no third-party actions.
+  aur-publish:
+    needs: aur-build
+    if: github.ref_type == 'tag' && !contains(github.ref_name, '-')
+    runs-on: ubuntu-24.04
+    environment: aur
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: aur
+          path: out
+      - name: Set up SSH for the AUR
+        env:
+          AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+        run: |
+          install -dm700 ~/.ssh
+          printf '%s\n' "$AUR_SSH_PRIVATE_KEY" > ~/.ssh/aur
+          chmod 600 ~/.ssh/aur
+          # pinned host key, as aur.archlinux.org publishes it (SHA256:RFzBCUItH9LZS0cKB5UE6ceAYhBD5C8GeOBip8Z11+4)
+          echo 'aur.archlinux.org ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEuBKrPzbawxA/k2g6NcyV5jmqwJ2s+zpgZGZ7tpLIcN' > ~/.ssh/known_hosts
+          printf 'Host aur.archlinux.org\n  User aur\n  IdentityFile ~/.ssh/aur\n  IdentitiesOnly yes\n  StrictHostKeyChecking yes\n' > ~/.ssh/config
+      - name: Push to the AUR
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          for pkg in agentflow agentflow-bin; do
+            rm -rf "aur-$pkg"
+            git clone "ssh://aur@aur.archlinux.org/$pkg.git" "aur-$pkg"
+            cp out/$pkg/PKGBUILD out/$pkg/.SRCINFO out/$pkg/*.install "aur-$pkg/"
+            cd "aur-$pkg"
+            git config user.name giosuel
+            git config user.email me@giosuel.ch
+            git add PKGBUILD .SRCINFO *.install
+            if git diff --cached --quiet; then
+              echo "$pkg is up to date on the AUR"
+            else
+              git commit -m "Update to ${TAG#v}"
+              git push origin HEAD:master
+            fi
+            cd ..
+          done
