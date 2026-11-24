@@ -197,6 +197,10 @@ async fn output(
         "errors": job.errors,
         "finished": job.is_finished(),
         "time": took(&job),
+        // The state chip as the page draws it: its tone and words, so a finished job's chip changes
+        // colour too (it kept "running"'s, N-19 #6).
+        "chip": job_row(&job).chip,
+        "label": job_row(&job).label,
         // What a builder sent back, for flow to fetch (GET …/results/<name>).
         "results": job.artifacts,
     }))
@@ -355,21 +359,30 @@ fn bytes(n: Option<i64>) -> String {
 }
 
 pub fn job_row(j: &Job) -> JobRow {
-    let (chip, label) = match j.state.as_str() {
-        "running" => (
-            "run",
-            match j.threads {
-                Some(t) if j.reason.is_empty() => format!("running · {t} threads"),
-                _ if !j.reason.is_empty() => format!("running · {}", j.reason),
-                _ => "running".into(),
-            },
-        ),
-        "paused" => ("warn", format!("paused · {}", j.reason)),
-        "queued" => ("quiet", j.reason.clone()),
-        "done" => ("ok", "done".into()),
-        "cancelled" => ("quiet", "cancelled".into()),
-        _ => ("bad", if j.reason.is_empty() { "failed".into() } else { format!("failed · {}", j.reason) }),
+    let label = match j.state.as_str() {
+        "running" => match j.threads {
+            Some(t) if j.reason.is_empty() => format!("running · {t} threads"),
+            _ if !j.reason.is_empty() => format!("running · {}", j.reason),
+            _ => "running".into(),
+        },
+        "paused" => format!("paused · {}", j.reason),
+        "queued" => j.reason.clone(),
+        "done" => "done".into(),
+        "cancelled" => "cancelled".into(),
+        _ => {
+            if j.reason.is_empty() {
+                "failed".into()
+            } else {
+                format!("failed · {}", j.reason)
+            }
+        }
     };
+    let chip =
+        super::tone::tone(if matches!(j.state.as_str(), "running" | "paused" | "queued" | "done" | "cancelled") {
+            &j.state
+        } else {
+            "failed"
+        });
     JobRow {
         id: j.id,
         project: j.project.clone(),

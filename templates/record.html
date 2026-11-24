@@ -10,7 +10,7 @@
 {% if !blocking.is_empty() %}
 <section class="blocking" aria-labelledby="blocking-h">
   <h2 class="label" id="blocking-h">Blocking</h2>
-  <ul class="rows">{% for (b, step) in blocking %}<li class="item-row"><span class="mono sub id-col">{{ b.short }}</span><div class="ttl"><a href="{{ b.url }}">{{ b.title }}</a>{% if !step.is_empty() %}<span class="sub">{{ step }}</span>{% endif %}</div><span class="chip state-blocked">blocked</span></li>{% endfor %}</ul>
+  <ul class="rows">{% for (b, step) in blocking %}<li class="item-row"><span class="mono sub id-col">{{ b.short }}</span><div class="ttl"><a href="{{ b.url }}">{{ b.title }}</a>{% if !step.is_empty() %}<span class="sub">{{ step }}</span>{% endif %}</div><span class="chip {{ crate::web::tone::tone("blocked") }}">blocked</span></li>{% endfor %}</ul>
   {% if state == "open" %}<p class="sub">Your answer unblocks {% if blocking.len() == 1 %}it{% else %}them{% endif %}.</p>{% endif %}
 </section>
 {% endif %}
@@ -26,21 +26,21 @@
     {% if let Some(sv) = shot %}
     <figure class="shot-full">
       <a href="{{ sv.image }}" target="_blank" rel="noopener" title="Open the full image"><img src="{{ sv.image }}" alt="{{ title }}"></a>
-      <figcaption class="sub"><span class="chip">{{ sv.category }}</span>{% if !sv.mstate.is_empty() %} <span class="mstate {{ sv.mstate }}">{{ sv.mstate }}</span>{% endif %} {{ sv.line }}</figcaption>
+      <figcaption class="sub"><span class="chip">{{ sv.category }}</span>{% if !sv.mstate.is_empty() %} <span class="chip {{ crate::web::tone::tone(sv.mstate) }}">{{ sv.mstate }}</span>{% endif %} {{ sv.line }}</figcaption>
     </figure>
     {% if !sv.design_url.is_empty() %}<p>Design: <a href="{{ sv.design_url }}" target="_blank" rel="noopener">{{ sv.design_url }}</a> ↗</p>{% endif %}
     {% if !sv.mstate.is_empty() %}
     <section class="stack-sm" aria-labelledby="ms-state-h">
       <h2 class="label" id="ms-state-h">State</h2>
       {% if is_owner %}<form method="post" action="{{ sv.state_action }}" class="seg" role="group" aria-label="Mockup state">{% for st in ["proposed", "approved", "built"] %}<button type="submit" name="state" value="{{ st }}"{% if sv.mstate == *st %} class="on" aria-pressed="true"{% else %} aria-pressed="false"{% endif %}>{{ st }}</button>{% endfor %}</form>
-      <p class="sub">You or the agent can change it; the agent sets built when the PR that implements it merges.</p>{% else %}<p><span class="mstate {{ sv.mstate }}">{{ sv.mstate }}</span></p>{% endif %}
+      <p class="sub">You or the agent can change it; the agent sets built when the PR that implements it merges.</p>{% else %}<p><span class="chip {{ crate::web::tone::tone(sv.mstate) }}">{{ sv.mstate }}</span></p>{% endif %}
     </section>
     {% endif %}
     {% endif %}
 
     {% if let Some(nt) = note %}
     <section class="stack-sm" aria-labelledby="note-h">
-      <div class="row wrap"><h2 class="label" id="note-h">{% if nt.download.is_empty() %}Note{% else %}File{% endif %}</h2>{% if !nt.category.is_empty() %}<span class="chip">{{ nt.category }}</span>{% endif %}{% if !nt.subagent.is_empty() %}<span class="chip subagent" title="A subagent of the project's agent wrote it">by a subagent · {{ nt.subagent }}</span>{% endif %}{% if !nt.size.is_empty() %}<span class="sub">{{ nt.filename }} · {{ nt.size }}</span>{% endif %}<span class="grow"></span>{% if !nt.download.is_empty() %}<a class="btn sm secondary" href="{{ nt.download }}" download>Download</a>{% endif %}</div>
+      <div class="row wrap"><h2 class="label" id="note-h">{% if nt.download.is_empty() %}Note{% else %}File{% endif %}</h2>{% if !nt.category.is_empty() %}<span class="chip">{{ nt.category }}</span>{% endif %}{% if !nt.subagent.is_empty() %}<span class="chip info" title="A subagent of the project's agent wrote it">by a subagent · {{ nt.subagent }}</span>{% endif %}{% if !nt.size.is_empty() %}<span class="sub">{{ nt.filename }} · {{ nt.size }}</span>{% endif %}<span class="grow"></span>{% if !nt.download.is_empty() %}<a class="btn sm secondary" href="{{ nt.download }}" download>Download</a>{% endif %}</div>
       {% if !nt.resurface.is_empty() %}<p class="sub">Comes back to the agent {{ nt.resurface }}.</p>{% endif %}
       {% if !nt.text_html.is_empty() %}<div class="md-doc prose">{{ nt.text_html|safe }}</div>{% endif %}
       {% if !nt.plain.is_empty() %}<pre class="md-doc mono note-plain">{{ nt.plain }}</pre>{% endif %}
@@ -86,7 +86,7 @@
 
     {% if let Some(b) = build %}
     <section class="card pad stack" aria-labelledby="try-h">
-      <div class="row wrap"><h2 id="try-h">Try it</h2><span class="plat">{{ b.platform }}</span></div>
+      <div class="row wrap"><h2 id="try-h">Try it</h2><span class="tag line">{{ b.platform }}</span></div>
       {% if b.download.is_empty() %}
       <p class="sub">Run this on any of your machines that has <span class="mono">flow run</span> (Settings › Your devices shows how to set it up). It downloads the build once, checks it, and starts it.</p>
       <pre class="cmd mono">{{ b.run }}</pre>

@@ -11,7 +11,7 @@
   {% if editor.is_none() %}
   {% if owner %}<a class="btn sm" href="/p/{{ slug }}/doc?edit=1" data-dlg>{{ crate::web::icons::icon("pencil")|safe }}<span>Edit</span></a>{% endif %}
   {% if rev > 0 %}<a class="btn sm secondary" href="/p/{{ slug }}/doc?history=1" data-dlg>{{ crate::web::icons::icon("history")|safe }}<span>History</span></a>{% endif %}
-  {% else %}<span class="dirty" data-dirty hidden><i aria-hidden="true"></i>Not saved</span>{% endif %}
+  {% else %}<span class="dirty" data-dirty hidden><span class="dot warn" aria-hidden="true"></span>Not saved</span>{% endif %}
 </div>
 
 

@@ -241,6 +241,37 @@ input[type=checkbox]:disabled, input[type=radio]:disabled { background-color: va
 .dd-more > summary { list-style: none; cursor: pointer; padding: 8px 10px; }
 .dd-more > summary::-webkit-details-marker { display: none; }
 
+/* ---------------------------------------------------------------- Chip: one shape, seven tones
+   States and results. A state's tone comes from src/web/tone.rs, never from a page:
+   <span class="chip {{ crate::web::tone::tone(state) }}">{{ state }}</span> */
+.chip { display: inline-flex; align-items: center; gap: var(--sp-1_5); height: 24px; padding: 0 10px; border-radius: var(--r-pill); font-size: var(--fs-label); font-weight: 500; background: var(--chip); color: var(--ink2); white-space: nowrap; }
+.chip.accent { background: var(--accent-chip); color: var(--accent-chip-ink); }
+.chip.ok { background: var(--ok-bg); color: var(--ok-ink); }
+.chip.warn { background: var(--warn-bg); color: var(--warn-ink); }
+.chip.bad { background: var(--bad-bg); color: var(--bad-ink); }
+.chip.info { background: var(--info-bg); color: var(--info-ink); }
+.chip.quiet { background: transparent; box-shadow: inset 0 0 0 1px var(--line); color: var(--muted); }
+.chip .i { width: 12px; height: 12px; stroke-width: 2.2; }
+
+/* Tag: small metadata (scope, milestone, model, platform); .line bordered, .dashed for the unsure */
+.tag { display: inline-flex; align-items: center; height: 20px; padding: 0 7px; border-radius: var(--r-sm); font: 500 var(--fs-micro) var(--mono); background: var(--chip); color: var(--ink2); white-space: nowrap; vertical-align: middle; }
+.tag.accent { background: var(--accent-chip); color: var(--accent-chip-ink); }
+.tag.line { background: transparent; box-shadow: inset 0 0 0 1px var(--line); color: var(--muted); }
+.tag.dashed { background: transparent; border: 1px dashed var(--border); color: var(--ink2); }
+
+/* Counts: after a label (.count, .warn when it waits on you), on an icon (.badge) */
+.count { margin-left: var(--sp-1); font: var(--fs-label) var(--mono); color: var(--muted); }
+.count.warn { color: var(--warn-ink); }
+.badge { display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 5px; border-radius: var(--r-pill); background: var(--bad); color: #1A0505; font: 600 var(--fs-micro)/1 var(--sans); }
+.badge.warn { background: var(--warn); color: #241A02; }
+
+/* Status dot: online, presence, severity, unread; .live with a ring */
+.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--dim); flex: none; }
+.dot.lg { width: 10px; height: 10px; }
+.dot.ok { background: var(--ok); } .dot.warn { background: var(--warn); } .dot.bad { background: var(--bad); }
+.dot.accent { background: var(--accent); } .dot.info { background: var(--info); } .dot.quiet { background: var(--muted); }
+.dot.live { box-shadow: 0 0 0 3px rgba(74, 222, 128, .18); }
+
 /* Copy field: a command or token with the copy icon in its corner (app.js adds the button) */
 .cmd { display: block; margin: 0; padding: 10px 12px; background: var(--sunken); color: var(--ink); border: 1px solid var(--line); border-radius: var(--r-md); font: var(--fs-sub)/1.5 var(--mono); overflow-x: auto; white-space: pre; }
 .copy-wrap { position: relative; }

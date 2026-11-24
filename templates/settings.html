@@ -77,7 +77,7 @@
     <h3 class="label set-sub warn-text">Waiting for your approval</h3>
     {% for (code, what, machine, asked) in approvals %}
     <div class="sl-wait"><span class="dot warn" aria-hidden="true"></span>
-      <a class="sl-name" href="/approve/{{ code }}"><strong>{{ what }}</strong><span class="sub">{% if !machine.is_empty() %}{{ machine }} · {% endif %}asked {{ asked }} · code <span class="mono code-chip">{{ code }}</span></span></a>
+      <a class="sl-name" href="/approve/{{ code }}"><strong>{{ what }}</strong><span class="sub">{% if !machine.is_empty() %}{{ machine }} · {% endif %}asked {{ asked }} · code <code>{{ code }}</code></span></a>
       <form method="post" action="/approve/{{ code }}" class="sl-wait-btns"><input type="hidden" name="back" value="clients">
         <button class="btn sm secondary" type="submit" name="decision" value="deny">Deny</button><button class="btn sm" type="submit" name="decision" value="approve">Approve</button></form></div>
     {% endfor %}

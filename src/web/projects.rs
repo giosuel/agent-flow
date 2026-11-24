@@ -453,18 +453,18 @@ async fn list(
                 let (questions, _) = counts.get(&p.id).copied().unwrap_or((0, 0));
                 let mut waits = Vec::new();
                 if questions > 0 {
-                    waits.push(("bad", plural(questions, "question", "questions")));
+                    waits.push((super::tone::tone("open"), plural(questions, "question", "questions")));
                 }
                 let merges = crate::prs::merge_order(c, p.id)?
                     .iter()
                     .filter(|o| o.after.is_none() && crate::prs::ready_in_order(o).is_ok())
                     .count() as i64;
                 if merges > 0 {
-                    waits.push(("accent", format!("{merges} to merge")));
+                    waits.push((super::tone::tone("ready"), format!("{merges} to merge")));
                 }
                 let to_test = crate::totest::open_count(c, p.id)?;
                 if to_test > 0 {
-                    waits.push(("warn", format!("{to_test} to test")));
+                    waits.push((super::tone::tone("to test"), format!("{to_test} to test")));
                 }
                 let last = records::recent_events(c, Some(p.id), 1)?
                     .first()
@@ -702,8 +702,8 @@ fn external_rows(c: &Connection, all: &[Record], now: i64) -> anyhow::Result<(Ve
             };
             let (rank, chip, review) = match p.state {
                 "shown" => (0, None, true),
-                "sending" => (0, Some(("accent", "sending".to_owned())), false),
-                _ => (1, Some(("quiet", "changes asked".to_owned())), false),
+                "sending" => (0, Some((super::tone::tone("running"), "sending".to_owned())), false),
+                _ => (1, Some((super::tone::tone("waiting"), "changes asked".to_owned())), false),
             };
             let sub = if p.kind.is_new() { format!("Draft · {}", p.title) } else { format!("Draft · {own_title}") };
             open.push((rank, -r.updated_at, ExtRow { icon: "draft", title: what, sub, url: r.url(), chip, review }));
@@ -723,14 +723,14 @@ fn external_rows(c: &Connection, all: &[Record], now: i64) -> anyhow::Result<(Ve
                     .map(|n| ("warn", n));
                 open.push((2, -r.updated_at, row(chip)));
             }
-            "merged" => done.push(row(Some(("ok", "merged".into())))),
-            "closed" => done.push(row(Some(("quiet", "closed".into())))),
+            "merged" => done.push(row(Some((super::tone::tone("merged"), "merged".into())))),
+            "closed" => done.push(row(Some((super::tone::tone("cancelled"), "closed".into())))),
             "dropped" => done.push(ExtRow {
                 icon: "draft",
                 title: format!("Draft for {}", r.str("repo")),
                 sub: r.title.clone(),
                 url: r.url(),
-                chip: Some(("quiet", "dropped".into())),
+                chip: Some((super::tone::tone("cancelled"), "dropped".into())),
                 review: false,
             }),
             _ => {}

@@ -87,6 +87,12 @@ const TYPE: &[(&str, &str, &str, &str, &str)] = &[
     ("--fs-micro", "11 / 500", "t-micro", "M14", "Tags, badges"),
 ];
 
+/// State words, each drawn in the tone src/web/tone.rs gives it.
+const STATES: &[&str] = &[
+    "todo", "doing", "review", "blocked", "done", "parked", "skipped", "draft", "running", "paused", "queued",
+    "failed", "open", "answered", "proposed", "approved", "built", "current", "replaced",
+];
+
 /// The button variants: (class, label, where).
 const BUTTONS: &[(&str, &str, &str)] = &[
     ("", "Merge", "One per view: Save, Merge, Push tag"),
@@ -103,6 +109,7 @@ struct UiPage {
     colours: &'static [(&'static str, Swatches)],
     type_roles: &'static [(&'static str, &'static str, &'static str, &'static str, &'static str)],
     buttons: &'static [(&'static str, &'static str, &'static str)],
+    states: &'static [&'static str],
     spacing: &'static [u32],
     radii: &'static [(&'static str, &'static str)],
     icons: &'static [&'static str],
@@ -123,6 +130,7 @@ async fn page(State(state): State<AppState>, Extension(actor): Extension<Actor>)
         colours: COLOURS,
         type_roles: TYPE,
         buttons: BUTTONS,
+        states: STATES,
         spacing: &[2, 4, 6, 8, 12, 16, 20, 24, 32, 48],
         radii: &[("xs", "4"), ("sm", "6"), ("md", "8"), ("lg", "12"), ("xl", "16"), ("pill", "999")],
         icons: super::icons::ALL,

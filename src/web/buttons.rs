@@ -1,5 +1,6 @@
 //! The owner's buttons on PRs and releases: what the pages show, and pressing them.
 
+use super::tone::tone;
 use axum::extract::{Path, State};
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::post;
@@ -91,13 +92,15 @@ pub fn pr_rows(c: &Connection, project_id: i64, now: i64) -> anyhow::Result<Vec<
         let mut buttons = views(c, r.id, now)?;
         let ready = prs::ready_in_order(o);
         let (chip, chip_class) = match (&ready, o.after) {
-            (Ok(()), None) => ("ready".to_owned(), "ok"),
-            (Ok(()), Some(_)) => ("ready".to_owned(), "accent"),
+            (Ok(()), None) => ("ready".to_owned(), tone("ready")),
+            // Ready, waiting for the one under it to merge first.
+            (Ok(()), Some(_)) => ("ready".to_owned(), tone("queued")),
             // A draft is the normal state of work in progress, not a problem.
-            (Err(why), _) if why == "still a draft" => ("draft".to_owned(), "quiet"),
-            (Err(why), _) => {
-                (why.clone(), if r.str("ci") == "failing" || r.str("mergeable") == "conflicting" { "bad" } else { "" })
-            }
+            (Err(why), _) if why == "still a draft" => ("draft".to_owned(), tone("draft")),
+            (Err(why), _) => (
+                why.clone(),
+                if r.str("ci") == "failing" || r.str("mergeable") == "conflicting" { tone("failing") } else { "" },
+            ),
         };
         let base = match o.after {
             Some(n) => format!("based on #{n}, merges after it"),
