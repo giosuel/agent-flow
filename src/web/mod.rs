@@ -329,9 +329,28 @@ pub async fn serve(state: AppState) -> anyhow::Result<()> {
     consultant::spawn_watchdog(state.clone());
     admin_socket::first_start_link(&state).await;
     let app = router(state).into_make_service_with_connect_info::<SocketAddr>();
-    axum::serve(listener, app).with_graceful_shutdown(shutdown_signal()).await?;
+    // On stop, the requests under way get a few seconds to finish. Streams that never end on their
+    // own (the Log's live view, a builder's connection, MCP sessions) would otherwise hold the old
+    // server until systemd kills it after 90 s, and AgentFlow is down meanwhile (2026-11-23).
+    let (stopping, stopped) = tokio::sync::oneshot::channel::<()>();
+    let serve = axum::serve(listener, app).with_graceful_shutdown(async move {
+        shutdown_signal().await;
+        let _ = stopping.send(());
+    });
+    tokio::select! {
+        r = serve => r?,
+        () = async {
+            if stopped.await.is_err() {
+                std::future::pending::<()>().await;
+            }
+            tokio::time::sleep(SHUTDOWN_GRACE).await;
+        } => tracing::info!("stopping: closed the connections still open after {} s", SHUTDOWN_GRACE.as_secs()),
+    }
     Ok(())
 }
+
+/// How long the requests under way may take to finish once the server is told to stop.
+const SHUTDOWN_GRACE: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// Wakes the transcript reader now (the Reload button on Usage and Conversations).
 pub static READ_NOW: tokio::sync::Notify = tokio::sync::Notify::const_new();
