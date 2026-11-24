@@ -900,7 +900,7 @@ async fn prs_merge_in_order_from_the_owners_buttons() {
         let (s, token, sess) = (&s, token.clone(), sess.clone());
         async move { mcp_tool(s, &token, &sess, name, args).await }
     };
-    assert!(!call("update_pr", json!({"number": 48, "ready": true})).await.0, "no repo yet");
+    assert!(!call("update_pr", json!({"number": 48})).await.0, "no repo yet");
     call("update_project", json!({"repo": "giosuel/vinculum"})).await;
     s.github.set("giosuel/vinculum", pr(48, "main", "b48"));
     s.github.set("giosuel/vinculum", pr(49, "b48", "b49"));
@@ -909,8 +909,11 @@ async fn prs_merge_in_order_from_the_owners_buttons() {
     let dir = tempfile::tempdir().unwrap();
     let wd = dir.path().display().to_string();
     for n in [48, 49] {
-        let (ok, r) = call("update_pr", json!({"number": n, "ready": true})).await;
+        let (ok, r) = call("update_pr", json!({"number": n})).await;
         assert!(ok, "{r}");
+        // Readiness is GitHub's draft flag (D-233): the old field is refused with the gh command.
+        let (ok, r) = call("update_pr", json!({"number": n, "ready": false})).await;
+        assert!(!ok && r.to_string().contains("gh pr ready --undo"), "{r}");
         let (ok, r) = call("add_button", json!({"record": format!("PR-{n}"), "label": "Merge", "kind": "merge", "command": format!("echo merged {n} > merged-{n}"), "workdir": wd})).await;
         assert!(ok, "{r}");
     }
