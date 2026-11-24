@@ -952,10 +952,12 @@ impl FlowMcp {
     }
 
     #[tool(description = "Ask the owner a question. One question per call, with the context they need, numbered \
-        options and your recommendation when it's a choice. They answer on their phone or the dashboard; the answer is \
-        stored verbatim and shows up in hello and get_record. Don't ask in chat as well. Never stop for a question: \
-        when the choice is cheap to change, set going_ahead and build your recommendation meanwhile; otherwise keep \
-        working on whatever doesn't depend on it (blocks names what does).")]
+        options and your recommendation when it's a choice. Ask in chat as well: your chat reply (or the summary at the \
+        end of a long task) repeats the same numbered questions with their ids (Q-12), so the owner can answer in either \
+        place (the owner, 2026-11-12). An answer on the page comes back verbatim in hello and get_record, its decision \
+        recorded by itself; one given in chat you record with answer_question. Never stop for a question: when the \
+        choice is cheap to change, set going_ahead and build your recommendation meanwhile; otherwise keep working on \
+        whatever doesn't depend on it (blocks names the tasks that wait, and they come back when it's answered).")]
     async fn ask_question(
         &self,
         Extension(parts): Extension<Parts>,

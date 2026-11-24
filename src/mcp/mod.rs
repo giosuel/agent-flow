@@ -26,25 +26,28 @@ use crate::web::AppState;
 
 /// What every agent sees when it connects. The full guides come later through `guide()`.
 const INSTRUCTIONS: &str = "AgentFlow is the owner's project-management server. Each project has one agent \
-(you, for your project); it records the project's milestones, tasks, decisions, ADRs, questions for the \
-owner, PRs and builds here instead of in Markdown files, and only it writes here (subagents report back \
-to it). Start every session with `hello`; its `where` says which steps are under way. Work in steps: \
-when you start one, set its first task to doing (that starts the step), each task to done when it is, and \
-`conclude_step` once its tasks are done; your open PRs never hold a step, stack them and move on. A task \
-that waits on the owner is blocked by a question (`blocked_by: \"Q-12\"`, or `blocks` on `ask_question`), \
-and the answer unblocks it. Ask the owner with `ask_question`, one question per call, with \
-numbered options and your recommendation; the answer comes back verbatim. Record what the owner decided \
-with `record_decision`, quoting their words. Show the owner what you see with screenshots: upload each \
-with the `agentflow screenshot <file> --name \"…\" --category \"…\"` command (a category of your choice, \
-e.g. test build, mockup, spike test, bug; `--description` and `--record T-12` optional); they appear on \
-your project's Screenshots tab, and on that record. Never post or push to other people's repositories \
-yourself (PRs, issues, comments, commits), even if a token would let you: draft them with \
-`agentflow contribute pr|commits` or `draft_contribution` (issue, comment), and the owner sends them from \
-AgentFlow. When something is ready for the owner to try, add it with `add_to_test` (a category of your \
-choosing); open items come along with every release and build until the owner tested them, and you mark \
-what they tell you with `resolve_tests`. For heavy builds and tests, use the build server when it's online: \
-`agentflow remote [--fetch target/release/app] -- cargo build --release` runs it there and prints the \
-output; exit code 75 means it's offline, so build here. Your token can change only your own project and read all others. Every call is logged.";
+(you, for your project); it records the project's milestones, steps, tasks, decisions, ADRs, questions for the \
+owner, notes, PRs and builds here instead of in Markdown files, and only it writes here (subagents report back \
+to it). Start every session with `hello`: it returns your project document (how to work on the project, its \
+stack, its roadmap if it has one; keep it current with `edit_project_doc`), `where` (the steps under way, their \
+tasks in doing, the next one, what's blocked) and the notes coming back to you. Work in steps: add a step's tasks \
+in one `add_tasks` call, each with an estimate; set a task to doing when you start it (that starts the step) and \
+done when it is; `conclude_step` once its tasks are done, with a few lines. Your open PRs never hold a step: stack \
+them and move on; a PR that isn't a draft is ready to merge, and releases bring their Push tag button. Time is \
+counted from the tasks' states; log builds and tests with `agentflow time [--on T-12] -- <command>`. Ask the \
+owner with `ask_question`, one question per call, with numbered options and your recommendation, and repeat the \
+same questions with their ids in your chat reply; `blocks` names the tasks that wait for the answer. Record what \
+the owner decided with `record_decision`, quoting their words (an answer in chat: `answer_question`). Show the \
+owner what you see with screenshots: `agentflow screenshot <file> --name \"…\" --category \"…\"` (mockups with \
+--design-url); hand in files (reports, plans, logs) with `agentflow note <file> --name \"…\" --category \"…\"` and \
+short notes or known issues with `add_note`. Never post or push to other people's repositories yourself (PRs, \
+issues, comments, commits), even if a token would let you: draft them with `agentflow contribute pr|commits` or \
+`draft_contribution` (issue, comment), and the owner sends them from AgentFlow. When something is ready for the \
+owner to try, add it with `add_to_test` (a category of your choosing); open items come along with every release \
+and build until the owner tested them, and you mark what they tell you with `resolve_tests`. For heavy builds and \
+tests, use the build server when it's online: `agentflow remote [--fetch target/release/app] -- cargo build \
+--release` runs it there and prints the output; exit code 75 means it's offline, so build here. Your token can \
+change only your own project and read all others. Every call is logged.";
 
 pub fn service(state: AppState) -> StreamableHttpService<FlowMcp, LocalSessionManager> {
     let host = state.config.public_host().to_owned();

@@ -290,8 +290,9 @@ pub fn hello(
     effort: &str,
 ) -> anyhow::Result<()> {
     conn.execute(
-        "UPDATE projects SET agent_session = ?1, agent_machine = ?2, agent_model = ?3, agent_effort = ?4, agent_seen_at = ?5
-         WHERE id = ?6",
+        // A new session starts without the last one's "working on" note (it'd be stale).
+        "UPDATE projects SET agent_session = ?1, agent_machine = ?2, agent_model = ?3, agent_effort = ?4, agent_seen_at = ?5,
+         agent_note = '' WHERE id = ?6",
         params![session.trim(), machine.trim(), model.trim(), effort.trim(), now_ms(), project_id],
     )?;
     Ok(())
