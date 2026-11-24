@@ -7,6 +7,37 @@
 </div>
 {% if let Some(n) = notice %}<p class="notice ok" role="status">{{ n }}. The agent gets your answer word for word.</p>{% endif %}
 
+{# The overview (the owner, 2026-11-18, D-212): the plan, today, the machine, agents and builds. #}
+<div class="dov" aria-label="Overview">
+  <a href="/usage" class="tile ov-plan">
+    <div class="th"><span class="ic">{{ crate::web::icons::icon("chart")|safe }}</span><span class="label">Plan</span><span class="go">Usage ›</span></div>
+    <div class="ov-desk">
+    {% for m in overview.plan %}<div class="mrow"><span class="sub">{{ m.label }}</span><div class="meter"><i class="{% if m.warn %}warn{% endif %}" style="width: {{ m.pct|fmt("{:.0}") }}%"></i>{% if let Some(k) = m.mark %}<b style="left: {{ k|fmt("{:.0}") }}%"></b>{% endif %}</div><span class="v">{{ m.value }}</span></div>{% endfor %}
+    <p class="sub ov-note">{{ overview.plan_note }}</p>
+    </div>
+    <div class="ov-phone"><span class="big">{% if overview.plan_big.is_empty() %}—{% else %}{{ overview.plan_big }}{% endif %}</span><span class="sub">{% if overview.plan_sub.is_empty() %}5 hours{% else %}{{ overview.plan_sub }}{% endif %}</span></div>
+  </a>
+  <a href="/usage" class="tile ov-today">
+    <div class="th"><span class="ic">{{ crate::web::icons::icon("tag")|safe }}</span><span class="label">Today</span><span class="go">Usage ›</span></div>
+    <div class="row ov-bigrow"><span class="big">{{ overview.today_usd }}</span><span class="sub ov-desk">at API prices{% if !overview.typical.is_empty() %} · {{ overview.typical }}{% endif %}</span></div>
+    <div class="kv"><span><b>{{ overview.new_tokens }}</b> new tokens</span><span class="ov-desk"><b>{{ overview.calls }}</b> calls</span><span class="ov-desk"><b>{{ overview.cache_reads }}</b> cache reads</span></div>
+    <div class="ovbars ov-desk">{% for p in overview.top %}<div class="ovbar"><span>{{ p.name }}</span><span class="t"><i style="width: {{ p.width|fmt("{:.0}") }}%; background: {{ p.tint }}"></i></span><span class="v">{{ p.usd }}</span></div>{% endfor %}</div>
+  </a>
+  <a href="/machine" class="tile ov-machine">
+    <div class="th"><span class="ic">{{ crate::web::icons::icon("cpu")|safe }}</span><span class="label">Machine</span><span class="go">Machine ›</span></div>
+    <div class="ov-desk">{% for m in overview.machine %}<div class="mrow"><span class="sub">{{ m.label }}</span><div class="meter"><i class="{% if m.warn %}warn{% endif %}" style="width: {{ m.pct|fmt("{:.0}") }}%"></i></div><span class="v">{{ m.value }}</span></div>{% endfor %}</div>
+    <div class="ov-phone"><span class="big">{{ overview.cpu_short }}</span><span class="sub">{{ overview.mem_short }}</span></div>
+  </a>
+  <a href="/machine" class="tile ov-agents">
+    <div class="th"><span class="ic">{{ crate::web::icons::icon("server")|safe }}</span><span class="label">Agents and builds</span><span class="go">Machine ›</span></div>
+    <div class="row ov-bigrow"><span class="big">{{ overview.online }}</span><span class="sub">of {{ overview.agents }} agents online</span></div>
+    <div class="ov-desk stack-sm">
+    {% for b in overview.builders %}<div class="srv"><span class="dot{% if b.online %} ok{% endif %}" aria-hidden="true"></span><b>{{ b.name }}</b><span class="sub">{{ b.job }}</span></div>{% endfor %}
+    {% if !overview.spark.is_empty() %}<span class="sub ov-note">CPU over the last hour</span><div class="spark" aria-hidden="true">{% for h in overview.spark %}<i style="height: {{ h }}%"{% if loop.last %} class="now"{% endif %}></i>{% endfor %}</div>{% endif %}
+    </div>
+  </a>
+</div>
+
 <div class="split">
   <section class="split-main stack" aria-labelledby="waiting-h">
     <div class="sec"><h2 id="waiting-h">Waiting on you</h2>{% if merge_count > 0 %}<span class="sub">{{ merge_count }} to merge or release</span>{% endif %}</div>

@@ -582,6 +582,8 @@ struct StepView {
     name: String,
     title: String,
     class: &'static str,
+    /// The step's page, opened as a dialog from the step bar (D-218).
+    url: String,
 }
 
 struct TaskCard {
@@ -605,6 +607,8 @@ struct Column {
 struct Board {
     title: String,
     summary: String,
+    /// A line under the heading: for the tasks without a milestone.
+    note: String,
     columns: Vec<Column>,
     /// The step bar (the owner, 2026-11-17: "find an alternative way to show the steps as there
     /// can be many"): the step under way (or next), dots for every step, the menu.
@@ -630,47 +634,6 @@ struct StepItem {
     sub: String,
     href: String,
     on: bool,
-}
-
-/// A milestone on the Tasks tab: its own tasks, then its steps (the owner, 2026-11-12).
-struct TaskGroup {
-    name: String,
-    title: String,
-    state: String,
-    sub: String,
-    rows: Vec<TaskLine>,
-    steps: Vec<StepBox>,
-}
-
-/// A step: concluded (one line and its summary), under way (its tasks in order) or planned.
-struct StepBox {
-    name: String,
-    title: String,
-    review: bool,
-    /// concluded, active, blocked (every open task is) or planned.
-    state: &'static str,
-    sub: String,
-    url: String,
-    rows: Vec<TaskLine>,
-}
-
-/// One task in the agent's order, with what blocks it.
-struct TaskLine {
-    n: usize,
-    short: String,
-    url: String,
-    title: String,
-    state: String,
-    est: String,
-    next: bool,
-    /// Open questions it waits for: (Q-1, url).
-    blocked_by: Vec<(String, String)>,
-    blocked_note: String,
-    /// "added · your feedback": a task that turned up while its step was under way.
-    added: String,
-    skip_reason: String,
-    /// Time spent (its share), when it has any.
-    spent: String,
 }
 
 /// How a task's source reads on the page.
@@ -849,6 +812,9 @@ struct ProjectPage {
     ms_closed: Vec<MsRow>,
     /// The closed ones start open when the board shows one of them.
     ms_closed_open: bool,
+    /// "Without a milestone": how many tasks, and whether the board shows them (D-218).
+    loose_count: usize,
+    loose_selected: bool,
     ms_counts: String,
     qcards: Vec<QCard>,
     /// The build server its `flow remote` uses, for the side card.
@@ -862,7 +828,6 @@ struct ProjectPage {
     /// Decisions of closed milestones, and replaced ones: folded away.
     decisions_closed: Vec<RecordRow>,
     decisions_replaced: Vec<RecordRow>,
-    groups: Vec<TaskGroup>,
     questions: Vec<RecordRow>,
     /// The Builds tab: every build, newest first.
     builds: Vec<RecordRow>,
@@ -888,9 +853,8 @@ struct TabQuery {
     /// After a button: its id and whether it worked.
     ran: Option<i64>,
     ok: Option<u8>,
-    /// After "Merge up to here": how many merged, and up to which PR.
-    merged: Option<usize>,
-    upto: Option<i64>,
+    /// After "Merge #a–#b": "a-b".
+    merging: Option<String>,
     /// The Screenshots tab's category filter.
     cat: Option<String>,
     /// The Settings tab's outcome: saved, or why not.
@@ -925,23 +889,33 @@ fn press_notice(q: &TabQuery) -> (Option<String>, bool) {
     if let Some(n) = q.tested {
         return (Some(tested_notice(n)), false);
     }
-    match (q.ran, q.ok, q.merged, q.upto) {
-        (Some(_), Some(1), _, _) => (Some("Done. The agent has been told.".into()), false),
-        (Some(_), Some(_), _, _) => {
+    let merging = q
+        .merging
+        .as_deref()
+        .and_then(|m| m.split_once('-'))
+        .and_then(|(a, b)| Some((a.parse::<i64>().ok()?, b.parse::<i64>().ok()?)));
+    match (q.ran, q.ok, merging) {
+        (Some(_), Some(1), _) => (Some("Done. The agent has been told.".into()), false),
+        (Some(_), Some(_), _) => {
             (Some("The command failed; its output is under the button. The agent has been told.".into()), true)
         }
-        (_, _, Some(n), Some(to)) => {
-            (Some(format!("{n} PR{} merged, up to #{to}.", if n == 1 { "" } else { "s" })), false)
-        }
+        (_, _, Some((a, b))) => (
+            Some(format!(
+                "Merging #{a}–#{b}, one after the other from the bottom. Each PR leaves this list once it's merged; it stops at the first that fails, with the output under its button. Reload to follow."
+            )),
+            false,
+        ),
         _ => (None, false),
     }
 }
 
 /// The project page's tabs, in order; questions come right after the overview.
+/// `?ms=none`: the board of the tasks without a milestone.
+const LOOSE: &str = "none";
+
 const TABS: &[(&str, &str)] = &[
     ("overview", "Overview"),
     ("questions", "Questions"),
-    ("tasks", "Tasks"),
     ("prs", "Pull requests"),
     ("builds", "Builds"),
     ("decisions", "Decisions"),
@@ -962,6 +936,10 @@ async fn project(
     if q.tab.as_deref() == Some("settings") {
         let code = q.settings.as_deref().map(|c| format!("?settings={}", super::log::enc(c))).unwrap_or_default();
         return Ok(Redirect::to(&format!("/p/{slug}/settings{code}")).into_response());
+    }
+    // The Tasks tab went (the owner, 2026-11-18, D-218): its links open the overview.
+    if q.tab.as_deref() == Some("tasks") {
+        return Ok(Redirect::to(&format!("/p/{slug}")).into_response());
     }
     let tab = q.tab.filter(|t| TABS.iter().any(|(k, _)| k == t)).unwrap_or_else(|| "overview".into());
     let now = now_ms();
@@ -1042,12 +1020,10 @@ async fn project(
                 .await?,
         );
     }
-    page.prs_total = page.prs.len();
-    page.has_stack_button = page.prs.iter().any(|p| p.up_to.is_some());
-    if tab == "overview" {
-        // The overview shows the start of the order; the Pull requests tab has all of them.
-        page.prs.truncate(8);
+    if tab == "prs" {
+        page.prs_total = page.prs.len();
     }
+    page.has_stack_button = page.prs.iter().any(|p| p.up_to.is_some());
     let next = if tab == "overview" { format!("/p/{}", page.slug) } else { format!("/p/{}?tab={tab}", page.slug) };
     let page = ProjectPage {
         nav: nav(&state, &actor, "/projects").await.back_to("/projects", "Projects"),
@@ -1106,11 +1082,17 @@ fn build_project_page(
     );
     meta("Ports", p.ports.join(", "));
 
-    // The board shows the chosen milestone (a top-level one), else the current one.
-    let current = chosen
-        .and_then(|name| ms.iter().find(|m| m.parent_id.is_none() && m.name.eq_ignore_ascii_case(name)))
-        .or_else(|| current_milestone(&ms))
-        .cloned();
+    // The board shows the chosen milestone (a top-level one), else the current one; or, with
+    // ?ms=none, the tasks without a milestone (the owner, 2026-11-18, D-218).
+    let loose_chosen = chosen.is_some_and(|n| n.eq_ignore_ascii_case(LOOSE));
+    let current = if loose_chosen {
+        None
+    } else {
+        chosen
+            .and_then(|name| ms.iter().find(|m| m.parent_id.is_none() && m.name.eq_ignore_ascii_case(name)))
+            .or_else(|| current_milestone(&ms))
+            .cloned()
+    };
     let now_ms_id = current_milestone(&ms).map(|m| m.id);
     // Open questions that block a task, for "blocked by Q-31" on its card.
     let mut blockers: HashMap<i64, Vec<(String, String)>> = HashMap::new();
@@ -1231,15 +1213,27 @@ fn build_project_page(
         parts.join(" · ")
     };
 
-    let board = current.as_ref().map(|cur| {
-        let steps: Vec<&Milestone> = ms.iter().filter(|s| s.parent_id == Some(cur.id)).collect();
-        let step = chosen_step.and_then(|n| steps.iter().find(|s| s.name.eq_ignore_ascii_case(n)).copied());
-        let ids: Vec<i64> = match step {
-            Some(s) => vec![s.id],
-            None => projects::with_steps(&ms, cur.id),
+    let loose_count =
+        tasks.iter().filter(|t| t.milestone_id.is_none() && !matches!(t.state.as_str(), "archived")).count();
+    let build_board = |cur: Option<&Milestone>| -> anyhow::Result<Board> {
+        let steps: Vec<&Milestone> = match cur {
+            Some(cur) => ms.iter().filter(|s| s.parent_id == Some(cur.id)).collect(),
+            None => Vec::new(),
         };
-        let mut mine: Vec<&Record> =
-            tasks.iter().copied().filter(|t| t.milestone_id.is_some_and(|m| ids.contains(&m))).collect();
+        let step = chosen_step.and_then(|n| steps.iter().find(|s| s.name.eq_ignore_ascii_case(n)).copied());
+        let ids: Vec<i64> = match (step, cur) {
+            (Some(s), _) => vec![s.id],
+            (None, Some(cur)) => projects::with_steps(&ms, cur.id),
+            (None, None) => Vec::new(),
+        };
+        let mut mine: Vec<&Record> = tasks
+            .iter()
+            .copied()
+            .filter(|t| match cur {
+                Some(_) => t.milestone_id.is_some_and(|m| ids.contains(&m)),
+                None => t.milestone_id.is_none(),
+            })
+            .collect();
         mine.sort_by(|a, b| a.position.partial_cmp(&b.position).unwrap_or(std::cmp::Ordering::Equal));
         let col = |title: &'static str, states: &[&str]| {
             let mut list: Vec<&Record> = mine.iter().copied().filter(|t| states.contains(&t.state.as_str())).collect();
@@ -1263,6 +1257,17 @@ fn build_project_page(
         let mut summary = vec![plural(mine.len() as i64, "task", "tasks")];
         if count("done") > 0 {
             summary.push(format!("{} done", count("done")));
+        }
+        // The totals the Tasks tab had (D-218): estimated, and the agent's time in doing.
+        let counted: Vec<&Record> =
+            mine.iter().copied().filter(|t| !matches!(t.state.as_str(), "skipped" | "archived")).collect();
+        let est: i64 = counted.iter().map(|t| crate::times::estimate_min(t)).sum();
+        if est > 0 {
+            summary.push(format!("estimated {}", crate::times::fmt_min(est)));
+        }
+        let spent = crate::times::times_of(c, &p.slug, &counted, now)?.total_ms;
+        if spent > 0 {
+            summary.push(format!("{} of agent time", crate::times::fmt_ms(spent)));
         }
         // The step under way, else the next planned one, else the last.
         let now_step = steps
@@ -1289,9 +1294,10 @@ fn build_project_page(
             }
             parts.join(" · ")
         };
+        let ms_name = cur.map(|c| c.name.as_str()).unwrap_or(LOOSE);
         let href = |step: Option<&str>| match step {
-            Some(n) => format!("/p/{}?ms={}&step={}#board", p.slug, cur.name, n),
-            None => format!("/p/{}?ms={}#board", p.slug, cur.name),
+            Some(n) => format!("/p/{}?ms={}&step={}#board", p.slug, ms_name, n),
+            None => format!("/p/{}?ms={}#board", p.slug, ms_name),
         };
         let item = |s: &&Milestone| StepItem {
             name: s.name.clone(),
@@ -1320,11 +1326,21 @@ fn build_project_page(
         ];
         // On the phone: the column with work in it first.
         let first_col = [1, 0, 2, 3, 4].into_iter().find(|&i| columns[i].count > 0).unwrap_or(0);
-        Board {
-            title: format!("{} · {}", cur.name, cur.title),
+        // The step bar shows the step the board shows, else the one under way (or next).
+        let bar_step = step.or(now_step);
+        Ok(Board {
+            title: match cur {
+                Some(cur) => format!("{} · {}", cur.name, cur.title),
+                None => "Without a milestone".into(),
+            },
             summary: summary.join(" · "),
-            step_now_sub: now_step.map(step_sub).unwrap_or_default(),
-            step_now: now_step.map(|s| StepView {
+            note: if cur.is_none() {
+                "Tasks the agent parked without putting them in a milestone.".into()
+            } else {
+                String::new()
+            },
+            step_now_sub: bar_step.map(step_sub).unwrap_or_default(),
+            step_now: bar_step.map(|s| StepView {
                 name: s.name.clone(),
                 title: s.title.clone(),
                 class: match s.state.as_str() {
@@ -1332,6 +1348,7 @@ fn build_project_page(
                     "active" => "now",
                     _ => "next",
                 },
+                url: format!("/p/{}/steps/{}", p.slug, s.id),
             }),
             dots: steps
                 .iter()
@@ -1353,8 +1370,13 @@ fn build_project_page(
             menu_done_more: older,
             columns,
             first_col,
-        }
-    });
+        })
+    };
+    let board = match (loose_chosen, current.as_ref()) {
+        (true, _) => Some(build_board(None)?),
+        (false, Some(cur)) => Some(build_board(Some(cur))?),
+        (false, None) => None,
+    };
 
     let row = |r: &Record| {
         let sub = match r.kind {
@@ -1512,155 +1534,6 @@ fn build_project_page(
         Vec::new()
     };
 
-    let groups = if tab == "tasks" {
-        let line = |i: usize, t: &Record, next: bool, times: &crate::times::Times| -> anyhow::Result<TaskLine> {
-            let blocked_by = if t.state == "blocked" {
-                crate::steps::blocking_questions(c, t.id)?.into_iter().map(|(s, _, u)| (s, u)).collect()
-            } else {
-                Vec::new()
-            };
-            Ok(TaskLine {
-                n: i + 1,
-                short: t.short_id(),
-                url: t.url(),
-                title: t.title.clone(),
-                state: t.state.clone(),
-                est: t.str("estimate").to_owned(),
-                next,
-                blocked_by,
-                blocked_note: if t.state == "blocked" { t.str("blocked_note").to_owned() } else { String::new() },
-                added: if t.data.get("added").and_then(Value::as_bool).unwrap_or(false) {
-                    let from = t.str("source_ref");
-                    let src = source_label(t.str("source"));
-                    if from.is_empty() { format!("added · {src}") } else { format!("added · {src} · from {from}") }
-                } else {
-                    String::new()
-                },
-                skip_reason: if t.state == "skipped" { t.str("skip_reason").to_owned() } else { String::new() },
-                spent: times
-                    .share_ms
-                    .get(&t.id)
-                    .filter(|ms| **ms > 0)
-                    .map(|ms| crate::times::fmt_ms(*ms))
-                    .unwrap_or_default(),
-            })
-        };
-        let lines = |list: &[&Record], active: bool, times: &crate::times::Times| -> anyhow::Result<Vec<TaskLine>> {
-            let next = if active { list.iter().position(|t| t.state == "todo") } else { None };
-            list.iter().enumerate().map(|(i, t)| line(i, t, Some(i) == next, times)).collect()
-        };
-        let est_of = |list: &[&Record]| -> i64 {
-            list.iter().filter(|t| t.state != "skipped").map(|t| crate::times::estimate_min(t)).sum()
-        };
-        let mut sorted: Vec<&Record> = tasks.clone();
-        sorted.sort_by(|a, b| {
-            a.position
-                .unwrap_or(f64::MAX)
-                .partial_cmp(&b.position.unwrap_or(f64::MAX))
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
-        let of = |id: i64| -> Vec<&Record> { sorted.iter().copied().filter(|t| t.milestone_id == Some(id)).collect() };
-        let mut groups = Vec::new();
-        for m in ms.iter().filter(|m| m.parent_id.is_none()) {
-            let steps: Vec<&Milestone> = ms.iter().filter(|s| s.parent_id == Some(m.id)).collect();
-            let own = of(m.id);
-            let count: usize = own.len() + steps.iter().map(|s| of(s.id).len()).sum::<usize>();
-            if count == 0 && steps.is_empty() && m.state != "active" {
-                continue;
-            }
-            let mut boxes = Vec::new();
-            let mut agent_ms = 0;
-            let mut est_all = est_of(&own);
-            for st in &steps {
-                let mine = of(st.id);
-                let counted: Vec<&Record> = mine.iter().copied().filter(|t| t.state != "skipped").collect();
-                let times = crate::times::times_of(c, &p.slug, &counted, now)?;
-                agent_ms += times.total_ms;
-                let est = est_of(&mine);
-                est_all += est;
-                let open = mine.iter().filter(|t| crate::steps::OPEN.contains(&t.state.as_str())).count();
-                let blocked = mine.iter().filter(|t| t.state == "blocked").count();
-                let state = match st.state.as_str() {
-                    "closed" => "concluded",
-                    "active" if open > 0 && blocked == open => "blocked",
-                    "active" => "active",
-                    _ => "planned",
-                };
-                let n = mine.len();
-                let est_txt = if est > 0 { format!("est. {}", crate::times::fmt_min(est)) } else { String::new() };
-                let sub = match state {
-                    "concluded" => format!("{est_txt} · took {}", crate::times::fmt_ms(times.total_ms)),
-                    "planned" if n == 0 => "starts when its first task does".into(),
-                    "planned" => format!("{n} task{} · {est_txt}", if n == 1 { "" } else { "s" }),
-                    _ => format!(
-                        "{open} open of {n} · {est_txt} · spent {} so far",
-                        crate::times::fmt_ms(times.total_ms)
-                    ),
-                };
-                let sub = sub.trim_start_matches(" · ").trim_end_matches(" · ").replace(" ·  · ", " · ");
-                let review = !st.review.is_empty();
-                let sub = if review {
-                    let r: Value = serde_json::from_str(&st.review).unwrap_or_default();
-                    let n = r["reviewers"].as_array().map(Vec::len).unwrap_or(0);
-                    format!(
-                        "{n} reviewer{} · commit {} · {sub}",
-                        if n == 1 { "" } else { "s" },
-                        r["commit"].as_str().unwrap_or("")
-                    )
-                } else {
-                    sub
-                };
-                boxes.push(StepBox {
-                    name: st.name.clone(),
-                    title: st.title.clone(),
-                    review,
-                    state,
-                    sub,
-                    url: format!("/p/{}/steps/{}", p.slug, st.id),
-                    rows: if state == "concluded" { Vec::new() } else { lines(&mine, st.state == "active", &times)? },
-                });
-            }
-            let own_counted: Vec<&Record> = own.iter().copied().filter(|t| t.state != "skipped").collect();
-            let own_times = crate::times::times_of(c, &p.slug, &own_counted, now)?;
-            agent_ms += own_times.total_ms;
-            let mut sub = match (steps.len(), count) {
-                (0, n) => format!("{n} task{}", if n == 1 { "" } else { "s" }),
-                (k, n) => {
-                    format!("{k} step{} · {n} task{}", if k == 1 { "" } else { "s" }, if n == 1 { "" } else { "s" })
-                }
-            };
-            if est_all > 0 {
-                sub.push_str(&format!(" · estimated {}", crate::times::fmt_min(est_all)));
-            }
-            if agent_ms > 0 {
-                sub.push_str(&format!(" · {} of agent time", crate::times::fmt_ms(agent_ms)));
-            }
-            let sub = sub;
-            groups.push(TaskGroup {
-                name: m.name.clone(),
-                title: m.title.clone(),
-                state: m.state.clone(),
-                sub,
-                rows: lines(&own, m.state == "active" && steps.is_empty(), &own_times)?,
-                steps: boxes,
-            });
-        }
-        let loose: Vec<&Record> = sorted.iter().copied().filter(|t| t.milestone_id.is_none()).collect();
-        if !loose.is_empty() {
-            groups.push(TaskGroup {
-                name: String::new(),
-                title: "Without a milestone".into(),
-                state: String::new(),
-                sub: format!("{} tasks", loose.len()),
-                rows: lines(&loose, false, &crate::times::Times::default())?,
-                steps: Vec::new(),
-            });
-        }
-        groups
-    } else {
-        Vec::new()
-    };
-
     let (external, external_done) = external_rows(c, &all, now)?;
     let to_test = if tab == "to-test" {
         Some(super::totest::view(
@@ -1695,6 +1568,8 @@ fn build_project_page(
         ms_now,
         ms_rows,
         ms_closed_open: ms_closed.iter().any(|r| r.selected),
+        loose_count,
+        loose_selected: loose_chosen,
         ms_closed,
         ms_counts,
         qcards,
@@ -1749,17 +1624,26 @@ fn build_project_page(
         decisions_archived,
         decisions_closed,
         decisions_replaced,
-        groups,
         questions,
         builds,
         shots_all: shots.len(),
         shots,
         shot_cats: Vec::new(),
-        prs_total: 0,
+        // The overview counts them for its tab; the Pull requests tab lists them (the owner,
+        // 2026-11-18: "lets remove the merge panel from the project dashboard").
+        prs_total: if tab == "overview" {
+            c.query_row(
+                "SELECT count(*) FROM records WHERE project_id = ?1 AND kind = 'pr' AND state = 'open'",
+                [p.id],
+                |r| r.get::<_, i64>(0),
+            )? as usize
+        } else {
+            0
+        },
         has_stack_button: false,
         tabs: TABS,
-        // Merge order and releases appear on the overview and the Pull requests tab only.
-        prs: if matches!(tab, "overview" | "prs") { super::buttons::pr_rows(c, p.id, now)? } else { Vec::new() },
+        prs: if tab == "prs" { super::buttons::pr_rows(c, p.id, now)? } else { Vec::new() },
+        // Releases appear on the overview and the Pull requests tab only.
         releases: if matches!(tab, "overview" | "prs") {
             super::buttons::release_rows(c, p.id, now)?
         } else {
@@ -1797,10 +1681,34 @@ pub struct TimeView {
     corrected: bool,
 }
 
-struct HistoryRow {
+/// A record's History (the owner, 2026-11-18: "it seems messy"; then "couldn't we fold the whole
+/// history by default?"): folded to one line, opened a timeline by day, a short line per change.
+struct History {
+    count: usize,
+    /// "New version, imaginarium · 23:25".
+    last: String,
+    days: Vec<HistoryDay>,
+}
+
+struct HistoryDay {
+    /// "Today, 18 Nov".
+    label: String,
+    events: Vec<HistoryEvent>,
+}
+
+struct HistoryEvent {
     rev: i64,
-    at: String,
-    text: String,
+    /// "23:25".
+    time: String,
+    who: String,
+    /// "New version", "Created the note", "Answered: A, “…”".
+    what: String,
+    /// What changed, with the new value: ("title", "Morning report", accent).
+    chips: Vec<(String, String, bool)>,
+    /// The file a new version replaced: ("v11", its address).
+    replaced: Option<(String, String)>,
+    /// "first" for the creation, "owner" for the owner's own changes.
+    dot: &'static str,
 }
 
 #[derive(Template)]
@@ -1846,7 +1754,7 @@ struct RecordPage {
     waits_for: Vec<RecordRow>,
     blocked_note: String,
     stale: Vec<RecordRow>,
-    history: Vec<HistoryRow>,
+    history: History,
     error: Option<String>,
     buttons: Vec<super::buttons::ButtonView>,
     pr_url: String,
@@ -2252,10 +2160,7 @@ async fn load_record_page(
         time,
         timings,
         note: if r.kind == Kind::Note { Some(super::notes::page(&state.config.data_dir(), &r)) } else { None },
-        history: history
-            .iter()
-            .map(|h| HistoryRow { rev: h.rev, at: tz.short(h.at), text: describe_revision(h, &r) })
-            .collect(),
+        history: history_view(&history, &r, &tz, now_ms()),
         error,
         buttons,
         pr_url: if r.kind == Kind::Pr { r.str("url").to_owned() } else { String::new() },
@@ -2341,44 +2246,110 @@ fn build_view(r: &Record, links: &[records::LinkView], sent: bool) -> BuildView 
     }
 }
 
-fn describe_revision(h: &records::Revision, r: &Record) -> String {
-    let who = if h.author == "owner" { "You".to_owned() } else { h.author.clone() };
-    if h.rev == 1 {
-        return format!("{who} created the {}.", r.kind.label().to_lowercase());
+/// Fields a History leaves out: set together with something it shows (a new file's size and
+/// version count, the answer's own bookkeeping) or not worth a line.
+const QUIET: &[&str] = &[
+    "size",
+    "versions",
+    "ext",
+    "bytes",
+    "filename",
+    "answer",
+    "answered_at",
+    "answer_option",
+    "answer_option_title",
+    "started_at",
+    "ready_for_feedback",
+];
+
+fn history_view(revs: &[records::Revision], r: &Record, tz: &Tz, now: i64) -> History {
+    let mut days: Vec<HistoryDay> = Vec::new();
+    let today = tz.day_start(now);
+    for h in revs {
+        let e = history_event(h, r, tz);
+        let start = tz.day_start(h.at);
+        let label = if start == today {
+            format!("Today, {}", tz.day(h.at))
+        } else if start == tz.day_start(today - 3_600_000) {
+            format!("Yesterday, {}", tz.day(h.at))
+        } else {
+            tz.day(h.at)
+        };
+        match days.last_mut() {
+            Some(d) if d.label == label => d.events.push(e),
+            _ => days.push(HistoryDay { label, events: vec![e] }),
+        }
     }
+    let last = revs
+        .first()
+        .map(|h| {
+            let e = history_event(h, r, tz);
+            let when = if tz.day_start(h.at) == today { e.time.clone() } else { tz.short(h.at) };
+            format!("{}, {} · {when}", e.what, e.who)
+        })
+        .unwrap_or_default();
+    History { count: revs.len(), last, days }
+}
+
+fn history_event(h: &records::Revision, r: &Record, tz: &Tz) -> HistoryEvent {
+    let mut e = HistoryEvent {
+        rev: h.rev,
+        time: tz.hm(h.at),
+        who: if h.author == "owner" { "you".to_owned() } else { h.author.clone() },
+        what: String::new(),
+        chips: Vec::new(),
+        replaced: None,
+        dot: if h.author == "owner" { "owner" } else { "" },
+    };
+    if h.rev == 1 {
+        e.what = format!("Created the {}", r.kind.label().to_lowercase());
+        e.dot = "first";
+        return e;
+    }
+    let obj = h.changes.as_object();
     // The owner's answer reads as the answer, not as a list of fields.
-    if let Some(obj) = h.changes.as_object()
+    if let Some(obj) = obj
         && obj.contains_key("answer")
     {
         let words = obj.get("answer").and_then(Value::as_str).unwrap_or("").trim();
         let option = obj.get("answer_option_title").and_then(Value::as_str);
-        return match (option, words) {
-            (Some(o), "") => format!("{who} answered: {o}."),
-            (Some(o), w) => format!("{who} answered: {o}, “{w}”."),
-            (None, w) => format!("{who} answered: “{w}”."),
+        e.what = match (option, words) {
+            (Some(o), "") => format!("Answered: {o}"),
+            (Some(o), w) => format!("Answered: {o}, “{w}”"),
+            (None, w) => format!("Answered: “{w}”"),
         };
+        return e;
     }
-    let mut parts: Vec<String> = Vec::new();
-    if let Some(obj) = h.changes.as_object() {
-        for (k, v) in obj {
-            parts.push(match (k.as_str(), v) {
-                ("state", Value::String(s)) => format!("set it to {s}"),
-                ("milestone", Value::String(m)) if !m.is_empty() => format!("moved it to {m}"),
-                ("answer", Value::String(_))
-                | ("answered_at", _)
-                | ("answer_option", _)
-                | ("answer_option_title", _) => continue,
-                ("started_at", _) => continue,
-                // Set by the feedback itself, which the next line of the history says.
-                ("ready_for_feedback", _) => continue,
-                (k, _) => format!("changed the {}", k.replace('_', " ")),
-            });
+    for (k, v) in obj.into_iter().flatten() {
+        if QUIET.contains(&k.as_str()) {
+            continue;
+        }
+        let value = match v {
+            Value::String(s) if s.chars().count() > 60 => s.chars().take(57).collect::<String>() + "…",
+            Value::String(s) => s.clone(),
+            Value::Number(n) => n.to_string(),
+            Value::Bool(b) => if *b { "yes" } else { "no" }.to_owned(),
+            _ => String::new(),
+        };
+        match k.as_str() {
+            "milestone" if !value.is_empty() => e.chips.push(("moved to".into(), value, false)),
+            "state" => e.chips.push(("state".into(), value, true)),
+            _ => e.chips.push((k.replace('_', " "), value, false)),
         }
     }
-    if !h.note.is_empty() {
-        parts.push(h.note.clone());
+    // A note's new file: the one it replaced is kept as v(n).
+    if h.note.starts_with("new version of the file") {
+        e.what = "New version".into();
+        if let Some(n) = obj.and_then(|o| o.get("versions")).and_then(Value::as_i64) {
+            e.replaced = Some((format!("v{n}"), format!("{}/file?v={n}", r.url())));
+        }
+    } else if !h.note.is_empty() {
+        let mut c = h.note.chars();
+        e.what = c.next().map(|f| f.to_uppercase().collect::<String>() + c.as_str()).unwrap_or_default();
+    } else {
+        e.what = "Changed".into();
     }
-    if parts.is_empty() { format!("{who} changed it.") } else { format!("{who}: {}.", parts.join(", ")) }
+    e
 }
 
 #[derive(Deserialize)]

@@ -5,7 +5,7 @@
     <div class="pr-actions">
       {% for b in pr.buttons %}{% include "button.html" %}{% endfor %}
       {% if let Some((label, ids, confirm)) = pr.up_to %}
-      <form method="post" action="/p/{{ slug }}/merge-up-to/{{ pr.number }}"><input type="hidden" name="actions" value="{{ ids }}"><button class="btn sm ghost" type="submit" data-confirm="{{ confirm }}">{{ label }}</button></form>
+      <form method="post" action="/p/{{ slug }}/merge-up-to/{{ pr.number }}"><input type="hidden" name="actions" value="{{ ids }}"><button class="btn sm" type="submit" data-confirm="{{ confirm }}">{{ label }}</button></form>
       {% endif %}
       <a class="sub" href="{{ pr.url }}/files">View changes on GitHub</a>
     </div>

@@ -231,6 +231,13 @@ pub fn confirm_text(a: &ActionRow) -> String {
 
 /// Why the button is disabled, or Ok when it can be pressed.
 pub fn enabled(conn: &Connection, a: &ActionRow) -> anyhow::Result<Result<(), String>> {
+    enabled_with(conn, a, false)
+}
+
+/// Like [`enabled`], for a PR's merge as one step of "Merge #a–#b": the chain's order and its
+/// top PR's CI were checked by [`crate::prs::chain_to`], so neither the PR below nor this PR's own
+/// CI holds it.
+fn enabled_with(conn: &Connection, a: &ActionRow, in_chain: bool) -> anyhow::Result<Result<(), String>> {
     match a.state.as_str() {
         "waiting" | "failed" => {}
         "running" => return Ok(Err("running now".into())),
@@ -258,6 +265,9 @@ pub fn enabled(conn: &Connection, a: &ActionRow) -> anyhow::Result<Result<(), St
         }
     }
     let record = records::get(conn, a.record_id)?;
+    if record.kind == Kind::Pr && a.is_merge() && in_chain {
+        return Ok(crate::prs::chain_ready(&record));
+    }
     if record.kind == Kind::Pr && a.is_merge() {
         if let Err(why) = crate::prs::merge_ready(&record) {
             return Ok(Err(why));
@@ -280,11 +290,25 @@ pub fn enabled(conn: &Connection, a: &ActionRow) -> anyhow::Result<Result<(), St
 
 /// Marks an action running, if it may be pressed and the page showed this exact command.
 pub fn claim(conn: &Connection, id: i64, shown_hash: &str) -> anyhow::Result<ActionRow> {
+    claim_with(conn, id, shown_hash, false)
+}
+
+/// Claims a PR's merge button as one step of "Merge #a–#b" (see [`enabled_with`]).
+pub fn claim_in_chain(conn: &Connection, id: i64, shown_hash: &str) -> anyhow::Result<ActionRow> {
+    claim_with(conn, id, shown_hash, true)
+}
+
+/// Can this button be pressed as a step of a chain? For [`crate::prs::chain_to`].
+pub fn enabled_in_chain(conn: &Connection, a: &ActionRow) -> anyhow::Result<Result<(), String>> {
+    enabled_with(conn, a, true)
+}
+
+fn claim_with(conn: &Connection, id: i64, shown_hash: &str, in_chain: bool) -> anyhow::Result<ActionRow> {
     let a = get(conn, id)?.context("no such button")?;
     if a.hash() != shown_hash {
         bail!("this button's command isn't the one the page showed; reload and look again");
     }
-    if let Err(why) = enabled(conn, &a)? {
+    if let Err(why) = enabled_with(conn, &a, in_chain)? {
         bail!("can't run it now: {why}");
     }
     let n = conn.execute(
