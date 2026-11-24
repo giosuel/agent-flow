@@ -176,6 +176,8 @@
         {% if set.is_some() %}<form method="post" action="/settings/github/remove"><input type="hidden" name="which" value="{{ which }}"><button class="btn sm danger" type="submit" data-confirm="Remove the token for {{ label|lower }}? gh uses the login of the user it runs as again.">Remove</button></form>{% endif %}
       </div></div>
     {% endfor %}
+    <div class="set-row stack-row" id="attribution"><div class="set-txt"><strong>Claude attribution in contributions</strong><span class="sub">What the checks under a draft for someone else's repository flag before you send it: Claude's Co-Authored-By line in commits, Claude-Session links, the "Generated with Claude Code" footer. Many projects don't want them; some ask contributors to say so. Allowing Co-Authored-By still flags the other two.</span></div>
+      <form method="post" action="/settings/attribution" class="row wrap"><label class="vh" for="attr-mode">Flag</label><select id="attr-mode" name="mode" class="attr-mode">{% for (key, label, on) in attribution %}<option value="{{ key }}"{% if *on %} selected{% endif %}>{{ label }}</option>{% endfor %}</select><button class="btn sm" type="submit">Save</button></form></div>
   </section>
   {% endif %}
   </div>

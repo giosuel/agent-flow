@@ -31,6 +31,7 @@ pub fn routes() -> Router<AppState> {
         .route("/settings/notify", post(notify_save))
         .route("/settings/github", post(github_save))
         .route("/settings/github/remove", post(github_remove))
+        .route("/settings/attribution", post(attribution_save))
         .route("/settings/tokens/{id}/revoke", post(token_revoke))
         .route("/settings/tokens/{id}/rotate", post(token_rotate))
         .route("/settings/sessions/{id}/end", post(session_end))
@@ -102,6 +103,8 @@ struct SettingsPage {
     chosen: bool,
     /// The server's GitHub tokens: (which, label, what it's for, set as "…abcd · login").
     github: Vec<(&'static str, &'static str, &'static str, Option<String>)>,
+    /// What the checks under a contribution flag of Claude's attribution: (key, label, picked).
+    attribution: Vec<(&'static str, &'static str, bool)>,
     /// The consultant, run by the server.
     consultant: super::consultant::View,
     /// Requests from `flow` waiting for approval: (code, what, machine, asked).
@@ -164,7 +167,7 @@ fn section_of_notice(done: &str) -> &'static str {
         "session-ended" => "browsers",
         "revoked" | "approved" | "denied" | "approve-failed" => "clients",
         "rotated" => "agents",
-        "github-saved" | "github-removed" => "github",
+        "github-saved" | "github-removed" | "attribution-saved" => "github",
         _ => "notifications",
     }
 }
@@ -196,6 +199,7 @@ fn notice_for(key: &str) -> Option<&'static str> {
         "approve-failed" => "Approved, but it failed; the terminal that asked says why.",
         "github-saved" => "GitHub token saved. AgentFlow's gh calls use it from now on.",
         "github-removed" => "GitHub token removed. gh uses the login of the user it runs as again.",
+        "attribution-saved" => "Saved. The checks under drafts for other people's repositories follow it from now on.",
         _ => return None,
     })
 }
@@ -346,7 +350,11 @@ async fn render_page(
             }
         })
         .collect();
+    let picked = state.db.call(|c| crate::outgoing::Attribution::of(c)).await?;
+    let attribution =
+        crate::outgoing::Attribution::ALL.into_iter().map(|a| (a.key(), a.label(), a == picked)).collect();
     let page = SettingsPage {
+        attribution,
         nav,
         notice,
         groups,
@@ -594,6 +602,26 @@ async fn github_save(
         .await?;
     log(&state, &actor, &ip, Action::Write, format!("GitHub token for {} set (account {login})", f.which)).await;
     Ok(Redirect::to("/settings?done=github-saved").into_response())
+}
+
+#[derive(Deserialize)]
+struct AttributionForm {
+    mode: String,
+}
+
+/// What the checks under a contribution flag of Claude's attribution (D-251: up to the user).
+async fn attribution_save(
+    State(state): State<AppState>,
+    Extension(actor): Extension<Actor>,
+    Extension(ip): Extension<ClientIp>,
+    Form(f): Form<AttributionForm>,
+) -> AppResult<Response> {
+    actor.require_owner()?;
+    let mode = crate::outgoing::Attribution::parse(&f.mode)
+        .ok_or_else(|| AppError::BadRequest("pick one of the choices".into()))?;
+    state.db.call(move |c| crate::outgoing::Attribution::set(c, mode)).await?;
+    log(&state, &actor, &ip, Action::Write, format!("Claude attribution in contributions: {}", mode.key())).await;
+    Ok(Redirect::to("/settings?done=attribution-saved").into_response())
 }
 
 async fn github_remove(
