@@ -1327,6 +1327,56 @@ async fn steps_run_on_batches_blocks_and_conclusions() {
 }
 
 #[tokio::test]
+async fn the_project_document_is_the_agents_and_the_owners() {
+    let s = TestServer::start().await;
+    let token = s.token(TokenKind::Project, Some("vinculum")).await;
+    let sess = mcp_session(&s, &token).await;
+    let call = |name: &'static str, args: Value| {
+        let (s, token, sess) = (&s, token.clone(), sess.clone());
+        async move { mcp_tool(s, &token, &sess, name, args).await }
+    };
+    let (ok, r) = call("edit_project_doc", json!({"section": "How to work on it", "text": "- Conventional Commits\n- DCO sign-off"})).await;
+    assert!(ok && r["rev"] == 1, "{r}");
+    let (ok, r) = call("edit_project_doc", json!({"section": "Roadmap", "text": "- M4 Keybinds (now)"})).await;
+    assert!(ok && r["rev"] == 2, "{r}");
+    let (ok, err) = call("edit_project_doc", json!({"text": "x".repeat(17 * 1024)})).await;
+    assert!(!ok && err.as_str().unwrap().contains("KB"), "{err}");
+    let (_, hello) = call("hello", json!({"session": "V", "machine": "m", "model": "o", "effort": "h"})).await;
+    let text = hello["doc"]["text"].as_str().unwrap();
+    assert!(text.contains("## How to work on it") && text.contains("## Roadmap"), "{text}");
+    assert!(hello["project"].get("stack").is_none(), "the stack lives in the document now");
+
+    // The owner sees it like a guide and edits a section; an edit on an old version is refused.
+    let cookie = s.owner_cookie().await;
+    let page = s.http.get(s.url("/p/vinculum?tab=notes")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
+    assert!(page.contains("Project document") && page.contains("Conventional Commits") && page.contains("rev 2"), "{page}");
+    let version = page.split("name=\"version\" value=\"").nth(1).map(|x| x.split('"').next().unwrap().to_owned());
+    assert!(version.is_none(), "no form until a pencil is pressed");
+    let page = s.http.get(s.url("/p/vinculum?tab=notes&edit=1")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
+    let version = page.split("name=\"version\" value=\"").nth(1).unwrap().split('"').next().unwrap().to_owned();
+    let post = |v: String, text: &'static str| {
+        let (s, cookie) = (&s, cookie.clone());
+        async move {
+            s.http
+                .post(s.url("/p/vinculum/doc"))
+                .header(COOKIE, &cookie)
+                .header(ORIGIN, &s.base)
+                .form(&[("version", v.as_str()), ("section", "1"), ("text", text)])
+                .send()
+                .await
+                .unwrap()
+        }
+    };
+    let res = post("stale0".into(), "## Roadmap\n\n- nope").await;
+    assert!(res.headers()[LOCATION].to_str().unwrap().contains("doc=stale"));
+    let res = post(version, "## Roadmap\n\n- M4 Keybinds\n- M5 Themes").await;
+    assert!(res.headers()[LOCATION].to_str().unwrap().contains("doc=saved"));
+    let (_, info) = call("project_info", json!({})).await;
+    assert!(info["doc"]["text"].as_str().unwrap().contains("M5 Themes"), "{info}");
+    assert_eq!(info["doc"]["rev"], 3);
+}
+
+#[tokio::test]
 async fn screenshots_are_uploaded_shown_and_linked() {
     let s = TestServer::start().await;
     let token = s.token(TokenKind::Project, Some("vinculum")).await;
@@ -1483,8 +1533,9 @@ async fn the_owner_edits_a_projects_details() {
     assert_eq!(save(vec![]).await, "/p/vinculum?tab=settings&settings=saved");
     let p = s.state.db.call(|c| crate::projects::require(c, "vinculum")).await.unwrap();
     assert_eq!((p.name.as_str(), p.repo.as_str()), ("Lituus", "giosuel/vinculum"));
-    assert_eq!(p.stack, ["Rust", "Slint", "zbus"]);
-    assert_eq!(p.pm_rules, ["One rule", "Another"]);
+    // Stack and rules live in the project document now; the form doesn't touch them.
+    assert!(p.stack.is_empty() && p.pm_rules.is_empty());
+    assert_eq!(p.ports, ["21300 demo"]);
     assert_eq!(save(vec![("name", " ")]).await, "/p/vinculum?tab=settings&settings=name");
     assert_eq!(save(vec![("repo", "not a repo")]).await, "/p/vinculum?tab=settings&settings=repo");
     let page =

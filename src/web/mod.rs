@@ -19,6 +19,7 @@ mod log;
 mod machine;
 mod new_project;
 mod pages;
+mod projectdoc;
 mod projects;
 mod pwa;
 mod settings;
@@ -152,6 +153,7 @@ pub fn router(state: AppState) -> Router {
         .merge(remote::routes())
         .merge(totest::routes())
         .merge(steps::routes())
+        .merge(projectdoc::routes())
         .merge(conversations::routes())
         .merge(guides::routes())
         .merge(log::routes())

@@ -50,12 +50,8 @@ struct SettingsForm {
     repo: String,
     checkout: String,
     machine: String,
-    stack: String,
-    platform: String,
     model: String,
     effort: String,
-    pm_rules: String,
-    git_rules: String,
     ports: String,
     build_product: String,
     /// The build server for `agentflow remote` ("" for none).
@@ -87,12 +83,8 @@ async fn save_settings(
         repo: Some(f.repo.clone()),
         checkout: Some(f.checkout.clone()),
         machine: Some(f.machine.clone()),
-        stack: Some(f.stack.split(',').map(str::to_owned).collect()),
-        platform: Some(f.platform.clone()),
         model: Some(f.model.clone()),
         effort: Some(f.effort.clone()),
-        pm_rules: Some(lines(&f.pm_rules)),
-        git_rules: Some(f.git_rules.clone()),
         ports: Some(lines(&f.ports)),
         build_product: Some(f.build_product.clone()),
         ..Default::default()
@@ -278,13 +270,7 @@ async fn list(
             for p in projects::list(c)? {
                 let ms = projects::milestones(c, p.id)?;
                 let online = p.agent.online(now);
-                let mut facts = Vec::new();
-                if !p.stack.is_empty() {
-                    facts.push(p.stack.join(" · "));
-                }
-                if !p.platform.is_empty() {
-                    facts.push(p.platform.clone());
-                }
+                let facts: Vec<String> = Vec::new();
                 // The milestones around the current one, and how far it is.
                 let top: Vec<&Milestone> = ms.iter().filter(|m| m.parent_id.is_none()).collect();
                 let cur = current_milestone(&ms);
@@ -616,12 +602,8 @@ pub struct EditView {
     repo: String,
     checkout: String,
     machine: String,
-    stack: String,
-    platform: String,
     model: String,
     effort: String,
-    pm_rules: String,
-    git_rules: String,
     ports: String,
     build_product: String,
 }
@@ -653,6 +635,8 @@ struct ProjectPage {
     /// The To test checklist (its tab), and how many are open (the tab's count).
     to_test: Option<super::totest::View>,
     to_test_open: i64,
+    /// The Notes tab: the project document.
+    doc: Option<super::projectdoc::DocView>,
     /// External PRs and issues: open ones and drafts, and the finished ones.
     external: Vec<ExtRow>,
     external_done: Vec<ExtRow>,
@@ -712,6 +696,12 @@ struct TabQuery {
     tested: Option<usize>,
     /// The milestone whose board the overview shows (its name); the current one if left out.
     ms: Option<String>,
+    /// The Notes tab: a section of the project document to edit ("2", or "all"), its history, an
+    /// older revision, and how a save went.
+    edit: Option<String>,
+    history: Option<u8>,
+    rev: Option<i64>,
+    doc: Option<String>,
 }
 
 /// The line shown after pressing a button, from the redirect's query.
@@ -759,6 +749,7 @@ const TABS: &[(&str, &str)] = &[
     ("decisions", "Decisions"),
     ("to-test", "To test"),
     ("screenshots", "Screenshots"),
+    ("notes", "Notes"),
     ("settings", "Settings"),
 ];
 
@@ -770,6 +761,7 @@ async fn project(
     tz: Tz,
 ) -> AppResult<Response> {
     let (notice, notice_bad) = press_notice(&q);
+    let tz_doc = tz.clone();
     let tab = q.tab.filter(|t| TABS.iter().any(|(k, _)| k == t)).unwrap_or_else(|| "overview".into());
     let now = now_ms();
     let chosen = q.ms.clone();
@@ -815,6 +807,27 @@ async fn project(
         let has_file: bool =
             crate::hands::run_async(crate::hands::Job::TokenExists { path: token_file.clone() }).await.unwrap_or(true);
         page.connect = Some(Connect { mcp_add, start, token_file: token_file.display().to_string(), has_file });
+    }
+    if tab == "notes" {
+        let (slug, edit, rev, outcome) = (page.slug.clone(), q.edit.clone(), q.rev, q.doc.clone());
+        let history = q.history == Some(1);
+        let owner = actor.is_owner();
+        let tz2 = tz_doc;
+        page.doc = Some(
+            state
+                .db
+                .call(move |c| {
+                    let p = projects::require(c, &slug)?;
+                    let ask = super::projectdoc::Ask {
+                        edit: edit.as_deref().filter(|_| owner),
+                        history,
+                        rev,
+                        outcome: outcome.as_deref(),
+                    };
+                    super::projectdoc::view(c, p.id, &ask, &tz2, now)
+                })
+                .await?,
+        );
     }
     page.prs_total = page.prs.len();
     page.has_stack_button = page.prs.iter().any(|p| p.up_to.is_some());
@@ -869,8 +882,6 @@ fn build_project_page(
         }
     };
     meta("info", "About", p.description.clone(), vec![]);
-    meta("stack", "Tech stack", p.stack.join(" · "), vec![]);
-    meta("platform", "Target platform", p.platform.clone(), vec![]);
     meta("model", "AI model", model_line(&p), vec![]);
     meta(
         "machine",
@@ -883,9 +894,7 @@ fn build_project_page(
             .join(" · "),
         vec![],
     );
-    meta("git", "Git", p.git_rules.clone(), vec![]);
     meta("port", "Ports", p.ports.join(", "), vec![]);
-    meta("rules", "PM rules for this project", String::new(), p.pm_rules.clone());
 
     // The board shows the chosen milestone (a top-level one), else the current one.
     let current = chosen
@@ -1090,12 +1099,8 @@ fn build_project_page(
         repo: p.repo.clone(),
         checkout: p.checkout.clone(),
         machine: p.machine.clone(),
-        stack: p.stack.join(", "),
-        platform: p.platform.clone(),
         model: p.model.clone(),
         effort: p.effort.clone(),
-        pm_rules: p.pm_rules.join("\n"),
-        git_rules: p.git_rules.clone(),
         ports: p.ports.join("\n"),
         build_product: p.build_product.clone(),
     });
@@ -1283,6 +1288,7 @@ fn build_project_page(
     };
     Ok(ProjectPage {
         to_test_open: crate::totest::open_count(c, p.id)?,
+        doc: None,
         to_test,
         external,
         external_done,
