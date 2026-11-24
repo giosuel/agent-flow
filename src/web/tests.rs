@@ -1032,7 +1032,8 @@ async fn the_bar_shows_the_project_its_tabs_and_the_global_pages() {
     // library's .tabs (it did in PR 7, 2026-11-24: the bar lost its tabs).
     let css = std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("static/app.css")).unwrap();
     assert!(css.contains(".pswitch, .btabs, .btabs-more, .vsep { display: none; }"), "the phone hides them");
-    let desk = css.lines().find(|l| l.trim_start().starts_with(".btabs { ")).expect("the desktop rule for the bar's tabs");
+    let desk =
+        css.lines().find(|l| l.trim_start().starts_with(".btabs { ")).expect("the desktop rule for the bar's tabs");
     assert!(desk.contains("display: flex"), "the desktop shows the bar's tabs: {desk}");
     let s = TestServer::start().await;
     let token = s.token(TokenKind::Project, Some("vinculum")).await;
