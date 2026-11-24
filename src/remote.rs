@@ -1398,13 +1398,30 @@ async fn fetch(data_dir: &Path, server: &BuildServer, job: &Job, path: &str) -> 
 
 async fn finish(state: &crate::web::AppState, job: &Job, st: &str, reason: &str, code: Option<i64>, out: Option<&Out>) {
     let (id, s, r) = (job.id, st.to_owned(), reason.to_owned());
+    let (project_id, server, command) = (job.project_id, job.server.clone(), job.command.join(" "));
     let _ = state
         .db
         .call(move |c| {
+            let now = now_ms();
             c.execute(
                 "UPDATE remote_jobs SET state = ?2, reason = ?3, exit_code = ?4, finished_at = ?5 WHERE id = ?1 AND state != 'cancelled'",
-                params![id, s, r, code, now_ms()],
+                params![id, s, r, code, now],
             )?;
+            // Its timing, on the one task in doing (or the one step under way), when that's clear.
+            let started: Option<i64> = c.query_row("SELECT started_at FROM remote_jobs WHERE id = ?1", [id], |r| r.get(0))?;
+            if let (Some(started), "done" | "failed") = (started, s.as_str()) {
+                let p = crate::projects::get_by_id(c, project_id)?;
+                if let Ok(on) = crate::times::resolve_on(c, project_id, &p.slug, None) {
+                    let what: String = command.chars().take(200).collect();
+                    crate::times::add(
+                        c,
+                        project_id,
+                        &on,
+                        &crate::times::NewTiming { what: &what, place: &server, wall_ms: now - started, cpu_ms: None, peak_mb: None, exit_code: code, note: "" },
+                        "agentflow",
+                    )?;
+                }
+            }
             Ok(())
         })
         .await;

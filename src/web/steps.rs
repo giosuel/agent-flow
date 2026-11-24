@@ -26,6 +26,18 @@ pub struct Row {
     pub title: String,
     pub state: String,
     pub est: String,
+    pub took: String,
+    /// Took more than estimated (by more than a tenth), less, or about right.
+    pub over: bool,
+    pub under: bool,
+    pub added: String,
+}
+
+pub struct Link {
+    pub short: String,
+    pub url: String,
+    pub title: String,
+    pub sub: String,
 }
 
 #[derive(Template)]
@@ -42,6 +54,14 @@ struct StepPage {
     summary_html: String,
     description: String,
     rows: Vec<Row>,
+    est_total: String,
+    took_total: String,
+    added_count: usize,
+    biggest_miss: String,
+    timings: Vec<crate::times::TimingRow>,
+    decisions: Vec<Link>,
+    follow_ups: Vec<Link>,
+    with_owner: Vec<Link>,
 }
 
 async fn step(
@@ -63,11 +83,52 @@ async fn step(
                 None => String::new(),
             };
             let tasks: Vec<Record> = crate::steps::tasks_of(c, m.id)?;
-            Ok(Some((p, m, parent, tasks)))
+            let now = crate::util::now_ms();
+            let (times, _) = crate::times::step_times(c, m.id, now)?;
+            let timings = crate::times::of_step(c, m.id)?;
+            let from = m.started_at.unwrap_or(i64::MAX);
+            let to = m.closed_at.unwrap_or(now);
+            let all = crate::records::query(c, &crate::records::Query { project_id: Some(p.id), limit: 0, ..Default::default() })?;
+            let decisions: Vec<Link> = all
+                .iter()
+                .filter(|r| r.kind == crate::records::Kind::Decision)
+                .filter(|r| {
+                    let at = r.data.get("said_at").and_then(serde_json::Value::as_i64).unwrap_or(r.created_at);
+                    at >= from && at <= to
+                })
+                .map(|r| Link { short: r.short_id(), url: r.url(), title: r.title.clone(), sub: r.str("owner_words").chars().take(140).collect() })
+                .collect();
+            let names: Vec<String> = [m.name.to_lowercase(), format!("{}/{}", parent.to_lowercase(), m.name.to_lowercase())].into();
+            let follow_ups: Vec<Link> = all
+                .iter()
+                .filter(|r| r.kind == crate::records::Kind::Task && r.milestone_id != Some(m.id))
+                .filter(|r| names.contains(&r.str("source_ref").trim().to_lowercase()))
+                .map(|r| Link { short: r.short_id(), url: r.url(), title: r.title.clone(), sub: format!("{} · {}", r.milestone.clone().unwrap_or_default(), r.state) })
+                .collect();
+            // Still with the owner: the step's PRs not merged yet, and what's open to test from its time.
+            let ids: Vec<i64> = tasks.iter().map(|t| t.id).collect();
+            let mut with_owner = Vec::new();
+            let mut stmt = c.prepare(
+                "SELECT DISTINCT l.from_id FROM links l JOIN records r ON r.id = l.from_id
+                 WHERE l.relation = 'implements' AND r.kind = 'pr' AND r.state = 'open' AND l.to_id IN (SELECT value FROM json_each(?1))",
+            )?;
+            let prs: Vec<i64> = stmt.query_map([serde_json::to_string(&ids)?], |r| r.get(0))?.collect::<Result<_, _>>()?;
+            for id in prs {
+                let pr = crate::records::get(c, id)?;
+                with_owner.push(Link { short: format!("#{}", pr.number), url: pr.url(), title: pr.title.clone(), sub: "to merge".into() });
+            }
+            let tests = all
+                .iter()
+                .filter(|r| r.kind == crate::records::Kind::Test && r.state == "open" && r.created_at >= from && r.created_at <= to)
+                .count();
+            if tests > 0 {
+                with_owner.push(Link { short: String::new(), url: format!("/p/{}?tab=to-test", p.slug), title: format!("{tests} item{} to test", if tests == 1 { "" } else { "s" }), sub: String::new() });
+            }
+            Ok(Some((p, m, parent, tasks, (times, timings, decisions, follow_ups, with_owner))))
         })
         .await?
         .ok_or(AppError::NotFound)?;
-    let (p, m, parent, tasks) = page;
+    let (p, m, parent, tasks, (times, timings, decisions, follow_ups, with_owner)) = page;
     let state_word = match m.state.as_str() {
         "closed" => "concluded",
         "active" => "active",
@@ -79,20 +140,44 @@ async fn step(
         (None, Some(b)) => format!("concluded {}", tz.short(b)),
         (None, None) => "not started yet".into(),
     };
-    let rows = tasks
+    let mut est_total = 0;
+    let mut miss: Option<(i64, String)> = None;
+    let rows: Vec<Row> = tasks
         .iter()
         .enumerate()
-        .map(|(i, t)| Row {
-            n: i + 1,
-            short: t.short_id(),
-            url: t.url(),
-            title: t.title.clone(),
-            state: t.state.clone(),
-            est: t.str("estimate").to_owned(),
+        .map(|(i, t)| {
+            let est = crate::times::estimate_min(t);
+            let took = times.share_ms.get(&t.id).copied().unwrap_or(0);
+            if t.state != "skipped" {
+                est_total += est;
+            }
+            let diff = took - est * 60_000;
+            if est > 0 && t.state == "done" && miss.as_ref().is_none_or(|m| diff.abs() > m.0.abs()) {
+                let word = if diff >= 0 { "over" } else { "under" };
+                miss = Some((diff, format!("{}, {} {word}", t.short_id(), crate::times::fmt_ms(diff.abs()))));
+            }
+            let added = if t.data.get("added").and_then(serde_json::Value::as_bool).unwrap_or(false) {
+                format!("added · {}", super::projects::source_label(t.str("source")))
+            } else {
+                String::new()
+            };
+            Row {
+                n: i + 1,
+                short: t.short_id(),
+                url: t.url(),
+                title: t.title.clone(),
+                state: t.state.clone(),
+                est: if est > 0 { crate::times::fmt_min(est) } else { t.str("estimate").to_owned() },
+                took: if t.state == "skipped" { String::new() } else { crate::times::fmt_ms(took) },
+                over: est > 0 && took > est * 66_000,
+                under: est > 0 && t.state == "done" && took < est * 54_000,
+                added,
+            }
         })
         .collect();
+    let added_count = rows.iter().filter(|r| !r.added.is_empty()).count();
     render(StepPage {
-        nav: nav(&state, &actor, "/projects").await.back_to(&format!("/p/{}?tab=tasks", p.slug), &p.name),
+        nav: nav(&state, &actor, "/projects").await.back_to(format!("/p/{}?tab=tasks", p.slug), &p.name),
         project_name: p.name.clone(),
         project_slug: p.slug.clone(),
         name: m.name.clone(),
@@ -103,5 +188,13 @@ async fn step(
         summary_html: markdown::to_html(&m.summary),
         description: m.description.clone(),
         rows,
+        est_total: crate::times::fmt_min(est_total),
+        took_total: crate::times::fmt_ms(times.total_ms),
+        added_count,
+        biggest_miss: miss.filter(|m| m.0.abs() >= 10 * 60_000).map(|m| m.1).unwrap_or_default(),
+        timings: crate::times::rows(&timings, &tz),
+        decisions,
+        follow_ups,
+        with_owner,
     })
 }

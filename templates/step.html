@@ -19,9 +19,33 @@
   </section>
   {% endif %}
   <section class="stack-sm" aria-labelledby="tasks-h">
-    <h2 class="label" id="tasks-h">Tasks</h2>
-    {% if rows.is_empty() %}<p class="sub">No tasks.</p>{% endif %}
-    <ol class="ord">{% for t in rows %}<li><span class="n">{{ t.n }}</span><span class="mono sub">{{ t.short }}</span><span class="t"><a href="{{ t.url }}">{{ t.title }}</a></span><span class="chip state-{{ t.state }}">{{ t.state }}</span><span class="tm sub">{% if !t.est.is_empty() %}est. {{ t.est }}{% endif %}</span></li>{% endfor %}</ol>
+    <div class="sec"><h2 class="label" id="tasks-h">Estimated and actual</h2><span class="sub">{{ rows.len() }} task{% if rows.len() != 1 %}s{% endif %}{% if added_count > 0 %}, {{ added_count }} added during the step{% endif %}</span></div>
+    {% if rows.is_empty() %}<p class="sub">No tasks.</p>{% else %}
+    <div class="table-wrap"><table class="cmp"><thead><tr><th>#</th><th>Task</th><th></th><th>Estimate</th><th>Took</th></tr></thead><tbody>
+    {% for t in rows %}<tr><td class="sub mono">{{ t.n }}</td><td><span class="mono sub">{{ t.short }}</span> <a href="{{ t.url }}">{{ t.title }}</a>{% if !t.added.is_empty() %} <span class="addtag">{{ t.added }}</span>{% endif %}</td><td><span class="chip state-{{ t.state }}">{{ t.state }}</span></td><td class="m">{{ t.est }}</td><td class="m{% if t.over %} over{% endif %}{% if t.under %} under{% endif %}">{{ t.took }}</td></tr>{% endfor %}
+    <tr class="tot"><td></td><td>Together</td><td></td><td class="m">{{ est_total }}</td><td class="m">{{ took_total }}</td></tr>
+    </tbody></table></div>
+    <p class="sub">Took: time in doing, counted from the tasks' state changes; time when several were in doing at once counts once and is split between them. Blocked, review and time the agent was away don't count.{% if !biggest_miss.is_empty() %} Biggest miss: {{ biggest_miss }}.{% endif %}</p>
+    {% endif %}
   </section>
+  {% if !with_owner.is_empty() %}
+  <section class="stack-sm" aria-labelledby="with-h">
+    <h2 class="label" id="with-h">Still with you</h2>
+    <ul class="rows">{% for l in with_owner %}<li class="item-row">{% if !l.short.is_empty() %}<span class="mono sub id-col">{{ l.short }}</span>{% endif %}<div class="ttl"><a href="{{ l.url }}">{{ l.title }}</a>{% if !l.sub.is_empty() %}<span class="sub">{{ l.sub }}</span>{% endif %}</div></li>{% endfor %}</ul>
+  </section>
+  {% endif %}
+  {% if !decisions.is_empty() %}
+  <section class="stack-sm" aria-labelledby="dec-h">
+    <h2 class="label" id="dec-h">Your decisions during the step</h2>
+    <ul class="rows">{% for l in decisions %}<li class="item-row"><span class="mono sub id-col">{{ l.short }}</span><div class="ttl"><a href="{{ l.url }}">{{ l.title }}</a><span class="sub">“{{ l.sub }}”</span></div></li>{% endfor %}</ul>
+  </section>
+  {% endif %}
+  {% if !follow_ups.is_empty() %}
+  <section class="stack-sm" aria-labelledby="fu-h">
+    <h2 class="label" id="fu-h">Follow-ups</h2>
+    <ul class="rows">{% for l in follow_ups %}<li class="item-row"><span class="mono sub id-col">{{ l.short }}</span><div class="ttl"><a href="{{ l.url }}">{{ l.title }}</a><span class="sub">{{ l.sub }}</span></div></li>{% endfor %}</ul>
+  </section>
+  {% endif %}
+  {% if !timings.is_empty() %}{% include "timings.html" %}{% endif %}
 </div>
 {% endblock %}

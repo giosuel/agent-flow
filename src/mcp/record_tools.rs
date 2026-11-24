@@ -98,7 +98,29 @@ pub struct UpdateTask {
     pub estimate: Option<String>,
     /// The branch its work is on.
     pub branch: Option<String>,
-    /// A line for the task's history; for skipped, why.
+    /// Correct the time spent when the counted one is wrong, e.g. "1 h 20 min"; needs a note on
+    /// why. Kept in the history.
+    pub time_spent: Option<String>,
+    /// A line for the task's history; for skipped or a time correction, why.
+    #[serde(default)]
+    pub note: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct LogTiming {
+    /// What ran, e.g. "cargo test --workspace".
+    pub what: String,
+    /// Wall time in seconds.
+    pub wall_s: f64,
+    /// CPU seconds (user + sys of the whole process tree), if you know them.
+    pub cpu_s: Option<f64>,
+    /// Peak memory in MB, if you know it.
+    pub peak_mb: Option<i64>,
+    /// Where it ran: "here" (default) or a build server's name.
+    pub place: Option<String>,
+    /// What it's on: a task (T-12), a step (P9.3d) or a PR (#58). Left out: the one task in
+    /// doing, or the one step under way.
+    pub on: Option<String>,
     #[serde(default)]
     pub note: String,
 }
@@ -425,6 +447,19 @@ fn update_one(tx: &rusqlite::Connection, a: &crate::auth::Actor, id: &str, p: &U
     if state.as_deref() == Some("skipped") {
         data.insert("skip_reason".into(), p.note.trim().into());
     }
+    if let Some(ts) = p.time_spent.as_deref().map(str::trim) {
+        if ts.is_empty() {
+            data.insert("time_override_min".into(), Value::Null);
+        } else {
+            let Some(min) = crate::steps::parse_minutes(ts) else {
+                anyhow::bail!("time_spent {ts:?} isn't a duration; write it like \"1 h 20 min\"");
+            };
+            if p.note.trim().is_empty() {
+                anyhow::bail!("say why the counted time is wrong, in note");
+            }
+            data.insert("time_override_min".into(), min.into());
+        }
+    }
     // Started now only if it wasn't already in progress.
     let to_doing = state.as_deref() == Some("doing") && r.state != "doing";
     if to_doing {
@@ -593,6 +628,43 @@ impl FlowMcp {
             })
             .await;
         self.finish(&actor, "order_tasks", Action::Write, outcome).await
+    }
+
+    #[tool(description = "Log how long a build or test took (wall, CPU, peak memory), on a task, a step or a PR. \
+        Easier: run it through `agentflow time [--on T-12] -- <command>`, which measures and logs it for you. These \
+        replace the timings in PR bodies.")]
+    async fn log_timing(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(p): Parameters<LogTiming>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let actor = actor_of(&parts);
+        let a = actor.clone();
+        let outcome = self
+            .state
+            .db
+            .call(move |c| {
+                let project = target_project(c, &a, None, true)?;
+                let on = crate::times::resolve_on(c, project.id, &project.slug, p.on.as_deref())?;
+                let t = crate::times::add(
+                    c,
+                    project.id,
+                    &on,
+                    &crate::times::NewTiming {
+                        what: &p.what,
+                        place: p.place.as_deref().unwrap_or("here"),
+                        wall_ms: (p.wall_s * 1000.0).round() as i64,
+                        cpu_ms: p.cpu_s.map(|s| (s * 1000.0).round() as i64),
+                        peak_mb: p.peak_mb,
+                        exit_code: None,
+                        note: &p.note,
+                    },
+                    &a.name(),
+                )?;
+                Ok(Outcome::new(json!({"on": t.on, "logged": t.what})).summary(format!("timing on {}", t.on)).project(project.slug))
+            })
+            .await;
+        self.finish(&actor, "log_timing", Action::Write, outcome).await
     }
 
     #[tool(description = "Change a task, or several at once with ids: its state (todo, doing, review, done, blocked, \

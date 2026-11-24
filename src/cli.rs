@@ -422,6 +422,110 @@ pub struct RemoteArgs {
 
 /// Runs a build or test on a build server and prints its output as it comes; exits with its exit
 /// code. Exit code 75 means the server is offline: build here instead.
+#[derive(Args)]
+pub struct TimeArgs {
+    #[command(flatten)]
+    pub client: ClientArgs,
+    /// What it's on: a task (T-12), a step (P9.3d) or a PR (#58). Left out: the one task in doing,
+    /// or the one step under way.
+    #[arg(long)]
+    pub on: Option<String>,
+    /// What to call it in the log; the command itself if left out.
+    #[arg(long)]
+    pub what: Option<String>,
+    /// The command, after `--`, e.g. `-- cargo test --workspace`. It can start with a wrapper such
+    /// as `systemd-run --user --scope -p MemoryMax=8G`.
+    #[arg(last = true, required = true)]
+    pub command: Vec<String>,
+}
+
+/// Children's CPU (user + sys) from /proc/self/stat once they're waited for, in ms.
+fn children_cpu_ms() -> Option<i64> {
+    let text = std::fs::read_to_string("/proc/self/stat").ok()?;
+    let f: Vec<&str> = text[text.rfind(')')? + 1..].split_whitespace().collect();
+    // After ')': … cutime(13) cstime(14), in clock ticks (100 a second).
+    let ticks: i64 = f.get(13)?.parse::<i64>().ok()? + f.get(14)?.parse::<i64>().ok()?;
+    Some(ticks * 10)
+}
+
+/// The resident memory of a process and everything it started, in KB.
+fn tree_rss_kb(root: u32) -> u64 {
+    let mut parent: std::collections::HashMap<u32, u32> = std::collections::HashMap::new();
+    let mut rss: std::collections::HashMap<u32, u64> = std::collections::HashMap::new();
+    let Ok(list) = std::fs::read_dir("/proc") else { return 0 };
+    for e in list.filter_map(Result::ok) {
+        let Some(pid) = e.file_name().to_str().and_then(|n| n.parse::<u32>().ok()) else { continue };
+        let Ok(text) = std::fs::read_to_string(format!("/proc/{pid}/stat")) else { continue };
+        let Some(close) = text.rfind(')') else { continue };
+        let f: Vec<&str> = text[close + 1..].split_whitespace().collect();
+        if let (Some(pp), Some(r)) = (f.get(1).and_then(|x| x.parse().ok()), f.get(21).and_then(|x| x.parse::<u64>().ok())) {
+            parent.insert(pid, pp);
+            rss.insert(pid, r * 4);
+        }
+    }
+    rss.iter()
+        .filter(|(pid, _)| {
+            let mut p = **pid;
+            for _ in 0..64 {
+                if p == root {
+                    return true;
+                }
+                match parent.get(&p) {
+                    Some(&pp) if pp > 1 => p = pp,
+                    _ => return false,
+                }
+            }
+            false
+        })
+        .map(|(_, kb)| kb)
+        .sum()
+}
+
+/// Runs a command, measures wall time, CPU (user + sys of everything it started) and peak memory
+/// (sampled), prints them and logs them in AgentFlow. Exits with the command's exit code.
+pub fn time(config_path: &Path, a: TimeArgs) -> anyhow::Result<i32> {
+    let client = Client::new(config_path, &a.client)?;
+    let what = a.what.clone().unwrap_or_else(|| a.command.join(" ")).chars().take(200).collect::<String>();
+    let start = std::time::Instant::now();
+    let mut child = std::process::Command::new(&a.command[0])
+        .args(&a.command[1..])
+        .spawn()
+        .with_context(|| format!("couldn't start {}", a.command[0]))?;
+    let pid = child.id();
+    let peak = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let sampler = {
+        let (peak, done) = (peak.clone(), done.clone());
+        std::thread::spawn(move || {
+            while !done.load(std::sync::atomic::Ordering::Relaxed) {
+                let kb = tree_rss_kb(pid);
+                peak.fetch_max(kb, std::sync::atomic::Ordering::Relaxed);
+                std::thread::sleep(std::time::Duration::from_millis(250));
+            }
+        })
+    };
+    let status = child.wait()?;
+    done.store(true, std::sync::atomic::Ordering::Relaxed);
+    let _ = sampler.join();
+    let wall_ms = start.elapsed().as_millis() as i64;
+    let cpu_ms = children_cpu_ms();
+    let peak_mb = (peak.load(std::sync::atomic::Ordering::Relaxed) / 1024) as i64;
+    let code = status.code().unwrap_or(1);
+    eprintln!(
+        "agentflow time: wall {}, CPU {}, peak {} (sampled), exit {code}",
+        crate::times::fmt_wall(wall_ms),
+        cpu_ms.map(|c| format!("{:.0} s", c as f64 / 1000.0)).unwrap_or_else(|| "?".into()),
+        crate::times::fmt_mb(peak_mb),
+    );
+    let body = serde_json::json!({"what": what, "wall_ms": wall_ms, "cpu_ms": cpu_ms, "peak_mb": peak_mb,
+        "exit_code": code, "on": a.on.clone().unwrap_or_default()});
+    match client.post_json("/api/timings", &body) {
+        Ok(r) => eprintln!("agentflow time: logged on {}", r["on"].as_str().unwrap_or("?")),
+        Err(e) => eprintln!("agentflow time: not logged: {e:#}"),
+    }
+    Ok(code)
+}
+
 pub fn remote(config_path: &Path, a: RemoteArgs) -> anyhow::Result<i32> {
     let client = Client::new(config_path, &a.client)?.with_timeout(std::time::Duration::from_secs(60));
     let dir = std::fs::canonicalize(&a.dir).with_context(|| format!("{} doesn't exist", a.dir.display()))?;

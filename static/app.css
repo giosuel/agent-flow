@@ -850,3 +850,20 @@ a.blk.q:hover { text-decoration: underline; }
 .blocked-line a { color: inherit; font-weight: 500; }
 .addtag { font-size: 12px; color: var(--ink2); border: 1px dashed var(--border); border-radius: 6px; padding: 1px 7px; margin-left: 8px; white-space: nowrap; }
 .chip.state-skipped { color: var(--muted); }
+.tbar { height: 10px; border-radius: 5px; background: var(--chip); overflow: hidden; }
+.tbar i { display: block; height: 100%; background: var(--accent); border-radius: 5px; }
+.tbar i.over { background: var(--warn); }
+.table-wrap { overflow-x: auto; }
+.timing { width: 100%; border-collapse: collapse; font-size: 14px; }
+.timing th { text-align: left; font-weight: 500; color: var(--muted); font-size: 12px; padding: 6px 10px 6px 0; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.timing td { padding: 8px 10px 8px 0; border-bottom: 1px solid var(--line2); vertical-align: top; }
+.timing td.m { font-family: var(--mono); white-space: nowrap; }
+.ord .tm .mono { font-size: 13px; color: var(--ink2); }
+.cmp { width: 100%; border-collapse: collapse; font-size: 14px; }
+.cmp th { text-align: left; font-weight: 500; color: var(--muted); font-size: 12px; padding: 6px 10px 6px 0; border-bottom: 1px solid var(--line); }
+.cmp td { padding: 8px 10px 8px 0; border-bottom: 1px solid var(--line2); vertical-align: top; }
+.cmp td.m { font-family: var(--mono); white-space: nowrap; }
+.cmp td.over { color: var(--warn-ink); } .cmp td.under { color: var(--ok); }
+.cmp tr.tot td { font-weight: 600; border-bottom: 0; }
+.cmp a { color: var(--ink); }
+.timing td.mono { white-space: nowrap; }

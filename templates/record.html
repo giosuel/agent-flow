@@ -30,6 +30,16 @@
     </figure>
     {% endif %}
 
+    {% if let Some(tv) = time %}
+    <section class="stack-sm" aria-labelledby="time-h">
+      <h2 class="label" id="time-h">Time</h2>
+      <p>{% if tv.spans.is_empty() %}Not in doing yet{% else %}<span class="mono">{{ tv.spent }}</span>{% endif %}{% if !tv.est.is_empty() %} {% if tv.spans.is_empty() %}; estimated{% else %} of an estimated{% endif %} <span class="mono">{{ tv.est }}</span>{% endif %}{% if tv.corrected %} <span class="sub">(corrected by the agent; see History)</span>{% endif %}</p>
+      {% if !tv.est.is_empty() %}<div class="tbar" role="img" aria-label="{{ tv.spent }} of {{ tv.est }}"><i class="{% if tv.over %}over{% endif %}" style="width: {{ tv.pct }}%"></i></div>{% endif %}
+      {% if !tv.spans.is_empty() %}<p class="sub">In doing: {{ tv.spans }}. Counted from its state changes; blocked, review and time the agent is away don't count.</p>{% endif %}
+      {% if !tv.raw.is_empty() %}<p class="sub">{{ tv.raw }}.</p>{% endif %}
+    </section>
+    {% endif %}
+    {% if !timings.is_empty() %}{% include "timings.html" %}{% endif %}
     {% if !owner_words.is_empty() %}
     <section class="stack-sm" aria-labelledby="words-h">
       <h2 class="label" id="words-h">The owner's words</h2>
