@@ -6,7 +6,7 @@
   <h1>Conversations</h1>
   <form method="post" action="/transcripts/read" class="row reload-form"><input type="hidden" name="next" value="{{ here }}">
     {% if !refreshed.is_empty() %}<span class="sub">{{ refreshed }}</span>{% endif %}
-    {% if can_reload %}<button class="reload-btn" type="submit"{% if reading %} disabled aria-label="Reading the transcripts" title="Reading the transcripts…"{% else %} aria-label="Reload" title="Read the transcripts now (they are read every five minutes), for tokens and conversations"{% endif %}>{{ crate::web::icons::icon("refresh")|safe }}</button>{% endif %}</form>
+    {% if can_reload %}<button class="ibtn{% if reading %} busy{% endif %}" type="submit"{% if reading %} disabled aria-label="Reading the transcripts" title="Reading the transcripts…"{% else %} aria-label="Reload" title="Read the transcripts now (they are read every five minutes), for tokens and conversations"{% endif %}>{{ crate::web::icons::icon("refresh")|safe }}</button>{% endif %}</form>
 </div>
 
 <form method="get" action="/conversations" class="ltool cvtool">
@@ -71,9 +71,9 @@
       <div class="grow"><h2 id="thread-h">{{ s.title.0 }}{% if !s.title_models.0.is_empty() %} <span class="mtag">{{ s.title_models.0 }}</span>{% endif %} <span class="sep">{{ s.title.1 }}</span> {{ s.title.2 }}{% if !s.title_models.1.is_empty() %} <span class="mtag">{{ s.title_models.1 }}</span>{% endif %}</h2><span class="sub">{{ s.line }}</span></div>
     </div>
     <div class="cv-pager">
-      {% if let Some(n) = s.next %}<a class="pg-btn" href="{{ n }}" data-newer aria-label="Newer {{ s.noun }}">{{ crate::web::icons::icon("back")|safe }}</a>{% else %}<span class="pg-btn off" aria-hidden="true">{{ crate::web::icons::icon("back")|safe }}</span>{% endif %}
+      {% if let Some(n) = s.next %}<a class="ibtn" href="{{ n }}" data-newer aria-label="Newer {{ s.noun }}">{{ crate::web::icons::icon("prev")|safe }}</a>{% else %}<span class="ibtn off" aria-hidden="true">{{ crate::web::icons::icon("prev")|safe }}</span>{% endif %}
       <div class="grow cv-pg-t"><strong>{{ s.pager }}</strong> <span class="sub">{{ s.pager_sub }}</span></div>
-      {% if let Some(p) = s.prev %}<a class="pg-btn" href="{{ p }}" data-older aria-label="Older {{ s.noun }}">{{ crate::web::icons::icon("chevron")|safe }}</a>{% else %}<span class="pg-btn off" aria-hidden="true">{{ crate::web::icons::icon("chevron")|safe }}</span>{% endif %}
+      {% if let Some(p) = s.prev %}<a class="ibtn" href="{{ p }}" data-older aria-label="Older {{ s.noun }}">{{ crate::web::icons::icon("chevron")|safe }}</a>{% else %}<span class="ibtn off" aria-hidden="true">{{ crate::web::icons::icon("chevron")|safe }}</span>{% endif %}
     </div>
     <div class="cv-body" data-swipe>
       <div class="cv-topic"><h3>{{ s.heading }}</h3><p class="sub">{{ s.heading_sub }}</p></div>

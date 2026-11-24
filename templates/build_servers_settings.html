@@ -47,7 +47,7 @@
           </form>
           <h3 class="label">Name</h3>
           <form method="post" action="/settings/build-servers/{{ s.name }}/rename" class="sl-rename">
-            <input aria-label="Name" name="name" required maxlength="64" value="{{ s.name }}"><button class="btn sm ghost" type="submit">Rename</button>
+            <input aria-label="Name" name="name" required maxlength="64" value="{{ s.name }}"><button class="btn sm secondary" type="submit">Rename</button>
           </form>
           <p class="sub">Projects and jobs follow the new name; the builder reconnects under it.</p>
         </div>

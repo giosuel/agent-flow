@@ -177,6 +177,56 @@ pub fn icon(name: &str) -> &'static str {
         "history" => {
             r#"<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5M12 8v4l3 2"/></svg>"#
         }
+        // Close, a caret, back and a warning: the library's (M15), instead of the "×", "‹" and "›"
+        // glyphs dialogs drew in three sizes.
+        "close" => r#"<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>"#,
+        "caret" => r#"<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5"/></svg>"#,
+        "prev" => r#"<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="m15 6-6 6 6 6"/></svg>"#,
+        "alert" => {
+            r#"<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4 2.8 20h18.4L12 4Z"/><path d="M12 10v4.5M12 17.5h.01"/></svg>"#
+        }
         _ => r#"<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/></svg>"#,
+    }
+}
+
+/// Every icon, for the library's catalogue page (/ui).
+pub const ALL: &[&str] = &[
+    "cpu", "memory", "disk", "tmp", "load", "draft", "pr", "issue", "session", "out", "inbox", "info", "stack",
+    "platform", "model", "rules", "git", "folder", "machine", "port", "question", "decision", "task", "doc", "merge",
+    "tag", "build", "bell", "key", "laptop", "window", "robot", "server", "code", "person", "hammer", "pause", "play",
+    "search", "filter", "copy", "message", "grid", "chart", "book", "more", "list", "gear", "pencil", "back", "plus",
+    "chevron", "ftext", "note", "archive", "image", "table", "pdf", "file", "download", "fork", "check", "refresh",
+    "history", "close", "caret", "prev", "alert",
+];
+
+/// The icons scripts draw (dialogs, the copy button, the bell's panel), as symbols on every page, so
+/// static/*.js uses the same icons as the templates: `<svg class="i"><use href="#i-close"/></svg>`.
+pub const SPRITE: &[&str] = &["close", "prev", "chevron", "copy", "check", "gear", "caret", "alert"];
+
+pub fn sprite() -> String {
+    let mut out =
+        String::from(r#"<svg class="sprite" aria-hidden="true" width="0" height="0" style="position:absolute">"#);
+    for name in SPRITE {
+        let svg = icon(name);
+        let inner = &svg[svg.find('>').map(|i| i + 1).unwrap_or(0)..svg.rfind("</svg>").unwrap_or(svg.len())];
+        out.push_str(&format!(r#"<symbol id="i-{name}" viewBox="0 0 24 24">{inner}</symbol>"#));
+    }
+    out.push_str("</svg>");
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn the_sprite_holds_every_icon_scripts_use() {
+        let s = super::sprite();
+        for name in super::SPRITE {
+            assert!(s.contains(&format!(r#"<symbol id="i-{name}" viewBox="0 0 24 24">"#)), "{name}");
+            assert_ne!(super::icon(name), super::icon("no such icon"), "{name} is a real icon, not the fallback dot");
+        }
+        assert!(s.contains(r#"<path d="M6 6l12 12M18 6 6 18"/></symbol>"#), "{s}");
+        for name in super::ALL {
+            assert_ne!(super::icon(name), super::icon("no such icon"), "{name} in ALL has no icon");
+        }
     }
 }

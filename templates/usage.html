@@ -7,7 +7,7 @@
   <h1>Usage</h1>
   <form method="post" action="/transcripts/read" class="row reload-form"><input type="hidden" name="next" value="/usage">
     <span class="sub">newest call {{ newest }}</span>
-    <button class="reload-btn" type="submit"{% if reading %} disabled aria-label="Reading the transcripts" title="Reading the transcripts…"{% else %} aria-label="Reload" title="Read the transcripts now (they are read every five minutes), for tokens and conversations"{% endif %}>{{ crate::web::icons::icon("refresh")|safe }}</button></form>
+    <button class="ibtn{% if reading %} busy{% endif %}" type="submit"{% if reading %} disabled aria-label="Reading the transcripts" title="Reading the transcripts…"{% else %} aria-label="Reload" title="Read the transcripts now (they are read every five minutes), for tokens and conversations"{% endif %}>{{ crate::web::icons::icon("refresh")|safe }}</button></form>
 </div>
 {# One page, no Overview | Tasks tabs: the tasks are a card, all of them a dialog (D-238). #}
 <section class="card plan-card" aria-labelledby="plan-h">

@@ -25,10 +25,10 @@
     <div class="send-row">
       <button class="btn" type="submit" data-confirm="{{ d.send_label }} as you? It goes out exactly as it is on this page.">{{ d.send_label }}</button>
       <details class="ask">
-        <summary class="btn ghost">Ask for changes</summary>
+        <summary class="btn secondary">Ask for changes</summary>
         <div class="stack-sm ask-box">
           <label class="field">What should change? The agent gets it word for word, with your edits above.<textarea name="note" rows="3" placeholder="e.g. shorter, and no screenshot link"></textarea></label>
-          <div><button class="btn ghost" type="submit" formaction="/p/{{ project_slug }}/{{ short }}/changes">Send it back to the agent</button></div>
+          <div><button class="btn secondary" type="submit" formaction="/p/{{ project_slug }}/{{ short }}/changes">Send it back to the agent</button></div>
         </div>
       </details>
       <span class="grow"></span>

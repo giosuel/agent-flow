@@ -12,7 +12,7 @@
         <summary>Its version of <b>{{ c.title }}</b>{% if !c.mine_kept %} (you removed it){% endif %}</summary>
         <div class="prose">{{ c.theirs_html|safe }}</div>
         <textarea hidden data-theirs="{{ c.title }}">{{ c.theirs }}</textarea>
-        <button type="button" class="btn sm ghost" data-use-theirs="{{ c.title }}">Use its version</button>
+        <button type="button" class="btn sm secondary" data-use-theirs="{{ c.title }}">Use its version</button>
       </details>
       {% endfor %}
     </div>
@@ -38,7 +38,7 @@
   </div>
   <div class="pd-foot">
     <button class="btn" type="submit">Save</button>
-    <a class="btn ghost" href="{{ ed.cancel_href }}"{% if ed.cancel_dlg %} data-dlg{% endif %} data-cancel>Cancel</a>
+    <a class="btn quiet" href="{{ ed.cancel_href }}"{% if ed.cancel_dlg %} data-dlg{% endif %} data-cancel>Cancel</a>
     <span class="sub hide-phone">Ctrl+S saves · Esc asks before it drops your edits</span>
     <span class="grow"></span>
     <span class="sub hide-phone">{{ ed.note }}</span>

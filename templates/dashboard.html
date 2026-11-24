@@ -69,7 +69,7 @@
       {% for g in groups %}
       <div class="grp"><span>{{ g.title }} · {{ g.items.len() }}</span></div>
       {% for i in g.items %}
-      <div class="item"><span class="ico">{{ i.icon|safe }}</span><div class="ttl"><a href="{{ i.url }}">{{ i.title }}</a><span class="sub">{{ i.sub }}</span></div><a class="btn sm ghost" href="{{ i.url }}">{{ i.action }}</a></div>
+      <div class="item"><span class="ico">{{ i.icon|safe }}</span><div class="ttl"><a href="{{ i.url }}">{{ i.title }}</a><span class="sub">{{ i.sub }}</span></div><a class="btn sm secondary" href="{{ i.url }}">{{ i.action }}</a></div>
       {% endfor %}
       {% endfor %}
     </div>

@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}UI library{% endblock %}
+{% block content %}
+{# The UI library's catalogue (M15): every token and component, drawn with static/ui.css itself.
+   A component looks here as it does on every page that uses it. #}
+<div class="head"><h1>UI library</h1><p class="sub">Tokens and components in static/ui.css; pages build only from these.</p></div>
+<div class="uicat">
+<div class="uicat-cols">
+<section class="card spec" aria-labelledby="ui-colour">
+  <div class="spec-h"><h2 class="label" id="ui-colour">Colour</h2><span class="sub">named tokens; nothing hard-coded in pages</span></div>
+  {% for (group, swatches) in colours %}
+  <div class="spec-row wide"><div class="nm"><b>{{ group }}</b></div><div class="smp swatches">{% for (token, what) in swatches.iter() %}<span class="swatch-c"><span class="b" style="background: var({{ token }})"></span><span class="k">{{ token }}</span><span class="h">{{ what }}</span></span>{% endfor %}</div></div>
+  {% endfor %}
+  <div class="spec-row wide"><div class="nm"><b>Status, four per tone</b>fill · -ink · -bg · -line</div><div class="smp">{% for t in ["ok", "warn", "bad", "info"] %}<span class="tone-set">{% for s in ["", "-ink", "-bg", "-line"] %}<span class="b" style="background: var(--{{ t }}{{ s }})" title="--{{ t }}{{ s }}"></span>{% endfor %}</span>{% endfor %}</div></div>
+</section>
+<section class="card spec" aria-labelledby="ui-type">
+  <div class="spec-h"><h2 class="label" id="ui-type">Type</h2><span class="sub">9 sizes; weights 400, 500, 600</span></div>
+  {% for (token, size, class, sample, what) in type_roles %}
+  <div class="spec-row"><div class="nm"><b>{{ token }}</b>{{ size }}</div><div class="smp"><span class="{{ class }}">{{ sample }}</span></div><div class="wh">{{ what }}</div></div>
+  {% endfor %}
+  <div class="spec-row"><div class="nm"><b>Numbers</b>mono 500</div><div class="smp"><span class="t-num">$2,155</span></div><div class="wh">Stat tiles, big counts</div></div>
+</section>
+</div>
+<div class="uicat-cols">
+<section class="card spec" aria-labelledby="ui-space">
+  <div class="spec-h"><h2 class="label" id="ui-space">Spacing, radii, sizes</h2></div>
+  <div class="spec-row"><div class="nm"><b>Spacing</b>--sp-* · 4 px base</div><div class="smp">{% for v in spacing %}<span class="st"><span class="space-bar" style="width: {{ v }}px"></span><span class="cap">{{ v }}</span></span>{% endfor %}</div><div class="wh">Rows 12/16, card bodies 16/20, cards 24</div></div>
+  <div class="spec-row"><div class="nm"><b>Radii</b>--r-*</div><div class="smp">{% for (n, v) in radii %}<span class="st"><span class="radius-box" style="border-radius: {{ v }}px"></span><span class="cap">{{ n }} {{ v }}</span></span>{% endfor %}</div><div class="wh">md controls · lg cards · xl dialogs · pill chips</div></div>
+  <div class="spec-row wide"><div class="nm"><b>Control md</b>--h-md 44</div><div class="smp"><button type="button" class="btn">Save</button><button type="button" class="btn secondary">Rename</button><button type="button" class="btn quiet">Cancel</button></div></div>
+  <div class="spec-row wide"><div class="nm"><b>Control sm</b>--h-sm 36</div><div class="smp"><button type="button" class="btn sm">Save limits</button><button type="button" class="btn sm secondary">Rename</button><button type="button" class="btn sm danger">Remove</button></div></div>
+  <div class="spec-row"><div class="nm"><b>Icons</b>14 · 16 · 18 · 22</div><div class="smp">{% for c in ["xs", "sm", "", "lg"] %}{{ self.icon_sized("bell", c)|safe }}{% endfor %}</div><div class="wh">icons.rs only, stroke 1.8</div></div>
+  <div class="spec-row"><div class="nm"><b>Breakpoint</b>700 px</div><div class="smp sub">Below it: 44 px targets, 16 px fields, sheets for dialogs</div><div class="wh">The only one</div></div>
+</section>
+<section class="card spec" aria-labelledby="ui-btn">
+  <div class="spec-h"><h2 class="label" id="ui-btn">Button</h2><span class="sub">four variants, two sizes</span></div>
+  {% for (kind, label, what) in buttons %}
+  <div class="spec-row"><div class="nm"><b>{% if kind.is_empty() %}primary{% else %}{{ kind }}{% endif %}</b>.btn{% if !kind.is_empty() %}.{{ kind }}{% endif %}</div><div class="smp"><button type="button" class="btn {{ kind }}">{{ label }}</button><button type="button" class="btn sm {{ kind }}">{{ label }}</button><button type="button" class="btn {{ kind }}" disabled>{{ label }}</button></div><div class="wh">{{ what }}</div></div>
+  {% endfor %}
+  <div class="spec-row"><div class="nm"><b>With an icon</b>16 px, first</div><div class="smp"><button type="button" class="btn secondary">{{ crate::web::icons::icon("plus")|safe }}Add a builder</button><button type="button" class="btn">{{ crate::web::icons::icon("download")|safe }}Download</button></div><div class="wh">8 px gap</div></div>
+</section>
+</div>
+<div class="uicat-cols">
+<section class="card spec" aria-labelledby="ui-ibtn">
+  <div class="spec-h"><h2 class="label" id="ui-ibtn">Icon button and text actions</h2></div>
+  <div class="spec-row"><div class="nm"><b>Icon button</b>.ibtn · 36</div><div class="smp">{% for i in ["refresh", "copy", "download", "close", "prev", "chevron"] %}<button type="button" class="ibtn" aria-label="{{ i }}">{{ crate::web::icons::icon(i)|safe }}</button>{% endfor %}<button type="button" class="ibtn on" aria-label="on">{{ crate::web::icons::icon("filter")|safe }}</button><button type="button" class="ibtn" disabled aria-label="disabled">{{ crate::web::icons::icon("chevron")|safe }}</button><button type="button" class="ibtn busy" disabled aria-label="busy">{{ crate::web::icons::icon("refresh")|safe }}</button></div><div class="wh">Reload, close, prev/next, download; on, disabled, busy</div></div>
+  <div class="spec-row"><div class="nm"><b>Flat</b>.ibtn.flat</div><div class="smp">{% for i in ["close", "gear", "copy", "bell"] %}<button type="button" class="ibtn flat" aria-label="{{ i }}">{{ crate::web::icons::icon(i)|safe }}</button>{% endfor %}</div><div class="wh">Dialog heads, the bar, inside fields</div></div>
+  <div class="spec-row"><div class="nm"><b>Action</b>.act · .act.subtle</div><div class="smp"><a class="act" href="#ui-ibtn">All 42 tasks</a><a class="act" href="#ui-ibtn">Edit</a><a class="act subtle" href="#ui-ibtn">Clear</a><button class="act subtle" type="button">Sign out</button></div><div class="wh">Links that act</div></div>
+</section>
+<section class="card spec" aria-labelledby="ui-copy">
+  <div class="spec-h"><h2 class="label" id="ui-copy">Copy field</h2></div>
+  <div class="spec-row wide"><div class="nm"><b>Command</b>pre.cmd</div><div class="smp"><pre class="cmd mono">curl -fsSL https://flow.giosuel.io/install.sh | sh</pre></div></div>
+</section>
+</div>
+<section class="card spec" aria-labelledby="ui-icons">
+  <div class="spec-h"><h2 class="label" id="ui-icons">Icons</h2><span class="sub">{{ icons.len() }} in icons.rs, the only source</span></div>
+  <div class="icons-grid">{% for i in icons %}<span title="{{ i }}">{{ crate::web::icons::icon(i)|safe }}{{ i }}</span>{% endfor %}</div>
+</section>
+</div>
+{% endblock %}

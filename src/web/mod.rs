@@ -33,6 +33,7 @@ mod projects;
 mod pwa;
 mod settings;
 mod steps;
+mod uilib;
 mod usage;
 
 use std::net::{IpAddr, SocketAddr};
@@ -162,6 +163,7 @@ pub fn router(state: AppState) -> Router {
         .merge(machine::routes())
         .merge(new_project::routes())
         .merge(usage::routes())
+        .merge(uilib::routes())
         .merge(dashboard::routes())
         .merge(pwa::routes())
         .nest_service("/mcp", mcp)

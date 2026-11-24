@@ -37,7 +37,7 @@ window.afDialog = ({ title, text = "", ok = "OK", cancel = null, danger = false 
     back.className = "cdlg-back";
     back.innerHTML = `<div class="cdlg" role="${cancel ? "alertdialog" : "dialog"}" aria-modal="true" aria-labelledby="cdlg-t" aria-describedby="cdlg-x">
       <h2 id="cdlg-t"></h2><p id="cdlg-x" class="sub"></p>
-      <div class="cdlg-btns">${cancel ? '<button type="button" class="btn ghost" data-v="0"></button>' : ""}<button type="button" class="btn${danger ? " solid-danger" : ""}" data-v="1"></button></div></div>`;
+      <div class="cdlg-btns">${cancel ? '<button type="button" class="btn quiet" data-v="0"></button>' : ""}<button type="button" class="btn${danger ? " danger-solid" : ""}" data-v="1"></button></div></div>`;
     back.querySelector("#cdlg-t").textContent = title;
     const body = back.querySelector("#cdlg-x");
     body.textContent = text;
@@ -121,9 +121,10 @@ document.addEventListener("change", (e) => {
 // A copy button (an icon in the field's corner) on every command or token block (pre.cmd). Uses
 // the clipboard API where the page is secure (https), and falls back to selecting the text and
 // copying it (http on the WireGuard address). A check mark shows it worked.
-const COPY_ICON =
-  '<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h8"/></svg>';
-const DONE_ICON = '<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>';
+// Icons come from icons.rs through the page's sprite (base.html), never drawn here.
+const icon = (name) => `<svg class="i" aria-hidden="true"><use href="#i-${name}"/></svg>`;
+const COPY_ICON = icon("copy");
+const DONE_ICON = icon("check");
 
 async function copyText(pre) {
   try {
@@ -159,7 +160,7 @@ const wireCopy = (root) => {
     wrap.append(pre);
     const btn = document.createElement("button");
     btn.type = "button";
-    btn.className = "copy-btn";
+    btn.className = "ibtn flat";
     btn.title = "Copy";
     btn.setAttribute("aria-label", "Copy");
     btn.innerHTML = COPY_ICON;
@@ -567,10 +568,9 @@ document.addEventListener("change", (e) => {
     panel = document.createElement("div");
     panel.className = "ntf-back";
     panel.innerHTML = `<div class="ntf-panel" role="dialog" aria-modal="false" aria-label="Notifications">
-      <div class="ntf-head"><strong>Notifications</strong><span class="grow"></span><a class="icon-only" href="/settings?s=notifications" aria-label="Notification settings" data-settings></a><button type="button" class="icon-only ntf-x" aria-label="Close">×</button></div>
+      <div class="ntf-head"><strong>Notifications</strong><span class="grow"></span><a class="ibtn flat" href="/settings?s=notifications" aria-label="Notification settings" data-settings>${icon("gear")}</a><button type="button" class="ibtn flat ntf-x" aria-label="Close">${icon("close")}</button></div>
       <div class="ntf-list"></div></div>`;
     panel.querySelector(".ntf-list").innerHTML = html;
-    panel.querySelector('a.icon-only').innerHTML = document.querySelector('a[href="/settings"].icon-btn')?.innerHTML || "⚙";
     panel.querySelector(".ntf-x").addEventListener("click", close);
     panel.addEventListener("click", (e) => { if (e.target === panel) close(); });
     document.body.append(panel);
@@ -647,7 +647,7 @@ document.addEventListener("change", (e) => {
     back = document.createElement("div");
     back.className = "sdlg-back";
     back.innerHTML = `<div class="sdlg" role="dialog" aria-modal="true" aria-label="Settings">
-      <div class="sdlg-head"><h2>Settings</h2><button type="button" class="icon-only sdlg-x" aria-label="Close">×</button></div>
+      <div class="sdlg-head"><h2>Settings</h2><button type="button" class="ibtn flat sdlg-x" aria-label="Close">${icon("close")}</button></div>
       <div class="sdlg-body"><p class="sub sdlg-wait">Loading…</p></div></div>`;
     back.querySelector(".sdlg-x").addEventListener("click", close);
     back.addEventListener("mousedown", (e) => { if (e.target === back) close(); });
@@ -729,7 +729,7 @@ document.addEventListener("change", (e) => {
       back = document.createElement("div");
       back.className = "sdlg-back pdlg-back";
       back.innerHTML = `<div class="sdlg pdlg" role="dialog" aria-modal="true" aria-labelledby="pdlg-t">
-        <div class="sdlg-head"><h2 id="pdlg-t"></h2><button type="button" class="icon-only sdlg-x" aria-label="Close">×</button></div>
+        <div class="sdlg-head"><h2 id="pdlg-t"></h2><button type="button" class="ibtn flat sdlg-x" aria-label="Close">${icon("close")}</button></div>
         <div class="pdlg-body"></div></div>`;
       back.querySelector(".sdlg-x").addEventListener("click", close);
       back.addEventListener("mousedown", (e) => { if (e.target === back) close(); });
