@@ -193,6 +193,22 @@ pub struct Live {
     running: HashMap<i64, tokio::sync::oneshot::Sender<()>>,
     /// When a page last asked: probes run every few seconds while someone looks or jobs run.
     pub watched_at: i64,
+    /// When each job's `flow remote` last asked for its output: a job nobody follows any more is
+    /// cancelled (see ORPHANED_AFTER).
+    pub followed: HashMap<i64, i64>,
+}
+
+/// A job whose `flow remote` hasn't asked for its output this long is cancelled: its client is
+/// gone (killed, timed out) and nobody gets its result (the owner, 2026-11-17: "yes, jobs like
+/// this should be cancelled", after a fuzz job ran on for 45 minutes with its client killed and
+/// held the builder's memory). Longer than `flow remote` waits out an AgentFlow restart (2 min).
+pub const ORPHANED_AFTER_MS: i64 = 10 * 60_000;
+
+/// Jobs among `active` nobody has followed for ORPHANED_AFTER_MS. A job seen for the first time
+/// (new, or after a restart) starts its clock now; jobs no longer active are forgotten.
+pub fn orphans(followed: &mut HashMap<i64, i64>, active: &[i64], now: i64) -> Vec<i64> {
+    followed.retain(|id, _| active.contains(id));
+    active.iter().filter(|id| now - *followed.entry(**id).or_insert(now) > ORPHANED_AFTER_MS).copied().collect()
 }
 
 pub type Shared = Arc<Mutex<Live>>;
@@ -705,8 +721,20 @@ async fn round(
     last_probe: &mut HashMap<String, i64>,
 ) -> anyhow::Result<()> {
     let name = server.name.clone();
-    let active = state.db.call(move |c| in_state(c, &name, &["queued", "running", "paused"])).await?;
+    let mut active = state.db.call(move |c| in_state(c, &name, &["queued", "running", "paused"])).await?;
     let now = now_ms();
+    let gone = {
+        let ids: Vec<i64> = active.iter().map(|j| j.id).collect();
+        let mut live = state.remote.lock().unwrap_or_else(|e| e.into_inner());
+        orphans(&mut live.followed, &ids, now)
+    };
+    for id in &gone {
+        tracing::info!("job #{id}: nobody follows it any more, cancelling it");
+        if let Err(e) = cancel(state, *id, "AgentFlow: its flow remote stopped following it 10 min ago").await {
+            tracing::warn!("job #{id}: couldn't cancel it: {e:#}");
+        }
+    }
+    active.retain(|j| !gone.contains(&j.id));
     let watched = now - state.remote.lock().unwrap_or_else(|e| e.into_inner()).watched_at < 60_000;
     // Every 5 seconds while jobs wait or run or someone looks; once a minute otherwise.
     let every = if !active.is_empty() || watched { 5_000 } else { 60_000 };
@@ -1478,6 +1506,18 @@ pub fn read_output(data_dir: &Path, id: i64, after: u64, max: u64) -> (String, u
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn jobs_nobody_follows_are_orphans() {
+        let mut f = HashMap::new();
+        // First seen: the clock starts; followed recently: kept.
+        assert!(orphans(&mut f, &[1, 2], 0).is_empty());
+        f.insert(2, 9 * 60_000);
+        assert_eq!(orphans(&mut f, &[1, 2], ORPHANED_AFTER_MS + 1), [1]);
+        // Finished jobs are forgotten.
+        orphans(&mut f, &[2], ORPHANED_AFTER_MS + 2);
+        assert!(!f.contains_key(&1));
+    }
 
     #[test]
     fn probes_split_cpu_and_memory_between_the_owner_and_builds() {
