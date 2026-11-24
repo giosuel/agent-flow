@@ -104,6 +104,21 @@ async fn pr_query(args: &[&str]) -> anyhow::Result<Vec<u8>> {
     }
 }
 
+/// Every PR of a repository, any state, newest first (for `agentflow admin import-prs`): `gh pr
+/// list` as the agents' user, without CI (history doesn't need it).
+pub fn all_prs_blocking(repo: &str, limit: u32) -> anyhow::Result<Vec<PrInfo>> {
+    check_repo(repo)?;
+    let out = std::process::Command::new("gh")
+        .args(["pr", "list", "-R", repo, "--state", "all", "--limit", &limit.to_string(), "--json", FIELDS_NO_CI])
+        .output()
+        .context("running gh")?;
+    if !out.status.success() {
+        bail!("gh pr list: {}", String::from_utf8_lossy(&out.stderr).trim());
+    }
+    let prs: Vec<GhPr> = serde_json::from_slice(&out.stdout).context("reading gh's answer")?;
+    Ok(prs.into_iter().map(PrInfo::from).collect())
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct GhPr {

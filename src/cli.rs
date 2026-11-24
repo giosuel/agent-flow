@@ -34,6 +34,14 @@ pub enum AdminCommand {
     /// Create "Lumen (demo)", a complete made-up project to try the pages with. Archive it on its
     /// page when you're done.
     Demo,
+    /// Bring a project's older PRs (from before AgentFlow) in as PR records, so tasks can link to
+    /// them: every PR of its repository numbered from..=to that isn't a record yet.
+    ImportPrs {
+        /// The project, e.g. "imaginarium".
+        project: String,
+        from: i64,
+        to: i64,
+    },
 }
 
 #[derive(Subcommand)]
@@ -178,6 +186,70 @@ pub fn admin(config_path: &Path, command: AdminCommand) -> anyhow::Result<()> {
             eprintln!("Exported {n} projects to {}", config.data_dir().join("export").display());
         }
         AdminCommand::ManagedSettings => print!("{}", crate::hardening::managed_settings_command(&config)?),
+        AdminCommand::ImportPrs { project, from, to } => {
+            if from < 1 || to < from || to - from > 2000 {
+                bail!("give a range of PR numbers, e.g. 300 374");
+            }
+            let p = db
+                .call_blocking({
+                    let project = project.clone();
+                    move |c| crate::projects::require(c, &project)
+                })?;
+            let repo = p.repo.trim().to_owned();
+            if repo.is_empty() {
+                bail!("{} has no repository set", p.slug);
+            }
+            let all = crate::github::all_prs_blocking(&repo, 1000)?;
+            let wanted: Vec<crate::github::PrInfo> = all.into_iter().filter(|i| (from..=to).contains(&i.number)).collect();
+            let (added, linked) = db.call_blocking(move |c| {
+                let tx = c.transaction()?;
+                // The agent hears of the import in one line, not one per PR: if it had read all its
+                // news before, the import's own events are marked read too.
+                let caught_up = crate::waiting::unread_count(&tx, p.id, &p.slug)? == 0;
+                let mut added = Vec::new();
+                for info in &wanted {
+                    let exists = crate::records::try_find(
+                        &tx,
+                        &crate::records::RecordRef { project: Some(p.slug.clone()), kind: crate::records::Kind::Pr, number: info.number },
+                        None,
+                    )?
+                    .is_some();
+                    if !exists {
+                        crate::prs::sync(&tx, &p, &repo, info, "import")?;
+                        added.push(info.number);
+                    }
+                }
+                if caught_up {
+                    let latest: i64 = tx.query_row("SELECT coalesce(max(seq), 0) FROM events", [], |r| r.get(0))?;
+                    crate::waiting::set_cursor(&tx, p.id, latest)?;
+                }
+                let linked: i64 = tx.query_row(
+                    "SELECT count(*) FROM links l JOIN records r ON r.id = l.from_id
+                     WHERE r.project_id = ?1 AND r.kind = 'pr' AND l.relation = 'implements' AND l.author = 'import'",
+                    [p.id],
+                    |r| r.get(0),
+                )?;
+                if !added.is_empty() {
+                    crate::records::event(
+                        &tx,
+                        Some(p.id),
+                        None,
+                        "pr.imported",
+                        &format!(
+                            "{} older PRs imported as records ({}–{}); link tasks to them with link (implements)",
+                            added.len(),
+                            added.iter().min().unwrap_or(&0),
+                            added.iter().max().unwrap_or(&0)
+                        ),
+                        "admin-cli",
+                    )?;
+                }
+                tx.commit()?;
+                Ok((added, linked))
+            })?;
+            log_cli(&db, Action::Write, format!("{} older PRs of {project} imported", added.len()))?;
+            eprintln!("Imported {} PRs into {project} ({} already there or outside the range); {linked} task links by branch.", added.len(), (to - from + 1) as usize - added.len());
+        }
         AdminCommand::Demo => {
             let data = config.data_dir();
             let said = db.call_blocking(move |c| crate::demo::create(c, &data))?;
