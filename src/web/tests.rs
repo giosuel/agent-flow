@@ -889,7 +889,7 @@ async fn the_dashboard_features_a_question_and_answers_on_send() {
     let featured = html.find("Tabs A or B?").unwrap();
     assert!(featured < html.find("Old question").unwrap());
     assert!(html.contains("More questions · 1"));
-    assert!(html.contains(r#"<b class="gbadge">2</b>"#));
+    assert!(html.contains(r#"<b class="badge warn gbadge">2</b>"#));
 
     let res = s
         .http
@@ -912,7 +912,7 @@ async fn the_dashboard_features_a_question_and_answers_on_send() {
         .await
         .unwrap();
     assert!(html.contains("Sent to vinculum: vinculum/Q-2"), "notice");
-    assert!(html.contains(r#"<b class="gbadge">1</b>"#));
+    assert!(html.contains(r#"<b class="badge warn gbadge">1</b>"#));
 }
 
 #[tokio::test]
@@ -1273,9 +1273,9 @@ async fn a_subagents_model_note_and_links_show() {
     assert!(note.contains("by a subagent · code-review · Fable 5.2"), "{note}");
     assert!(note.contains("s subagent · "), "its History says who: {note}");
     let notes = owner_page(&s, &cookie, "/p/vinculum?tab=notes").await;
-    assert!(notes.contains(r#"<span class="chip subagent""#), "{notes}");
+    assert!(notes.contains(r#"<span class="chip info""#), "{notes}");
     let conv = owner_page(&s, &cookie, "/conversations?kind=sub").await;
-    assert!(conv.contains(r#"<span class="mtag">Fable 5.2</span>"#), "{conv}");
+    assert!(conv.contains(r#"<span class="tag line">Fable 5.2</span>"#), "{conv}");
     assert!(conv.contains(r#"<a href="/p/vinculum/N-1">N-1</a>"#), "{conv}");
 }
 
@@ -2791,7 +2791,7 @@ async fn screenshots_are_uploaded_shown_and_linked() {
     assert!(res.status().is_client_error() || res.status().is_redirection(), "{}", res.status());
 
     // A mockup is proposed until approved; it links to its design; owner and agent move it on.
-    assert!(page.contains("mstate proposed"), "{page}");
+    assert!(page.contains(r#"<span class="chip warn">proposed</span>"#), "{page}");
     assert_eq!(
         up("name=x&category=mockup&design_url=javascript:alert(1)", png.clone()).await.status(),
         StatusCode::BAD_REQUEST
@@ -4292,6 +4292,17 @@ fn the_ui_library_replaced_the_old_buttons() {
     let gone = [
         "ghost",
         "lsearch",
+        "\"mtag",
+        "\"mstate",
+        "class=\"imp",
+        "class=\"plat",
+        "class=\"lx",
+        "addtag",
+        "sevdot",
+        "chip subagent",
+        "state-done",
+        "code-chip",
+        "next-tag",
         "class=\"ranges",
         "class=\"rng",
         "seg3",

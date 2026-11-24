@@ -28,7 +28,7 @@
       {% if editor.is_none() %}
       <a class="btn sm" href="/handbook?f={{ name }}&amp;edit=1">{{ crate::web::icons::icon("pencil")|safe }}<span>Edit</span></a>
       {% if rev > 1 %}<a class="btn sm secondary" href="/handbook?f={{ name }}&amp;history=1">{{ crate::web::icons::icon("history")|safe }}<span>History</span></a>{% endif %}
-      {% else %}<span class="dirty" data-dirty hidden><i aria-hidden="true"></i>Not saved</span>{% endif %}
+      {% else %}<span class="dirty" data-dirty hidden><span class="dot warn" aria-hidden="true"></span>Not saved</span>{% endif %}
     </div>
     {% if let Some((ok, text)) = notice %}<p class="notice{% if *ok %} ok{% else %} warn{% endif %}" role="status">{{ text }}</p>{% endif %}
     {% if let Some(ed) = editor %}

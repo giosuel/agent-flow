@@ -33,6 +33,7 @@ mod projects;
 mod pwa;
 mod settings;
 mod steps;
+mod tone;
 mod uilib;
 mod usage;
 

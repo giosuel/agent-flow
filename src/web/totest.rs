@@ -85,9 +85,10 @@ pub fn view(
     for r in &items {
         let first = r.str("first_release");
         let chip = match (first, &current) {
-            ("", _) => ("quiet", "new".to_owned()),
-            (f, Some(cur)) if f == cur => ("quiet", format!("new in {f}")),
-            (f, _) => ("warn", format!("from {f}")),
+            ("", _) => (super::tone::tone("new"), "new".to_owned()),
+            (f, Some(cur)) if f == cur => (super::tone::tone("new"), format!("new in {f}")),
+            // Waiting since an older release.
+            (f, _) => (super::tone::tone("waiting"), format!("from {f}")),
         };
         let problems = r
             .data

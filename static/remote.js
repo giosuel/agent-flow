@@ -33,7 +33,8 @@
       if (atBottom) log.scrollTop = log.scrollHeight;
       document.getElementById("job-time").textContent = j.time;
       const chip = document.getElementById("job-state");
-      chip.textContent = j.finished ? (j.state === "done" ? "done" : `${j.state}${j.reason ? " · " + j.reason : ""}`) : `${j.state}${j.reason ? " · " + j.reason : ""}`;
+      chip.textContent = j.label;
+      chip.className = `chip ${j.chip}`.trim();
       if (j.finished) {
         clearInterval(timer);
         document.getElementById("job-cancel")?.remove();

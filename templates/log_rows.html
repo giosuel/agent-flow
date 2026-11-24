@@ -6,8 +6,8 @@
     <span class="lc"><span class="lcat c-{{ r.cat }}">{{ crate::web::icons::icon(r.cat_icon)|safe }}<span>{{ r.cat_label }}</span></span></span>
     <span class="la">{{ r.actor }}</span>
     <span class="lp">{% if r.project.is_empty() %}<span class="dim">–</span>{% else %}{{ r.project }}{% endif %}</span>
-    <span class="lw"><span class="lsum">{{ r.summary }}</span>{% if r.count > 1 %}<span class="lx" title="{{ r.count }} identical entries in this second">×{{ r.count }}</span>{% endif %}{% if let Some(o) = r.job_outcome %}<span class="ljob{% if r.job_ok %} ok{% else %} bad{% endif %}">{{ o }}</span>{% endif %}{% if r.archived %}<span class="lx">archived</span>{% endif %}</span>
-    <span class="ls">{% if r.severity != "info" %}<span class="sevdot {{ r.severity }}" aria-hidden="true"></span>{{ r.severity }}{% endif %}</span>
+    <span class="lw"><span class="lsum">{{ r.summary }}</span>{% if r.count > 1 %}<span class="tag" title="{{ r.count }} identical entries in this second">×{{ r.count }}</span>{% endif %}{% if let Some(o) = r.job_outcome %}<span class="chip ljob{% if r.job_ok %} ok{% else %} bad{% endif %}">{{ o }}</span>{% endif %}{% if r.archived %}<span class="tag">archived</span>{% endif %}</span>
+    <span class="ls">{% if r.severity != "info" %}<span class="dot {% if r.severity == "error" %}bad{% else if r.severity == "warn" %}warn{% else %}quiet{% endif %}" aria-hidden="true"></span>{{ r.severity }}{% endif %}</span>
   </summary>
   <div class="ldetail">
     <div class="ldl">

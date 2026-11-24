@@ -52,11 +52,11 @@
     <div class="grow"></div>
     <nav class="nav gnav" aria-label="Pages">
       {% for item in nav.items %}{% if item.href != "/projects" %}
-      <a href="{{ item.href }}"{% if item.active %} class="on" aria-current="page"{% else %} aria-label="{{ item.name }}{% if item.href == "/" && nav.waiting > 0 %}, {{ nav.waiting }} waiting{% endif %}" data-name="{{ item.name }}"{% endif %}>{{ item.icon()|safe }}{% if item.active %}<span>{{ item.name }}</span>{% endif %}{% if item.href == "/" && nav.waiting > 0 %}<b class="gbadge">{{ nav.waiting }}</b>{% endif %}</a>
+      <a href="{{ item.href }}"{% if item.active %} class="on" aria-current="page"{% else %} aria-label="{{ item.name }}{% if item.href == "/" && nav.waiting > 0 %}, {{ nav.waiting }} waiting{% endif %}" data-name="{{ item.name }}"{% endif %}>{{ item.icon()|safe }}{% if item.active %}<span>{{ item.name }}</span>{% endif %}{% if item.href == "/" && nav.waiting > 0 %}<b class="badge warn gbadge">{{ nav.waiting }}</b>{% endif %}</a>
       {% endif %}{% endfor %}
     </nav>
     <span class="vsep" aria-hidden="true"></span>
-    <a class="ibtn flat icon-btn bell" href="/notifications" aria-label="Notifications{% if nav.unread > 0 %}, {{ nav.unread }} new{% endif %}" aria-haspopup="dialog" data-bell>{{ crate::web::icons::icon("bell")|safe }}{% if nav.unread > 0 %}<b class="bell-badge">{% if nav.unread > 99 %}99+{% else %}{{ nav.unread }}{% endif %}</b>{% endif %}</a>
+    <a class="ibtn flat icon-btn bell" href="/notifications" aria-label="Notifications{% if nav.unread > 0 %}, {{ nav.unread }} new{% endif %}" aria-haspopup="dialog" data-bell>{{ crate::web::icons::icon("bell")|safe }}{% if nav.unread > 0 %}<b class="badge bell-badge">{% if nav.unread > 99 %}99+{% else %}{{ nav.unread }}{% endif %}</b>{% endif %}</a>
     <a class="ibtn flat icon-btn" href="/settings" aria-label="Settings" data-settings aria-haspopup="dialog">{{ crate::web::icons::icon("gear")|safe }}</a>
   </div>
 </header>
@@ -65,7 +65,7 @@
 {% block content %}{% endblock %}
 </main>
 <nav class="tabbar" aria-label="Main">
-  {% for t in nav.tabs %}<a href="{{ t.href }}"{% if t.active %} class="on" aria-current="page"{% endif %}>{{ t.icon|safe }}<span>{{ t.name }}</span>{% if t.href == "/" && nav.waiting > 0 %}<b class="badge" aria-label="{{ nav.waiting }} waiting">{{ nav.waiting }}</b>{% endif %}</a>{% endfor %}
+  {% for t in nav.tabs %}<a href="{{ t.href }}"{% if t.active %} class="on" aria-current="page"{% endif %}>{{ t.icon|safe }}<span>{{ t.name }}</span>{% if t.href == "/" && nav.waiting > 0 %}<b class="badge warn" aria-label="{{ nav.waiting }} waiting">{{ nav.waiting }}</b>{% endif %}</a>{% endfor %}
 </nav>
 <footer class="foot"><span class="mono">AgentFlow {{ nav.version }}</span><form method="post" action="/logout"><button class="act subtle" type="submit">Sign out</button></form></footer>
 </body>
