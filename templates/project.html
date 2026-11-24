@@ -51,6 +51,9 @@
           <pre class="cmd mono">{{ c.mcp_add }}</pre>
           <p class="sub">2. Start the agent there:</p>
           <pre class="cmd mono">{{ c.start }}</pre>
+          {% if c.hooks %}<p class="sub">Its Claude Code hooks are in place: hello at every start, resume, /clear and compaction, and the news before each of your prompts.</p>
+          {% else %}<p class="sub">3. Give its sessions hello at every start and after compaction, and the news before each of your prompts. This writes Claude Code hooks into the folder's <span class="mono">.claude/settings.local.json</span> (kept out of git) and leaves the rest of that file as it is:</p>
+          <form method="post" action="/p/{{ slug }}/hooks"><button class="btn sm" type="submit">Write the hooks</button></form>{% endif %}
           {% if !c.has_file %}<p class="notice warn">The token file <span class="mono">{{ c.token_file }}</span> doesn't exist. Rotate the project's token in <a href="/settings">Settings</a>; that writes it.</p>{% endif %}
         </div>
       </details>

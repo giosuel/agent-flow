@@ -19,7 +19,7 @@
   <pre class="cmd mono">{{ d.mcp_add }}</pre>
   <p class="sub">2. Start the agent there (in tmux, with Remote Control if you like):</p>
   <pre class="cmd mono">{{ d.start }}</pre>
-  <p class="sub">Its first note tells it to start with <span class="mono">hello</span>; it shows up as online on the project page once it does.</p>
+  <p class="sub">Its hooks load <span class="mono">hello</span> when it starts and after every compaction; it shows up as online on the project page then.</p>
   <div><a class="btn" href="/p/{{ d.slug }}">Open the project</a></div>
 </section>
 {% else %}
@@ -41,6 +41,7 @@
       <li>The folder with a local git repository (an existing folder or repository is left as it is). You create the GitHub repo later and tell the agent the remote.</li>
       <li>A project token, in a file only you can read, and the command to register AgentFlow for that folder.</li>
       <li>The agent's first note, in its memory, not the repository.</li>
+      <li>Claude Code hooks in the folder's <span class="mono">.claude/settings.local.json</span>, kept out of git: hello at every start and after compaction, the news before each of your prompts.</li>
     </ul>
   </div>
   <div><button class="btn" type="submit">Create project</button></div>

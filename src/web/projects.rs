@@ -30,6 +30,7 @@ pub fn routes() -> Router<AppState> {
         .route("/p/{slug}/{id}/answer", post(answer))
         .route("/p/{slug}/{id}/scope", post(set_scope))
         .route("/p/{slug}/status", post(set_status))
+        .route("/p/{slug}/hooks", post(write_hooks))
         .route("/p/{slug}/settings", post(save_settings))
 }
 
@@ -158,6 +159,30 @@ async fn set_status(
         .ip(Some(ip.0));
     activity::write(&state.db, e).await;
     Ok(Redirect::to(&format!("/p/{slug}?tab=settings")).into_response())
+}
+
+/// Writes (or brings up to date) the project's Claude Code hooks in its folder (the owner,
+/// 2026-11-12: "let's make it so agent-flow writes the hooks").
+async fn write_hooks(
+    State(state): State<AppState>,
+    Extension(actor): Extension<Actor>,
+    Extension(ip): Extension<ClientIp>,
+    Path(slug): Path<String>,
+) -> AppResult<Response> {
+    actor.require_owner()?;
+    let s = slug.clone();
+    let p = state.db.call(move |c| projects::require(c, &s)).await?;
+    if p.checkout.trim().is_empty() {
+        return Err(AppError::BadRequest("the project has no folder; set it in Settings first".into()));
+    }
+    let folder = crate::util::expand_home(p.checkout.trim());
+    let token_file = crate::tokens::token_path(&state.config.token_dir(), Some(&p.slug), &p.name);
+    let step: String = crate::hands::run_async(crate::hands::Job::WriteHooks { folder, token_file, name: p.name.clone() })
+        .await
+        .map_err(|e| AppError::BadRequest(format!("{e:#}")))?;
+    let e = Entry::new(&actor, Via::Page, Action::Write, step).project(slug.clone()).ip(Some(ip.0));
+    activity::write(&state.db, e).await;
+    Ok(Redirect::to(&format!("/p/{slug}")).into_response())
 }
 
 #[derive(Deserialize, Default)]
@@ -639,6 +664,8 @@ pub struct Connect {
     start: String,
     token_file: String,
     has_file: bool,
+    /// AgentFlow's Claude Code hooks are in the folder, as they'd be written now.
+    hooks: bool,
 }
 
 #[derive(Template)]
@@ -833,7 +860,14 @@ async fn project(
         let (mcp_add, start) = crate::onboard::commands(&folder, &token_file, &state.config.public_url);
         let has_file: bool =
             crate::hands::run_async(crate::hands::Job::TokenExists { path: token_file.clone() }).await.unwrap_or(true);
-        page.connect = Some(Connect { mcp_add, start, token_file: token_file.display().to_string(), has_file });
+        let hooks: bool = crate::hands::run_async(crate::hands::Job::HooksPresent {
+            folder: folder.clone(),
+            token_file: token_file.clone(),
+            name: page.name.clone(),
+        })
+        .await
+        .unwrap_or(false);
+        page.connect = Some(Connect { mcp_add, start, token_file: token_file.display().to_string(), has_file, hooks });
     }
     if tab == "notes" {
         let (slug, edit, rev, outcome) = (page.slug.clone(), q.edit.clone(), q.rev, q.doc.clone());

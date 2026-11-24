@@ -60,6 +60,17 @@ pub enum Job {
     TokenExists {
         path: PathBuf,
     },
+    /// A project's Claude Code hooks, in its folder's `.claude/settings.local.json`.
+    WriteHooks {
+        folder: PathBuf,
+        token_file: PathBuf,
+        name: String,
+    },
+    HooksPresent {
+        folder: PathBuf,
+        token_file: PathBuf,
+        name: String,
+    },
     OnboardCheck {
         project: crate::onboard::NewProject,
         taken: crate::onboard::Taken,
@@ -186,6 +197,8 @@ impl Job {
             Job::GuideUnpushed { dir } => to_value(crate::guides::Repo { dir, author: String::new() }.unpushed_here()),
             Job::WriteToken { path, secret } => to_value(crate::tokens::write_token_file_here(&path, &secret)?),
             Job::TokenExists { path } => to_value(path.exists()),
+            Job::WriteHooks { folder, token_file, name } => to_value(crate::onboard::write_hooks(&folder, &token_file, &name)?),
+            Job::HooksPresent { folder, token_file, name } => to_value(crate::onboard::hooks_present(&folder, &token_file, &name)),
             Job::OnboardCheck { mut project, taken } => {
                 let folder = crate::onboard::check(&mut project, &taken)?;
                 to_value((project, folder))
