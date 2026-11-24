@@ -65,10 +65,12 @@ async function turnOn(button, status) {
   }
 }
 
+// Delegated, so the button works in the Settings dialog too.
+document.addEventListener("click", (e) => {
+  const button = e.target.closest("#push-on");
+  if (button) turnOn(button, document.getElementById("push-status"));
+});
 document.addEventListener("DOMContentLoaded", () => {
-  const button = document.getElementById("push-on");
-  const status = document.getElementById("push-status");
-  if (button) button.addEventListener("click", () => turnOn(button, status));
   // Register the worker on every visit so the app keeps receiving pushes after updates.
   if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});
 });
