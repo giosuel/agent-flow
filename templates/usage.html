@@ -36,7 +36,7 @@
 <section class="card pad stack" aria-labelledby="chart-h">
   <div class="sec wrap"><div class="stack-sm"><h2 id="chart-h">{{ chart_title }}</h2><span class="sub">{% if zoomed %}{{ chart_sub }}{% else %}<span class="hide-phone">Open a day for its hours</span><span class="only-phone">Tap a day for its hours</span>{% endif %}</span></div>
     <span class="row wrap">
-      {% if zoomed %}<a class="sub" href="/usage{% for (k, _, on) in metrics %}{% if *on && !k.is_empty() %}?metric={{ k }}{% endif %}{% endfor %}">← Back to 14 days</a>{% endif %}
+      {% if zoomed %}<a class="sub ilink" href="/usage{% for (k, _, on) in metrics %}{% if *on && !k.is_empty() %}?metric={{ k }}{% endif %}{% endfor %}">{{ crate::web::icons::icon("back")|safe }}<span>Back to 14 days</span></a>{% endif %}
       <span class="seg sm" role="group" aria-label="What to count">
         {% for (k, name, on) in metrics %}<a{% if *on %} class="on"{% endif %} href="/usage?{{ day_q }}{{ keep_days }}{% if !k.is_empty() %}metric={{ k }}{% endif %}"{% if *on %} aria-current="true"{% endif %}>{{ name }}</a>{% endfor %}
       </span>

@@ -29,7 +29,7 @@
       <a href="{{ sv.image }}" target="_blank" rel="noopener" title="Open the full image"><img src="{{ sv.image }}" alt="{{ title }}"></a>
       <figcaption class="sub"><span class="chip">{{ sv.category }}</span>{% if !sv.mstate.is_empty() %} <span class="chip {{ crate::web::tone::tone(sv.mstate) }}">{{ sv.mstate }}</span>{% endif %} {{ sv.line }}</figcaption>
     </figure>
-    {% if !sv.design_url.is_empty() %}<p>Design: <a href="{{ sv.design_url }}" target="_blank" rel="noopener">{{ sv.design_url }}</a> ↗</p>{% endif %}
+    {% if !sv.design_url.is_empty() %}<p>Design: <a class="ilink" href="{{ sv.design_url }}" target="_blank" rel="noopener"><span>{{ sv.design_url }}</span>{{ crate::web::icons::icon("out")|safe }}</a></p>{% endif %}
     {% if !sv.mstate.is_empty() %}
     <section class="stack-sm" aria-labelledby="ms-state-h">
       <h2 class="label" id="ms-state-h">State</h2>

@@ -64,6 +64,8 @@ document.addEventListener("DOMContentLoaded", () => {
   document.addEventListener("click", async (e) => {
     const b = e.target.closest("button[data-copy]");
     if (!b) return;
-    try { await navigator.clipboard.writeText(b.dataset.copy); b.querySelector("span").textContent = "Copied"; } catch (_) { /* no clipboard */ }
+    // app.js's copy routine: the clipboard where the page is secure, a selection over http (T-113).
+    const ok = await window.afCopy(b.dataset.copy);
+    b.querySelector("span").textContent = ok ? "Copied" : "Couldn't copy";
   });
 });

@@ -28,6 +28,10 @@
   /* Charts: one colour per project, fixed (charts.rs) */
   --cat-1: #3987E5; --cat-2: #D95926; --cat-3: #199E70; --cat-4: #9085E9; --cat-5: #D55181; --cat-other: #6E6E7A;
   /* Elevation and focus */
+  /* Tints: one palette for icon tiles, avatars, note types and the Log's categories. */
+  --tint-violet-bg: #1C1530; --tint-violet: #D2C4FF; --tint-teal-bg: #0E2A24; --tint-teal: #86E3C8;
+  --tint-orange-bg: #2B1E0C; --tint-orange: #FDBA74; --tint-blue-bg: #0F2433; --tint-blue: #9ED8FF;
+  --tint-green-bg: #102A16; --tint-green: #86EFAC; --tint-red-bg: #2E1212; --tint-red: #FCA5A5;
   --shadow-pop: 0 16px 40px rgba(0, 0, 0, .55); --shadow-dialog: 0 24px 80px rgba(0, 0, 0, .6); --scrim: rgba(0, 0, 0, .62);
   --focus-ring: 0 0 0 3px rgba(167, 139, 250, .32); --bad-ring: 0 0 0 3px rgba(248, 113, 113, .28);
   /* Type: 9 sizes */
@@ -133,6 +137,10 @@ code, pre, .mono { font-family: var(--mono); }
 .act.subtle { color: var(--muted); font-weight: 400; text-decoration: underline; }
 .act.subtle:hover { color: var(--ink); }
 button.act { background: none; border: 0; padding: 0; font: inherit; cursor: pointer; }
+/* Text with an icon beside it (Back, Newer, Older, a link out): one gap, the icon at text size. */
+.ilink { display: inline-flex; align-items: center; gap: var(--sp-1); max-width: 100%; }
+.ilink > span { min-width: 0; overflow-wrap: anywhere; }
+.ilink > .i { width: var(--ic-sm); height: var(--ic-sm); }
 
 /* ---------------------------------------------------------------- Field: one height, one focus ring, one error
    A field is a label with its control, help under it and an error under that:
@@ -432,13 +440,34 @@ a.item-row:hover { background: var(--hover-bg); }
 .tl-day::after { content: ""; flex: 1; border-top: 1px solid var(--line2); }
 
 /* ---------------------------------------------------------------- Icon tile: an icon on a tinted square
-   .itile (36), .sm (28), .lg (44); muted on the chip by default. */
+   .itile (36), .sm (28), .lg (44); muted on the chip by default, or a state tone (.accent, .ok,
+   .warn, .bad, .info) or a tint (.t-violet …). (N-20 §5.4: seven icon containers in four sizes,
+   squares and circles, three tint sets) */
 .itile { display: grid; place-items: center; width: 36px; height: 36px; flex: none; border-radius: var(--r-md); background: var(--chip); color: var(--muted); }
 .itile .i { width: var(--ic); height: var(--ic); }
 .itile.sm { width: 28px; height: 28px; }
 .itile.sm .i { width: var(--ic-sm); height: var(--ic-sm); }
 .itile.lg { width: 44px; height: 44px; }
 .itile.lg .i { width: var(--ic-lg); height: var(--ic-lg); }
+.itile.accent { background: var(--accent-bg); color: var(--accent-ink); }
+.itile.ok { background: var(--ok-bg); color: var(--ok); }
+.itile.warn { background: var(--warn-bg); color: var(--warn-ink); }
+.itile.bad { background: var(--bad-bg); color: var(--bad); }
+.itile.info { background: var(--info-bg); color: var(--info-ink); }
+
+/* Avatar: a session's initials in a circle, tinted by its name (.sm in lists) */
+.av { display: inline-grid; place-items: center; width: 28px; height: 28px; flex: none; border-radius: 50%; background: var(--chip); color: var(--ink2); font-size: var(--fs-micro); font-weight: 600; letter-spacing: .02em; box-shadow: 0 0 0 2px var(--panel); }
+.av.sm { width: 22px; height: 22px; font-size: 10px; box-shadow: none; }
+.av .i { width: 15px; height: 15px; }
+
+/* Tints, after the tile and the avatar so they win over their grey (any tile or avatar): t-violet, t-teal, t-orange, t-blue, t-green, t-red */
+.t-violet { background: var(--tint-violet-bg); color: var(--tint-violet); }
+.t-teal { background: var(--tint-teal-bg); color: var(--tint-teal); }
+.t-orange { background: var(--tint-orange-bg); color: var(--tint-orange); }
+.t-blue { background: var(--tint-blue-bg); color: var(--tint-blue); }
+.t-green { background: var(--tint-green-bg); color: var(--tint-green); }
+.t-red { background: var(--tint-red-bg); color: var(--tint-red); }
+
 
 /* ---------------------------------------------------------------- Notice: one, in five tones
    p.notice: an icon from icons.rs (info, check for ok, alert for warn and bad) and its text in a
