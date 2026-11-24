@@ -18,7 +18,7 @@ use crate::usage::{self, Tokens, short};
 use crate::util::now_ms;
 
 pub fn routes() -> Router<AppState> {
-    Router::new().route("/usage", get(page))
+    Router::new().route("/usage", get(page)).route("/transcripts/read", axum::routing::post(read_now))
 }
 
 #[derive(Deserialize, Default)]
@@ -92,6 +92,8 @@ struct Tile {
 #[template(path = "usage.html")]
 struct UsagePage {
     nav: Nav,
+    /// The transcripts are being read right now.
+    reading: bool,
     tab: String,
     newest: String,
     tiles: Vec<Tile>,
@@ -311,6 +313,7 @@ async fn page(
 
     let day_q = day.map(|d| format!("day={}&", tz.date(d))).unwrap_or_default();
     render(UsagePage {
+        reading: super::READING.load(std::sync::atomic::Ordering::Relaxed),
         nav: nav(&state, &actor, "/usage").await,
         tab,
         newest: newest.map(|t| crate::util::ago(t, now)).unwrap_or_else(|| "not yet".into()),
@@ -341,4 +344,22 @@ async fn page(
         tasks: task_rows,
         days,
     })
+}
+
+#[derive(serde::Deserialize)]
+struct ReadForm {
+    /// Where to go back to; only local paths.
+    next: Option<String>,
+}
+
+/// The Reload button (the owner, 2026-11-12: "a reload button to manually refresh tokens and
+/// conversations"): reads the transcripts now instead of at the next five-minute round.
+async fn read_now(
+    Extension(actor): Extension<crate::auth::Actor>,
+    axum::Form(form): axum::Form<ReadForm>,
+) -> super::AppResult<axum::response::Response> {
+    actor.require_owner()?;
+    super::READ_NOW.notify_one();
+    let next = super::local_path(form.next.as_deref()).unwrap_or_else(|| "/usage".into());
+    Ok(axum::response::IntoResponse::into_response(axum::response::Redirect::to(&next)))
 }

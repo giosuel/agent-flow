@@ -200,6 +200,11 @@ pub async fn serve(state: AppState) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Wakes the transcript reader now (the Reload button on Usage and Conversations).
+pub static READ_NOW: tokio::sync::Notify = tokio::sync::Notify::const_new();
+/// The reader is going through the transcripts right now.
+pub static READING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 /// Reads new token usage from the transcripts: at start, then every five minutes. Files are read
 /// outside the database's lock, one at a time, so a first read of gigabytes doesn't hold up pages.
 fn spawn_usage(state: AppState) {
@@ -207,9 +212,15 @@ fn spawn_usage(state: AppState) {
         let mut tick = tokio::time::interval(std::time::Duration::from_secs(300));
         tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
-            tick.tick().await;
+            tokio::select! {
+                _ = tick.tick() => {}
+                _ = READ_NOW.notified() => {}
+            }
             let started = std::time::Instant::now();
-            match usage_round(&state).await {
+            READING.store(true, std::sync::atomic::Ordering::Relaxed);
+            let result = usage_round(&state).await;
+            READING.store(false, std::sync::atomic::Ordering::Relaxed);
+            match result {
                 Ok(s) if s.calls > 0 => tracing::info!(
                     "token usage: {} new calls from {} transcripts in {:.1} s",
                     s.calls,

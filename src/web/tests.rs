@@ -911,56 +911,6 @@ async fn a_build_goes_from_agent_to_owner_and_feedback_comes_back() {
 }
 
 #[tokio::test]
-async fn agents_and_the_consultant_talk_through_agentflow() {
-    let s = TestServer::start().await;
-    let v = s.token(TokenKind::Project, Some("vinculum")).await;
-    let a = s.token(TokenKind::Project, Some("antimony")).await;
-    let consultant = s.token(TokenKind::Admin, None).await;
-    let (vs, as_, cs) = (mcp_session(&s, &v).await, mcp_session(&s, &a).await, mcp_session(&s, &consultant).await);
-
-    let (ok, r) = mcp_tool(&s, &v, &vs, "send_message", json!({"to": ["antimony"], "subject": "Port 21300?", "body": "Can I use 21300 for a demo?", "kind": "resource"})).await;
-    assert!(ok, "{r}");
-    let thread = r["conversation"].as_i64().unwrap();
-
-    // Antimony's next reply of any tool says something is waiting; since_last_check has it.
-    let (_, info) = mcp_tool(&s, &a, &as_, "project_info", json!({})).await;
-    assert!(info["unread"].as_str().unwrap_or("").starts_with("1 new"), "{info}");
-    let (_, news) = mcp_tool(&s, &a, &as_, "since_last_check", json!({})).await;
-    assert!(news.to_string().contains("Can I use 21300"), "{news}");
-    mcp_tool(
-        &s,
-        &a,
-        &as_,
-        "send_message",
-        json!({"conversation": thread, "body": "Yes, it's free.", "kind": "answer"}),
-    )
-    .await;
-    let (_, conv) = mcp_tool(&s, &v, &vs, "conversation", json!({"conversation": thread})).await;
-    assert_eq!(conv["messages"].as_array().unwrap().len(), 2);
-
-    // The consultant waits for its messages; a question to it ends the wait.
-    let waiter = {
-        let (http, url, t) = (s.http.clone(), s.url("/api/wait?timeout=20"), consultant.clone());
-        tokio::spawn(async move { http.get(url).bearer_auth(t).send().await.unwrap().json::<Value>().await.unwrap() })
-    };
-    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-    mcp_tool(&s, &v, &vs, "send_message", json!({"to": ["consultant"], "subject": "Tags for A milestones", "body": "How do A milestones get tagged?", "kind": "question"})).await;
-    let got = tokio::time::timeout(std::time::Duration::from_secs(10), waiter).await.unwrap().unwrap();
-    assert!(got.to_string().contains("How do A milestones"), "{got}");
-    // It stays unread until the consultant says it handled it.
-    let (_, inbox) = mcp_tool(&s, &consultant, &cs, "inbox", json!({})).await;
-    let list = inbox["messages"].as_array().unwrap();
-    assert_eq!(list.len(), 1, "{inbox}");
-    let (_, inbox) = mcp_tool(&s, &consultant, &cs, "inbox", json!({"read_up_to": list[0]["id"]})).await;
-    assert_eq!(inbox["messages"].as_array().unwrap().len(), 0, "marked read");
-    // An agent can't read a conversation it isn't in, nor the consultant's inbox.
-    let (ok, _) = mcp_tool(&s, &a, &as_, "conversation", json!({"conversation": thread + 1})).await;
-    assert!(!ok);
-    let (ok, _) = mcp_tool(&s, &a, &as_, "inbox", json!({})).await;
-    assert!(!ok);
-}
-
-#[tokio::test]
 async fn contributions_are_watched_for_their_project() {
     use crate::github::ItemInfo;
     let s = TestServer::start().await;
@@ -1003,39 +953,82 @@ async fn contributions_are_watched_for_their_project() {
     assert!(news.to_string().contains("1 new comment"), "{news}");
 }
 
+/// The owner, 2026-11-12: conversations log what sessions send each other with Claude Code's
+/// SendMessage and what subagents are told and report, read from the transcripts.
 #[tokio::test]
-async fn the_owner_reads_conversations_but_doesnt_write() {
+async fn conversations_log_sessions_and_subagents_from_the_transcripts() {
     let s = TestServer::start().await;
-    let v = s.token(TokenKind::Project, Some("vinculum")).await;
-    let vs = mcp_session(&s, &v).await;
-    let (_, r) = mcp_tool(
-        &s,
-        &v,
-        &vs,
-        "send_message",
-        json!({"to": ["consultant"], "subject": "Tags?", "body": "How?", "kind": "question"}),
+    let root = tempfile::tempdir().unwrap();
+    let mine = root.path().join("-home-viber-agent-flow");
+    let theirs = root.path().join("-home-viber-office");
+    std::fs::create_dir_all(mine.join("s1/subagents")).unwrap();
+    std::fs::create_dir_all(&theirs).unwrap();
+    let line = |v: Value| format!("{v}\n");
+    // Sent here, received there: logged once.
+    std::fs::write(
+        mine.join("s1.jsonl"),
+        [
+            line(json!({"type": "user", "cwd": "/home/viber/agent-flow", "timestamp": "2026-11-12T10:00:00Z", "message": {"content": "hi"}})),
+            line(json!({"type": "assistant", "timestamp": "2026-11-12T10:01:00Z", "message": {"content": [
+                {"type": "tool_use", "name": "SendMessage", "input": {"to": "Imaginarium", "message": "Scopes are live."}}]}})),
+        ]
+        .concat(),
     )
-    .await;
-    let thread = r["conversation"].as_i64().unwrap();
+    .unwrap();
+    std::fs::write(
+        theirs.join("s2.jsonl"),
+        [
+            line(json!({"type": "custom-title", "customTitle": "Imaginarium", "sessionId": "s2"})),
+            line(json!({"type": "queue-operation", "operation": "enqueue", "cwd": "/home/viber/office", "timestamp": "2026-11-12T10:01:01Z",
+                "content": "<cross-session-message from=\"uds:/run/a.sock\" from-name=\"agent-flow-22\" from-mode=\"prompting\">\nScopes are live.\n</cross-session-message>"})),
+            line(json!({"type": "assistant", "timestamp": "2026-11-12T10:05:00Z", "message": {"content": [
+                {"type": "tool_use", "name": "SendMessage", "input": {"to": "uds:/run/a.sock", "message": "Done, **thanks**."}}]}})),
+        ]
+        .concat(),
+    )
+    .unwrap();
+    // A subagent: its brief and its report; its tool calls stay out.
+    std::fs::write(
+        mine.join("s1/subagents/agent-a0ca2a7e879b8b08a.meta.json"),
+        json!({"agentType": "general-purpose", "description": "Review 1: security"}).to_string(),
+    )
+    .unwrap();
+    std::fs::write(
+        mine.join("s1/subagents/agent-a0ca2a7e879b8b08a.jsonl"),
+        [
+            line(json!({"type": "user", "parentUuid": null, "cwd": "/home/viber/agent-flow", "timestamp": "2026-11-12T11:00:00Z", "message": {"content": "Review the diff for security."}})),
+            line(json!({"type": "user", "timestamp": "2026-11-12T11:00:05Z", "message": {"content": [{"type": "tool_result", "content": "secret file contents"}]}})),
+            line(json!({"type": "assistant", "timestamp": "2026-11-12T11:20:00Z", "message": {"content": [
+                {"type": "tool_use", "name": "SubagentHandback", "input": {"message": "No findings worth fixing."}}]}})),
+        ]
+        .concat(),
+    )
+    .unwrap();
+    let path = root.path().to_owned();
+    s.db.call(move |c| {
+        crate::usage::ingest(c, &path)?;
+        // Read again: nothing twice.
+        crate::usage::ingest(c, &path)?;
+        Ok(())
+    })
+    .await
+    .unwrap();
     let cookie = s.owner_cookie().await;
     let page = s.http.get(s.url("/conversations")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
-    assert!(page.contains("Tags?") && page.contains("vinculum → Consultant"), "names, not slugs");
+    assert!(page.contains("Between sessions") && page.contains("Subagents") && page.contains("Review 1: security"), "{page}");
+    let pair = s.http.get(s.url("/conversations?t=pair%3Aagent-flow%7Cimaginarium")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
+    assert_eq!(pair.matches("Scopes are live.").count(), 1, "kept once: {pair}");
+    assert!(pair.contains("<strong>thanks</strong>") && pair.contains("→ agent-flow"), "{pair}");
+    let sub = s.http.get(s.url("/conversations?t=sub%3Aa0ca2a7e879b8b08a")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
+    assert!(sub.contains("Review the diff for security.") && sub.contains("No findings worth fixing."), "{sub}");
+    assert!(!sub.contains("secret file contents"), "tool results stay out");
     assert!(!page.contains("<textarea"), "no reply box");
-    let res = s
-        .http
-        .post(s.url(&format!("/conversations/{thread}/reply")))
-        .header(COOKIE, &cookie)
-        .header(ORIGIN, &s.base)
-        .form(&[("body", "Use the .a8 suffix.")])
-        .send()
-        .await
-        .unwrap();
-    assert!(res.status().is_client_error(), "{}", res.status());
-    // Tokens can't use the page.
-    assert_eq!(
-        s.http.get(s.url("/conversations")).bearer_auth(&v).send().await.unwrap().status(),
-        StatusCode::FORBIDDEN
-    );
+    // Reload wakes the reader; tokens can't use the page or the button.
+    let res = s.http.post(s.url("/transcripts/read")).header(COOKIE, &cookie).header(ORIGIN, &s.base).form(&[("next", "/conversations")]).send().await.unwrap();
+    assert!(res.status().is_redirection(), "{}", res.status());
+    let v = s.token(TokenKind::Project, Some("vinculum")).await;
+    assert_eq!(s.http.get(s.url("/conversations")).bearer_auth(&v).send().await.unwrap().status(), StatusCode::FORBIDDEN);
+    assert!(!s.http.post(s.url("/transcripts/read")).bearer_auth(&v).send().await.unwrap().status().is_success());
 }
 
 #[tokio::test]
@@ -2417,6 +2410,17 @@ async fn milestones_steps_and_tasks_are_edited_and_archived_freely() {
     assert_eq!(found["count"], 2, "archived left out: {found}");
     let (_, found) = call("find_records", json!({"kind": "task", "milestone": "P9", "include_archived": true})).await;
     assert_eq!(found["count"], 3, "{found}");
+    // An archived step reads back when asked for.
+    let (ok, m) = call("get_milestone", json!({"milestone": "P9.3c"})).await;
+    assert!(!ok, "{m}");
+    let (ok, m) = call("get_milestone", json!({"milestone": "P9.3c", "include_archived": true})).await;
+    assert!(ok && m["summary"] == "P9.3c done." && m["archived"]["reason"] == "not needed" && m["tasks"][0]["id"] == "T-2", "{m}");
+    // A concluded step in one call, as history.
+    let (ok, m) = call("add_milestone", json!({"name": "P9.9", "title": "Old", "step_of": "P9", "state": "closed",
+        "started_at": "2026-11-01", "closed_at": "2026-11-02", "summary": "Done long ago."})).await;
+    assert!(ok && m["state"] == "closed", "{m}");
+    let (_, m) = call("get_milestone", json!({"milestone": "P9.9"})).await;
+    assert!(m["closed_at"].as_str().unwrap().starts_with("2026-11-02") && m["summary"] == "Done long ago.", "{m}");
     let (ok, r) = call("restore_milestone", json!({"milestone": "P9.3c"})).await;
     assert!(ok && r["with"] == json!(["T-2"]), "{r}");
     let (_, t2) = call("get_record", json!({"id": "T-2"})).await;
@@ -2552,6 +2556,10 @@ async fn questions_and_decisions_have_scopes() {
     assert!(!ids.contains(&"vinculum/D-1".to_owned()) && !ids.contains(&m8_thing), "{found}");
     let (_, found) = call("find_records", json!({"kind": "decision", "include_closed": true})).await;
     assert_eq!(found["count"], ids.len() + 2, "{found}");
+    // Pages: count is the page, total all of them; compact leaves the quotes out.
+    let (_, page) = call("find_records", json!({"kind": "decision", "include_closed": true, "limit": 1, "offset": 1, "compact": true})).await;
+    assert!(page["count"] == 1 && page["total"] == ids.len() + 2 && page["more"] == true, "{page}");
+    assert!(page["records"][0].get("owner_words").is_none() && page["records"][0]["scope"].is_string(), "{page}");
     let tab = s.http.get(s.url("/p/vinculum?tab=decisions")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
     assert!(tab.contains("1 of closed milestones") && tab.contains("1 replaced by newer ones"), "{tab}");
     // hello lists project-wide decisions since the last session.
