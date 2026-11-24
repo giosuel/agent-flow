@@ -1177,3 +1177,22 @@ html.no-scroll { overflow: hidden; }
   .sdlg .set-shell.chosen .set-back { display: inline-flex; align-items: center; gap: 2px; margin: 10px 0 4px -6px; color: var(--accent); font-size: 17px; text-decoration: none; }
   .sdlg .set-back .i { width: 24px; height: 24px; }
 }
+
+/* A page shown as a dialog (data-dlg): the setup code, Add project. Left-aligned steps. */
+.pdlg { width: min(760px, 100%); height: auto; max-height: calc(100dvh - 64px); }
+.pdlg-body { overflow-y: auto; overscroll-behavior: contain; padding: 20px 24px 24px; }
+.pdlg-body .dlg-hide { display: none; }
+.pdlg-body .head { margin: 0 0 12px; }
+.pdlg-body .card { background: none; border: 0; padding: 0; }
+.pdlg-body details.card { border-top: 1px solid var(--line); padding-top: 16px; margin-top: 16px; border-radius: 0; }
+.flowcard { text-align: left; }
+.flowcard .steps-list { padding-left: 22px; margin: 4px 0; }
+.flowcard .steps-list li { padding-left: 6px; }
+.flowcard .steps-list li::marker { color: var(--accent); font-weight: 600; }
+.flowcard .steps-list li > p { margin: 0 0 8px; }
+.setup-code { font-size: 30px; letter-spacing: .12em; text-align: center; color: var(--ink); margin: 4px 0; padding: 18px 8px; border: 1px solid var(--line); border-radius: 10px; background: var(--inset); }
+@media (max-width: 700px) {
+  .pdlg { height: 100dvh; max-height: none; }
+  .pdlg-body { padding: 16px; }
+  .setup-code { font-size: 24px; }
+}

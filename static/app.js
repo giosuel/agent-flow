@@ -639,3 +639,73 @@ document.addEventListener("change", (e) => {
     if (back) load(u.pathname + u.search); else open(u.pathname + u.search);
   });
 })();
+
+// Pages that belong in a dialog (the owner, 2026-11-17: "make sure this is also a dialog"): a link
+// or form marked data-dlg opens its page's [data-dlg-content] over the current page; forms inside
+// it stay inside it, and an answer that isn't such a page (e.g. the new project's page) is opened
+// as a page. Without scripts, they're pages as before.
+(() => {
+  let back = null;
+  const close = () => {
+    if (!back) return;
+    back.classList.remove("open");
+    const b = back;
+    back = null;
+    document.documentElement.classList.remove("no-scroll");
+    document.removeEventListener("keydown", onKey, true);
+    setTimeout(() => b.remove(), 160);
+  };
+  const onKey = (e) => { if (e.key === "Escape" && !document.querySelector(".cdlg-back")) { e.preventDefault(); close(); } };
+  const show = async (url, init) => {
+    let res;
+    try {
+      res = await fetch(url, { credentials: "same-origin", ...init });
+    } catch (_) {
+      location.href = url;
+      return;
+    }
+    const doc = new DOMParser().parseFromString(await res.text(), "text/html");
+    const content = doc.querySelector("[data-dlg-content]");
+    if (!content) { location.href = res.url; return; }
+    const h1 = content.querySelector(".head h1");
+    const title = h1 ? h1.textContent : document.title;
+    if (h1) h1.closest(".head").querySelector("h1").remove();
+    if (!back) {
+      back = document.createElement("div");
+      back.className = "sdlg-back pdlg-back";
+      back.innerHTML = `<div class="sdlg pdlg" role="dialog" aria-modal="true" aria-labelledby="pdlg-t">
+        <div class="sdlg-head"><h2 id="pdlg-t"></h2><button type="button" class="icon-only sdlg-x" aria-label="Close">×</button></div>
+        <div class="pdlg-body"></div></div>`;
+      back.querySelector(".sdlg-x").addEventListener("click", close);
+      back.addEventListener("mousedown", (e) => { if (e.target === back) close(); });
+      back.addEventListener("submit", (e) => {
+        const form = e.target;
+        if ((form.getAttribute("method") || "").toLowerCase() !== "post") return;
+        e.preventDefault();
+        show(form.action, { method: "POST", body: new URLSearchParams(new FormData(form, e.submitter)), headers: { "Content-Type": "application/x-www-form-urlencoded" } });
+      });
+      document.body.append(back);
+      document.documentElement.classList.add("no-scroll");
+      document.addEventListener("keydown", onKey, true);
+      requestAnimationFrame(() => back && back.classList.add("open"));
+    }
+    back.querySelector("#pdlg-t").textContent = title;
+    const body = back.querySelector(".pdlg-body");
+    body.replaceChildren(content);
+    body.scrollTo(0, 0);
+    document.dispatchEvent(new CustomEvent("af:content", { detail: content }));
+    back.querySelector(".sdlg-x").focus();
+  };
+  document.addEventListener("click", (e) => {
+    const a = e.target.closest("a[data-dlg]");
+    if (!a || e.metaKey || e.ctrlKey || e.shiftKey || e.button) return;
+    e.preventDefault();
+    show(a.href);
+  });
+  document.addEventListener("submit", (e) => {
+    const form = e.target.closest("form[data-dlg]");
+    if (!form || back) return;
+    e.preventDefault();
+    show(form.action, { method: "POST", body: new URLSearchParams(new FormData(form, e.submitter)), headers: { "Content-Type": "application/x-www-form-urlencoded" } });
+  });
+})();

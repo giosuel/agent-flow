@@ -6,7 +6,7 @@
   <h1>Archived projects</h1>
   <p class="status-line">Out of the Dashboard and the project list; their pages and records stay. Open one to restore it. <a href="/projects">Back to the projects</a></p>
   {% else %}
-  <div class="row wrap"><h1>Projects</h1><span class="grow"></span><a class="btn" href="/projects/new">Add project</a></div>
+  <div class="row wrap"><h1>Projects</h1><span class="grow"></span><a class="btn" href="/projects/new" data-dlg>Add project</a></div>
   <p class="status-line">One row per project and its agent. Add project starts one, or brings in an existing folder.{% if archived_count > 0 %} <a href="/projects?archived=1">{{ archived_count }} archived</a>{% endif %}</p>
   {% endif %}
 </div>
