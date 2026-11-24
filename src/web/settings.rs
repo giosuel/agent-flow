@@ -96,6 +96,8 @@ struct SettingsPage {
     notice: Option<&'static str>,
     /// The server's GitHub tokens: (which, label, what it's for, set as "…abcd · login").
     github: Vec<(&'static str, &'static str, &'static str, Option<String>)>,
+    /// The consultant, run by the server.
+    consultant: super::consultant::View,
     /// Requests from `flow` waiting for approval: (code, what, machine).
     approvals: Vec<(String, String, String)>,
     passkeys_available: bool,
@@ -226,6 +228,7 @@ async fn render_page(
                 ("external", "Other people's repositories", "sending the contributions you approve", show(token(GitHub::External), login("github.login.external").await)),
             ]
         },
+        consultant: super::consultant::view(state).await,
         approvals: state
             .db
             .call(|c| crate::approvals::pending(c))

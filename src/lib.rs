@@ -13,6 +13,7 @@ pub mod builders;
 pub mod builds;
 pub mod cli;
 pub mod config;
+pub mod consultant;
 pub mod connect;
 pub mod contributions;
 pub mod db;

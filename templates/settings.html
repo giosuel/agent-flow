@@ -63,6 +63,20 @@
   </ul>
 </section>
 
+<section class="card pad stack" aria-labelledby="s-consultant" id="s-consultant">
+  <div class="sec"><h2 id="s-consultant">Consultant</h2><span class="sub">{% if consultant.on && consultant.running %}running{% else if consultant.on %}on, not running{% else %}off{% endif %}</span></div>
+  <p class="sub">A Claude Code session the server runs (Opus 5.5, with Remote Control), as the server's user. Agents ask it with SendMessage ("AgentFlow Consultant"). It uses AgentFlow's tools freely; shell commands and edits wait for you to allow them, in tmux or on claude.ai.</p>
+  {% if let Some(e) = consultant.error %}<p class="notice warn" role="alert">{{ e }}</p>{% endif %}
+  {% if consultant.on %}
+  {% if let Some(l) = consultant.link %}<p><a class="btn sm ghost" href="{{ l }}" target="_blank" rel="noopener">Open its session on claude.ai</a></p>{% else %}<p class="sub">Its claude.ai link shows here once it has connected Remote Control.</p>{% endif %}
+  <p class="sub">To reach it directly on the server, as the server's user:</p>
+  <pre class="cmd mono">{{ consultant.attach }}</pre>
+  <form method="post" action="/settings/consultant/off"><button class="btn sm ghost" type="submit" data-confirm="Switch the consultant off? Its session ends; switching it on again continues it.">Switch off</button></form>
+  {% else %}
+  <form method="post" action="/settings/consultant/on"><button class="btn sm" type="submit">Switch on</button></form>
+  {% endif %}
+</section>
+
 <section class="card pad stack" aria-labelledby="s-github" id="s-github">
   <div class="sec"><h2 id="s-github">GitHub</h2><span class="sub">AgentFlow's own tokens, kept encrypted</span></div>
   <p class="sub">With a token here, AgentFlow talks to GitHub with it, from wherever it runs. Without one, <span class="mono">gh</span> uses the login of the user it runs as. For your repositories: a fine-grained token with read and write access to Contents and Pull requests.</p>
