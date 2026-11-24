@@ -1410,8 +1410,10 @@ ol.lrows { padding: 0; margin: 0; list-style: none; gap: 0; }
   .gnav a.on .gbadge { position: static; }
   .gnav a[data-name]:hover::after, .gnav a[data-name]:focus-visible::after { content: attr(data-name); position: absolute; top: calc(100% + 6px); left: 50%; transform: translateX(-50%); z-index: 31; padding: 4px 9px; border-radius: 6px; background: var(--ink); color: var(--sunken); font-size: var(--fs-sub); font-weight: 500; white-space: nowrap; pointer-events: none; }
   .vsep { display: block; flex: none; width: 4px; }
-  /* In a project the bar names it and holds its tabs: the page's own title and tabs are the phone's. */
-  .proj-head { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  /* In a project the bar names it and holds its tabs: the page's own title and tabs are the phone's.
+     Its path stays, as on a record's page (the owner, 2026-11-24: "lets add this navigation to every
+     project page"). */
+  .proj-head > :not(.crumb-row) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   .proj-tabs { display: none; }
 }
 
