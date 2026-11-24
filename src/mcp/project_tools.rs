@@ -14,7 +14,7 @@ use crate::projects::{self, MilestonePatch, NewMilestone, ProjectPatch};
 use crate::records::{self, Kind, Query};
 use crate::util::now_ms;
 
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
 pub struct Hello {
     /// Your session's name, e.g. "Vinculum".
     pub session: String,
@@ -85,15 +85,36 @@ pub struct AddMilestone {
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct ReviewInfo {
     /// Who reviews, e.g. ["correctness", "UX", "performance"] (fresh agents, no context of the work).
+    #[serde(default)]
     pub reviewers: Vec<String>,
     /// The commit reviewed, e.g. "9f3c2e1" (on main, or say the branch).
+    #[serde(default)]
     pub commit: String,
     /// The owner's words for the review, verbatim, if they gave any.
-    #[serde(default)]
-    pub owner_words: String,
+    pub owner_words: Option<String>,
     /// The reports, as notes or links, e.g. ["N-6"].
-    #[serde(default)]
-    pub reports: Vec<String>,
+    pub reports: Option<Vec<String>>,
+}
+
+impl ReviewInfo {
+    /// This review over an earlier one: what's left out stays as it was.
+    fn over(&self, old: &str) -> Value {
+        let old: Value = serde_json::from_str(old).unwrap_or(Value::Null);
+        let reviewers = if self.reviewers.is_empty() { old.get("reviewers").cloned().unwrap_or_else(|| json!([])) } else { json!(self.reviewers) };
+        let commit = match self.commit.trim() {
+            "" => old.get("commit").and_then(Value::as_str).unwrap_or("").to_owned(),
+            c => c.to_owned(),
+        };
+        let owner_words = match &self.owner_words {
+            Some(w) => w.trim().to_owned(),
+            None => old.get("owner_words").and_then(Value::as_str).unwrap_or("").to_owned(),
+        };
+        let reports = match &self.reports {
+            Some(r) => json!(r),
+            None => old.get("reports").cloned().unwrap_or_else(|| json!([])),
+        };
+        json!({"reviewers": reviewers, "commit": commit, "owner_words": owner_words, "reports": reports})
+    }
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -105,7 +126,8 @@ pub struct UpdateMilestone {
     #[serde(flatten)]
     pub patch: MilestonePatch,
     /// Makes it a review step, or changes its review details (reviewers, commit, the owner's
-    /// words, reports such as ["N-26"]).
+    /// words, reports such as ["N-26"]). What you leave out stays as it was, so
+    /// {"reports": ["N-26"]} only sets the reports.
     pub review: Option<ReviewInfo>,
 }
 
@@ -249,6 +271,80 @@ fn task_counts(c: &rusqlite::Connection, project_id: i64) -> anyhow::Result<Vec<
     Ok(rows.collect::<Result<_, _>>()?)
 }
 
+/// What hello returns (the tool, and `agentflow hello` for a SessionStart hook): records the
+/// session, then the project, its document, milestones, where it is, questions, notes and news.
+pub(crate) fn hello_reply(
+    c: &rusqlite::Connection,
+    project: &projects::Project,
+    p: &Hello,
+    token_dir: &std::path::Path,
+) -> anyhow::Result<Value> {
+    let prev_hello = projects::hello(c, project.id, &p.session, &p.machine, &p.model, &p.effort)?;
+    // Project-wide decisions since your last session: standing rules to fold into the
+    // project document (Imaginarium's agent, 2026-11-12).
+    let new_project_decisions: Vec<Value> = match prev_hello {
+        None => Vec::new(),
+        Some(since) => records::query(
+            c,
+            &Query { project_id: Some(project.id), kinds: vec![Kind::Decision], states: vec!["current".into()], limit: 0, ..Default::default() },
+        )?
+        .into_iter()
+        .filter(|d| d.milestone_id.is_none() && d.created_at >= since)
+        .map(|d| json!({"id": d.ref_id, "title": d.title, "owner_words": d.data.get("owner_words")}))
+        .collect(),
+    };
+    let ms = projects::milestones(c, project.id)?;
+    let counts = task_counts(c, project.id)?;
+    let open = records::query(
+        c,
+        &Query { project_id: Some(project.id), kinds: vec![Kind::Question], states: vec!["open".into()], ..Default::default() },
+    )?;
+    let answered = records::query(
+        c,
+        &Query {
+            project_id: Some(project.id),
+            kinds: vec![Kind::Question],
+            states: vec!["answered".into()],
+            since: Some(now_ms() - 7 * 86_400_000),
+            limit: 20,
+            ..Default::default()
+        },
+    )?;
+    let recent = records::recent_events(c, Some(project.id), 15)?;
+    let unread = crate::waiting::unread_count(c, project.id, &project.slug)?;
+    let reply = json!({
+        "project": project_json(&projects::get_by_id(c, project.id)?, now_ms()),
+        // Your project document: rules for working on it, stack, roadmap, pointers.
+        // Keep it current with edit_project_doc; the owner may edit it too.
+        "doc": doc_json(&crate::projectdoc::get(c, project.id)?),
+        "milestones": milestones_json(&ms, &counts),
+        // Where you are: each step under way, its tasks in doing, the next one, and
+        // what's blocked by what.
+        "where": crate::steps::where_json(c, project.id)?,
+        // Notes that come back today (a date that's here) or until resolved (a condition).
+        "notes_back": notes_back(c, project.id)?,
+        "open_questions": open.iter().map(|q| json!({"id": q.ref_id, "title": q.title})).collect::<Vec<_>>(),
+        "answered_this_week": answered.iter().map(|q| json!({"id": q.ref_id, "title": q.title, "answer": q.data.get("answer")})).collect::<Vec<_>>(),
+        "new_project_decisions": new_project_decisions,
+        "unread_events": unread,
+        "recent_events": recent.iter().map(|e| json!({"at": crate::util::fmt_utc(e.at), "what": e.summary, "by": e.actor})).collect::<Vec<_>>(),
+        // The CLI (publish, screenshot, contribute, remote, wait) needs the same token.
+        "cli": {
+            "token_file": crate::tokens::token_path(token_dir, Some(&project.slug), &project.name),
+            "how": "Run agentflow commands with AGENTFLOW_TOKEN_FILE set to token_file (sessions started with AgentFlow's start command have it), or add --token-file token_file."
+        },
+    });
+    let mut reply = reply;
+    if p.brief
+        && let Some(o) = reply.as_object_mut()
+    {
+        for k in ["doc", "milestones", "cli", "project"] {
+            o.remove(k);
+        }
+    }
+    Ok(reply)
+}
+
 #[tool_router(router = project_tools, vis = "pub(super)")]
 impl FlowMcp {
     #[tool(description = "Start every session with this: says which session, machine, model and effort work on your \
@@ -268,69 +364,7 @@ impl FlowMcp {
             .db
             .call(move |c| {
                 let project = target_project(c, &a, None, true)?;
-                let prev_hello = projects::hello(c, project.id, &p.session, &p.machine, &p.model, &p.effort)?;
-                // Project-wide decisions since your last session: standing rules to fold into the
-                // project document (Imaginarium's agent, 2026-11-12).
-                let new_project_decisions: Vec<Value> = match prev_hello {
-                    None => Vec::new(),
-                    Some(since) => records::query(
-                        c,
-                        &Query { project_id: Some(project.id), kinds: vec![Kind::Decision], states: vec!["current".into()], limit: 0, ..Default::default() },
-                    )?
-                    .into_iter()
-                    .filter(|d| d.milestone_id.is_none() && d.created_at >= since)
-                    .map(|d| json!({"id": d.ref_id, "title": d.title, "owner_words": d.data.get("owner_words")}))
-                    .collect(),
-                };
-                let ms = projects::milestones(c, project.id)?;
-                let counts = task_counts(c, project.id)?;
-                let open = records::query(
-                    c,
-                    &Query { project_id: Some(project.id), kinds: vec![Kind::Question], states: vec!["open".into()], ..Default::default() },
-                )?;
-                let answered = records::query(
-                    c,
-                    &Query {
-                        project_id: Some(project.id),
-                        kinds: vec![Kind::Question],
-                        states: vec!["answered".into()],
-                        since: Some(now_ms() - 7 * 86_400_000),
-                        limit: 20,
-                        ..Default::default()
-                    },
-                )?;
-                let recent = records::recent_events(c, Some(project.id), 15)?;
-                let unread = crate::waiting::unread_count(c, project.id, &project.slug)?;
-                let reply = json!({
-                    "project": project_json(&projects::get_by_id(c, project.id)?, now_ms()),
-                    // Your project document: rules for working on it, stack, roadmap, pointers.
-                    // Keep it current with edit_project_doc; the owner may edit it too.
-                    "doc": doc_json(&crate::projectdoc::get(c, project.id)?),
-                    "milestones": milestones_json(&ms, &counts),
-                    // Where you are: each step under way, its tasks in doing, the next one, and
-                    // what's blocked by what.
-                    "where": crate::steps::where_json(c, project.id)?,
-                    // Notes that come back today (a date that's here) or until resolved (a condition).
-                    "notes_back": notes_back(c, project.id)?,
-                    "open_questions": open.iter().map(|q| json!({"id": q.ref_id, "title": q.title})).collect::<Vec<_>>(),
-                    "answered_this_week": answered.iter().map(|q| json!({"id": q.ref_id, "title": q.title, "answer": q.data.get("answer")})).collect::<Vec<_>>(),
-                    "new_project_decisions": new_project_decisions,
-                    "unread_events": unread,
-                    "recent_events": recent.iter().map(|e| json!({"at": crate::util::fmt_utc(e.at), "what": e.summary, "by": e.actor})).collect::<Vec<_>>(),
-                    // The CLI (publish, screenshot, contribute, remote, wait) needs the same token.
-                    "cli": {
-                        "token_file": crate::tokens::token_path(&token_dir, Some(&project.slug), &project.name),
-                        "how": "Run agentflow commands with AGENTFLOW_TOKEN_FILE set to token_file (sessions started with AgentFlow's start command have it), or add --token-file token_file."
-                    },
-                });
-                let mut reply = reply;
-                if p.brief
-                    && let Some(o) = reply.as_object_mut()
-                {
-                    for k in ["doc", "milestones", "cli", "project"] {
-                        o.remove(k);
-                    }
-                }
+                let reply = hello_reply(c, &project, &p, &token_dir)?;
                 let what = if p.brief { "hello (brief)" } else { "hello" };
                 Ok(Outcome::new(reply).summary(format!("{what} from {} on {}", p.session, p.machine)).project(project.slug))
             })
@@ -524,7 +558,7 @@ impl FlowMcp {
                     projects::set_review(
                         &tx,
                         &m,
-                        &json!({"reviewers": r.reviewers, "commit": r.commit.trim(), "owner_words": r.owner_words.trim(), "reports": r.reports}),
+                        &json!({"reviewers": r.reviewers, "commit": r.commit.trim(), "owner_words": r.owner_words.as_deref().unwrap_or("").trim(), "reports": r.reports.clone().unwrap_or_default()}),
                     )?;
                 }
                 tx.commit()?;
@@ -561,14 +595,11 @@ impl FlowMcp {
                     if m.parent_id.is_none() {
                         anyhow::bail!("a review is a step; {} is a milestone", m.name);
                     }
-                    if r.reviewers.is_empty() || r.commit.trim().is_empty() {
+                    let review = r.over(&m.review);
+                    if review["reviewers"].as_array().is_none_or(|a| a.is_empty()) || review["commit"].as_str().is_none_or(|c| c.is_empty()) {
                         anyhow::bail!("a review step names its reviewers and the commit they review");
                     }
-                    projects::set_review(
-                        &tx,
-                        &m,
-                        &json!({"reviewers": r.reviewers, "commit": r.commit.trim(), "owner_words": r.owner_words.trim(), "reports": r.reports}),
-                    )?;
+                    projects::set_review(&tx, &m, &review)?;
                 }
                 tx.commit()?;
                 Ok(Outcome::new(json!({"milestone": m.name, "title": m.title, "state": m.state, "tag": m.tag, "summary": m.summary,

@@ -7,6 +7,8 @@ mod guide_tools;
 mod message_tools;
 mod pr_tools;
 mod project_tools;
+mod schema;
+pub(crate) use project_tools::{Hello, hello_reply};
 mod record_tools;
 
 use std::sync::Arc;
@@ -81,16 +83,17 @@ pub struct FlowMcp {
 
 impl FlowMcp {
     fn new(state: AppState) -> Self {
-        Self {
-            state,
-            tool_router: Self::tool_router()
-                + Self::project_tools()
-                + Self::record_tools()
-                + Self::pr_tools()
-                + Self::build_tools()
-                + Self::message_tools()
-                + Self::guide_tools(),
+        let mut tool_router = Self::tool_router()
+            + Self::project_tools()
+            + Self::record_tools()
+            + Self::pr_tools()
+            + Self::build_tools()
+            + Self::message_tools()
+            + Self::guide_tools();
+        for route in tool_router.map.values_mut() {
+            route.attr.input_schema = std::sync::Arc::new(schema::inline(&route.attr.input_schema));
         }
+        Self { state, tool_router }
     }
 
     async fn log(&self, actor: &Actor, action: Action, summary: String) {

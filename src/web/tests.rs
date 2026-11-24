@@ -1571,7 +1571,12 @@ async fn answers_make_scoped_decisions_and_releases_bring_their_tag_button() {
 
     // A note on a step; a step made a review later; where for a milestone whose steps are done.
     assert!(call("add_milestone", json!({"name": "R9", "title": "Review", "step_of": "M4"})).await.0);
+    assert!(!call("update_milestone", json!({"milestone": "R9", "review": {"reports": ["N-1"]}})).await.0, "not a review yet");
     assert!(call("update_milestone", json!({"milestone": "R9", "review": {"reviewers": ["UX"], "commit": "abc1234"}})).await.0);
+    // Only the reports: the reviewers and commit stay.
+    assert!(call("update_milestone", json!({"milestone": "R9", "review": {"reports": ["N-26"]}})).await.0);
+    let (_, m) = call("get_milestone", json!({"milestone": "R9"})).await;
+    assert!(m["review"]["reports"] == json!(["N-26"]) && m["review"]["reviewers"] == json!(["UX"]) && m["review"]["commit"] == "abc1234", "{m}");
     let (ok, n) = call("add_note", json!({"name": "Review report R1", "category": "review report", "text": "Findings…", "record": "R9"})).await;
     assert!(ok, "{n}");
     assert!(!call("add_note", json!({"name": "x", "category": "x", "text": "x", "record": "NOPE"})).await.0);
@@ -2565,4 +2570,77 @@ async fn questions_and_decisions_have_scopes() {
     // hello lists project-wide decisions since the last session.
     let (_, h) = call("hello", hello).await;
     assert!(h["new_project_decisions"].to_string().contains("New rule"), "{h}");
+}
+
+/// `agentflow hello` for a SessionStart hook: the hello tool's reply over the API, news marked
+/// read, the last session details kept when left out; only for a project's agent.
+#[tokio::test]
+async fn hello_over_the_api_for_a_session_start_hook() {
+    let s = TestServer::start().await;
+    let token = s.token(TokenKind::Project, Some("vinculum")).await;
+    let sess = mcp_session(&s, &token).await;
+    let call = |name: &'static str, args: Value| {
+        let (s, token, sess) = (&s, token.clone(), sess.clone());
+        async move { mcp_tool(s, &token, &sess, name, args).await }
+    };
+    assert!(call("hello", json!({"session": "Vinculum", "machine": "giosuel.ch", "model": "Opus", "effort": "high"})).await.0);
+    assert!(call("edit_project_doc", json!({"section": "How to work on it", "text": "- DCO sign-off"})).await.0);
+    assert!(call("add_milestone", json!({"name": "M1", "title": "Done one", "description": "long text", "state": "closed"})).await.0);
+    assert!(call("add_milestone", json!({"name": "M2", "title": "Now", "description": "what M2 is", "state": "active"})).await.0);
+    let (ok, q) = call("ask_question", json!({"title": "Which?"})).await;
+    assert!(ok, "{q}");
+    let cookie = s.owner_cookie().await;
+    let res = s.http.post(s.url("/p/vinculum/Q-1/answer")).header(COOKIE, &cookie).header(ORIGIN, &s.base).form(&[("words", "this one")]).send().await.unwrap();
+    assert!(res.status().is_redirection());
+
+    let res = s.http.post(s.url("/api/hello")).bearer_auth(&token).json(&json!({"source": "compact", "model": "Opus 5.5"})).send().await.unwrap();
+    assert!(res.status().is_success(), "{}", res.status());
+    let r: Value = res.json().await.unwrap();
+    assert!(r["doc"]["text"].as_str().unwrap().contains("DCO sign-off"), "{r}");
+    assert!(r["news"].to_string().contains("Owner answered Q-1"), "{r}");
+    let text = crate::cli::hello_text(&r, "compact", crate::cli::HelloPart::All);
+    assert!(text.starts_with("AgentFlow hello after your context was summarized"), "{text}");
+    assert!(text.contains("DCO sign-off") && text.contains("Owner answered Q-1"), "{text}");
+    assert!(text.contains("- M1 Done one [closed]") && !text.contains("long text") && text.contains("what M2 is"), "{text}");
+    // The news was marked read; the session's name stayed, the model changed.
+    let res = s.http.get(s.url("/api/news")).bearer_auth(&token).send().await.unwrap();
+    assert_eq!(res.json::<Value>().await.unwrap()["events"].as_array().unwrap().len(), 0);
+    assert_eq!(r["project"]["agent"]["session"], "Vinculum", "{r}");
+    let model: String = s.db.call(|c| Ok(crate::projects::require(c, "vinculum")?.agent.model)).await.unwrap();
+    assert_eq!(model, "Opus 5.5");
+    // The two parts for hooks: the document alone, then the rest, each under the hook limit.
+    let res = s.http.post(s.url("/api/hello")).bearer_auth(&token).json(&json!({"part": "doc"})).send().await.unwrap();
+    let d: Value = res.json().await.unwrap();
+    assert!(d.get("milestones").is_none() && d["doc"]["text"].as_str().unwrap().contains("DCO"), "{d}");
+    let doc = crate::cli::hello_text(&d, "startup", crate::cli::HelloPart::Doc);
+    assert!(doc.contains("DCO sign-off") && !doc.contains("=== Milestones"), "{doc}");
+    let mut big = r.clone();
+    big["doc"]["text"] = "- a rule\n".repeat(3000).into();
+    big["recent_events"] = (0..200).map(|i| json!({"at": "2026-11-12T10:00:00Z", "what": format!("event {i} {}", "x".repeat(80)), "by": "x"})).collect();
+    let doc = crate::cli::hello_text(&big, "startup", crate::cli::HelloPart::Doc);
+    assert!(doc.chars().count() <= crate::cli::HOOK_LIMIT && doc.contains("the document goes on"), "{}", doc.len());
+    let rest = crate::cli::hello_text(&big, "startup", crate::cli::HelloPart::NoDoc);
+    assert!(rest.chars().count() <= crate::cli::HOOK_LIMIT, "{}", rest.len());
+    assert!(!rest.contains("a rule") && rest.contains("=== Where you are") && rest.contains("Owner answered Q-1") && rest.contains("what M2 is") && rest.contains("cut to fit"), "{rest}");
+    // Not for the owner.
+    let res = s.http.post(s.url("/api/hello")).header(COOKIE, &cookie).header(ORIGIN, &s.base).json(&json!({})).send().await.unwrap();
+    assert!(!res.status().is_success());
+}
+
+/// Every tool's schema is written out in full: no $ref for a client to follow (Imaginarium's
+/// didn't see update_milestone's review).
+#[tokio::test]
+async fn tool_schemas_have_no_refs() {
+    let s = TestServer::start().await;
+    let token = s.token(TokenKind::Project, Some("vinculum")).await;
+    let sess = mcp_session(&s, &token).await;
+    let (_, r) = mcp_call(&s, &token, Some(&sess), json!({"jsonrpc": "2.0", "id": 9, "method": "tools/list", "params": {}})).await;
+    let tools = r.unwrap()["result"]["tools"].as_array().unwrap().clone();
+    assert!(tools.len() > 20);
+    for t in &tools {
+        let schema = t["inputSchema"].to_string();
+        assert!(!schema.contains("$ref"), "{}: {schema}", t["name"]);
+    }
+    let um = tools.iter().find(|t| t["name"] == "update_milestone").unwrap();
+    assert!(um["inputSchema"]["properties"]["review"]["properties"]["reports"].is_object(), "{um}");
 }

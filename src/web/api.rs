@@ -17,7 +17,7 @@ use crate::util::fmt_utc;
 use crate::{records, waiting};
 
 pub fn routes() -> Router<AppState> {
-    Router::new().route("/api/wait", get(wait)).route("/api/news", get(news)).route("/api/timings", axum::routing::post(timing))
+    Router::new().route("/api/wait", get(wait)).route("/api/news", get(news)).route("/api/hello", axum::routing::post(hello)).route("/api/timings", axum::routing::post(timing))
 }
 
 /// A timing from `agentflow time`: what ran, how long, CPU and peak memory, on what.
@@ -85,6 +85,67 @@ async fn news(State(state): State<AppState>, Extension(actor): Extension<Actor>,
     match result {
         Ok(events) => Json(json!({"events": events.iter().map(waiting::news_json).collect::<Vec<_>>()})).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": format!("{e:#}")}))).into_response(),
+    }
+}
+
+/// Who is saying hello, from `agentflow hello` (a SessionStart hook); what's left empty keeps the
+/// project's last values.
+#[derive(Deserialize, Default)]
+#[serde(default)]
+pub struct HelloBody {
+    pub session: String,
+    pub machine: String,
+    pub model: String,
+    pub effort: String,
+    /// Why the session (re)started: startup, resume, clear, compact or fork.
+    pub source: String,
+    /// "doc": only the project document, with no side effects (the second of two hooks).
+    pub part: String,
+}
+
+/// `agentflow hello`: the hello tool's reply, for a SessionStart hook (Imaginarium's agent and the
+/// owner, 2026-11-12: the full hello on every start, resume, /clear and compaction). The news in it
+/// is marked read, so the hook before the next prompt doesn't repeat it.
+async fn hello(State(state): State<AppState>, Extension(actor): Extension<Actor>, Json(b): Json<HelloBody>) -> Response {
+    if !matches!(actor, Actor::Project { .. }) {
+        return (StatusCode::FORBIDDEN, Json(json!({"error": "hello is for a project's agent"}))).into_response();
+    }
+    let token_dir = state.config.token_dir();
+    let a = actor.clone();
+    let source = b.source.trim().to_owned();
+    let res = state
+        .db
+        .call(move |c| {
+            let project = crate::mcp::target_project(c, &a, None, true)?;
+            if b.part == "doc" {
+                let d = crate::projectdoc::get(c, project.id)?;
+                let edited = if d.rev > 0 { format!("{} by {} ({})", crate::util::fmt_utc(d.updated_at), d.author, d.what) } else { String::new() };
+                return Ok((json!({"doc": {"text": d.text, "rev": d.rev, "edited": edited}}), None, project.slug));
+            }
+            let keep = |new: String, old: &str| if new.trim().is_empty() { old.to_owned() } else { new };
+            let p = crate::mcp::Hello {
+                session: keep(b.session, &project.agent.session),
+                machine: keep(b.machine, &project.agent.machine),
+                model: keep(b.model, &project.agent.model),
+                effort: keep(b.effort, &project.agent.effort),
+                brief: false,
+            };
+            let mut reply = crate::mcp::hello_reply(c, &project, &p, &token_dir)?;
+            let news = waiting::read_news(c, project.id, &project.slug)?;
+            reply["news"] = news.iter().map(waiting::news_json).collect::<Vec<_>>().into();
+            Ok((reply, Some(p.session), project.slug))
+        })
+        .await;
+    match res {
+        Ok((reply, None, _)) => Json(reply).into_response(),
+        Ok((reply, Some(session), slug)) => {
+            let how = if source.is_empty() { String::new() } else { format!(" ({source})") };
+            let mut e = crate::activity::Entry::new(&actor, crate::activity::Via::Api, crate::activity::Action::Read, format!("hello from {session}{how}"));
+            e.project = Some(slug);
+            crate::activity::write(&state.db, e).await;
+            Json(reply).into_response()
+        }
+        Err(e) => super::json_error(StatusCode::BAD_REQUEST, format!("{e:#}")),
     }
 }
 

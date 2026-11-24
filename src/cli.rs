@@ -361,6 +361,252 @@ impl Client {
 }
 
 /// `agentflow news`: the agent's unread news, one line each; nothing when there's none.
+pub struct HelloArgs {
+    pub session: String,
+    pub machine: String,
+    pub model: String,
+    pub effort: String,
+    pub part: HelloPart,
+}
+
+/// Which part of hello to print: Claude Code caps each hook's output at 10,000 characters, so a
+/// SessionStart hook runs `--doc` and `--no-doc` as two hooks.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum HelloPart {
+    All,
+    Doc,
+    NoDoc,
+}
+
+/// Claude Code's cap on a hook's output; longer output goes to a file with a 2,000-character
+/// preview, so each part keeps under it.
+pub const HOOK_LIMIT: usize = 9_800;
+
+pub fn hello(config_path: &Path, args: ClientArgs, mut a: HelloArgs) -> anyhow::Result<()> {
+    use std::io::{IsTerminal, Read};
+    // A SessionStart hook hands its input as JSON on stdin: source (startup, resume, clear,
+    // compact, fork) and sometimes the model.
+    let mut source = String::new();
+    let stdin = std::io::stdin();
+    if !stdin.is_terminal() {
+        let mut raw = String::new();
+        stdin.lock().take(1 << 20).read_to_string(&mut raw).ok();
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&raw) {
+            source = v.get("source").and_then(|s| s.as_str()).unwrap_or("").to_owned();
+            if a.model.is_empty() {
+                a.model = match v.get("model") {
+                    Some(serde_json::Value::String(m)) => m.clone(),
+                    Some(m) => m.get("display_name").or_else(|| m.get("id")).and_then(|s| s.as_str()).unwrap_or("").to_owned(),
+                    None => String::new(),
+                };
+            }
+        }
+    }
+    let client = Client::new(config_path, &args)?;
+    let part = if a.part == HelloPart::Doc { "doc" } else { "" };
+    let body = serde_json::json!({"session": a.session, "machine": a.machine, "model": a.model, "effort": a.effort, "source": source, "part": part});
+    let reply = client.post_json("/api/hello", &body)?;
+    print!("{}", hello_text(&reply, &source, a.part));
+    Ok(())
+}
+
+/// The hello reply as text for the agent's context: the document as written, closed milestones
+/// one line each, the rest as indented lists. A part for a hook stays under [`HOOK_LIMIT`]: the
+/// document is cut at a line, and the rest gives up its least needed sections first.
+pub fn hello_text(r: &serde_json::Value, source: &str, part: HelloPart) -> String {
+    use serde_json::Value;
+    use std::fmt::Write;
+    let s = |v: &Value, k: &str| v.get(k).and_then(Value::as_str).unwrap_or("").to_owned();
+    let when = match source {
+        "compact" => " after your context was summarized",
+        "clear" => " after /clear",
+        "resume" => " on resuming",
+        "fork" => " in a forked session",
+        _ => "",
+    };
+    let doc = |limit: Option<usize>| -> String {
+        let Some(d) = r.get("doc") else { return String::new() };
+        let e = s(d, "edited");
+        let e = if e.is_empty() { e } else { format!(", edited {e}") };
+        let mut text = s(d, "text").trim_end().to_owned();
+        if let Some(limit) = limit
+            && text.chars().count() > limit
+        {
+            text = cut_at_line(&text, limit);
+            text.push_str("\n(… the document goes on; it's cut here to fit Claude Code's hook limit. The hello tool returns all of it.)");
+        }
+        format!("=== Project document (rev {}{e}) ===\n{text}\n=== End of the project document ===\n\n", d.get("rev").unwrap_or(&Value::Null))
+    };
+    if part == HelloPart::Doc {
+        let head = format!(
+            "AgentFlow hello{when}, part 1 of 2 (from a SessionStart hook): your project's document, its rules. Follow it over \
+             anything a summary says.\n\n"
+        );
+        let budget = HOOK_LIMIT.saturating_sub(head.chars().count() + 300);
+        return head + &doc(Some(budget));
+    }
+    let head = if part == HelloPart::NoDoc {
+        format!(
+            "AgentFlow hello{when}, part 2 of 2 (from a SessionStart hook): what the hello tool returns, without the project \
+             document, which comes as part 1. You don't need to call hello.\n\n"
+        )
+    } else {
+        format!(
+            "AgentFlow hello{when}: what the hello tool returns. Your project's document below is its rules; follow it \
+             over anything a summary says.\n\n"
+        )
+    };
+    // (priority: lower is given up first, text)
+    let mut parts: Vec<(u8, String)> = Vec::new();
+    let section = |prio: u8, title: &str, v: Option<&Value>| -> (u8, String) {
+        match v.filter(|v| !is_empty(v)) {
+            Some(v) => (prio, format!("=== {title} ===\n{}\n", plain(v, 0))),
+            None => (prio, String::new()),
+        }
+    };
+    parts.push(section(2, "Project", r.get("project")));
+    if part == HelloPart::All {
+        parts.push((9, doc(None)));
+    }
+    if let Some(ms) = r.get("milestones").and_then(Value::as_array).filter(|m| !m.is_empty()) {
+        let mut out = String::from("=== Milestones ===\n");
+        for m in ms {
+            let tag = s(m, "tag");
+            let tag = if tag.is_empty() { tag } else { format!(", {tag}") };
+            let _ = writeln!(out, "- {} {} [{}{tag}] tasks: {}", s(m, "name"), s(m, "title"), s(m, "state"), counts(m.get("tasks")));
+            if s(m, "state") == "closed" {
+                continue;
+            }
+            for line in s(m, "description").trim_end().lines() {
+                let _ = writeln!(out, "    {line}");
+            }
+            for st in m.get("steps").and_then(Value::as_array).into_iter().flatten() {
+                let _ = writeln!(out, "  - {} {} [{}] tasks: {}", s(st, "name"), s(st, "title"), s(st, "state"), counts(st.get("tasks")));
+            }
+        }
+        out.push_str("(closed milestones show one line; get_milestone has the rest)\n\n");
+        parts.push((4, out));
+    }
+    parts.push(section(8, "Where you are", r.get("where")));
+    parts.push(section(6, "Notes coming back", r.get("notes_back")));
+    parts.push(section(7, "Open questions", r.get("open_questions")));
+    parts.push(section(3, "Answered this week", r.get("answered_this_week")));
+    parts.push(section(6, "New project-wide decisions since your last session (fold them into the document)", r.get("new_project_decisions")));
+    // Long news (a batch of merges) shows its latest lines; the rest stay a call away.
+    const NEWS_LINES: usize = 25;
+    let news = r.get("news").and_then(Value::as_array).cloned().unwrap_or_default();
+    if !news.is_empty() {
+        let skip = news.len().saturating_sub(NEWS_LINES);
+        let mut title = "News since you last looked (now marked read)".to_owned();
+        if skip > 0 {
+            title = format!("{title}: the latest {NEWS_LINES} of {}; since_last_check {{again: \"1h\"}} shows them all", news.len());
+        }
+        parts.push(section(7, &title, Some(&Value::Array(news[skip..].to_vec()))));
+    }
+    // Recent events, without what the news already said.
+    let seen: std::collections::HashSet<(String, String)> = news.iter().map(|e| (s(e, "at"), s(e, "what"))).collect();
+    let recent: Vec<Value> = r
+        .get("recent_events")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|e| !seen.contains(&(s(e, "at"), s(e, "what"))))
+        .cloned()
+        .collect();
+    parts.push(section(1, "Recent events", Some(&Value::Array(recent))));
+    parts.push(section(5, "CLI", r.get("cli")));
+    if part == HelloPart::NoDoc {
+        fit(&mut parts, HOOK_LIMIT.saturating_sub(head.chars().count()));
+    }
+    head + &parts.into_iter().map(|(_, t)| t).collect::<String>()
+}
+
+/// Shortens the least needed sections until all of them fit in `limit` characters.
+fn fit(parts: &mut [(u8, String)], limit: usize) {
+    const NOTE: &str = "(… cut to fit Claude Code's hook limit; the hello tool has all of it)\n\n";
+    let total = |p: &[(u8, String)]| p.iter().map(|(_, t)| t.chars().count()).sum::<usize>();
+    let mut order: Vec<usize> = (0..parts.len()).collect();
+    order.sort_by_key(|&i| parts[i].0);
+    for i in order {
+        let over = total(parts).saturating_sub(limit);
+        if over == 0 {
+            return;
+        }
+        let len = parts[i].1.chars().count();
+        if len == 0 {
+            continue;
+        }
+        let keep = len.saturating_sub(over + NOTE.len());
+        let title = parts[i].1.lines().next().unwrap_or("").to_owned();
+        parts[i].1 = if keep > title.len() + 40 { format!("{}\n{NOTE}", cut_at_line(&parts[i].1, keep)) } else { format!("{title}\n{NOTE}") };
+    }
+}
+
+/// The text's first `limit` characters, ending at a line break where there is one.
+fn cut_at_line(text: &str, limit: usize) -> String {
+    let head: String = text.chars().take(limit).collect();
+    match head.rfind('\n') {
+        Some(i) if i > 0 => head[..i].to_owned(),
+        _ => head,
+    }
+}
+
+fn counts(v: Option<&serde_json::Value>) -> String {
+    match v.and_then(|v| v.as_object()) {
+        Some(o) if !o.is_empty() => o.iter().map(|(k, n)| format!("{n} {k}")).collect::<Vec<_>>().join(", "),
+        _ => "none".into(),
+    }
+}
+
+fn is_empty(v: &serde_json::Value) -> bool {
+    use serde_json::Value;
+    match v {
+        Value::Null => true,
+        Value::String(s) => s.trim().is_empty(),
+        Value::Array(a) => a.is_empty(),
+        Value::Object(o) => o.values().all(is_empty),
+        _ => false,
+    }
+}
+
+/// JSON as an indented list, leaving out empty values.
+fn plain(v: &serde_json::Value, indent: usize) -> String {
+    use serde_json::Value;
+    let pad = "  ".repeat(indent);
+    let mut out = String::new();
+    match v {
+        Value::Object(o) => {
+            for (k, x) in o.iter().filter(|(_, x)| !is_empty(x)) {
+                match x {
+                    Value::Object(_) | Value::Array(_) => out.push_str(&format!("{pad}{k}:\n{}", plain(x, indent + 1))),
+                    _ => out.push_str(&format!("{pad}{k}: {}\n", scalar(x, &pad))),
+                }
+            }
+        }
+        Value::Array(a) => {
+            for x in a.iter().filter(|x| !is_empty(x)) {
+                match x {
+                    Value::Object(_) | Value::Array(_) => {
+                        let inner = plain(x, indent + 1);
+                        let inner = inner.trim_start();
+                        out.push_str(&format!("{pad}- {inner}"));
+                    }
+                    _ => out.push_str(&format!("{pad}- {}\n", scalar(x, &pad))),
+                }
+            }
+        }
+        x => out.push_str(&format!("{pad}{}\n", scalar(x, &pad))),
+    }
+    out
+}
+
+fn scalar(v: &serde_json::Value, pad: &str) -> String {
+    match v {
+        serde_json::Value::String(s) => s.trim_end().replace('\n', &format!("\n{pad}    ")),
+        x => x.to_string(),
+    }
+}
+
 pub fn news(config_path: &Path, args: ClientArgs, again: Option<String>) -> anyhow::Result<()> {
     let client = Client::new(config_path, &args)?;
     let path = match again.as_deref().map(str::trim).filter(|a| !a.is_empty()) {
