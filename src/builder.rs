@@ -128,7 +128,8 @@ pub async fn run(cfg: Config) -> anyhow::Result<()> {
             Err(e) => eprintln!("{e:#}; trying again in {pause} s"),
         }
         tokio::time::sleep(Duration::from_secs(pause)).await;
-        pause = (pause * 2).min(60);
+        // Short pauses: a server that restarts (an install) is back within seconds, and jobs wait.
+        pause = (pause * 2).min(5);
     }
 }
 

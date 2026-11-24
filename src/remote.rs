@@ -378,13 +378,30 @@ pub fn create(conn: &Connection, j: &NewJob) -> anyhow::Result<i64> {
 
 /// Jobs that were running when AgentFlow stopped: nobody waits for their output any more, so
 /// they're over.
-pub fn fail_orphans(conn: &Connection) -> anyhow::Result<()> {
+pub fn fail_orphans(conn: &Connection) -> anyhow::Result<Vec<(Job, u64)>> {
+    // Those whose request on the builder is known run on: the scheduler follows them again.
+    let keep: Vec<(Job, u64)> = in_states(conn, &["running", "paused"])?
+        .into_iter()
+        .filter_map(|j| {
+            let rid: Option<i64> =
+                conn.query_row("SELECT req_id FROM remote_jobs WHERE id = ?1", [j.id], |r| r.get(0)).ok().flatten();
+            rid.map(|r| (j, r as u64))
+        })
+        .collect();
     conn.execute(
         "UPDATE remote_jobs SET state = 'failed', reason = 'AgentFlow restarted while it ran', finished_at = ?1
-         WHERE state IN ('running', 'paused')",
+         WHERE state IN ('running', 'paused') AND req_id IS NULL",
         [now_ms()],
     )?;
-    Ok(())
+    Ok(keep)
+}
+
+fn in_states(conn: &Connection, states: &[&str]) -> anyhow::Result<Vec<Job>> {
+    let mut out = Vec::new();
+    for s in load_servers(conn)? {
+        out.extend(in_state(conn, &s.name, states)?);
+    }
+    Ok(out)
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -612,8 +629,18 @@ fn work_dir(server: &BuildServer, slug: &str) -> String {
 /// Runs the scheduler: probes the servers, starts what fits, pauses and resumes for memory.
 pub fn spawn(state: crate::web::AppState) {
     tokio::spawn(async move {
-        if let Err(e) = state.db.call(|c| fail_orphans(c)).await {
-            tracing::warn!("build servers: {e:#}");
+        match state.db.call(|c| fail_orphans(c)).await {
+            Ok(keep) => {
+                // Jobs that ran on while AgentFlow restarted: follow them again.
+                let servers = state.db.call(|c| load_servers(c)).await.unwrap_or_default();
+                for (job, rid) in keep {
+                    if let Some(server) = servers.iter().find(|s| s.name == job.server).cloned() {
+                        tracing::info!("following job #{} on {} again after the restart", job.id, server.name);
+                        tokio::spawn(resume_job(state.clone(), server, job, rid));
+                    }
+                }
+            }
+            Err(e) => tracing::warn!("build servers: {e:#}"),
         }
         reload(&state).await;
         let mut last_probe: HashMap<String, i64> = HashMap::new();
@@ -1049,8 +1076,19 @@ exec systemd-run --user --quiet --wait --pipe --collect --unit=af-job-{id} --wor
     flush(&state, &job, &mut out).await;
 
     let code = stream_daemon(&state, &server, &job, script, &mut out).await;
+    finish_run(state, server, job, code, out).await;
+}
+
+async fn finish_run(state: crate::web::AppState, server: BuildServer, job: Job, code: Option<i64>, mut out: Out) {
     state.remote.lock().unwrap_or_else(|e| e.into_inner()).running.remove(&job.id);
     let id = job.id;
+    let _ = state
+        .db
+        .call(move |c| {
+            c.execute("UPDATE remote_jobs SET req_id = NULL WHERE id = ?1", [id])?;
+            Ok(())
+        })
+        .await;
     if state.db.call(move |c| get(c, id)).await.ok().flatten().is_some_and(|j| j.state == "cancelled") {
         out.line(&note("cancelled")).await;
         flush(&state, &job, &mut out).await;
@@ -1069,13 +1107,62 @@ async fn stream_daemon(
     script: String,
     out: &mut Out,
 ) -> Option<i64> {
-    let (rid, mut events) = match crate::builders::hub().stream(&server.name, script) {
+    let (rid, events) = match crate::builders::hub().stream(&server.name, script) {
         Ok(x) => x,
         Err(e) => {
             out.line(&note(&format!("{e:#}"))).await;
             return None;
         }
     };
+    // Kept, so a restarted AgentFlow follows the job again instead of failing it.
+    let id = job.id;
+    let _ = state
+        .db
+        .call(move |c| {
+            c.execute("UPDATE remote_jobs SET req_id = ?2 WHERE id = ?1", params![id, rid as i64])?;
+            Ok(())
+        })
+        .await;
+    follow(state, server, job, rid, events, out).await
+}
+
+/// A job that ran on while AgentFlow restarted: its output goes on into the same file, and it
+/// finishes as any other (the builder kept what it said meanwhile and sends it now).
+async fn resume_job(state: crate::web::AppState, server: BuildServer, job: Job, rid: u64) {
+    let path = log_path(&state.config.data_dir(), job.id);
+    let before = tokio::fs::read_to_string(&path).await.unwrap_or_default().lines().count() as i64;
+    let file = match tokio::fs::OpenOptions::new().append(true).create(true).open(&path).await {
+        Ok(f) => f,
+        Err(e) => {
+            finish(&state, &job, "failed", &format!("can't write the output: {e}"), None, None).await;
+            return;
+        }
+    };
+    let mut out = Out {
+        file,
+        batch: Vec::new(),
+        lines: before,
+        warnings: 0,
+        errors: 0,
+        highlights: Vec::new(),
+        first: Vec::new(),
+        last: Default::default(),
+    };
+    out.line(&note("AgentFlow restarted; following the job again")).await;
+    let events = crate::builders::hub().adopt(&server.name, rid);
+    let code = follow(&state, &server, &job, rid, events, &mut out).await;
+    finish_run(state, server, job, code, out).await;
+}
+
+/// The job's lines into its output until it ends.
+async fn follow(
+    state: &crate::web::AppState,
+    server: &BuildServer,
+    job: &Job,
+    rid: u64,
+    mut events: tokio::sync::mpsc::UnboundedReceiver<crate::builders::Event>,
+    out: &mut Out,
+) -> Option<i64> {
     let (tx, mut stop) = tokio::sync::oneshot::channel();
     state.remote.lock().unwrap_or_else(|e| e.into_inner()).running.insert(job.id, tx);
     let mut tick = tokio::time::interval(Duration::from_secs(1));
