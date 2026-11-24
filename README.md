@@ -43,9 +43,14 @@ agents' process folders. To sign in the first time (or after losing every passke
 `sudo flow server add-passkey` on the server prints a one-time link; the first start also logs one
 (`journalctl -u agentflow`) while no passkey exists.
 
-**Packages.** `scripts/deb.sh` makes a `.deb` from a release binary, and `packaging/arch/PKGBUILD`
-builds the AUR package from a release tag. Both install the two programs (`agentflow`, `flow`), the two services and the user;
-then run `sudo agentflow setup …` as above (no `install` step needed).
+**Packages.** Two of them, as `.deb` (`scripts/deb.sh`, from the release programs) and from the AUR
+(`packaging/arch/PKGBUILD`, a split package built from a release tag):
+- `agentflow`, the server: `agentflow`, its system service, the agents' helper service and the
+  `agentflow` user. It needs `agentflow-client` (agents on the server use `flow`). Then run
+  `sudo agentflow setup …` as above (no `install` step needed), and `sudo flow server add-passkey`.
+- `agentflow-client`: `flow`, and `agentflow-builder` with its user service, for every machine that
+  connects to the server (`flow connect`) or builds for agents (`flow builder add`). A builder keeps
+  running while its user isn't logged in only with linger on: `sudo loginctl enable-linger <user>`.
 
 **As one user (a personal machine).** `scripts/install.sh` builds the release programs, installs them as
 `~/.local/bin/agentflow` and `~/.local/bin/flow` and runs it as a systemd user service (`packaging/agentflow.service`).
