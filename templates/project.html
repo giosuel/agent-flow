@@ -41,7 +41,7 @@
 {% endif %}
 
 <section class="pcard" aria-labelledby="pc-h">
-  <div class="ph"><h2 class="label" id="pc-h">Project</h2><a class="sub" href="/p/{{ slug }}/settings" data-dlg>Edit</a></div>
+  <div class="card-head"><h2 id="pc-h">Project</h2><span class="grow"></span><a class="act" href="/p/{{ slug }}/settings" data-dlg>Edit</a></div>
   <div class="pcard-b">
     <div class="pcard-about">{% for m in about %}{% if m.label == "About" %}<p class="info-about">{{ m.value }}</p>{% endif %}{% endfor %}
       {% if session_url.is_none() %}<p class="sub">The link to its Claude Code session shows up once the agent runs with <span class="mono">/remote-control</span>.</p>{% endif %}</div>
@@ -70,7 +70,7 @@
   <aside class="ov-side" aria-label="About the project">
     {% for rel in releases %}
     <details class="ov-fold" open>
-      <summary class="ph"><span class="ofi">{{ crate::web::icons::icon("tag")|safe }}</span><h2 class="label">Release</h2><span class="sub of-phone mono">{{ rel.tag }}</span><span class="grow"></span><a class="sub of-desk" href="{{ rel.url }}">details</a><span class="of-chev">{{ crate::web::icons::icon("chevron")|safe }}</span></summary>
+      <summary class="card-head"><span class="ofi">{{ crate::web::icons::icon("tag")|safe }}</span><h2>Release</h2><span class="sub of-phone mono">{{ rel.tag }}</span><span class="grow"></span><a class="act of-desk" href="{{ rel.url }}">details</a><span class="of-chev">{{ crate::web::icons::icon("chevron")|safe }}</span></summary>
       <div class="of-body stack">
         <p><span class="mono">{{ rel.tag }}</span> · {{ rel.title }}</p>
         <p class="sub">{{ rel.waits }}{% for (n, u) in rel.open_prs %} <a class="mono" href="{{ u }}">{{ n }}</a>{% endfor %}</p>
@@ -80,7 +80,7 @@
     </details>
     {% endfor %}
     <details class="ov-fold" open>
-      <summary class="ph"><span class="ofi">{{ crate::web::icons::icon("decision")|safe }}</span><h2 class="label" id="dec-h">Latest decisions</h2><span class="sub of-phone mono">{% for d in decisions %}{% if loop.index <= 3 %}{% if !loop.first %}, {% endif %}{{ d.short }}{% endif %}{% endfor %}</span><span class="grow"></span><a class="sub of-desk" href="/p/{{ slug }}?tab=decisions">All</a><span class="of-chev">{{ crate::web::icons::icon("chevron")|safe }}</span></summary>
+      <summary class="card-head"><span class="ofi">{{ crate::web::icons::icon("decision")|safe }}</span><h2 id="dec-h">Latest decisions</h2><span class="sub of-phone mono">{% for d in decisions %}{% if loop.index <= 3 %}{% if !loop.first %}, {% endif %}{{ d.short }}{% endif %}{% endfor %}</span><span class="grow"></span><a class="act of-desk" href="/p/{{ slug }}?tab=decisions">All</a><span class="of-chev">{{ crate::web::icons::icon("chevron")|safe }}</span></summary>
       <div class="of-body">
         {% if decisions.is_empty() %}<p class="sub ovp-pad">No decisions recorded yet.</p>{% endif %}
         {% for d in decisions %}<a class="dec-row" href="{{ d.url }}"><span class="sub mono">{{ d.id }} · {{ d.sub }}</span><span>{{ d.title }}</span></a>{% endfor %}
@@ -88,7 +88,7 @@
     </details>
     {% if !external.is_empty() || !external_done.is_empty() %}
     <details class="ov-fold" open>
-      <summary class="ph"><span class="ofi">{{ crate::web::icons::icon("pr")|safe }}</span><h2 class="label" id="ext-h">External PRs / issues</h2><span class="sub of-phone">{{ external.len() }} open</span><span class="grow"></span><span class="of-chev">{{ crate::web::icons::icon("chevron")|safe }}</span></summary>
+      <summary class="card-head"><span class="ofi">{{ crate::web::icons::icon("pr")|safe }}</span><h2 id="ext-h">External PRs / issues</h2><span class="sub of-phone">{{ external.len() }} open</span><span class="grow"></span><span class="of-chev">{{ crate::web::icons::icon("chevron")|safe }}</span></summary>
       <div class="of-body stack">
       <ul class="rows">{% for e in external %}<li class="item-row ext-row"><span class="ext-ico ext-{{ e.icon }}">{{ crate::web::icons::icon(e.icon)|safe }}</span><div class="ttl"><a href="{{ e.url }}">{{ e.title }}</a><span class="sub">{{ e.sub }}</span></div>{% if let Some((cls, text)) = e.chip %}<span class="chip {{ cls }}">{{ text }}</span>{% endif %}{% if e.review %}<a class="btn sm secondary" href="{{ e.url }}">Review</a>{% endif %}</li>{% endfor %}</ul>
       {% if external.is_empty() %}<p class="sub">Nothing open.</p>{% endif %}

@@ -75,6 +75,10 @@ code, pre, .mono { font-family: var(--mono); }
 .t-h3 { font-size: var(--fs-h3); font-weight: 600; line-height: 1.35; }
 .t-sm { font-size: var(--fs-sm); }
 .t-micro { font-size: var(--fs-micro); font-weight: 500; }
+/* Text in a tone */
+.warn-text { color: var(--warn-ink); }
+.bad-text { color: var(--bad-ink); }
+.ok-text { color: var(--ok-ink); }
 
 /* Layout: a row and a stack */
 .grow { flex: 1 1 0; }
@@ -192,6 +196,37 @@ input[type=checkbox]:disabled, input[type=radio]:disabled { background-color: va
 .switch input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
 .switch input:disabled + span { opacity: .4; }
 
+/* ---------------------------------------------------------------- Page header
+   <div class="head [head-row]"><h1>Usage</h1><p class="status-line">…</p></div>: the title (30), a
+   status line under it, or with .head-row the actions on the right. */
+.head { display: flex; flex-direction: column; gap: var(--sp-2); }
+.head.head-row { flex-direction: row; align-items: center; justify-content: space-between; gap: var(--sp-3); flex-wrap: wrap; }
+.status-line { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1_5) 10px; font-size: var(--fs-sm); color: var(--muted); }
+.status-line a { color: var(--muted); text-decoration: none; }
+.status-line a.warn-text { color: var(--warn-ink); }
+
+/* ---------------------------------------------------------------- Card: one surface, one radius, one header
+   <section class="card"><div class="card-head"><h2>Title</h2><span class="sub">…</span><span class="grow"></span><a class="act">…</a></div>
+   <div class="card-body">…</div><div class="card-foot">…</div></section>; .card.pad for plain content. */
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--r-lg); min-width: 0; }
+.card.pad { padding: var(--sp-6); }
+.card.list { overflow: hidden; }
+.card-head { display: flex; align-items: center; gap: var(--sp-2) var(--sp-3); flex-wrap: wrap; min-height: 56px; padding: var(--sp-3) var(--sp-5); border-bottom: 1px solid var(--line2); }
+.card-head h2, .card-head h3 { margin: 0; font-size: var(--fs-h3); font-weight: 600; color: var(--ink); letter-spacing: 0; text-transform: none; }
+.card-head.flat { border-bottom: 0; }
+summary.card-head { list-style: none; cursor: pointer; }
+summary.card-head::-webkit-details-marker { display: none; }
+.card-body { padding: var(--sp-4) var(--sp-5); }
+.card-foot { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; min-height: 52px; padding: var(--sp-3) var(--sp-5); border-top: 1px solid var(--line2); }
+/* Callout: a box in a tone (waiting on you, a conflict, an estimate) */
+.callout { border: 1px solid var(--warn-line); background: var(--warn-bg); border-radius: var(--r-lg); }
+.callout.bad { border-color: var(--bad-line); background: var(--bad-bg); }
+.callout.accent { border-color: var(--accent-line); background: var(--accent-bg); }
+/* Toolbar: the filters, the first band of the card they filter (.alone: a band of its own) */
+.toolbar { display: flex; flex-wrap: wrap; gap: var(--sp-2); align-items: center; padding: var(--sp-3) var(--sp-5); background: var(--band); border-bottom: 1px solid var(--line); }
+.card > .toolbar:first-child { border-radius: var(--r-lg) var(--r-lg) 0 0; }
+.toolbar.alone { border: 1px solid var(--line); border-radius: var(--r-lg); }
+
 /* ---------------------------------------------------------------- Segmented control: one look, two sizes
    Time ranges, metrics, Markdown/Preview, a mockup's state. Links take aria-current, buttons
    aria-pressed or aria-selected; the picked one has .on. md in toolbars, .sm in card heads. */
@@ -301,6 +336,8 @@ input[type=checkbox]:disabled, input[type=radio]:disabled { background-color: va
   input, select, textarea { font-size: 16px; }
   .field > input, .field > select, .field > textarea { font-size: 16px; }
   .search { flex-basis: 100%; }
+  .card.pad { padding: var(--sp-4); }
+  .card-head, .card-body, .card-foot, .toolbar { padding-left: var(--sp-4); padding-right: var(--sp-4); }
   .seg:not(.sm) { flex-basis: 100%; }
   .seg:not(.sm) > a, .seg:not(.sm) > button { flex: 1; }
   .fchip { min-height: var(--h-md); }

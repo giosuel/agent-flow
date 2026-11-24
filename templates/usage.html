@@ -11,7 +11,7 @@
 </div>
 {# One page, no Overview | Tasks tabs: the tasks are a card, all of them a dialog (D-238). #}
 <section class="card plan-card" aria-labelledby="plan-h">
-  <div class="plan-h"><h2 id="plan-h">Plan</h2>{% if !plan_seen.is_empty() %}<span class="sub">from a status line {{ plan_seen }}</span>{% endif %}<span class="grow"></span>{% if !est_rows.is_empty() %}<a class="sub" href="#est-h">How big a window is</a>{% endif %}</div>
+  <div class="card-head"><h2 id="plan-h">Plan</h2>{% if !plan_seen.is_empty() %}<span class="sub">from a status line {{ plan_seen }}</span>{% endif %}<span class="grow"></span>{% if !est_rows.is_empty() %}<a class="act" href="#est-h">How big a window is</a>{% endif %}</div>
   {% if meters.is_empty() %}
   <p class="sub plan-empty">The plan's 5-hour and weekly usage comes from Claude Code's status line in the agents' sessions. Run <span class="mono">flow project setup</span> again in a project's folder to add it there; the next reply of a session there sends it.</p>
   {% else %}
