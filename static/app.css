@@ -2084,3 +2084,32 @@ html.no-scroll { overflow: hidden; }
   .proj-head { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   .proj-tabs { display: none; }
 }
+
+/* Usage as one page (the owner, 2026-11-23, D-238): Tasks by cost as a card beside How big a
+   window is, every task in a dialog (/usage/tasks). */
+.usage-pair { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+.usage-pair > :only-child { grid-column: 1 / -1; }
+.tk-title { display: flex; align-items: baseline; gap: 12px; }
+.tk-table th[scope=row] { font-weight: 400; white-space: normal; }
+.tk-table th[scope=row] a { color: var(--ink); text-decoration: none; }
+.tk-table th[scope=row] a:hover { color: var(--accent); }
+.tk-table th[scope=row] .mono { margin-right: 4px; }
+.table.nums.tk-table .tk-l { text-align: left; }
+.tk-cost { display: inline-flex; align-items: center; justify-content: flex-end; gap: 10px; }
+.cbar { width: 56px; height: 4px; border-radius: 2px; background: var(--line); overflow: hidden; flex: none; }
+.cbar i { display: block; height: 100%; border-radius: 2px; background: var(--c); }
+.tk-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding-top: 12px; border-top: 1px solid var(--line2); }
+.tk-all { display: inline-flex; align-items: center; gap: 2px; color: var(--accent); font-weight: 600; text-decoration: none; min-height: 32px; }
+.tk-all .i { width: 18px; height: 18px; }
+.tk-all:hover { text-decoration: underline; }
+.pdlg:has(.tasks-all) { width: min(1240px, 100%); }
+.tk-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+.tk-out th[scope=row] { color: var(--ink2); }
+.tk-note { margin-top: 14px; }
+.only-phone.tk-ph { display: none; }
+@media (max-width: 1100px) { .usage-pair { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 700px) {
+  .only-phone.tk-ph { display: block; margin-top: 2px; font-size: 13px; }
+  .cbar { width: 40px; }
+}
+.cbar.cbar-none { visibility: hidden; }
