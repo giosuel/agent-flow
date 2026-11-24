@@ -1560,6 +1560,3 @@ ol.lrows { padding: 0; margin: 0; list-style: none; gap: 0; }
   .tt-acts .btn { width: 100%; }
   .eb td.eb-what { min-width: 0; }
 }
-
-/* Settings › GitHub: what the contribution checks flag (D-251); the select shrinks on the phone. */
-.attr-mode { flex: 1 1 260px; min-width: 0; max-width: 100%; }

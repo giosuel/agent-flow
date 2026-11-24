@@ -328,27 +328,6 @@ async fn settings_are_owner_only() {
     assert!(text.contains("?s=clients") && text.contains("?s=consultant"), "the list of sections");
     let page = s.http.get(s.url("/settings?s=devices")).header(COOKIE, &cookie).send().await.unwrap();
     assert!(page.text().await.unwrap().contains("/install.sh | sh"), "the install command is under Devices");
-    // What the contribution checks flag of Claude's attribution is the user's (D-251).
-    let github = owner_page(&s, &cookie, "/settings?s=github").await;
-    assert!(github.contains(r#"<option value="all" selected>"#), "everything until picked: {github}");
-    let save = |mode: &'static str| {
-        let (http, url, cookie, origin) =
-            (s.http.clone(), s.url("/settings/attribution"), cookie.clone(), s.base.clone());
-        async move {
-            http.post(url).header(COOKIE, &cookie).header(ORIGIN, &origin).form(&[("mode", mode)]).send().await.unwrap()
-        }
-    };
-    assert_eq!(save("bogus").await.status(), StatusCode::BAD_REQUEST);
-    let res = save("trailer").await;
-    assert_eq!(res.headers()[LOCATION], "/settings?done=attribution-saved");
-    let github = owner_page(&s, &cookie, "/settings?done=attribution-saved").await;
-    assert!(
-        github.contains(r#"<option value="trailer" selected>"#) && github.contains("follow it from now on"),
-        "{github}"
-    );
-    let res =
-        s.http.post(s.url("/settings/attribution")).bearer_auth(&admin).form(&[("mode", "off")]).send().await.unwrap();
-    assert_eq!(res.status(), StatusCode::FORBIDDEN);
 }
 
 /// The owner, 2026-11-13: `flow connect` signs a machine in like `gh auth login`; the owner

@@ -18,7 +18,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use anyhow::{Context, bail};
-use rusqlite::{Connection, OptionalExtension};
+use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
@@ -717,88 +717,6 @@ pub struct Check {
     pub link: Option<(String, String)>,
 }
 
-/// Words that mark Claude's attribution, which the owner leaves off other people's repositories.
-const ATTRIBUTION: &[&str] = &[
-    "co-authored-by: claude",
-    "claude-session:",
-    "generated with [claude code",
-    "generated with claude code",
-    "noreply@anthropic.com",
-];
-
-pub fn has_attribution(text: &str) -> bool {
-    let t = text.to_lowercase();
-    ATTRIBUTION.iter().any(|w| t.contains(w))
-}
-
-/// What the checks flag of Claude's attribution: a setting of the user's (the owner, 2026-11-24,
-/// D-251: "this is just my preference, this should be up to the user"), in Settings › GitHub.
-/// Everything until they pick otherwise.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Attribution {
-    /// Co-Authored-By, Claude-Session links and the Claude Code footer.
-    All,
-    /// Claude's Co-Authored-By line in commits is fine; the rest is flagged.
-    Trailer,
-    /// No check.
-    Off,
-}
-
-impl Attribution {
-    pub const KEY: &'static str = "contrib.attribution";
-    pub const ALL: [Attribution; 3] = [Attribution::All, Attribution::Trailer, Attribution::Off];
-
-    pub fn parse(s: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|a| a.key() == s)
-    }
-
-    pub fn key(self) -> &'static str {
-        match self {
-            Attribution::All => "all",
-            Attribution::Trailer => "trailer",
-            Attribution::Off => "off",
-        }
-    }
-
-    pub fn label(self) -> &'static str {
-        match self {
-            Attribution::All => "Flag all Claude attribution",
-            Attribution::Trailer => "Allow Co-Authored-By in commits",
-            Attribution::Off => "Don't check",
-        }
-    }
-
-    /// The user's choice.
-    pub fn of(conn: &Connection) -> anyhow::Result<Self> {
-        let v: Option<String> =
-            conn.query_row("SELECT value FROM settings WHERE key = ?1", [Self::KEY], |r| r.get(0)).optional()?;
-        Ok(v.as_deref().and_then(Self::parse).unwrap_or(Attribution::All))
-    }
-
-    pub fn set(conn: &Connection, a: Attribution) -> anyhow::Result<()> {
-        conn.execute(
-            "INSERT INTO settings (key, value) VALUES (?1, ?2) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
-            rusqlite::params![Self::KEY, a.key()],
-        )?;
-        Ok(())
-    }
-}
-
-/// Claude's attribution in a commit message, as the user's setting sees it.
-pub fn commit_attribution(message: &str, mode: Attribution) -> bool {
-    match mode {
-        Attribution::Off => false,
-        Attribution::All => has_attribution(message),
-        Attribution::Trailer => has_attribution(
-            &message
-                .lines()
-                .filter(|l| !l.trim().to_lowercase().starts_with("co-authored-by:"))
-                .collect::<Vec<_>>()
-                .join("\n"),
-        ),
-    }
-}
-
 /// Headings of their template that the text doesn't have.
 pub fn missing_headings(template: &str, body: &str) -> Vec<String> {
     let body = body.to_lowercase();
@@ -813,12 +731,6 @@ pub fn missing_headings(template: &str, body: &str) -> Vec<String> {
 
 pub fn checks(conn: &Connection, r: &Record, p: &Pending<'_>) -> anyhow::Result<Vec<Check>> {
     let mut out = Vec::new();
-    let commits: Vec<Commit> = p
-        .data
-        .get("code")
-        .and_then(|c| c.get("commits"))
-        .and_then(|c| serde_json::from_value(c.clone()).ok())
-        .unwrap_or_default();
     if let Some(t) = r.data.get("template").and_then(|t| t.get("text")).and_then(Value::as_str)
         && p.kind == DraftType::Pr
     {
@@ -834,30 +746,8 @@ pub fn checks(conn: &Connection, r: &Record, p: &Pending<'_>) -> anyhow::Result<
             link: None,
         });
     }
-    let mode = Attribution::of(conn)?;
-    let message = |c: &Commit| format!("{}\n{}", c.subject, c.body);
-    let in_commits = commits.iter().any(|c| commit_attribution(&message(c), mode));
-    let allowed = mode == Attribution::Trailer && commits.iter().any(|c| has_attribution(&message(c)));
-    let in_text = has_attribution(p.body) || (p.kind.is_new() && has_attribution(p.title));
-    if mode != Attribution::Off {
-        out.push(Check {
-            ok: !in_commits && !in_text,
-            text: match (in_text, in_commits) {
-                (false, false) if allowed => {
-                    "Only Claude's Co-Authored-By line in the commits, which you allow (Settings › GitHub)".into()
-                }
-                (false, false) => "No Claude attribution in the text or the commits".into(),
-                (true, false) => {
-                    "The text has Claude attribution (you leave it off other people's repositories)".into()
-                }
-                (false, true) => {
-                    "A commit message has Claude attribution (you leave it off other people's repositories)".into()
-                }
-                (true, true) => "The text and a commit message have Claude attribution".into(),
-            },
-            link: None,
-        });
-    }
+    // No check of Claude's attribution: that's the standard of the user's own agent, which they
+    // override in its configuration if they want (the owner, 2026-11-24, D-252).
     let agreed = p.data.get("agreed").and_then(Value::as_str).unwrap_or("");
     if p.kind.is_new() {
         let found = if agreed.is_empty() {
@@ -1347,30 +1237,7 @@ mod tests {
     }
 
     #[test]
-    fn attribution_follows_the_users_setting() {
-        let msg = "Fix the parser\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>";
-        let both = format!("{msg}\nClaude-Session: https://claude.ai/code/session_1");
-        assert!(commit_attribution(msg, Attribution::All));
-        assert!(!commit_attribution(msg, Attribution::Trailer), "the Co-Authored-By line is allowed");
-        assert!(commit_attribution(&both, Attribution::Trailer), "a session link still isn't");
-        assert!(!commit_attribution(&both, Attribution::Off));
-        let db = crate::db::Db::open_memory();
-        db.call_blocking(|c| {
-            assert_eq!(Attribution::of(c)?, Attribution::All, "everything until the user picks");
-            Attribution::set(c, Attribution::Trailer)?;
-            assert_eq!(Attribution::of(c)?, Attribution::Trailer);
-            Ok(())
-        })
-        .unwrap();
-        assert_eq!(Attribution::parse("off"), Some(Attribution::Off));
-        assert_eq!(Attribution::parse("bogus"), None);
-    }
-
-    #[test]
-    fn attribution_and_template_headings() {
-        assert!(has_attribution("Fix\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"));
-        assert!(has_attribution("🤖 Generated with [Claude Code](https://claude.com/claude-code)"));
-        assert!(!has_attribution("Center fences on the axis"));
+    fn template_headings() {
         let t = "## Summary\n\nWhat it does\n\n## Testing\n\n<!-- how -->\n";
         assert_eq!(missing_headings(t, "## Summary\nIt centers them."), ["Testing"]);
         assert!(missing_headings(t, "## summary\nx\n## testing\ny").is_empty());
