@@ -501,11 +501,12 @@ pub struct MilestonePatch {
     pub name: Option<String>,
     pub title: Option<String>,
     pub description: Option<String>,
-    /// planned, active or closed. Reopening a closed milestone needs `reopened_because`.
+    /// planned, active or closed. Reopening a closed milestone (not a step) needs `reopened_because`.
     pub state: Option<String>,
     /// The tag that closed it, e.g. "v0.0.5-m4".
     pub tag: Option<String>,
-    /// Why a closed milestone is reopened. Closed milestones should stay closed: say why.
+    /// Why a closed milestone is reopened. Closed milestones should stay closed: say why. Steps
+    /// reopen freely.
     pub reopened_because: Option<String>,
     /// Move it before this milestone (by name); "end" moves it to the end.
     pub move_before: Option<String>,
@@ -513,9 +514,11 @@ pub struct MilestonePatch {
     /// history brought in from elsewhere (an import).
     pub started_at: Option<String>,
     pub closed_at: Option<String>,
-    /// A concluded step's summary, for steps brought in from elsewhere (conclude_step writes it
-    /// for steps concluded here).
+    /// A step's summary: rewrite it, e.g. when tasks were moved in from other steps (conclude_step
+    /// writes it for steps concluded here). Empty removes it.
     pub summary: Option<String>,
+    /// Move a step to another milestone, e.g. "P10".
+    pub step_of: Option<String>,
 }
 
 pub fn update_milestone(
@@ -533,15 +536,17 @@ pub fn update_milestone(
             bail!("state must be planned, active or closed");
         }
         if m.state == "closed" {
+            // A milestone closed with its tag stays closed unless there's a reason; steps are the
+            // agent's to edit freely (the owner, 2026-11-12).
             let why = patch.reopened_because.as_deref().map(str::trim).unwrap_or("");
-            if why.is_empty() {
+            if why.is_empty() && m.parent_id.is_none() {
                 bail!("{} is closed; reopening it needs reopened_because", m.name);
             }
             conn.execute(
                 "UPDATE milestones SET reopened_because = ?1, closed_at = NULL WHERE id = ?2",
                 params![why, m.id],
             )?;
-            notes.push(format!("reopened: {why}"));
+            notes.push(if why.is_empty() { "reopened".into() } else { format!("reopened: {why}") });
         }
         if state == "closed" {
             conn.execute("UPDATE milestones SET closed_at = ?1 WHERE id = ?2", params![now, m.id])?;
@@ -581,12 +586,28 @@ pub fn update_milestone(
             notes.push(format!("{col} set to {v}"));
         }
     }
-    if let Some(sum) = patch.summary.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
-        if m.state != "closed" && patch.state.as_deref() != Some("closed") {
-            bail!("a summary is for a concluded step (state closed); conclude_step concludes one");
+    if let Some(sum) = patch.summary.as_deref().map(str::trim) {
+        let n = conn.execute(
+            "UPDATE milestones SET summary = ?1 WHERE id = ?2 AND summary != ?1",
+            params![crate::activity::redact(sum), m.id],
+        )?;
+        if n > 0 {
+            notes.push(if sum.is_empty() { "summary removed".into() } else { "summary set".into() });
         }
-        conn.execute("UPDATE milestones SET summary = ?1 WHERE id = ?2", params![crate::activity::redact(sum), m.id])?;
-        notes.push("summary set".into());
+    }
+    if let Some(parent) = patch.step_of.as_deref().map(str::trim).filter(|p| !p.is_empty()) {
+        let p = find_milestone(conn, m.project_id, parent)?;
+        if m.parent_id.is_none() {
+            bail!("{} is a milestone; only steps move to another milestone", m.name);
+        }
+        if p.parent_id.is_some() {
+            bail!("{} is a step; steps belong to a milestone", p.name);
+        }
+        if m.parent_id != Some(p.id) {
+            conn.execute("UPDATE milestones SET parent_id = ?1 WHERE id = ?2", params![p.id, m.id])
+                .with_context(|| format!("{} has a step {} already", p.name, m.name))?;
+            notes.push(format!("now a step of {}", p.name));
+        }
     }
     if let Some(before) = &patch.move_before {
         let pos = if before.eq_ignore_ascii_case("end") {

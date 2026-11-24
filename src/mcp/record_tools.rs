@@ -51,6 +51,10 @@ pub struct TaskItem {
     pub state: Option<String>,
     /// Why it's skipped.
     pub reason: Option<String>,
+    /// For a done task brought in as history (e.g. a step folded into another): when it started
+    /// and ended, "2026-11-09" or "2026-11-09 14:30" (UTC).
+    pub started_at: Option<String>,
+    pub done_at: Option<String>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -106,6 +110,14 @@ pub struct UpdateTask {
     /// A line for the task's history; for skipped or a time correction, why.
     #[serde(default)]
     pub note: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct DeleteTasks {
+    /// The tasks, e.g. ["T-14", "T-15"].
+    pub ids: Vec<String>,
+    /// Why, in a line; kept in the project's event log.
+    pub reason: String,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -418,6 +430,14 @@ fn check_item(t: &TaskItem) -> Result<(), String> {
     if let Some(b) = &t.branch {
         check_branch(b.trim()).map_err(|e| e.to_string())?;
     }
+    for (k, v) in [("started_at", &t.started_at), ("done_at", &t.done_at)] {
+        if let Some(v) = v.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
+            if t.state.as_deref() != Some("done") {
+                return Err(format!("{k} is for a done task brought in as history"));
+            }
+            crate::util::parse_day_or_time(v).map_err(|e| format!("{k}: {e:#}"))?;
+        }
+    }
     Ok(())
 }
 
@@ -452,6 +472,11 @@ fn add_one(tx: &rusqlite::Connection, project_id: i64, m: Option<&projects::Mile
     if state == "doing" {
         data.insert("started_at".into(), now_ms().into());
     }
+    for (k, v) in [("started_at", &t.started_at), ("done_at", &t.done_at)] {
+        if let Some(v) = v.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
+            data.insert(k.into(), crate::util::parse_day_or_time(v)?.into());
+        }
+    }
     let r = records::create(
         tx,
         project_id,
@@ -479,10 +504,8 @@ fn update_one(tx: &rusqlite::Connection, a: &crate::auth::Actor, id: &str, p: &U
     }
     let milestone_id = match &p.milestone {
         Some(name) => {
+            // Any step, concluded ones too (the owner, 2026-11-12: agents edit steps and tasks freely).
             let m = projects::find_milestone(tx, r.project_id, name)?;
-            if m.state == "closed" {
-                anyhow::bail!("{} is concluded; move the task to a step that isn't", m.name);
-            }
             Some(Some(m.id))
         }
         None => None,
@@ -1102,9 +1125,43 @@ impl FlowMcp {
         self.finish(&actor, "update_decision", Action::Write, outcome).await
     }
 
+    #[tool(description = "Delete tasks for good (the owner, 2026-11-12: agents edit or delete steps and tasks \
+        freely): a duplicate, a mistake, or one folded into another. Their history and links go with them; the event \
+        log keeps a line with each one's title and your reason. A task you decided not to do is skipped instead \
+        (update_task), so the step shows it. All or none.")]
+    async fn delete_tasks(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(p): Parameters<DeleteTasks>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let actor = actor_of(&parts);
+        let a = actor.clone();
+        let outcome = self
+            .state
+            .db
+            .call(move |c| {
+                let tx = c.transaction()?;
+                if p.ids.is_empty() {
+                    anyhow::bail!("name the tasks in ids, e.g. [\"T-14\"]");
+                }
+                let mut done = Vec::new();
+                let mut project = String::new();
+                for id in &p.ids {
+                    let t = writable(&tx, &a, id)?;
+                    crate::steps::delete_task(&tx, &t, &p.reason, &a.name())?;
+                    project = t.project.clone();
+                    done.push(t.short_id());
+                }
+                tx.commit()?;
+                Ok(Outcome::new(json!({"deleted": done})).summary(format!("deleted {}", done.join(", "))).project(project))
+            })
+            .await;
+        self.finish(&actor, "delete_tasks", Action::Write, outcome).await
+    }
+
     #[tool(description = "Change a task, or several at once with ids: its state (todo, doing, review, done, blocked, \
-        parked, skipped), title, details, step, tags, estimate, branch, or when a parked task comes back. Doing starts \
-        its step; blocked needs blocked_by; skipped a note on why.")]
+        parked, skipped), title, details, step (any step, concluded ones too), tags, estimate, branch, or when a parked \
+        task comes back. Doing starts its step; blocked needs blocked_by; skipped a note on why.")]
     async fn update_task(
         &self,
         Extension(parts): Extension<Parts>,

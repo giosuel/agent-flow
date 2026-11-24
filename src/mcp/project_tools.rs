@@ -111,6 +111,21 @@ pub struct ConcludeStep {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct DeleteStep {
+    /// Only for the consultant: which project.
+    pub project: Option<String>,
+    /// The step, e.g. "P9.3b" (or a milestone without steps).
+    pub step: String,
+    /// Move its tasks to this step, e.g. "P9.3"; its notes, PRs, decisions and timings go there too.
+    pub move_to: Option<String>,
+    /// Delete its tasks with it instead.
+    #[serde(default)]
+    pub delete_tasks: bool,
+    /// Why, in a line; kept in the project's event log.
+    pub reason: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct EditProjectDoc {
     /// Only for the consultant: which project.
     pub project: Option<String>,
@@ -457,8 +472,10 @@ impl FlowMcp {
     }
 
     #[tool(
-        description = "Change a milestone or step: rename, retitle, describe, move it (move_before), set its state \
-        (planned, active, closed) and the tag that closed it. A closed milestone should stay closed; reopening needs a reason."
+        description = "Change a milestone or step: rename, retitle, describe, move it (move_before, or step_of to \
+        another milestone), set its state (planned, active, closed), dates, summary and the tag that closed it. Steps \
+        are yours to edit freely, concluded ones too (the owner, 2026-11-12); a closed milestone should stay closed, \
+        and reopening one needs a reason."
     )]
     async fn update_milestone(
         &self,
@@ -527,6 +544,38 @@ impl FlowMcp {
             })
             .await;
         self.finish(&actor, "conclude_step", Action::Write, outcome).await
+    }
+
+    #[tool(description = "Delete a step for good (the owner, 2026-11-12: agents edit or delete steps and tasks \
+        freely), e.g. to fold small steps into one: move its tasks with move_to, or delete them with delete_tasks. \
+        Its notes, PRs, decisions and timings are never deleted: they go to move_to, or to its milestone. The event \
+        log keeps a line with what it was and your reason.")]
+    async fn delete_step(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(p): Parameters<DeleteStep>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let actor = actor_of(&parts);
+        let a = actor.clone();
+        let outcome = self
+            .state
+            .db
+            .call(move |c| {
+                let tx = c.transaction()?;
+                let project = target_project(&tx, &a, p.project.as_deref(), true)?;
+                let step = projects::find_milestone(&tx, project.id, &p.step)?;
+                let to = match p.move_to.as_deref().map(str::trim).filter(|m| !m.is_empty()) {
+                    Some(name) => Some(projects::find_milestone(&tx, project.id, name)?),
+                    None => None,
+                };
+                let done = crate::steps::delete_step(&tx, &step, to.as_ref(), p.delete_tasks, &p.reason, &a.name())?;
+                tx.commit()?;
+                Ok(Outcome::new(json!({"deleted": step.name, "moved": done.moved, "tasks_deleted": done.deleted, "moved_to": to.map(|t| t.name)}))
+                    .summary(format!("step {} deleted", step.name))
+                    .project(project.slug))
+            })
+            .await;
+        self.finish(&actor, "delete_step", Action::Write, outcome).await
     }
 
     #[tool(description = "Change your project document: one `##` section at a time (replaced, added or removed), \

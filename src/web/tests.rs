@@ -2349,3 +2349,73 @@ async fn devices_download_the_program_for_flow_run() {
     let bytes = res.bytes().await.unwrap();
     assert_eq!(&bytes[..4], b"\x7fELF", "the program itself");
 }
+
+/// The owner, 2026-11-12: "let agents freely edit steps and tasks, edit or delete them".
+#[tokio::test]
+async fn steps_and_tasks_are_edited_and_deleted_freely() {
+    let s = TestServer::start().await;
+    let token = s.token(TokenKind::Project, Some("vinculum")).await;
+    let sess = mcp_session(&s, &token).await;
+    let call = |name: &'static str, args: Value| {
+        let (s, token, sess) = (&s, token.clone(), sess.clone());
+        async move { mcp_tool(s, &token, &sess, name, args).await }
+    };
+    assert!(call("add_milestone", json!({"name": "P9", "title": "Prep"})).await.0);
+    assert!(call("add_milestone", json!({"name": "P10", "title": "More prep"})).await.0);
+    for (n, t) in [("P9.3", "Agents"), ("P9.3b", "Batches"), ("P9.3c", "Asking first")] {
+        assert!(call("add_milestone", json!({"name": n, "title": t, "step_of": "P9"})).await.0);
+    }
+    for n in ["P9.3", "P9.3b", "P9.3c"] {
+        let (ok, r) = call("update_milestone", json!({"milestone": n, "state": "closed", "summary": format!("{n} done.")})).await;
+        assert!(ok, "{r}");
+    }
+    let (ok, r) = call("add_tasks", json!({"milestone": "P9.3b", "tasks": [{"title": "Batch API", "state": "done"}]})).await;
+    assert!(ok && r["ids"] == json!(["T-1"]), "{r}");
+    let (ok, r) = call("add_tasks", json!({"milestone": "P9.3c", "tasks": [{"title": "Ask UI", "state": "done"}]})).await;
+    assert!(ok && r["ids"] == json!(["T-2"]), "{r}");
+    let (ok, n) = call("add_note", json!({"name": "Batch log", "category": "log", "text": "ok", "record": "P9.3b"})).await;
+    assert!(ok, "{n}");
+    // Fold P9.3b into P9.3: a done task with its dates, its own task moved, the step deleted.
+    let (ok, r) = call("add_tasks", json!({"milestone": "P9.3", "tasks": [
+        {"title": "P9.3c: Asking first", "state": "done", "body": "P9.3c done.", "started_at": "2026-11-09", "done_at": "2026-11-09 18:00"}]})).await;
+    assert!(ok, "{r}");
+    assert!(!call("add_tasks", json!({"milestone": "P9.3", "tasks": [{"title": "x", "state": "todo", "estimate": "1 h", "done_at": "2026-11-09"}]})).await.0);
+    let (ok, err) = call("delete_step", json!({"step": "P9.3b", "reason": "folded into P9.3"})).await;
+    assert!(!ok && err.as_str().unwrap().contains("has tasks (T-1)"), "{err}");
+    assert!(!call("delete_step", json!({"step": "P9.3b"})).await.0, "a reason");
+    let (ok, d) = call("delete_step", json!({"step": "P9.3b", "move_to": "P9.3", "reason": "folded into P9.3"})).await;
+    assert!(ok, "{d}");
+    assert_eq!(d["moved"], json!(["T-1", "N-1"]));
+    let (ok, d) = call("delete_step", json!({"step": "P9.3c", "delete_tasks": true, "reason": "now T-3 in P9.3"})).await;
+    assert!(ok, "{d}");
+    assert!(!call("update_milestone", json!({"milestone": "P9.3b", "title": "x"})).await.0, "gone");
+    assert!(!call("delete_step", json!({"step": "P9", "reason": "x"})).await.0, "a milestone with steps stays");
+    // Concluded steps: reopened without a reason, moved to another milestone, summary rewritten;
+    // tasks move into them.
+    let (ok, r) = call("update_milestone", json!({"milestone": "P9.3", "summary": "Agents drive the app; batches and asking first."})).await;
+    assert!(ok, "{r}");
+    let (ok, r) = call("add_task", json!({"milestone": "P10", "title": "Later", "estimate": "1 h"})).await;
+    assert!(ok, "{r}");
+    let (ok, r) = call("update_task", json!({"id": "T-4", "milestone": "P9.3"})).await;
+    assert!(ok, "{r}");
+    let (ok, r) = call("update_milestone", json!({"milestone": "P9.3", "state": "active"})).await;
+    assert!(ok, "{r}");
+    let (ok, r) = call("update_milestone", json!({"milestone": "P9.3", "step_of": "P10"})).await;
+    assert!(ok, "{r}");
+    // Tasks deleted for good, all or none, with a line in the log.
+    assert!(!call("delete_tasks", json!({"ids": ["T-4", "T-99"], "reason": "dup"})).await.0);
+    let (ok, r) = call("delete_tasks", json!({"ids": ["T-4"], "reason": "a duplicate of T-1"})).await;
+    assert!(ok && r["deleted"] == json!(["T-4"]), "{r}");
+    let (ok, _) = call("get_record", json!({"id": "T-4"})).await;
+    assert!(!ok);
+    let (ok, r) = call("get_record", json!({"id": "T-1"})).await;
+    assert!(ok && r["milestone"] == "P9.3", "{r}");
+    let log: String = s
+        .state
+        .db
+        .call(|c| Ok(c.query_row("SELECT group_concat(summary, ' | ') FROM events WHERE kind IN ('task.deleted', 'milestone.deleted')", [], |r| r.get(0))?))
+        .await
+        .unwrap();
+    assert!(log.contains("T-4 deleted (Later, was todo): a duplicate of T-1") && log.contains("Step P9.3b deleted (Batches, closed): folded into P9.3; moved: T-1, N-1"), "{log}");
+    assert!(log.contains("deleted with it: T-2"), "{log}");
+}
