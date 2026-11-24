@@ -621,6 +621,10 @@ async fn the_overview_puts_questions_first_and_folds_closed_milestones() {
     assert!(m1 < m2 && m2 < m3, "done, under way, planned");
     assert!(page.contains(r#"<details class="ml-done" data-ml-done>"#), "the done ones folded on the overview");
     assert!(!page.contains("Open questions"), "the old card at the bottom is gone");
+    // The state icons say what they mean on hover.
+    for tip in [r#"title="Done""#, r#"title="Under way""#, r#"title="Planned"#] {
+        assert!(page.contains(tip), "{tip}: {page}");
+    }
     // One click answers, and the overview says so.
     let res = s
         .http
