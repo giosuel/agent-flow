@@ -255,7 +255,10 @@ async fn upload(
         anyhow::Ok(manifest)
     }
     .await;
-    let manifest = match result.and_then(|m| pick_entry(&m, q.entry.trim(), q.platform.trim().is_empty() || q.platform.trim() == builds::DEFAULT_PLATFORM).map(|e| (m, e))) {
+    let manifest = match result.and_then(|m| {
+        pick_entry(&m, q.entry.trim(), q.platform.trim().is_empty() || q.platform.trim() == builds::DEFAULT_PLATFORM)
+            .map(|e| (m, e))
+    }) {
         Ok(m) => m,
         Err(e) => return json_error(StatusCode::BAD_REQUEST, format!("{e:#}")),
     };
@@ -267,7 +270,8 @@ async fn upload(
     }
     // The name is taken atomically: a hard link fails if it exists, so two uploads in the same
     // minute from the same commit never share one, and a build never changes.
-    let base = builds::build_name(built_at.unwrap_or_else(time::OffsetDateTime::now_utc), q.branch.trim(), q.commit.trim());
+    let base =
+        builds::build_name(built_at.unwrap_or_else(time::OffsetDateTime::now_utc), q.branch.trim(), q.commit.trim());
     let mut name = base.clone();
     let mut n = 1;
     loop {
@@ -302,7 +306,8 @@ async fn upload(
         })
         .filter(|(t, _)| !t.is_empty())
         .collect();
-    let platform = if q.platform.trim().is_empty() { builds::DEFAULT_PLATFORM.to_owned() } else { q.platform.trim().to_owned() };
+    let platform =
+        if q.platform.trim().is_empty() { builds::DEFAULT_PLATFORM.to_owned() } else { q.platform.trim().to_owned() };
     if let Err(e) = builds::check_platform(&platform) {
         return json_error(StatusCode::BAD_REQUEST, format!("{e:#}"));
     }
@@ -310,7 +315,9 @@ async fn upload(
         Vec::new()
     } else {
         match serde_json::from_str::<Vec<String>>(&q.needs) {
-            Ok(n) if n.len() <= 12 && n.iter().all(|x| x.chars().count() <= 200) => n.into_iter().map(|x| x.trim().to_owned()).filter(|x| !x.is_empty()).collect(),
+            Ok(n) if n.len() <= 12 && n.iter().all(|x| x.chars().count() <= 200) => {
+                n.into_iter().map(|x| x.trim().to_owned()).filter(|x| !x.is_empty()).collect()
+            }
             _ => return json_error(StatusCode::BAD_REQUEST, "needs is a list of up to 12 short lines"),
         }
     };
@@ -709,9 +716,12 @@ async fn download(
     })
     .await;
     let Ok(Ok(bytes)) = bytes else { return StatusCode::GONE.into_response() };
-    let file: String = if single { entry.rsplit('/').next().unwrap_or(&entry).to_owned() } else { format!("{name}.tar") };
+    let file: String =
+        if single { entry.rsplit('/').next().unwrap_or(&entry).to_owned() } else { format!("{name}.tar") };
     let file: String = file.chars().filter(|c| c.is_ascii_alphanumeric() || "-_.".contains(*c)).collect();
-    let e = Entry::new(&actor, Via::Page, Action::Read, format!("build {} downloaded", r.short_id())).project(r.project.clone()).target(r.ref_id.clone());
+    let e = Entry::new(&actor, Via::Page, Action::Read, format!("build {} downloaded", r.short_id()))
+        .project(r.project.clone())
+        .target(r.ref_id.clone());
     activity::write(&state.db, e).await;
     let mut res = bytes.into_response();
     let h = res.headers_mut();

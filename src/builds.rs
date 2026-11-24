@@ -43,7 +43,9 @@ pub const DEFAULT_PLATFORM: &str = "linux-x86_64";
 pub fn check_platform(p: &str) -> anyhow::Result<()> {
     let ok = p.len() <= 40
         && p.split_once('-').is_some_and(|(os, arch)| {
-            !os.is_empty() && !arch.is_empty() && os.chars().all(|c| c.is_ascii_lowercase())
+            !os.is_empty()
+                && !arch.is_empty()
+                && os.chars().all(|c| c.is_ascii_lowercase())
                 && arch.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
         });
     if !ok {

@@ -36,7 +36,8 @@ enum Command {
         /// The only user allowed to send jobs: AgentFlow's own.
         #[arg(long, default_value = "agentflow")]
         server_user: String,
-    },    /// The client commands moved to `flow`. For one release, `flow hello`, `news`,
+    },
+    /// The client commands moved to `flow`. For one release, `flow hello`, `news`,
     /// `publish` and the others are handed to `flow`, so hooks written before keep working.
     #[command(external_subcommand)]
     Moved(Vec<OsString>),

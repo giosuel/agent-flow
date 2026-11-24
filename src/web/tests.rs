@@ -171,7 +171,16 @@ async fn a_passkey_link_leads_to_adding_a_passkey() {
     let res = s.http.post(s.url(&format!("/login/link/{link}"))).send().await.unwrap();
     assert_eq!(res.headers()["location"], "/settings?add_passkey=1#passkeys");
     let cookie = res.headers()[SET_COOKIE].to_str().unwrap().split(';').next().unwrap().to_owned();
-    let page = s.http.get(s.url("/settings?add_passkey=1")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
+    let page = s
+        .http
+        .get(s.url("/settings?add_passkey=1"))
+        .header(COOKIE, &cookie)
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
     assert!(page.contains("Add a passkey for this device"), "{page}");
     assert!(s.log_summaries().await.iter().any(|l| l.contains("passkey link made on the server, as root")));
 }
@@ -313,7 +322,15 @@ async fn a_machine_connects_after_the_owner_approves() {
     let polled = |p: String| {
         let s = &s;
         async move {
-            s.http.post(s.url("/api/approvals/poll")).json(&json!({"poll": p})).send().await.unwrap().json::<Value>().await.unwrap()
+            s.http
+                .post(s.url("/api/approvals/poll"))
+                .json(&json!({"poll": p}))
+                .send()
+                .await
+                .unwrap()
+                .json::<Value>()
+                .await
+                .unwrap()
         }
     };
     assert_eq!(polled(poll.clone()).await["state"], "pending");
@@ -322,9 +339,25 @@ async fn a_machine_connects_after_the_owner_approves() {
     let admin = s.token(TokenKind::Admin, None).await;
     let res = s.http.get(s.url(&format!("/approve/{code}"))).bearer_auth(&admin).send().await.unwrap();
     assert_eq!(res.status(), StatusCode::FORBIDDEN);
-    let res = s.http.post(s.url(&format!("/approve/{code}"))).bearer_auth(&admin).form(&[("decision", "approve")]).send().await.unwrap();
+    let res = s
+        .http
+        .post(s.url(&format!("/approve/{code}")))
+        .bearer_auth(&admin)
+        .form(&[("decision", "approve")])
+        .send()
+        .await
+        .unwrap();
     assert_eq!(res.status(), StatusCode::FORBIDDEN);
-    let page = s.http.get(s.url(&format!("/approve/{code}"))).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
+    let page = s
+        .http
+        .get(s.url(&format!("/approve/{code}")))
+        .header(COOKIE, &cookie)
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
     assert!(page.contains(&code) && page.contains("viber@mothman") && page.contains("Approve"), "{page}");
     let settings = s.http.get(s.url("/settings")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
     assert!(settings.contains("Waiting for your approval") && settings.contains(&code));
@@ -357,9 +390,17 @@ async fn a_machine_connects_after_the_owner_approves() {
 
     // A connected machine asks for an admin job; agents' tokens can't even ask.
     let project = s.token(TokenKind::Project, Some("imaginarium")).await;
-    let res = s.http.post(s.url("/api/approvals")).bearer_auth(&project).json(&json!({"action": "backup", "machine": "x"})).send().await.unwrap();
+    let res = s
+        .http
+        .post(s.url("/api/approvals"))
+        .bearer_auth(&project)
+        .json(&json!({"action": "backup", "machine": "x"}))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(res.status(), StatusCode::FORBIDDEN);
-    let res = s.http.post(s.url("/api/approvals")).json(&json!({"action": "backup", "machine": "x"})).send().await.unwrap();
+    let res =
+        s.http.post(s.url("/api/approvals")).json(&json!({"action": "backup", "machine": "x"})).send().await.unwrap();
     assert_eq!(res.status(), StatusCode::FORBIDDEN, "admin jobs come from a connected machine");
     let asked: Value = s
         .http
@@ -386,11 +427,19 @@ async fn a_machine_connects_after_the_owner_approves() {
     // flow disconnect: the machine revokes its own token.
     let res = s.http.delete(s.url("/api/tokens/self")).bearer_auth(&token).send().await.unwrap();
     assert_eq!(res.status(), StatusCode::OK);
-    assert_eq!(s.http.get(s.url("/api/status")).bearer_auth(&token).send().await.unwrap().status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        s.http.get(s.url("/api/status")).bearer_auth(&token).send().await.unwrap().status(),
+        StatusCode::UNAUTHORIZED
+    );
 
     // The install script is public and names this server.
     let script = s.http.get(s.url("/install.sh")).send().await.unwrap().text().await.unwrap();
-    assert!(script.starts_with("#!/bin/sh") && script.contains(&format!("url='{}'", s.base)) && script.contains("flow\" connect"), "{script}");
+    assert!(
+        script.starts_with("#!/bin/sh")
+            && script.contains(&format!("url='{}'", s.base))
+            && script.contains("flow\" connect"),
+        "{script}"
+    );
 }
 
 #[tokio::test]
@@ -461,7 +510,9 @@ async fn an_agent_runs_its_project_over_mcp() {
     // A replaced decision is out of the default reads; include_closed brings it.
     let (_, found) = call("find_records", json!({"project": "all", "kind": "decision", "text": "vertical"})).await;
     assert_eq!(found["count"], 0, "{found}");
-    let (_, found) = call("find_records", json!({"project": "all", "kind": "decision", "text": "vertical", "include_closed": true})).await;
+    let (_, found) =
+        call("find_records", json!({"project": "all", "kind": "decision", "text": "vertical", "include_closed": true}))
+            .await;
     assert_eq!(found["records"][0]["id"], "vinculum/D-1");
 
     // Another project's agent can read but not change.
@@ -700,9 +751,11 @@ async fn prs_merge_in_order_from_the_owners_buttons() {
         let (ok, r) = call("add_button", json!({"record": format!("PR-{n}"), "label": "Merge", "kind": "merge", "command": format!("echo merged {n} > merged-{n}"), "workdir": wd})).await;
         assert!(ok, "{r}");
     }
-    let (ok, r) =
-        call("add_release", json!({"tag": "v0.0.5-m4", "title": "M4: Keybinds", "waits_for": ["PR-48", "PR-49"], "tag_button": false}))
-            .await;
+    let (ok, r) = call(
+        "add_release",
+        json!({"tag": "v0.0.5-m4", "title": "M4: Keybinds", "waits_for": ["PR-48", "PR-49"], "tag_button": false}),
+    )
+    .await;
     assert!(ok, "{r}");
     call("add_button", json!({"record": "R-1", "label": "Push tag v0.0.5-m4", "kind": "tag", "command": "echo tagged > tagged", "workdir": wd, "requires": ["PR-49"]})).await;
 
@@ -968,8 +1021,16 @@ async fn a_build_goes_from_agent_to_owner_and_feedback_comes_back() {
     std::fs::write(exe.path().join("lumen.exe"), b"MZ fake exe").unwrap();
     let mut wtar = Vec::new();
     crate::builds::pack(&exe.path().join("lumen.exe"), &mut wtar).unwrap();
-    let wurl = |q: &str| s.url(&format!("/api/builds?product=imaginarium&summary=Windows&commit=b2c3d4e&branch=m8&{q}"));
-    let res = s.http.post(wurl("entry=lumen.exe&platform=windows%20x86")).bearer_auth(&token).body(wtar.clone()).send().await.unwrap();
+    let wurl =
+        |q: &str| s.url(&format!("/api/builds?product=imaginarium&summary=Windows&commit=b2c3d4e&branch=m8&{q}"));
+    let res = s
+        .http
+        .post(wurl("entry=lumen.exe&platform=windows%20x86"))
+        .bearer_auth(&token)
+        .body(wtar.clone())
+        .send()
+        .await
+        .unwrap();
     assert_eq!(res.status(), StatusCode::BAD_REQUEST, "a platform is os-arch");
     let res: Value = s
         .http
@@ -984,13 +1045,30 @@ async fn a_build_goes_from_agent_to_owner_and_feedback_comes_back() {
         .unwrap();
     assert!(res["run"].as_str().is_some_and(|r| r.starts_with("download it from")), "{res}");
     let n = res["number"].as_i64().unwrap();
-    let list: Value = s.http.get(s.url("/api/builds/imaginarium")).bearer_auth(&device).send().await.unwrap().json().await.unwrap();
+    let list: Value =
+        s.http.get(s.url("/api/builds/imaginarium")).bearer_auth(&device).send().await.unwrap().json().await.unwrap();
     let w = list["builds"].as_array().unwrap().iter().find(|b| b["number"] == n).cloned().unwrap();
     assert_eq!(w["platform"], "windows-x86_64");
     let cookie = s.owner_cookie().await;
-    let page = s.http.get(s.url(&format!("/p/imaginarium/B-{n}"))).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
-    assert!(page.contains("Windows · x86_64") && page.contains("/download") && page.contains("Vulkan") && !page.contains(&format!("flow run imaginarium {n}")), "{page}");
-    let file = s.http.get(s.url(&format!("/p/imaginarium/B-{n}/download"))).header(COOKIE, &cookie).send().await.unwrap();
+    let page = s
+        .http
+        .get(s.url(&format!("/p/imaginarium/B-{n}")))
+        .header(COOKIE, &cookie)
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(
+        page.contains("Windows · x86_64")
+            && page.contains("/download")
+            && page.contains("Vulkan")
+            && !page.contains(&format!("flow run imaginarium {n}")),
+        "{page}"
+    );
+    let file =
+        s.http.get(s.url(&format!("/p/imaginarium/B-{n}/download"))).header(COOKIE, &cookie).send().await.unwrap();
     assert!(file.headers()["content-disposition"].to_str().unwrap().contains("lumen.exe"));
     assert_eq!(file.bytes().await.unwrap().as_ref(), b"MZ fake exe");
 }
@@ -1007,26 +1085,50 @@ async fn older_builds_move_over_with_their_number_and_date() {
     std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
     let mut tar = Vec::new();
     crate::builds::pack(&bin, &mut tar).unwrap();
-    let post = |q: String| s.http.post(s.url(&format!("/api/builds?product=imaginarium&summary=Old%20one&{q}"))).bearer_auth(&token).body(tar.clone()).send();
+    let post = |q: String| {
+        s.http
+            .post(s.url(&format!("/api/builds?product=imaginarium&summary=Old%20one&{q}")))
+            .bearer_auth(&token)
+            .body(tar.clone())
+            .send()
+    };
 
     // viber-run's #63, then its #5 from October: each keeps its number, date and name.
-    let res: Value = post("commit=79916898&branch=feat%2Fstroke-dash-gap&built_at=2026-11-11%2021%3A37&number=63".into()).await.unwrap().json().await.unwrap();
+    let res: Value =
+        post("commit=79916898&branch=feat%2Fstroke-dash-gap&built_at=2026-11-11%2021%3A37&number=63".into())
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
     assert_eq!(res["number"], 63, "{res}");
     assert_eq!(res["name"], "2026-11-11-2137-stroke-dash-gap-79916898");
-    let res: Value = post("commit=2925797&branch=feat%2Fm6.12-text-style&built_at=2026-10-26%2010%3A28&number=5".into()).await.unwrap().json().await.unwrap();
+    let res: Value =
+        post("commit=2925797&branch=feat%2Fm6.12-text-style&built_at=2026-10-26%2010%3A28&number=5".into())
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
     assert_eq!(res["number"], 5, "{res}");
     assert_eq!(res["name"], "2026-10-26-1028-m6.12-text-style-2925797");
 
     // A taken number, a number without a date, a date ahead, and something to try are refused.
     let res = post("commit=2925797&built_at=2026-10-26%2010%3A28&number=5".into()).await.unwrap();
     assert_eq!(res.status(), StatusCode::CONFLICT);
-    for q in ["commit=2925797&number=6", "commit=2925797&built_at=2099-01-01%2000%3A00&number=6", "built_at=2026-10-26%2010%3A28&number=6&features=%5B%22A%3A%20b%22%5D", "built_at=yesterday&number=6"] {
+    for q in [
+        "commit=2925797&number=6",
+        "commit=2925797&built_at=2099-01-01%2000%3A00&number=6",
+        "built_at=2026-10-26%2010%3A28&number=6&features=%5B%22A%3A%20b%22%5D",
+        "built_at=yesterday&number=6",
+    ] {
         assert_eq!(post(q.into()).await.unwrap().status(), StatusCode::BAD_REQUEST, "{q}");
     }
 
     // The newest is still the newest, the October one is dated October, and the next new build
     // continues after the highest number.
-    let list: Value = s.http.get(s.url("/api/builds/imaginarium")).bearer_auth(&device).send().await.unwrap().json().await.unwrap();
+    let list: Value =
+        s.http.get(s.url("/api/builds/imaginarium")).bearer_auth(&device).send().await.unwrap().json().await.unwrap();
     let numbers: Vec<i64> = list["builds"].as_array().unwrap().iter().map(|b| b["number"].as_i64().unwrap()).collect();
     assert_eq!(numbers, [63, 5]);
     let old = s.state.db.call(|c| crate::records::find_str(c, "imaginarium/B-5", None)).await.unwrap();
@@ -1038,18 +1140,46 @@ async fn older_builds_move_over_with_their_number_and_date() {
     // and a refusal then comes back as an answer rather than as a dropped upload.
     let long = "x".repeat(292);
     let ask = |summary: String| {
-        s.http.post(s.url(&format!("/api/builds?product=imaginarium&summary={summary}&built_at=2026-10-27%2010%3A00&number=7&check=true"))).bearer_auth(&token).send()
+        s.http
+            .post(s.url(&format!(
+                "/api/builds?product=imaginarium&summary={summary}&built_at=2026-10-27%2010%3A00&number=7&check=true"
+            )))
+            .bearer_auth(&token)
+            .send()
     };
     let ok: Value = ask(long.clone()).await.unwrap().json().await.unwrap();
     assert_eq!(ok["ok"], true);
     assert_eq!(ask("y".repeat(301)).await.unwrap().status(), StatusCode::BAD_REQUEST);
-    let res = s.http.post(s.url("/api/builds?product=imaginarium&summary=x&built_at=2026-10-27%2010%3A00&number=5&check=true")).bearer_auth(&token).send().await.unwrap();
+    let res = s
+        .http
+        .post(s.url("/api/builds?product=imaginarium&summary=x&built_at=2026-10-27%2010%3A00&number=5&check=true"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .unwrap();
     assert_eq!(res.status(), StatusCode::CONFLICT, "a taken number is known before the upload");
-    let res: Value = s.http.post(s.url(&format!("/api/builds?product=imaginarium&summary={long}&commit=abcdef1&built_at=2026-10-27%2010%3A00&number=7"))).bearer_auth(&token).body(tar.clone()).send().await.unwrap().json().await.unwrap();
+    let res: Value = s
+        .http
+        .post(s.url(&format!(
+            "/api/builds?product=imaginarium&summary={long}&commit=abcdef1&built_at=2026-10-27%2010%3A00&number=7"
+        )))
+        .bearer_auth(&token)
+        .body(tar.clone())
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
     assert_eq!(res["number"], 7, "{res}");
 
     // Nothing was put on the To test list for the old ones.
-    let tests: i64 = s.state.db.call(|c| Ok(c.query_row("SELECT count(*) FROM records WHERE kind = 'test'", [], |r| r.get(0))?)).await.unwrap();
+    let tests: i64 = s
+        .state
+        .db
+        .call(|c| Ok(c.query_row("SELECT count(*) FROM records WHERE kind = 'test'", [], |r| r.get(0))?))
+        .await
+        .unwrap();
     assert_eq!(tests, 0);
 }
 
@@ -1158,19 +1288,51 @@ async fn conversations_log_sessions_and_subagents_from_the_transcripts() {
     .unwrap();
     let cookie = s.owner_cookie().await;
     let page = s.http.get(s.url("/conversations")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
-    assert!(page.contains("Between sessions") && page.contains("Subagents") && page.contains("Review 1: security"), "{page}");
-    let pair = s.http.get(s.url("/conversations?t=pair%3Aagent-flow%7Cimaginarium")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
+    assert!(
+        page.contains("Between sessions") && page.contains("Subagents") && page.contains("Review 1: security"),
+        "{page}"
+    );
+    let pair = s
+        .http
+        .get(s.url("/conversations?t=pair%3Aagent-flow%7Cimaginarium"))
+        .header(COOKIE, &cookie)
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
     assert_eq!(pair.matches("Scopes are live.").count(), 1, "kept once: {pair}");
     assert!(pair.contains("<strong>thanks</strong>") && pair.contains("→ agent-flow"), "{pair}");
-    let sub = s.http.get(s.url("/conversations?t=sub%3Aa0ca2a7e879b8b08a")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
+    let sub = s
+        .http
+        .get(s.url("/conversations?t=sub%3Aa0ca2a7e879b8b08a"))
+        .header(COOKIE, &cookie)
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
     assert!(sub.contains("Review the diff for security.") && sub.contains("No findings worth fixing."), "{sub}");
     assert!(!sub.contains("secret file contents"), "tool results stay out");
     assert!(!page.contains("<textarea"), "no reply box");
     // Reload wakes the reader; tokens can't use the page or the button.
-    let res = s.http.post(s.url("/transcripts/read")).header(COOKIE, &cookie).header(ORIGIN, &s.base).form(&[("next", "/conversations")]).send().await.unwrap();
+    let res = s
+        .http
+        .post(s.url("/transcripts/read"))
+        .header(COOKIE, &cookie)
+        .header(ORIGIN, &s.base)
+        .form(&[("next", "/conversations")])
+        .send()
+        .await
+        .unwrap();
     assert!(res.status().is_redirection(), "{}", res.status());
     let v = s.token(TokenKind::Project, Some("vinculum")).await;
-    assert_eq!(s.http.get(s.url("/conversations")).bearer_auth(&v).send().await.unwrap().status(), StatusCode::FORBIDDEN);
+    assert_eq!(
+        s.http.get(s.url("/conversations")).bearer_auth(&v).send().await.unwrap().status(),
+        StatusCode::FORBIDDEN
+    );
     assert!(!s.http.post(s.url("/transcripts/read")).bearer_auth(&v).send().await.unwrap().status().is_success());
 }
 
@@ -1438,15 +1600,23 @@ async fn steps_run_on_batches_blocks_and_conclusions() {
     assert!(call("add_milestone", json!({"name": "K1", "title": "Read binds", "step_of": "M4"})).await.0);
     assert!(call("add_milestone", json!({"name": "K2", "title": "Write binds", "step_of": "M4"})).await.0);
     // All or nothing, every problem listed.
-    let (ok, err) = call("add_tasks", json!({"milestone": "K1", "tasks": [
-        {"title": "Parse", "estimate": "2 h"}, {"title": "Store"}, {"title": "Skip me", "state": "skipped"}]})).await;
+    let (ok, err) = call(
+        "add_tasks",
+        json!({"milestone": "K1", "tasks": [
+        {"title": "Parse", "estimate": "2 h"}, {"title": "Store"}, {"title": "Skip me", "state": "skipped"}]}),
+    )
+    .await;
     assert!(!ok, "{err}");
     let err = err.as_str().unwrap();
     assert!(err.contains("#2: needs an estimate") && err.contains("#3: needs a reason"), "{err}");
-    let (ok, r) = call("add_tasks", json!({"milestone": "K1", "tasks": [
+    let (ok, r) = call(
+        "add_tasks",
+        json!({"milestone": "K1", "tasks": [
         {"title": "Parse", "estimate": "2 h", "branch": "feat/binds"},
         {"title": "Store", "estimate": "40 min"},
-        {"title": "Rename the module", "state": "skipped", "reason": "churn", "importance": "low"}]})).await;
+        {"title": "Rename the module", "state": "skipped", "reason": "churn", "importance": "low"}]}),
+    )
+    .await;
     assert!(ok, "{r}");
     assert_eq!(r["ids"], json!(["T-1", "T-2", "T-3"]));
     // Order, then doing starts the step; one call moves two.
@@ -1456,7 +1626,16 @@ async fn steps_run_on_batches_blocks_and_conclusions() {
     assert!(ok, "{u}");
     assert_eq!(u["started"], json!(["K1", "M4"]));
     // "Working on" comes from the tasks in doing until the agent says more.
-    let ov = s.http.get(s.url("/p/vinculum")).header(COOKIE, s.owner_cookie().await).send().await.unwrap().text().await.unwrap();
+    let ov = s
+        .http
+        .get(s.url("/p/vinculum"))
+        .header(COOKIE, s.owner_cookie().await)
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
     assert!(ov.contains("doing T-2 Store (+1)"), "{ov}");
     // Added once the step is under way: found, unless said.
     let (ok, t) = call("add_task", json!({"milestone": "K1", "title": "Wider drop zone", "estimate": "30 min", "source": "owner_feedback", "source_ref": "B-3"})).await;
@@ -1469,32 +1648,69 @@ async fn steps_run_on_batches_blocks_and_conclusions() {
     let k1 = hello["where"].as_array().unwrap().iter().find(|w| w["step"] == "K1").cloned().unwrap();
     assert_eq!(k1["blocked"][0]["by"], "Q-1");
     assert_eq!(k1["doing"].as_array().unwrap().len(), 2);
-    let tasks = s.http.get(s.url("/p/vinculum?tab=tasks")).header(COOKIE, s.owner_cookie().await).send().await.unwrap().text().await.unwrap();
+    let tasks = s
+        .http
+        .get(s.url("/p/vinculum?tab=tasks"))
+        .header(COOKIE, s.owner_cookie().await)
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
     assert!(tasks.contains("blocked by Q-1") && tasks.contains("added · your feedback · from B-3"), "{tasks}");
     assert!(tasks.contains("skipped: churn"));
     // Concluding needs the open tasks dealt with.
     let (ok, err) = call("conclude_step", json!({"step": "K1", "summary": "Binds are read."})).await;
     assert!(!ok && err.as_str().unwrap().contains("still has open tasks"), "{err}");
-    let (ok, c) = call("conclude_step", json!({"step": "K1", "summary": "Binds are read.", "move_open_to": "K2"})).await;
+    let (ok, c) =
+        call("conclude_step", json!({"step": "K1", "summary": "Binds are read.", "move_open_to": "K2"})).await;
     assert!(ok, "{c}");
     assert_eq!(c["moved"].as_array().unwrap().len(), 3);
     assert!(!call("add_task", json!({"milestone": "K1", "title": "Late", "estimate": "1 h"})).await.0);
     // History brought in: done tasks may go into a concluded step, without estimates; the step
     // and milestone keep their real dates and summary.
-    let (ok, r) = call("add_tasks", json!({"milestone": "K1", "tasks": [{"title": "Old work", "state": "done"}]})).await;
+    let (ok, r) =
+        call("add_tasks", json!({"milestone": "K1", "tasks": [{"title": "Old work", "state": "done"}]})).await;
     assert!(ok, "{r}");
-    let (ok, r) = call("update_milestone", json!({"milestone": "K1", "started_at": "2026-10-14", "closed_at": "2026-10-20 18:00", "summary": "Imported."})).await;
+    let (ok, r) = call(
+        "update_milestone",
+        json!({"milestone": "K1", "started_at": "2026-10-14", "closed_at": "2026-10-20 18:00", "summary": "Imported."}),
+    )
+    .await;
     assert!(ok, "{r}");
-    assert!(!call("update_milestone", json!({"milestone": "K2", "closed_at": "2026-10-20"})).await.0, "only a closed one");
-    assert!(!call("update_milestone", json!({"milestone": "K1", "started_at": "2099-01-01"})).await.0, "not in the future");
+    assert!(
+        !call("update_milestone", json!({"milestone": "K2", "closed_at": "2026-10-20"})).await.0,
+        "only a closed one"
+    );
+    assert!(
+        !call("update_milestone", json!({"milestone": "K1", "started_at": "2099-01-01"})).await.0,
+        "not in the future"
+    );
     // A parked task may have no milestone; nothing else may.
     let (ok, r) = call("add_task", json!({"title": "Windows parity", "state": "parked", "estimate": "2 d"})).await;
     assert!(ok, "{r}");
     assert!(!call("add_task", json!({"title": "Loose", "estimate": "1 h"})).await.0);
-    let tasks = s.http.get(s.url("/p/vinculum?tab=tasks")).header(COOKIE, s.owner_cookie().await).send().await.unwrap().text().await.unwrap();
+    let tasks = s
+        .http
+        .get(s.url("/p/vinculum?tab=tasks"))
+        .header(COOKIE, s.owner_cookie().await)
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
     assert!(tasks.contains("Without a milestone") && tasks.contains("Windows parity"), "{tasks}");
     // A review is a step: reviewers and commit, findings ranked, one skipped.
-    assert!(!call("add_milestone", json!({"name": "R1", "title": "Review", "review": {"reviewers": ["UX"], "commit": "abc1234"}})).await.0);
+    assert!(
+        !call(
+            "add_milestone",
+            json!({"name": "R1", "title": "Review", "review": {"reviewers": ["UX"], "commit": "abc1234"}})
+        )
+        .await
+        .0
+    );
     let (ok, r) = call("add_milestone", json!({"name": "K9", "title": "End-of-M4 review", "step_of": "M4",
         "review": {"reviewers": ["correctness", "UX"], "commit": "abc1234", "owner_words": "rate the issues by importance"}})).await;
     assert!(ok, "{r}");
@@ -1503,11 +1719,21 @@ async fn steps_run_on_batches_blocks_and_conclusions() {
         {"title": "Big thing", "estimate": "2 h", "source": "review", "importance": "high"},
         {"title": "Churn", "state": "skipped", "reason": "no behaviour change", "importance": "low", "source": "review"}]})).await;
     assert!(ok, "{r}");
-    let tasks = s.http.get(s.url("/p/vinculum?tab=tasks")).header(COOKIE, s.owner_cookie().await).send().await.unwrap().text().await.unwrap();
+    let tasks = s
+        .http
+        .get(s.url("/p/vinculum?tab=tasks"))
+        .header(COOKIE, s.owner_cookie().await)
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
     let at = tasks.find("End-of-M4 review").unwrap();
     assert!(tasks[at..].contains("review step") && tasks[at..].contains("2 reviewers · commit abc1234"), "{tasks}");
     let step_url = tasks[at..].split("href=\"").nth(1).unwrap().split('"').next().unwrap().to_owned();
-    let page = s.http.get(s.url(&step_url)).header(COOKIE, s.owner_cookie().await).send().await.unwrap().text().await.unwrap();
+    let page =
+        s.http.get(s.url(&step_url)).header(COOKIE, s.owner_cookie().await).send().await.unwrap().text().await.unwrap();
     assert!(page.contains("Findings, by importance") && page.contains("rate the issues by importance"), "{page}");
     assert!(page.find("Big thing").unwrap() < page.find("Low thing").unwrap(), "high first");
     assert!(page.contains("skipped: no behaviour change"));
@@ -1522,7 +1748,11 @@ async fn the_project_document_is_the_agents_and_the_owners() {
         let (s, token, sess) = (&s, token.clone(), sess.clone());
         async move { mcp_tool(s, &token, &sess, name, args).await }
     };
-    let (ok, r) = call("edit_project_doc", json!({"section": "How to work on it", "text": "- Conventional Commits\n- DCO sign-off"})).await;
+    let (ok, r) = call(
+        "edit_project_doc",
+        json!({"section": "How to work on it", "text": "- Conventional Commits\n- DCO sign-off"}),
+    )
+    .await;
     assert!(ok && r["rev"] == 1, "{r}");
     let (ok, r) = call("edit_project_doc", json!({"section": "Roadmap", "text": "- M4 Keybinds (now)"})).await;
     assert!(ok && r["rev"] == 2, "{r}");
@@ -1535,11 +1765,24 @@ async fn the_project_document_is_the_agents_and_the_owners() {
 
     // The owner sees it like a guide and edits a section; an edit on an old version is refused.
     let cookie = s.owner_cookie().await;
-    let page = s.http.get(s.url("/p/vinculum?tab=notes")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
-    assert!(page.contains("Project document") && page.contains("Conventional Commits") && page.contains("rev 2"), "{page}");
+    let page =
+        s.http.get(s.url("/p/vinculum?tab=notes")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
+    assert!(
+        page.contains("Project document") && page.contains("Conventional Commits") && page.contains("rev 2"),
+        "{page}"
+    );
     let version = page.split("name=\"version\" value=\"").nth(1).map(|x| x.split('"').next().unwrap().to_owned());
     assert!(version.is_none(), "no form until a pencil is pressed");
-    let page = s.http.get(s.url("/p/vinculum?tab=notes&edit=1")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
+    let page = s
+        .http
+        .get(s.url("/p/vinculum?tab=notes&edit=1"))
+        .header(COOKIE, &cookie)
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
     let version = page.split("name=\"version\" value=\"").nth(1).unwrap().split('"').next().unwrap().to_owned();
     let post = |v: String, text: &'static str| {
         let (s, cookie) = (&s, cookie.clone());
@@ -1583,14 +1826,31 @@ async fn notes_are_files_or_text_and_come_back() {
     assert!(res.status().is_success());
     assert!(!up("name=&category=x&filename=a.txt", b"x").await.status().is_success(), "a name");
     // A new version keeps the old file.
-    assert!(up("replaces=N-1&filename=report.md&name=&category=", b"# Done\n\n- T-4\n- T-5").await.status().is_success());
+    assert!(
+        up("replaces=N-1&filename=report.md&name=&category=", b"# Done\n\n- T-4\n- T-5").await.status().is_success()
+    );
     // A text note that comes back until resolved, one on a past date, one later.
     let (ok, n) = call("add_note", json!({"name": "Loro needs im", "category": "known issue", "text": "Check on every Loro update.", "resurface": "when Loro updates"})).await;
     assert!(ok, "{n}");
-    assert!(call("add_note", json!({"name": "x-wing pin", "category": "known issue", "text": "pinned", "resurface": "2020-01-01"})).await.0);
-    assert!(call("add_note", json!({"name": "Later", "category": "known issue", "text": "later", "resurface": "2099-01-01"})).await.0);
+    assert!(
+        call(
+            "add_note",
+            json!({"name": "x-wing pin", "category": "known issue", "text": "pinned", "resurface": "2020-01-01"})
+        )
+        .await
+        .0
+    );
+    assert!(
+        call(
+            "add_note",
+            json!({"name": "Later", "category": "known issue", "text": "later", "resurface": "2099-01-01"})
+        )
+        .await
+        .0
+    );
     let (_, hello) = call("hello", json!({"session": "V", "machine": "m", "model": "o", "effort": "h"})).await;
-    let mut back: Vec<&str> = hello["notes_back"].as_array().unwrap().iter().map(|n| n["name"].as_str().unwrap()).collect();
+    let mut back: Vec<&str> =
+        hello["notes_back"].as_array().unwrap().iter().map(|n| n["name"].as_str().unwrap()).collect();
     back.sort_unstable();
     assert_eq!(back, ["Loro needs im", "x-wing pin"], "{hello}");
     assert!(!call("update_note", json!({"id": "N-3", "state": "resolved"})).await.0, "a reason");
@@ -1598,7 +1858,8 @@ async fn notes_are_files_or_text_and_come_back() {
     assert!(!call("update_note", json!({"id": "N-1", "text": "x"})).await.0, "files get a new version instead");
 
     let cookie = s.owner_cookie().await;
-    let tab = s.http.get(s.url("/p/vinculum?tab=notes")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
+    let tab =
+        s.http.get(s.url("/p/vinculum?tab=notes")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
     assert!(tab.contains("Morning report") && tab.contains("morning report") && tab.contains("1 resolved"), "{tab}");
     assert!(tab.contains("comes back when Loro updates") || tab.contains("2 versions"), "{tab}");
     let page = s.http.get(s.url("/p/vinculum/N-1")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
@@ -1606,7 +1867,16 @@ async fn notes_are_files_or_text_and_come_back() {
     let f = s.http.get(s.url("/p/vinculum/N-2/file")).header(COOKIE, &cookie).send().await.unwrap();
     assert_eq!(f.headers()[CONTENT_TYPE], "application/octet-stream");
     assert!(f.headers()["content-disposition"].to_str().unwrap().starts_with("attachment"));
-    let old = s.http.get(s.url("/p/vinculum/N-1/file?v=1")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
+    let old = s
+        .http
+        .get(s.url("/p/vinculum/N-1/file?v=1"))
+        .header(COOKIE, &cookie)
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
     assert!(old.contains("T-4") && !old.contains("T-5"));
 }
 
@@ -1637,21 +1907,50 @@ async fn answers_make_scoped_decisions_and_releases_bring_their_tag_button() {
     let (_, t) = call("get_record", json!({"id": "T-1"})).await;
     assert_eq!(t["state"], "todo", "{t}");
     // record_decision with answers closes an open question too, in its scope.
-    let (ok, d) = call("record_decision", json!({"title": "8990 it is", "owner_words": "yes", "source": "owner", "answers": "Q-1"})).await;
+    let (ok, d) = call(
+        "record_decision",
+        json!({"title": "8990 it is", "owner_words": "yes", "source": "owner", "answers": "Q-1"}),
+    )
+    .await;
     assert!(ok, "{d}");
     let (_, q1) = call("get_record", json!({"id": "Q-1"})).await;
     assert_eq!(q1["state"], "answered", "{q1}");
     // Answered on the page: the decision is recorded by itself, and the agent hears it with a
     // reminder to check older decisions.
-    assert!(call("ask_question", json!({"title": "Tabs or a list?", "options": [{"title": "Tabs"}, {"title": "A list"}]})).await.0);
+    assert!(
+        call("ask_question", json!({"title": "Tabs or a list?", "options": [{"title": "Tabs"}, {"title": "A list"}]}))
+            .await
+            .0
+    );
     let cookie = s.owner_cookie().await;
-    let res = s.http.post(s.url("/p/vinculum/Q-3/answer")).header(COOKIE, &cookie).header(ORIGIN, &s.base).form(&[("option", "2")]).send().await.unwrap();
+    let res = s
+        .http
+        .post(s.url("/p/vinculum/Q-3/answer"))
+        .header(COOKIE, &cookie)
+        .header(ORIGIN, &s.base)
+        .form(&[("option", "2")])
+        .send()
+        .await
+        .unwrap();
     assert!(res.status().is_redirection());
-    let decisions = s.http.get(s.url("/p/vinculum?tab=decisions")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
+    let decisions = s
+        .http
+        .get(s.url("/p/vinculum?tab=decisions"))
+        .header(COOKIE, &cookie)
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
     assert!(decisions.contains("Tabs or a list: A list") && decisions.contains("M4 · "), "{decisions}");
     let (_, news) = call("since_last_check", json!({})).await;
     let news = news.to_string();
-    assert!(news.contains("Owner answered Q-3: 2: A list → D-") && news.contains("check whether it changes an earlier decision"), "{news}");
+    assert!(
+        news.contains("Owner answered Q-3: 2: A list → D-")
+            && news.contains("check whether it changes an earlier decision"),
+        "{news}"
+    );
     // Asked in a chat the owner is having: recorded, but no badge (and no push).
     assert!(!call("ask_question", json!({"title": "Now?", "in_chat": true, "urgent": true})).await.0);
     let before = s.db.call(|c| crate::waiting::count(c)).await.unwrap();
@@ -1669,13 +1968,29 @@ async fn answers_make_scoped_decisions_and_releases_bring_their_tag_button() {
     let (ok, r) = call("update_decision", json!({"id": id, "owner_words": "tabs on the left please", "said_at": "2026-11-01", "tags": [], "reason": "owner asked: recover the exact words"})).await;
     assert!(ok && r["changed"] == true, "{r}");
     let (_, got) = call("get_record", json!({"id": id})).await;
-    assert!(got.to_string().contains("tabs on the left please") && got.to_string().contains("owner asked: recover"), "{got}");
-    let (ok, r) = call("update_decision", json!({"id": id, "state": "archived", "reason": "owner asked: duplicate of D-2"})).await;
+    assert!(
+        got.to_string().contains("tabs on the left please") && got.to_string().contains("owner asked: recover"),
+        "{got}"
+    );
+    let (ok, r) =
+        call("update_decision", json!({"id": id, "state": "archived", "reason": "owner asked: duplicate of D-2"}))
+            .await;
     assert!(ok && r["state"] == "archived", "{r}");
-    let decisions = s.http.get(s.url("/p/vinculum?tab=decisions")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
+    let decisions = s
+        .http
+        .get(s.url("/p/vinculum?tab=decisions"))
+        .header(COOKIE, &cookie)
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
     assert!(decisions.contains("1 archived"), "{decisions}");
     assert!(!call("update_decision", json!({"id": "D-1", "state": "deleted", "reason": "x"})).await.0);
-    assert!(call("update_decision", json!({"id": id, "state": "current", "reason": "owner: keep it after all"})).await.0);
+    assert!(
+        call("update_decision", json!({"id": id, "state": "current", "reason": "owner: keep it after all"})).await.0
+    );
 
     // A release brings its Push tag button once the project has a repository: GitHub's API makes
     // the tag, so no folder is needed (the project may lie on any machine).
@@ -1685,10 +2000,16 @@ async fn answers_make_scoped_decisions_and_releases_bring_their_tag_button() {
     let (ok, r) = call("add_release", json!({"tag": "v0.0.6-m5", "title": "M5"})).await;
     assert!(ok, "{r}");
     let cmd = r["tag_button"]["command"].as_str().unwrap();
-    assert!(cmd.contains("repos/giosuel/vinculum/git/ref/heads/main") && cmd.contains("-f tag=v0.0.6-m5") && cmd.contains("ref=refs/tags/v0.0.6-m5"), "{cmd}");
+    assert!(
+        cmd.contains("repos/giosuel/vinculum/git/ref/heads/main")
+            && cmd.contains("-f tag=v0.0.6-m5")
+            && cmd.contains("ref=refs/tags/v0.0.6-m5"),
+        "{cmd}"
+    );
     assert!(!cmd.contains("git push") && !cmd.contains("checkout") && !cmd.contains("cd "), "{cmd}");
     // After a context reset: hello brief leaves out the document and milestones.
-    let (_, b) = call("hello", json!({"session": "V", "machine": "m", "model": "o", "effort": "h", "brief": true})).await;
+    let (_, b) =
+        call("hello", json!({"session": "V", "machine": "m", "model": "o", "effort": "h", "brief": true})).await;
     assert!(b.get("doc").is_none() && b.get("milestones").is_none() && b.get("where").is_some(), "{b}");
     assert!(!call("add_release", json!({"tag": "v1; rm -rf ~", "title": "x"})).await.0);
     // Its text can be changed later; its tag can't, and other kinds aren't releases.
@@ -1701,9 +2022,19 @@ async fn answers_make_scoped_decisions_and_releases_bring_their_tag_button() {
     assert!(!call("update_release", json!({"id": "D-1", "body": "x"})).await.0);
     // A question holds a release's tag button until it's answered.
     let rel = r["id"].as_str().unwrap().rsplit('/').next().unwrap().to_owned();
-    let (ok, q) = call("ask_question", json!({"title": "Tag name: v0.0.6-m5 or v0.1.0?", "blocks": [rel.clone()]})).await;
+    let (ok, q) =
+        call("ask_question", json!({"title": "Tag name: v0.0.6-m5 or v0.1.0?", "blocks": [rel.clone()]})).await;
     assert!(ok, "{q}");
-    let page = s.http.get(s.url(&format!("/p/vinculum/{rel}"))).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
+    let page = s
+        .http
+        .get(s.url(&format!("/p/vinculum/{rel}")))
+        .header(COOKIE, &cookie)
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
     assert!(page.contains("waits for the answer to Q-"), "{page}");
 
     // Batches: decisions (one replacing an earlier one of the same batch), ADRs, to-test items.
@@ -1717,30 +2048,55 @@ async fn answers_make_scoped_decisions_and_releases_bring_their_tag_button() {
     let (ok, err) = call("record_decisions", json!({"decisions": [{"title": "x", "owner_words": "y", "source": "owner"}, {"title": "z", "owner_words": "", "source": "owner"}]})).await;
     assert!(!ok && err.as_str().unwrap().contains("#2"), "{err}");
     assert!(call("add_adrs", json!({"adrs": [{"title": "Rendering", "repo": "giosuel/vinculum", "path": "docs/adr/0001.md"}, {"title": "Storage", "repo": "giosuel/vinculum", "path": "docs/adr/0002.md"}]})).await.0);
-    let (ok, r) = call("add_to_tests", json!({"items": [{"title": "Import", "category": "Import"}, {"title": "Export", "category": "Export"}]})).await;
+    let (ok, r) = call(
+        "add_to_tests",
+        json!({"items": [{"title": "Import", "category": "Import"}, {"title": "Export", "category": "Export"}]}),
+    )
+    .await;
     assert!(ok && r["ids"].as_array().unwrap().len() == 2, "{r}");
 
     // A note on a step; a step made a review later; where for a milestone whose steps are done.
     assert!(call("add_milestone", json!({"name": "R9", "title": "Review", "step_of": "M4"})).await.0);
-    assert!(!call("update_milestone", json!({"milestone": "R9", "review": {"reports": ["N-1"]}})).await.0, "not a review yet");
-    assert!(call("update_milestone", json!({"milestone": "R9", "review": {"reviewers": ["UX"], "commit": "abc1234"}})).await.0);
+    assert!(
+        !call("update_milestone", json!({"milestone": "R9", "review": {"reports": ["N-1"]}})).await.0,
+        "not a review yet"
+    );
+    assert!(
+        call("update_milestone", json!({"milestone": "R9", "review": {"reviewers": ["UX"], "commit": "abc1234"}}))
+            .await
+            .0
+    );
     // Only the reports: the reviewers and commit stay.
     assert!(call("update_milestone", json!({"milestone": "R9", "review": {"reports": ["N-26"]}})).await.0);
     let (_, m) = call("get_milestone", json!({"milestone": "R9"})).await;
-    assert!(m["review"]["reports"] == json!(["N-26"]) && m["review"]["reviewers"] == json!(["UX"]) && m["review"]["commit"] == "abc1234", "{m}");
-    let (ok, n) = call("add_note", json!({"name": "Review report R1", "category": "review report", "text": "Findings…", "record": "R9"})).await;
+    assert!(
+        m["review"]["reports"] == json!(["N-26"])
+            && m["review"]["reviewers"] == json!(["UX"])
+            && m["review"]["commit"] == "abc1234",
+        "{m}"
+    );
+    let (ok, n) = call(
+        "add_note",
+        json!({"name": "Review report R1", "category": "review report", "text": "Findings…", "record": "R9"}),
+    )
+    .await;
     assert!(ok, "{n}");
     assert!(!call("add_note", json!({"name": "x", "category": "x", "text": "x", "record": "NOPE"})).await.0);
-    let tasks = s.http.get(s.url("/p/vinculum?tab=tasks")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
+    let tasks =
+        s.http.get(s.url("/p/vinculum?tab=tasks")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
     let at = tasks.find(">Review<").unwrap();
     let url = tasks[at..].split("href=\"").nth(1).unwrap().split('"').next().unwrap().to_owned();
     let step = s.http.get(s.url(&url)).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
     assert!(step.contains("Reports and notes") && step.contains("Review report R1"), "{step}");
     assert!(call("conclude_step", json!({"step": "R9", "summary": "Reviewed."})).await.0);
     assert!(call("update_milestone", json!({"milestone": "M4", "state": "active"})).await.0);
-    let (_, h) = call("hello", json!({"session": "V", "machine": "m", "model": "o", "effort": "h", "brief": true})).await;
+    let (_, h) =
+        call("hello", json!({"session": "V", "machine": "m", "model": "o", "effort": "h", "brief": true})).await;
     let w = h["where"].as_array().unwrap();
-    assert!(w.iter().any(|x| x["milestone"] == "M4" && x["hint"].as_str().unwrap().contains("every step is concluded")), "{h}");
+    assert!(
+        w.iter().any(|x| x["milestone"] == "M4" && x["hint"].as_str().unwrap().contains("every step is concluded")),
+        "{h}"
+    );
 }
 
 #[tokio::test]
@@ -1749,7 +2105,9 @@ async fn screenshots_are_uploaded_shown_and_linked() {
     let token = s.token(TokenKind::Project, Some("vinculum")).await;
     let sess = mcp_session(&s, &token).await;
     assert!(mcp_tool(&s, &token, &sess, "add_milestone", json!({"name": "M4", "title": "Keybinds"})).await.0);
-    let (ok, t) = mcp_tool(&s, &token, &sess, "add_task", json!({"title": "Sidebar", "milestone": "M4", "estimate": "1 h"})).await;
+    let (ok, t) =
+        mcp_tool(&s, &token, &sess, "add_task", json!({"title": "Sidebar", "milestone": "M4", "estimate": "1 h"}))
+            .await;
     assert!(ok, "{t}");
     let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
     png.extend_from_slice(&1280u32.to_be_bytes());
@@ -1798,9 +2156,17 @@ async fn screenshots_are_uploaded_shown_and_linked() {
 
     // A mockup is proposed until approved; it links to its design; owner and agent move it on.
     assert!(page.contains("mstate proposed"), "{page}");
-    assert_eq!(up("name=x&category=mockup&design_url=javascript:alert(1)", png.clone()).await.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        up("name=x&category=mockup&design_url=javascript:alert(1)", png.clone()).await.status(),
+        StatusCode::BAD_REQUEST
+    );
     assert_eq!(up("name=x&category=mockup&state=done", png.clone()).await.status(), StatusCode::BAD_REQUEST);
-    assert!(up("name=Sidebar%20B&category=mockup&design_url=https%3A%2F%2Fclaude.ai%2Fartifact%2Fabc", png.clone()).await.status().is_success());
+    assert!(
+        up("name=Sidebar%20B&category=mockup&design_url=https%3A%2F%2Fclaude.ai%2Fartifact%2Fabc", png.clone())
+            .await
+            .status()
+            .is_success()
+    );
     let res = s
         .http
         .post(s.url("/p/vinculum/S-1/mockup-state"))
@@ -2541,14 +2907,18 @@ async fn milestones_steps_and_tasks_are_edited_and_archived_freely() {
         assert!(call("add_milestone", json!({"name": n, "title": t, "step_of": "P9"})).await.0);
     }
     for n in ["P9.3", "P9.3b", "P9.3c"] {
-        let (ok, r) = call("update_milestone", json!({"milestone": n, "state": "closed", "summary": format!("{n} done.")})).await;
+        let (ok, r) =
+            call("update_milestone", json!({"milestone": n, "state": "closed", "summary": format!("{n} done.")})).await;
         assert!(ok, "{r}");
     }
-    let (ok, r) = call("add_tasks", json!({"milestone": "P9.3b", "tasks": [{"title": "Batch API", "state": "done"}]})).await;
+    let (ok, r) =
+        call("add_tasks", json!({"milestone": "P9.3b", "tasks": [{"title": "Batch API", "state": "done"}]})).await;
     assert!(ok && r["ids"] == json!(["T-1"]), "{r}");
-    let (ok, r) = call("add_tasks", json!({"milestone": "P9.3c", "tasks": [{"title": "Ask UI", "state": "done"}]})).await;
+    let (ok, r) =
+        call("add_tasks", json!({"milestone": "P9.3c", "tasks": [{"title": "Ask UI", "state": "done"}]})).await;
     assert!(ok && r["ids"] == json!(["T-2"]), "{r}");
-    let (ok, n) = call("add_note", json!({"name": "Batch log", "category": "log", "text": "ok", "record": "P9.3b"})).await;
+    let (ok, n) =
+        call("add_note", json!({"name": "Batch log", "category": "log", "text": "ok", "record": "P9.3b"})).await;
     assert!(ok, "{n}");
     // Fold P9.3b into P9.3: a done task with its dates, then the step archived with move_to.
     let (ok, r) = call("add_tasks", json!({"milestone": "P9.3", "tasks": [
@@ -2556,7 +2926,8 @@ async fn milestones_steps_and_tasks_are_edited_and_archived_freely() {
     assert!(ok, "{r}");
     assert!(!call("add_tasks", json!({"milestone": "P9.3", "tasks": [{"title": "x", "state": "todo", "estimate": "1 h", "done_at": "2026-11-09"}]})).await.0);
     assert!(!call("archive_milestone", json!({"milestone": "P9.3b", "reason": ""})).await.0, "a reason");
-    let (ok, d) = call("archive_milestone", json!({"milestone": "P9.3b", "move_to": "P9.3", "reason": "folded into P9.3"})).await;
+    let (ok, d) =
+        call("archive_milestone", json!({"milestone": "P9.3b", "move_to": "P9.3", "reason": "folded into P9.3"})).await;
     assert!(ok, "{d}");
     assert_eq!(d["moved"], json!(["T-1", "N-1"]));
     // Without move_to, its tasks are archived with it, and restoring brings them back.
@@ -2576,10 +2947,17 @@ async fn milestones_steps_and_tasks_are_edited_and_archived_freely() {
     let (ok, m) = call("get_milestone", json!({"milestone": "P9.3c"})).await;
     assert!(!ok, "{m}");
     let (ok, m) = call("get_milestone", json!({"milestone": "P9.3c", "include_archived": true})).await;
-    assert!(ok && m["summary"] == "P9.3c done." && m["archived"]["reason"] == "not needed" && m["tasks"][0]["id"] == "T-2", "{m}");
+    assert!(
+        ok && m["summary"] == "P9.3c done." && m["archived"]["reason"] == "not needed" && m["tasks"][0]["id"] == "T-2",
+        "{m}"
+    );
     // A concluded step in one call, as history.
-    let (ok, m) = call("add_milestone", json!({"name": "P9.9", "title": "Old", "step_of": "P9", "state": "closed",
-        "started_at": "2026-11-01", "closed_at": "2026-11-02", "summary": "Done long ago."})).await;
+    let (ok, m) = call(
+        "add_milestone",
+        json!({"name": "P9.9", "title": "Old", "step_of": "P9", "state": "closed",
+        "started_at": "2026-11-01", "closed_at": "2026-11-02", "summary": "Done long ago."}),
+    )
+    .await;
     assert!(ok && m["state"] == "closed", "{m}");
     let (_, m) = call("get_milestone", json!({"milestone": "P9.9"})).await;
     assert!(m["closed_at"].as_str().unwrap().starts_with("2026-11-02") && m["summary"] == "Done long ago.", "{m}");
@@ -2588,7 +2966,9 @@ async fn milestones_steps_and_tasks_are_edited_and_archived_freely() {
     let (_, t2) = call("get_record", json!({"id": "T-2"})).await;
     assert_eq!(t2["state"], "done", "{t2}");
     // Steps and milestones edit freely: reopened, moved to another milestone, summary rewritten.
-    assert!(call("update_milestone", json!({"milestone": "P9.3", "summary": "Agents drive the app; batches."})).await.0);
+    assert!(
+        call("update_milestone", json!({"milestone": "P9.3", "summary": "Agents drive the app; batches."})).await.0
+    );
     let (ok, r) = call("add_task", json!({"milestone": "P10", "title": "Later", "estimate": "1 h"})).await;
     assert!(ok, "{r}");
     assert!(call("update_task", json!({"id": "T-4", "milestone": "P9.3"})).await.0);
@@ -2598,14 +2978,28 @@ async fn milestones_steps_and_tasks_are_edited_and_archived_freely() {
     assert!(!call("update_task", json!({"id": "T-4", "state": "archived"})).await.0, "a reason");
     let (ok, r) = call("update_task", json!({"id": "T-4", "state": "archived", "note": "a duplicate of T-1"})).await;
     assert!(ok, "{r}");
-    let tasks = s.http.get(s.url("/p/vinculum?tab=tasks")).header(COOKIE, s.owner_cookie().await).send().await.unwrap().text().await.unwrap();
+    let tasks = s
+        .http
+        .get(s.url("/p/vinculum?tab=tasks"))
+        .header(COOKIE, s.owner_cookie().await)
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
     assert!(!tasks.contains("Later"), "{tasks}");
     assert!(call("update_task", json!({"id": "T-4", "state": "todo"})).await.0);
     // A milestone takes its steps, tasks and the decisions and questions scoped to it along.
     assert!(call("update_milestone", json!({"milestone": "P10", "state": "active"})).await.0);
-    let (ok, d) = call("record_decision", json!({"title": "Keep it small", "owner_words": "small", "source": "owner"})).await;
+    let (ok, d) =
+        call("record_decision", json!({"title": "Keep it small", "owner_words": "small", "source": "owner"})).await;
     assert!(ok, "{d}");
-    let (ok, d) = call("record_decision", json!({"title": "Always ask first", "owner_words": "ask", "source": "owner", "scope": "project"})).await;
+    let (ok, d) = call(
+        "record_decision",
+        json!({"title": "Always ask first", "owner_words": "ask", "source": "owner", "scope": "project"}),
+    )
+    .await;
     assert!(ok, "{d}");
     let (ok, a) = call("archive_milestone", json!({"milestone": "P10", "reason": "dropped"})).await;
     assert!(ok, "{a}");
@@ -2621,7 +3015,11 @@ async fn milestones_steps_and_tasks_are_edited_and_archived_freely() {
     let log: String = s
         .state
         .db
-        .call(|c| Ok(c.query_row("SELECT group_concat(summary, ' | ') FROM events WHERE kind LIKE 'milestone.%'", [], |r| r.get(0))?))
+        .call(|c| {
+            Ok(c.query_row("SELECT group_concat(summary, ' | ') FROM events WHERE kind LIKE 'milestone.%'", [], |r| {
+                r.get(0)
+            })?)
+        })
         .await
         .unwrap();
     assert!(log.contains("Step P9.3b archived (Batches): folded into P9.3; moved to P9.3: T-1, N-1"), "{log}");
@@ -2648,7 +3046,9 @@ async fn questions_and_decisions_have_scopes() {
     assert!(call("update_milestone", json!({"milestone": "P9", "state": "active"})).await.0);
     assert!(call("update_milestone", json!({"milestone": "M9", "state": "active"})).await.0);
     // Two active: the one whose step has a task in doing.
-    assert!(call("add_task", json!({"milestone": "P9.1", "title": "Work", "estimate": "1 h", "state": "doing"})).await.0);
+    assert!(
+        call("add_task", json!({"milestone": "P9.1", "title": "Work", "estimate": "1 h", "state": "doing"})).await.0
+    );
     let (_, q) = call("ask_question", json!({"title": "Which?"})).await;
     assert_eq!(q["scope"], "P9", "{q}");
     // A step names its milestone; "project"; a planned milestone.
@@ -2656,7 +3056,9 @@ async fn questions_and_decisions_have_scopes() {
     assert_eq!(q["scope"], "M9");
     let (_, q) = call("ask_question", json!({"title": "Everywhere?", "scope": "project", "related": ["D-9"]})).await;
     assert!(q.as_str().is_some_and(|e| e.contains("D-9")), "related must be decisions: {q}");
-    let (ok, d) = call("record_decision", json!({"title": "Old rule", "owner_words": "old", "source": "owner", "scope": "M8"})).await;
+    let (ok, d) =
+        call("record_decision", json!({"title": "Old rule", "owner_words": "old", "source": "owner", "scope": "M8"}))
+            .await;
     assert!(ok, "{d}");
     let (ok, q) = call("ask_question", json!({"title": "Everywhere?", "scope": "project", "related": ["D-1"]})).await;
     assert!(ok && q["scope"] == "project", "{q}");
@@ -2675,17 +3077,32 @@ async fn questions_and_decisions_have_scopes() {
     let cookie = s.owner_cookie().await;
     let page = s.http.get(s.url("/p/vinculum/Q-3")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
     assert!(page.contains("Its decision goes into") && page.contains("Project-wide"), "{page}");
-    let m9: i64 = s
-        .db
-        .call(|c| {
+    let m9: i64 =
+        s.db.call(|c| {
             let p = crate::projects::require(c, "vinculum")?;
             Ok(crate::projects::find_milestone(c, p.id, "M9")?.id)
         })
         .await
         .unwrap();
-    let res = s.http.post(s.url("/p/vinculum/Q-3/scope")).header(COOKIE, &cookie).header(ORIGIN, &s.base).form(&[("scope", m9.to_string())]).send().await.unwrap();
+    let res = s
+        .http
+        .post(s.url("/p/vinculum/Q-3/scope"))
+        .header(COOKIE, &cookie)
+        .header(ORIGIN, &s.base)
+        .form(&[("scope", m9.to_string())])
+        .send()
+        .await
+        .unwrap();
     assert!(res.status().is_redirection());
-    let res = s.http.post(s.url("/p/vinculum/Q-3/answer")).header(COOKIE, &cookie).header(ORIGIN, &s.base).form(&[("words", "yes, everywhere")]).send().await.unwrap();
+    let res = s
+        .http
+        .post(s.url("/p/vinculum/Q-3/answer"))
+        .header(COOKIE, &cookie)
+        .header(ORIGIN, &s.base)
+        .form(&[("words", "yes, everywhere")])
+        .send()
+        .await
+        .unwrap();
     assert!(res.status().is_redirection());
     // News comes in the next write call's reply, once; again shows it again.
     let (ok, r) = call("add_note", json!({"name": "n", "category": "log", "text": "x"})).await;
@@ -2699,30 +3116,52 @@ async fn questions_and_decisions_have_scopes() {
     let res = s.http.get(s.url("/api/news?again=60")).bearer_auth(&token).send().await.unwrap();
     assert!(res.text().await.unwrap().contains("Owner answered Q-3"));
     // Decisions: several re-scoped at once, promoted, replaced.
-    let (ok, d) = call("record_decision", json!({"title": "New rule", "owner_words": "new", "source": "owner", "scope": "M8"})).await;
+    let (ok, d) =
+        call("record_decision", json!({"title": "New rule", "owner_words": "new", "source": "owner", "scope": "M8"}))
+            .await;
     assert!(ok, "{d}");
     let new_id = d["id"].as_str().unwrap().to_owned();
-    let (ok, r) = call("update_decision", json!({"ids": ["D-1", new_id.clone()], "scope": "M9", "reason": "about M9"})).await;
+    let (ok, r) =
+        call("update_decision", json!({"ids": ["D-1", new_id.clone()], "scope": "M9", "reason": "about M9"})).await;
     assert!(ok && r["decisions"].as_array().unwrap().len() == 2, "{r}");
-    let (ok, r) = call("update_decision", json!({"id": "D-1", "replaced_by": new_id.clone(), "reason": "the owner changed it"})).await;
+    let (ok, r) =
+        call("update_decision", json!({"id": "D-1", "replaced_by": new_id.clone(), "reason": "the owner changed it"}))
+            .await;
     assert!(ok && r["state"] == "replaced", "{r}");
-    let (ok, r) = call("update_decision", json!({"id": new_id.clone(), "scope": "project", "reason": "holds everywhere"})).await;
+    let (ok, r) =
+        call("update_decision", json!({"id": new_id.clone(), "scope": "project", "reason": "holds everywhere"})).await;
     assert!(ok && r["scope"] == "project", "{r}");
     // Default reads: project-wide and open milestones' decisions; closed and replaced need a flag.
-    let (ok, d) = call("record_decision", json!({"title": "M8 thing", "owner_words": "m8", "source": "owner", "scope": "M8"})).await;
+    let (ok, d) =
+        call("record_decision", json!({"title": "M8 thing", "owner_words": "m8", "source": "owner", "scope": "M8"}))
+            .await;
     assert!(ok, "{d}");
     assert!(call("update_milestone", json!({"milestone": "M8", "state": "closed"})).await.0);
     let (_, found) = call("find_records", json!({"kind": "decision"})).await;
-    let ids: Vec<String> = found["records"].as_array().unwrap().iter().map(|r| r["id"].as_str().unwrap().to_owned()).collect();
+    let ids: Vec<String> =
+        found["records"].as_array().unwrap().iter().map(|r| r["id"].as_str().unwrap().to_owned()).collect();
     let m8_thing = d["id"].as_str().unwrap().to_owned();
     assert!(!ids.contains(&"vinculum/D-1".to_owned()) && !ids.contains(&m8_thing), "{found}");
     let (_, found) = call("find_records", json!({"kind": "decision", "include_closed": true})).await;
     assert_eq!(found["count"], ids.len() + 2, "{found}");
     // Pages: count is the page, total all of them; compact leaves the quotes out.
-    let (_, page) = call("find_records", json!({"kind": "decision", "include_closed": true, "limit": 1, "offset": 1, "compact": true})).await;
+    let (_, page) = call(
+        "find_records",
+        json!({"kind": "decision", "include_closed": true, "limit": 1, "offset": 1, "compact": true}),
+    )
+    .await;
     assert!(page["count"] == 1 && page["total"] == ids.len() + 2 && page["more"] == true, "{page}");
     assert!(page["records"][0].get("owner_words").is_none() && page["records"][0]["scope"].is_string(), "{page}");
-    let tab = s.http.get(s.url("/p/vinculum?tab=decisions")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
+    let tab = s
+        .http
+        .get(s.url("/p/vinculum?tab=decisions"))
+        .header(COOKIE, &cookie)
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
     assert!(tab.contains("1 of closed milestones") && tab.contains("1 replaced by newer ones"), "{tab}");
     // hello lists project-wide decisions since the last session.
     let (_, h) = call("hello", hello).await;
@@ -2740,17 +3179,47 @@ async fn hello_over_the_api_for_a_session_start_hook() {
         let (s, token, sess) = (&s, token.clone(), sess.clone());
         async move { mcp_tool(s, &token, &sess, name, args).await }
     };
-    assert!(call("hello", json!({"session": "Vinculum", "machine": "giosuel.ch", "model": "Opus", "effort": "high"})).await.0);
+    assert!(
+        call("hello", json!({"session": "Vinculum", "machine": "giosuel.ch", "model": "Opus", "effort": "high"}))
+            .await
+            .0
+    );
     assert!(call("edit_project_doc", json!({"section": "How to work on it", "text": "- DCO sign-off"})).await.0);
-    assert!(call("add_milestone", json!({"name": "M1", "title": "Done one", "description": "long text", "state": "closed"})).await.0);
-    assert!(call("add_milestone", json!({"name": "M2", "title": "Now", "description": "what M2 is", "state": "active"})).await.0);
+    assert!(
+        call(
+            "add_milestone",
+            json!({"name": "M1", "title": "Done one", "description": "long text", "state": "closed"})
+        )
+        .await
+        .0
+    );
+    assert!(
+        call("add_milestone", json!({"name": "M2", "title": "Now", "description": "what M2 is", "state": "active"}))
+            .await
+            .0
+    );
     let (ok, q) = call("ask_question", json!({"title": "Which?"})).await;
     assert!(ok, "{q}");
     let cookie = s.owner_cookie().await;
-    let res = s.http.post(s.url("/p/vinculum/Q-1/answer")).header(COOKIE, &cookie).header(ORIGIN, &s.base).form(&[("words", "this one")]).send().await.unwrap();
+    let res = s
+        .http
+        .post(s.url("/p/vinculum/Q-1/answer"))
+        .header(COOKIE, &cookie)
+        .header(ORIGIN, &s.base)
+        .form(&[("words", "this one")])
+        .send()
+        .await
+        .unwrap();
     assert!(res.status().is_redirection());
 
-    let res = s.http.post(s.url("/api/hello")).bearer_auth(&token).json(&json!({"source": "compact", "model": "Opus 5.5"})).send().await.unwrap();
+    let res = s
+        .http
+        .post(s.url("/api/hello"))
+        .bearer_auth(&token)
+        .json(&json!({"source": "compact", "model": "Opus 5.5"}))
+        .send()
+        .await
+        .unwrap();
     assert!(res.status().is_success(), "{}", res.status());
     let r: Value = res.json().await.unwrap();
     assert!(r["doc"]["text"].as_str().unwrap().contains("DCO sign-off"), "{r}");
@@ -2758,7 +3227,10 @@ async fn hello_over_the_api_for_a_session_start_hook() {
     let text = crate::cli::hello_text(&r, "compact", crate::cli::HelloPart::All);
     assert!(text.starts_with("AgentFlow hello after your context was summarized"), "{text}");
     assert!(text.contains("DCO sign-off") && text.contains("Owner answered Q-1"), "{text}");
-    assert!(text.contains("- M1 Done one [closed]") && !text.contains("long text") && text.contains("what M2 is"), "{text}");
+    assert!(
+        text.contains("- M1 Done one [closed]") && !text.contains("long text") && text.contains("what M2 is"),
+        "{text}"
+    );
     // The news was marked read; the session's name stayed, the model changed.
     let res = s.http.get(s.url("/api/news")).bearer_auth(&token).send().await.unwrap();
     assert_eq!(res.json::<Value>().await.unwrap()["events"].as_array().unwrap().len(), 0);
@@ -2773,14 +3245,31 @@ async fn hello_over_the_api_for_a_session_start_hook() {
     assert!(doc.contains("DCO sign-off") && !doc.contains("=== Milestones"), "{doc}");
     let mut big = r.clone();
     big["doc"]["text"] = "- a rule\n".repeat(3000).into();
-    big["recent_events"] = (0..200).map(|i| json!({"at": "2026-11-12T10:00:00Z", "what": format!("event {i} {}", "x".repeat(80)), "by": "x"})).collect();
+    big["recent_events"] = (0..200)
+        .map(|i| json!({"at": "2026-11-12T10:00:00Z", "what": format!("event {i} {}", "x".repeat(80)), "by": "x"}))
+        .collect();
     let doc = crate::cli::hello_text(&big, "startup", crate::cli::HelloPart::Doc);
     assert!(doc.chars().count() <= crate::cli::HOOK_LIMIT && doc.contains("the document goes on"), "{}", doc.len());
     let rest = crate::cli::hello_text(&big, "startup", crate::cli::HelloPart::NoDoc);
     assert!(rest.chars().count() <= crate::cli::HOOK_LIMIT, "{}", rest.len());
-    assert!(!rest.contains("a rule") && rest.contains("=== Where you are") && rest.contains("Owner answered Q-1") && rest.contains("what M2 is") && rest.contains("cut to fit"), "{rest}");
+    assert!(
+        !rest.contains("a rule")
+            && rest.contains("=== Where you are")
+            && rest.contains("Owner answered Q-1")
+            && rest.contains("what M2 is")
+            && rest.contains("cut to fit"),
+        "{rest}"
+    );
     // Not for the owner.
-    let res = s.http.post(s.url("/api/hello")).header(COOKIE, &cookie).header(ORIGIN, &s.base).json(&json!({})).send().await.unwrap();
+    let res = s
+        .http
+        .post(s.url("/api/hello"))
+        .header(COOKIE, &cookie)
+        .header(ORIGIN, &s.base)
+        .json(&json!({}))
+        .send()
+        .await
+        .unwrap();
     assert!(!res.status().is_success());
 }
 
@@ -2791,7 +3280,9 @@ async fn tool_schemas_have_no_refs() {
     let s = TestServer::start().await;
     let token = s.token(TokenKind::Project, Some("vinculum")).await;
     let sess = mcp_session(&s, &token).await;
-    let (_, r) = mcp_call(&s, &token, Some(&sess), json!({"jsonrpc": "2.0", "id": 9, "method": "tools/list", "params": {}})).await;
+    let (_, r) =
+        mcp_call(&s, &token, Some(&sess), json!({"jsonrpc": "2.0", "id": 9, "method": "tools/list", "params": {}}))
+            .await;
     let tools = r.unwrap()["result"]["tools"].as_array().unwrap().clone();
     assert!(tools.len() > 20);
     for t in &tools {
@@ -2832,7 +3323,14 @@ async fn a_setup_code_sets_a_project_up_on_a_machine() {
 
     let redeem = |code: String| {
         let s = &s;
-        async move { s.http.post(s.url("/api/setup/redeem")).json(&json!({"code": code, "machine": "giosuel@mothman"})).send().await.unwrap() }
+        async move {
+            s.http
+                .post(s.url("/api/setup/redeem"))
+                .json(&json!({"code": code, "machine": "giosuel@mothman"}))
+                .send()
+                .await
+                .unwrap()
+        }
     };
     let got: Value = redeem(code.to_lowercase()).await.json().await.unwrap();
     assert_eq!(got["project"], "vinculum");
@@ -2849,10 +3347,22 @@ async fn a_setup_code_sets_a_project_up_on_a_machine() {
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
-    let res = s.http.post(s.url("/api/setup/done")).bearer_auth(&token).json(&json!({"folder": "relative", "machine": "m"})).send().await.unwrap();
+    let res = s
+        .http
+        .post(s.url("/api/setup/done"))
+        .bearer_auth(&token)
+        .json(&json!({"folder": "relative", "machine": "m"}))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(res.status(), StatusCode::BAD_REQUEST);
     let page = s.http.get(s.url("/p/vinculum")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
-    assert!(page.contains("/home/giosuel/vinculum") && page.contains("mothman") && page.contains("Set up on another machine"), "{page}");
+    assert!(
+        page.contains("/home/giosuel/vinculum")
+            && page.contains("mothman")
+            && page.contains("Set up on another machine"),
+        "{page}"
+    );
 }
 
 /// Add project: the commands for `flow project setup`, or a project created here with a setup code.
@@ -2877,7 +3387,10 @@ async fn add_project_hands_out_the_commands_or_a_setup_code() {
     assert!(shown.contains("id=\"setup-code\"") && shown.contains("cd ~/speculum-tool"), "{shown}");
     let p = s.db.call(|c| crate::projects::require(c, "speculum-tool")).await.unwrap();
     assert!(p.checkout.is_empty(), "no folder until it's set up");
-    let tokens: i64 = s.db.call(move |c| Ok(c.query_row("SELECT count(*) FROM tokens WHERE project_id = ?1", [p.id], |r| r.get(0))?)).await.unwrap();
+    let tokens: i64 =
+        s.db.call(move |c| Ok(c.query_row("SELECT count(*) FROM tokens WHERE project_id = ?1", [p.id], |r| r.get(0))?))
+            .await
+            .unwrap();
     assert_eq!(tokens, 0, "the setup code brings the token");
 }
 
@@ -2897,7 +3410,9 @@ async fn flow_sync_sends_each_call_once_for_its_project() {
     };
     std::fs::write(&file, line("m1", "2026-11-13T01:00:00Z") + &line("m2", "2026-11-13T01:01:00Z")).unwrap();
     let send = |tok: String, f: std::path::PathBuf, base: String| {
-        tokio::task::spawn_blocking(move || crate::sync::send(&crate::cli::Client::with_token(&base, &tok), &[f]).unwrap())
+        tokio::task::spawn_blocking(move || {
+            crate::sync::send(&crate::cli::Client::with_token(&base, &tok), &[f]).unwrap()
+        })
     };
     assert_eq!(send(token.clone(), file.clone(), s.base.clone()).await.unwrap(), 2);
     assert_eq!(send(token.clone(), file.clone(), s.base.clone()).await.unwrap(), 0, "nothing twice");
@@ -2906,10 +3421,11 @@ async fn flow_sync_sends_each_call_once_for_its_project() {
     let mut f = std::fs::OpenOptions::new().append(true).open(&file).unwrap();
     std::io::Write::write_all(&mut f, line("m3", "2026-11-13T01:02:00Z").as_bytes()).unwrap();
     assert_eq!(send(token.clone(), file.clone(), s.base.clone()).await.unwrap(), 1);
-    let rows: Vec<(String, Option<String>)> = s
-        .db
-        .call(|c| {
-            let mut st = c.prepare("SELECT u.message_id, p.slug FROM usage u LEFT JOIN projects p ON p.id = u.project_id ORDER BY 1")?;
+    let rows: Vec<(String, Option<String>)> =
+        s.db.call(|c| {
+            let mut st = c.prepare(
+                "SELECT u.message_id, p.slug FROM usage u LEFT JOIN projects p ON p.id = u.project_id ORDER BY 1",
+            )?;
             let v = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<Result<Vec<_>, _>>()?;
             Ok(v)
         })
@@ -2919,7 +3435,8 @@ async fn flow_sync_sends_each_call_once_for_its_project() {
     assert!(rows.iter().all(|(_, p)| p.as_deref() == Some("vinculum")), "{rows:?}");
     // Only projects' tokens sync.
     let device = s.token(TokenKind::Device, None).await;
-    let res = s.http.post(s.url("/api/sync/state")).bearer_auth(&device).json(&json!({"file": "m:/x"})).send().await.unwrap();
+    let res =
+        s.http.post(s.url("/api/sync/state")).bearer_auth(&device).json(&json!({"file": "m:/x"})).send().await.unwrap();
     assert_eq!(res.status(), StatusCode::FORBIDDEN);
 }
 
@@ -2963,21 +3480,37 @@ async fn a_builders_token_is_only_for_building() {
     let token = got["result"]["token"].as_str().unwrap().to_owned();
     assert!(token.starts_with("af_bld_"), "{got}");
     assert_eq!(got["result"]["min_threads"], 4.0, "a quarter of its threads");
-    let (kind,): (String,) = s.db.call(|c| Ok(c.query_row("SELECT kind FROM build_servers WHERE name = 'testbox'", [], |r| Ok((r.get(0)?,)))?)).await.unwrap();
+    let (kind,): (String,) = s
+        .db
+        .call(|c| Ok(c.query_row("SELECT kind FROM build_servers WHERE name = 'testbox'", [], |r| Ok((r.get(0)?,)))?))
+        .await
+        .unwrap();
     assert_eq!(kind, "daemon");
     for path in ["/api/status", "/api/projects", "/mcp"] {
         let res = s.http.get(s.url(path)).bearer_auth(&token).send().await.unwrap();
         assert_eq!(res.status(), StatusCode::FORBIDDEN, "{path}");
     }
-    let res = s.http.post(s.url("/api/builders/blobs")).bearer_auth(&token).json(&json!({"shas": []})).send().await.unwrap();
+    let res =
+        s.http.post(s.url("/api/builders/blobs")).bearer_auth(&token).json(&json!({"shas": []})).send().await.unwrap();
     assert_eq!(res.status(), StatusCode::OK, "its own endpoint");
     let agent = s.token(TokenKind::Project, Some("vinculum")).await;
-    let res = s.http.post(s.url("/api/builders/blobs")).bearer_auth(&agent).json(&json!({"shas": []})).send().await.unwrap();
+    let res =
+        s.http.post(s.url("/api/builders/blobs")).bearer_auth(&agent).json(&json!({"shas": []})).send().await.unwrap();
     assert_eq!(res.status(), StatusCode::FORBIDDEN, "not for agents");
     // Agents upload snapshots; the store takes only what matches its hash.
     let data = b"fn main() {}\n".to_vec();
     let sha = crate::blobs::sha_of(&data);
-    let missing: Value = s.http.post(s.url("/api/remote/blobs/missing")).bearer_auth(&agent).json(&json!({"shas": [sha]})).send().await.unwrap().json().await.unwrap();
+    let missing: Value = s
+        .http
+        .post(s.url("/api/remote/blobs/missing"))
+        .bearer_auth(&agent)
+        .json(&json!({"shas": [sha]}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
     assert_eq!(missing["missing"][0], sha.as_str());
     let mut pack = Vec::new();
     crate::blobs::pack_bytes(&[(sha.clone(), data)], &mut pack).unwrap();
@@ -2990,8 +3523,12 @@ async fn a_builders_token_is_only_for_building() {
 
     // flow builder list / edit: a connected machine sees it and changes its name and limits; the
     // token moves with the name.
-    let list: Value = s.http.get(s.url("/api/builders")).bearer_auth(&device).send().await.unwrap().json().await.unwrap();
-    assert!(list["builders"].as_array().unwrap().iter().any(|b| b["name"] == "testbox" && b["kind"] == "daemon"), "{list}");
+    let list: Value =
+        s.http.get(s.url("/api/builders")).bearer_auth(&device).send().await.unwrap().json().await.unwrap();
+    assert!(
+        list["builders"].as_array().unwrap().iter().any(|b| b["name"] == "testbox" && b["kind"] == "daemon"),
+        "{list}"
+    );
     let res = s.http.get(s.url("/api/builders")).bearer_auth(&agent).send().await.unwrap();
     assert_eq!(res.status(), StatusCode::FORBIDDEN, "not for agents");
     let res = s
@@ -3003,7 +3540,8 @@ async fn a_builders_token_is_only_for_building() {
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
-    let res = s.http.post(s.url("/api/builders/blobs")).bearer_auth(&token).json(&json!({"shas": []})).send().await.unwrap();
+    let res =
+        s.http.post(s.url("/api/builders/blobs")).bearer_auth(&token).json(&json!({"shas": []})).send().await.unwrap();
     assert_eq!(res.status(), StatusCode::OK, "the token works under the new name");
     let (n, t, k): (String, f64, i64) = s
         .db
@@ -3014,6 +3552,7 @@ async fn a_builders_token_is_only_for_building() {
     // flow builder remove, on the builder: it leaves and its token stops working.
     let res = s.http.delete(s.url("/api/builders/self")).bearer_auth(&token).send().await.unwrap();
     assert_eq!(res.status(), StatusCode::OK);
-    let res = s.http.post(s.url("/api/builders/blobs")).bearer_auth(&token).json(&json!({"shas": []})).send().await.unwrap();
+    let res =
+        s.http.post(s.url("/api/builders/blobs")).bearer_auth(&token).json(&json!({"shas": []})).send().await.unwrap();
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }

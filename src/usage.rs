@@ -392,7 +392,11 @@ pub fn store_as(conn: &mut Connection, read: &Read, project: Option<i64>) -> any
         )?;
     }
     if !read.log.is_empty() {
-        let cwd = if read.cwd.is_empty() { read.calls.first().map(|c| c.cwd.as_str()).unwrap_or("") } else { read.cwd.as_str() };
+        let cwd = if read.cwd.is_empty() {
+            read.calls.first().map(|c| c.cwd.as_str()).unwrap_or("")
+        } else {
+            read.cwd.as_str()
+        };
         let project_id = project.or_else(|| checkouts.project(cwd, &read.folder));
         crate::sessionlog::store(&tx, &read.log, &read.session, &read.folder, cwd, project_id)?;
     }

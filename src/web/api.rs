@@ -17,7 +17,11 @@ use crate::util::fmt_utc;
 use crate::{records, waiting};
 
 pub fn routes() -> Router<AppState> {
-    Router::new().route("/api/wait", get(wait)).route("/api/news", get(news)).route("/api/hello", axum::routing::post(hello)).route("/api/timings", axum::routing::post(timing))
+    Router::new()
+        .route("/api/wait", get(wait))
+        .route("/api/news", get(news))
+        .route("/api/hello", axum::routing::post(hello))
+        .route("/api/timings", axum::routing::post(timing))
 }
 
 /// A timing from `flow time`: what ran, how long, CPU and peak memory, on what.
@@ -36,26 +40,44 @@ pub struct TimingBody {
     pub note: String,
 }
 
-async fn timing(State(state): State<AppState>, Extension(actor): Extension<Actor>, Json(b): Json<TimingBody>) -> Response {
+async fn timing(
+    State(state): State<AppState>,
+    Extension(actor): Extension<Actor>,
+    Json(b): Json<TimingBody>,
+) -> Response {
     let a = actor.clone();
     let res = state
         .db
         .call(move |c| {
             let project = crate::mcp::target_project(c, &a, None, true)?;
-            let on = crate::times::resolve_on(c, project.id, &project.slug, Some(b.on.as_str()).filter(|o| !o.is_empty()))?;
+            let on =
+                crate::times::resolve_on(c, project.id, &project.slug, Some(b.on.as_str()).filter(|o| !o.is_empty()))?;
             let place = if b.place.trim().is_empty() { "here" } else { b.place.as_str() };
             crate::times::add(
                 c,
                 project.id,
                 &on,
-                &crate::times::NewTiming { what: &b.what, place, wall_ms: b.wall_ms, cpu_ms: b.cpu_ms, peak_mb: b.peak_mb, exit_code: b.exit_code, note: &b.note },
+                &crate::times::NewTiming {
+                    what: &b.what,
+                    place,
+                    wall_ms: b.wall_ms,
+                    cpu_ms: b.cpu_ms,
+                    peak_mb: b.peak_mb,
+                    exit_code: b.exit_code,
+                    note: &b.note,
+                },
                 &a.name(),
             )
         })
         .await;
     match res {
         Ok(t) => {
-            let e = crate::activity::Entry::new(&actor, crate::activity::Via::Api, crate::activity::Action::Write, format!("timing on {}: {}", t.on, t.what));
+            let e = crate::activity::Entry::new(
+                &actor,
+                crate::activity::Via::Api,
+                crate::activity::Action::Write,
+                format!("timing on {}: {}", t.on, t.what),
+            );
             crate::activity::write(&state.db, e).await;
             Json(json!({"on": t.on, "id": t.id})).into_response()
         }
@@ -71,7 +93,11 @@ struct NewsQuery {
 
 /// The news for `flow news` (a hook before each of the owner's prompts): unread events by
 /// others, marked read; or, with `again`, the last minutes once more.
-async fn news(State(state): State<AppState>, Extension(actor): Extension<Actor>, Query(q): Query<NewsQuery>) -> Response {
+async fn news(
+    State(state): State<AppState>,
+    Extension(actor): Extension<Actor>,
+    Query(q): Query<NewsQuery>,
+) -> Response {
     let Actor::Project { project_id, slug, .. } = actor else {
         return (StatusCode::FORBIDDEN, Json(json!({"error": "news is for a project's agent"}))).into_response();
     };
@@ -83,7 +109,9 @@ async fn news(State(state): State<AppState>, Extension(actor): Extension<Actor>,
         })
         .await;
     match result {
-        Ok(events) => Json(json!({"events": events.iter().map(waiting::news_json).collect::<Vec<_>>()})).into_response(),
+        Ok(events) => {
+            Json(json!({"events": events.iter().map(waiting::news_json).collect::<Vec<_>>()})).into_response()
+        }
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": format!("{e:#}")}))).into_response(),
     }
 }
@@ -106,7 +134,11 @@ pub struct HelloBody {
 /// `flow hello`: the hello tool's reply, for a SessionStart hook (Imaginarium's agent and the
 /// owner, 2026-11-12: the full hello on every start, resume, /clear and compaction). The news in it
 /// is marked read, so the hook before the next prompt doesn't repeat it.
-async fn hello(State(state): State<AppState>, Extension(actor): Extension<Actor>, Json(b): Json<HelloBody>) -> Response {
+async fn hello(
+    State(state): State<AppState>,
+    Extension(actor): Extension<Actor>,
+    Json(b): Json<HelloBody>,
+) -> Response {
     if !matches!(actor, Actor::Project { .. }) {
         return (StatusCode::FORBIDDEN, Json(json!({"error": "hello is for a project's agent"}))).into_response();
     }
@@ -119,7 +151,11 @@ async fn hello(State(state): State<AppState>, Extension(actor): Extension<Actor>
             let project = crate::mcp::target_project(c, &a, None, true)?;
             if b.part == "doc" {
                 let d = crate::projectdoc::get(c, project.id)?;
-                let edited = if d.rev > 0 { format!("{} by {} ({})", crate::util::fmt_utc(d.updated_at), d.author, d.what) } else { String::new() };
+                let edited = if d.rev > 0 {
+                    format!("{} by {} ({})", crate::util::fmt_utc(d.updated_at), d.author, d.what)
+                } else {
+                    String::new()
+                };
                 return Ok((json!({"doc": {"text": d.text, "rev": d.rev, "edited": edited}}), None, project.slug));
             }
             let keep = |new: String, old: &str| if new.trim().is_empty() { old.to_owned() } else { new };
@@ -140,7 +176,12 @@ async fn hello(State(state): State<AppState>, Extension(actor): Extension<Actor>
         Ok((reply, None, _)) => Json(reply).into_response(),
         Ok((reply, Some(session), slug)) => {
             let how = if source.is_empty() { String::new() } else { format!(" ({source})") };
-            let mut e = crate::activity::Entry::new(&actor, crate::activity::Via::Api, crate::activity::Action::Read, format!("hello from {session}{how}"));
+            let mut e = crate::activity::Entry::new(
+                &actor,
+                crate::activity::Via::Api,
+                crate::activity::Action::Read,
+                format!("hello from {session}{how}"),
+            );
             e.project = Some(slug);
             crate::activity::write(&state.db, e).await;
             Json(reply).into_response()
@@ -194,8 +235,7 @@ async fn wait(
     Query(q): Query<WaitQuery>,
 ) -> Response {
     let Actor::Project { project_id, slug, .. } = actor.clone() else {
-        return (StatusCode::FORBIDDEN, Json(json!({"error": "wait is for a project's agent"})))
-            .into_response();
+        return (StatusCode::FORBIDDEN, Json(json!({"error": "wait is for a project's agent"}))).into_response();
     };
     // One agent per project needs one or two waits at a time; more would only load the database.
     let Some(_slot) = WaitSlot::take(&state, project_id) else {
@@ -249,4 +289,3 @@ async fn wait(
         tokio::time::sleep(POLL).await;
     }
 }
-

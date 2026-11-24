@@ -31,12 +31,19 @@ pub async fn view(state: &AppState) -> View {
     let (on, link, error) = state
         .db
         .call(move |c| {
-            let error: Option<String> = c.query_row("SELECT value FROM settings WHERE key = 'consultant.error'", [], |r| r.get(0)).ok();
+            let error: Option<String> =
+                c.query_row("SELECT value FROM settings WHERE key = 'consultant.error'", [], |r| r.get(0)).ok();
             Ok((consultant::is_on(c)?, consultant::session_link(c, &f2)?, error.filter(|e| !e.is_empty())))
         })
         .await
         .unwrap_or((false, None, None));
-    View { on, running: consultant::running(&state.config.data_dir()).await, link, attach: consultant::attach_command(&state.config.data_dir()), error }
+    View {
+        on,
+        running: consultant::running(&state.config.data_dir()).await,
+        link,
+        attach: consultant::attach_command(&state.config.data_dir()),
+        error,
+    }
 }
 
 async fn note_error(state: &AppState, e: &str) {
@@ -60,13 +67,23 @@ async fn bring_up(state: &AppState) -> anyhow::Result<()> {
     let history = consultant::has_history(&crate::usage::root(&state.config), &folder);
     consultant::start(&data, &folder, resume.as_deref(), history).await?;
     if resume.is_some() {
-        state.db.call(|c| { c.execute("DELETE FROM settings WHERE key = 'consultant.resume'", [])?; Ok(()) }).await?;
+        state
+            .db
+            .call(|c| {
+                c.execute("DELETE FROM settings WHERE key = 'consultant.resume'", [])?;
+                Ok(())
+            })
+            .await?;
     }
     note_error(state, "").await;
     Ok(())
 }
 
-async fn on(State(state): State<AppState>, Extension(actor): Extension<Actor>, Extension(ip): Extension<ClientIp>) -> AppResult<Response> {
+async fn on(
+    State(state): State<AppState>,
+    Extension(actor): Extension<Actor>,
+    Extension(ip): Extension<ClientIp>,
+) -> AppResult<Response> {
     actor.require_owner()?;
     if let Err(e) = consultant::login_ok().await {
         note_error(&state, &format!("{e:#}")).await;
@@ -78,15 +95,21 @@ async fn on(State(state): State<AppState>, Extension(actor): Extension<Actor>, E
     {
         note_error(&state, &format!("{e:#}")).await;
     }
-    activity::write(&state.db, Entry::new(&actor, Via::Page, Action::Write, "consultant switched on").ip(Some(ip.0))).await;
+    activity::write(&state.db, Entry::new(&actor, Via::Page, Action::Write, "consultant switched on").ip(Some(ip.0)))
+        .await;
     Ok(Redirect::to("/settings#s-consultant").into_response())
 }
 
-async fn off(State(state): State<AppState>, Extension(actor): Extension<Actor>, Extension(ip): Extension<ClientIp>) -> AppResult<Response> {
+async fn off(
+    State(state): State<AppState>,
+    Extension(actor): Extension<Actor>,
+    Extension(ip): Extension<ClientIp>,
+) -> AppResult<Response> {
     actor.require_owner()?;
     state.db.call(|c| consultant::set_on(c, false)).await?;
     let _ = consultant::stop(&state.config.data_dir()).await;
-    activity::write(&state.db, Entry::new(&actor, Via::Page, Action::Write, "consultant switched off").ip(Some(ip.0))).await;
+    activity::write(&state.db, Entry::new(&actor, Via::Page, Action::Write, "consultant switched off").ip(Some(ip.0)))
+        .await;
     Ok(Redirect::to("/settings#s-consultant").into_response())
 }
 

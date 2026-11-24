@@ -3,15 +3,15 @@
 
 pub(crate) mod admin_socket;
 mod api;
-pub(crate) mod consultant;
-pub(crate) mod builders;
-mod sync;
 mod approvals;
 mod assets;
+pub(crate) mod builders;
 mod builds;
+pub(crate) mod consultant;
 pub mod outgoing;
 pub mod remote;
 mod screenshots;
+mod sync;
 mod totest;
 pub use builds::notify_build;
 mod buttons;
@@ -201,7 +201,13 @@ pub async fn serve(state: AppState) -> anyhow::Result<()> {
     }
     {
         let data = state.config.data_dir();
-        let _ = state.db.call(move |c| { crate::secrets::load_all(c, &data); Ok(()) }).await;
+        let _ = state
+            .db
+            .call(move |c| {
+                crate::secrets::load_all(c, &data);
+                Ok(())
+            })
+            .await;
     }
     crate::poller::spawn(state.clone());
     if state.config.local_transcripts {
@@ -432,7 +438,11 @@ async fn authenticate(State(state): State<AppState>, jar: CookieJar, mut req: Re
 
     // A builder's token opens the builder's own endpoints and nothing else.
     if matches!(actor, Actor::Builder { .. }) && !path.starts_with("/api/builders/") {
-        return (StatusCode::FORBIDDEN, axum::Json(serde_json::json!({"error": "a builder's token is only for /api/builders"}))).into_response();
+        return (
+            StatusCode::FORBIDDEN,
+            axum::Json(serde_json::json!({"error": "a builder's token is only for /api/builders"})),
+        )
+            .into_response();
     }
 
     // A browser session may only change things from AgentFlow's own pages, so another site can't

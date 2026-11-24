@@ -153,7 +153,10 @@ impl FlowMcp {
                     && !matches!(tool, "since_last_check" | "hello")
                     && let Some(obj) = reply.as_object_mut()
                 {
-                    obj.insert("unread".into(), serde_json::json!(format!("{unread} new for you; call since_last_check")));
+                    obj.insert(
+                        "unread".into(),
+                        serde_json::json!(format!("{unread} new for you; call since_last_check")),
+                    );
                 }
                 Ok(json_result(reply))
             }

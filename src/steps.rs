@@ -100,7 +100,8 @@ pub fn task_started(conn: &Connection, task: &Record, actor: &str) -> anyhow::Re
 /// The tasks of one step (or of a milestone itself, without its steps), in the agent's order.
 pub fn tasks_of(conn: &Connection, milestone_id: i64) -> anyhow::Result<Vec<Record>> {
     let m = projects::get_milestone(conn, milestone_id)?;
-    let mut all = records::query(conn, &Query { project_id: Some(m.project_id), kinds: vec![Kind::Task], ..Default::default() })?;
+    let mut all =
+        records::query(conn, &Query { project_id: Some(m.project_id), kinds: vec![Kind::Task], ..Default::default() })?;
     all.retain(|t| t.milestone_id == Some(milestone_id));
     sort_by_position(&mut all);
     Ok(all)
@@ -174,7 +175,14 @@ pub fn conclude(
     let first = summary.lines().next().unwrap_or("");
     let what = if step.parent_id.is_some() { "Step" } else { "Milestone" };
     let moved_note = if moved.is_empty() { String::new() } else { format!(" ({} moved on)", moved.join(", ")) };
-    event(conn, Some(step.project_id), None, "milestone.concluded", &format!("{what} {} concluded: {first}{moved_note}", step.name), actor)?;
+    event(
+        conn,
+        Some(step.project_id),
+        None,
+        "milestone.concluded",
+        &format!("{what} {} concluded: {first}{moved_note}", step.name),
+        actor,
+    )?;
     Ok(Concluded { step: projects::get_milestone(conn, step.id)?, moved })
 }
 
@@ -182,7 +190,13 @@ pub fn conclude(
 /// freely): hidden from the lists, kept with its history, restorable. `with` is the milestone it
 /// was archived along with, so restoring that milestone brings it back. An open question stops
 /// blocking its tasks.
-pub fn archive_record(conn: &Connection, r: &Record, reason: &str, with: Option<i64>, actor: &str) -> anyhow::Result<Record> {
+pub fn archive_record(
+    conn: &Connection,
+    r: &Record,
+    reason: &str,
+    with: Option<i64>,
+    actor: &str,
+) -> anyhow::Result<Record> {
     if !matches!(r.kind, Kind::Task | Kind::Decision | Kind::Question) {
         bail!("{} is a {}; tasks, decisions and questions are archived", r.ref_id, r.kind);
     }
@@ -224,7 +238,12 @@ pub fn restore_record(conn: &Connection, r: &Record, actor: &str) -> anyhow::Res
     for k in ["archived_from", "archive_reason", "archived_with"] {
         data.insert(k.into(), Value::Null);
     }
-    let (rec, _) = records::update(conn, r, actor, Patch { state: Some(back), data, note: "restored".into(), ..Default::default() })?;
+    let (rec, _) = records::update(
+        conn,
+        r,
+        actor,
+        Patch { state: Some(back), data, note: "restored".into(), ..Default::default() },
+    )?;
     Ok(rec)
 }
 
@@ -256,7 +275,10 @@ pub fn archive_milestone(
     }
     if let Some(to) = move_to {
         if m.parent_id.is_none() {
-            bail!("{} is a milestone: its steps and tasks are archived with it (move_to is for a step's tasks)", m.name);
+            bail!(
+                "{} is a milestone: its steps and tasks are archived with it (move_to is for a step's tasks)",
+                m.name
+            );
         }
         if to.id == m.id || to.project_id != m.project_id || to.archived_at.is_some() {
             bail!("move_to is another live step or milestone of the same project");
@@ -264,7 +286,8 @@ pub fn archive_milestone(
     }
     let now = now_ms();
     let mut out = Archived::default();
-    let steps: Vec<Milestone> = projects::milestones(conn, m.project_id)?.into_iter().filter(|s| s.parent_id == Some(m.id)).collect();
+    let steps: Vec<Milestone> =
+        projects::milestones(conn, m.project_id)?.into_iter().filter(|s| s.parent_id == Some(m.id)).collect();
     conn.execute(
         "UPDATE milestones SET archived_at = ?1, archived_reason = ?2, archived_with = NULL, updated_at = ?1 WHERE id = ?3",
         params![now, reason, m.id],
@@ -320,7 +343,11 @@ pub fn archive_milestone(
         line.push_str(&format!("; with its steps {}", out.steps.join(", ")));
     }
     if !out.moved.is_empty() {
-        line.push_str(&format!("; moved to {}: {}", move_to.map(|t| t.name.as_str()).unwrap_or("its milestone"), out.moved.join(", ")));
+        line.push_str(&format!(
+            "; moved to {}: {}",
+            move_to.map(|t| t.name.as_str()).unwrap_or("its milestone"),
+            out.moved.join(", ")
+        ));
     }
     if !out.archived.is_empty() {
         line.push_str(&format!("; archived with it: {}", out.archived.join(", ")));
@@ -397,12 +424,8 @@ pub fn block(conn: &Connection, task: &Record, by: &str, actor: &str) -> anyhow:
             format!("blocked: {by}")
         }
     };
-    let (t, _) = records::update(
-        conn,
-        task,
-        actor,
-        Patch { state: Some("blocked".into()), data, note, ..Default::default() },
-    )?;
+    let (t, _) =
+        records::update(conn, task, actor, Patch { state: Some("blocked".into()), data, note, ..Default::default() })?;
     Ok(t)
 }
 
@@ -444,12 +467,7 @@ fn unblock_after(conn: &Connection, q: &Record, why: &str, actor: &str) -> anyho
             conn,
             &t,
             actor,
-            Patch {
-                state: Some("todo".into()),
-                note: format!("unblocked: {why}"),
-                quiet: true,
-                ..Default::default()
-            },
+            Patch { state: Some("todo".into()), note: format!("unblocked: {why}"), quiet: true, ..Default::default() },
         )?;
         freed.push(t.short_id());
     }
@@ -470,7 +488,8 @@ fn unblock_after(conn: &Connection, q: &Record, why: &str, actor: &str) -> anyho
 /// one, and what's blocked by what.
 pub fn where_json(conn: &Connection, project_id: i64) -> anyhow::Result<Value> {
     let ms = projects::milestones(conn, project_id)?;
-    let mut tasks = records::query(conn, &Query { project_id: Some(project_id), kinds: vec![Kind::Task], ..Default::default() })?;
+    let mut tasks =
+        records::query(conn, &Query { project_id: Some(project_id), kinds: vec![Kind::Task], ..Default::default() })?;
     sort_by_position(&mut tasks);
     let mut out = Vec::new();
     for m in ms.iter().filter(|m| m.state == "active") {
@@ -485,12 +504,20 @@ pub fn where_json(conn: &Connection, project_id: i64) -> anyhow::Result<Value> {
             continue;
         }
         let mine: Vec<&Record> = tasks.iter().filter(|t| t.milestone_id == Some(m.id)).collect();
-        let doing: Vec<Value> = mine.iter().filter(|t| t.state == "doing").map(|t| json!({"id": t.short_id(), "title": t.title})).collect();
-        let next = mine.iter().find(|t| t.state == "todo").map(|t| json!({"id": t.short_id(), "title": t.title, "estimate": t.data.get("estimate")}));
+        let doing: Vec<Value> =
+            mine.iter().filter(|t| t.state == "doing").map(|t| json!({"id": t.short_id(), "title": t.title})).collect();
+        let next = mine
+            .iter()
+            .find(|t| t.state == "todo")
+            .map(|t| json!({"id": t.short_id(), "title": t.title, "estimate": t.data.get("estimate")}));
         let mut blocked = Vec::new();
         for t in mine.iter().filter(|t| t.state == "blocked") {
             let qs = blocking_questions(conn, t.id)?;
-            let by = if qs.is_empty() { t.str("blocked_note").to_owned() } else { qs.iter().map(|q| q.0.clone()).collect::<Vec<_>>().join(", ") };
+            let by = if qs.is_empty() {
+                t.str("blocked_note").to_owned()
+            } else {
+                qs.iter().map(|q| q.0.clone()).collect::<Vec<_>>().join(", ")
+            };
             blocked.push(json!({"id": t.short_id(), "title": t.title, "by": by}));
         }
         let open = mine.iter().filter(|t| OPEN.contains(&t.state.as_str())).count();
@@ -531,20 +558,63 @@ mod tests {
         let db = Db::open_memory();
         db.call_blocking(|c| {
             let p = projects::create(c, "lumen", "Lumen", "owner")?;
-            let m = projects::add_milestone(c, p.id, &projects::NewMilestone { name: "M3", title: "Albums", description: "", parent: None, before: None }, "lumen")?;
-            let s1 = projects::add_milestone(c, p.id, &projects::NewMilestone { name: "S1", title: "Model", description: "", parent: Some(m.id), before: None }, "lumen")?;
-            let s2 = projects::add_milestone(c, p.id, &projects::NewMilestone { name: "S2", title: "Sidebar", description: "", parent: Some(m.id), before: None }, "lumen")?;
+            let m = projects::add_milestone(
+                c,
+                p.id,
+                &projects::NewMilestone { name: "M3", title: "Albums", description: "", parent: None, before: None },
+                "lumen",
+            )?;
+            let s1 = projects::add_milestone(
+                c,
+                p.id,
+                &projects::NewMilestone {
+                    name: "S1",
+                    title: "Model",
+                    description: "",
+                    parent: Some(m.id),
+                    before: None,
+                },
+                "lumen",
+            )?;
+            let s2 = projects::add_milestone(
+                c,
+                p.id,
+                &projects::NewMilestone {
+                    name: "S2",
+                    title: "Sidebar",
+                    description: "",
+                    parent: Some(m.id),
+                    before: None,
+                },
+                "lumen",
+            )?;
             let task = |title: &str, mid: i64| {
-                records::create(c, p.id, "lumen", NewRecord { kind: Some(Kind::Task), title: title.into(), milestone_id: Some(mid), ..Default::default() })
+                records::create(
+                    c,
+                    p.id,
+                    "lumen",
+                    NewRecord {
+                        kind: Some(Kind::Task),
+                        title: title.into(),
+                        milestone_id: Some(mid),
+                        ..Default::default()
+                    },
+                )
             };
             let t1 = task("Albums table", s1.id)?;
             let t2 = task("Smart albums", s1.id)?;
             // Doing starts the step and its milestone.
-            let (t1, _) = records::update(c, &t1, "lumen", Patch { state: Some("doing".into()), ..Default::default() })?;
+            let (t1, _) =
+                records::update(c, &t1, "lumen", Patch { state: Some("doing".into()), ..Default::default() })?;
             assert_eq!(task_started(c, &t1, "lumen")?, vec!["S1".to_owned(), "M3".to_owned()]);
             assert_eq!(projects::get_milestone(c, s1.id)?.state, "active");
             // A question blocks t2; answering unblocks it.
-            let q = records::create(c, p.id, "lumen", NewRecord { kind: Some(Kind::Question), title: "List or grid?".into(), ..Default::default() })?;
+            let q = records::create(
+                c,
+                p.id,
+                "lumen",
+                NewRecord { kind: Some(Kind::Question), title: "List or grid?".into(), ..Default::default() },
+            )?;
             let t2 = block(c, &t2, "Q-1", "lumen")?;
             assert_eq!(t2.state, "blocked");
             assert_eq!(blocking_questions(c, t2.id)?.len(), 1);

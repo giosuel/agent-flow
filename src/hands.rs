@@ -362,7 +362,8 @@ mod tests {
         .unwrap();
         assert_eq!((out.code, out.stdout.as_str(), out.stderr.as_str()), (Some(3), "hi\n", "err\n"));
         let slow: ExecOut = serde_json::from_value(
-            send(&sock, &Job::Exec { argv: vec!["sleep".into(), "5".into()], cwd: None, timeout_s: 1, env: vec![] }).unwrap(),
+            send(&sock, &Job::Exec { argv: vec!["sleep".into(), "5".into()], cwd: None, timeout_s: 1, env: vec![] })
+                .unwrap(),
         )
         .unwrap();
         assert!(slow.timed_out && slow.code.is_none());

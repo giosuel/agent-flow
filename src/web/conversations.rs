@@ -121,11 +121,14 @@ async fn page(
     let row = |t: &sessionlog::Thread| ThreadRow {
         key: t.key.clone(),
         title: t.title.clone(),
-        sub: [t.sub.clone(), t.project_id.and_then(|p| names.get(&p).cloned()).filter(|_| !t.is_subagent).unwrap_or_default()]
-            .into_iter()
-            .filter(|s| !s.is_empty())
-            .collect::<Vec<_>>()
-            .join(" · "),
+        sub: [
+            t.sub.clone(),
+            t.project_id.and_then(|p| names.get(&p).cloned()).filter(|_| !t.is_subagent).unwrap_or_default(),
+        ]
+        .into_iter()
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join(" · "),
         count: t.count,
         when: ago(t.last_at, now),
         selected: pick.as_deref() == Some(t.key.as_str()),
@@ -133,7 +136,11 @@ async fn page(
     let selected = pick.as_ref().and_then(|k| {
         sessions.iter().chain(subagents.iter()).find(|t| &t.key == k).map(|t| {
             let line = if t.is_subagent {
-                format!("Subagent{} · started {}", if t.sub.is_empty() { String::new() } else { format!(" · {}", t.sub) }, msgs.first().map(|m| tz.short(m.at)).unwrap_or_default())
+                format!(
+                    "Subagent{} · started {}",
+                    if t.sub.is_empty() { String::new() } else { format!(" · {}", t.sub) },
+                    msgs.first().map(|m| tz.short(m.at)).unwrap_or_default()
+                )
             } else {
                 format!("Between sessions · {} message{}", t.count, if t.count == 1 { "" } else { "s" })
             };

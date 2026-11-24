@@ -40,13 +40,18 @@ impl Config {
     }
 
     pub fn load(path: &Path) -> anyhow::Result<Self> {
-        let text = std::fs::read_to_string(path).with_context(|| format!("reading {} (flow builder add writes it)", path.display()))?;
+        let text = std::fs::read_to_string(path)
+            .with_context(|| format!("reading {} (flow builder add writes it)", path.display()))?;
         let c: Config = toml::from_str(&text)?;
         Ok(c)
     }
 
     fn token(&self) -> anyhow::Result<String> {
-        let path = if self.token_file.is_empty() { expand_home("~/.config/agentflow/builder.token") } else { expand_home(&self.token_file) };
+        let path = if self.token_file.is_empty() {
+            expand_home("~/.config/agentflow/builder.token")
+        } else {
+            expand_home(&self.token_file)
+        };
         let t = std::fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
         Ok(t.trim().to_owned())
     }
@@ -152,7 +157,11 @@ fn machine() -> (u64, f64) {
     let threads = std::thread::available_parallelism().map(|n| n.get() as u64).unwrap_or(1);
     let mem = std::fs::read_to_string("/proc/meminfo")
         .ok()
-        .and_then(|t| t.lines().find(|l| l.starts_with("MemTotal:")).and_then(|l| l.split_whitespace().nth(1)?.parse::<f64>().ok()))
+        .and_then(|t| {
+            t.lines()
+                .find(|l| l.starts_with("MemTotal:"))
+                .and_then(|l| l.split_whitespace().nth(1)?.parse::<f64>().ok())
+        })
         .map(|kb| kb / 1024.0 / 1024.0)
         .unwrap_or(0.0);
     (threads, (mem * 10.0).round() / 10.0)
@@ -179,7 +188,9 @@ fn handle(me: Arc<Builder>, req: Request) {
             tokio::spawn(async move {
                 let got = tokio::task::spawn_blocking(move || sync(&me2, &work, &manifest, &bundle)).await;
                 let reply = match got {
-                    Ok(Ok(report)) => Reply::Done { re: id, code: 0, stdout: report.to_string(), stderr: String::new() },
+                    Ok(Ok(report)) => {
+                        Reply::Done { re: id, code: 0, stdout: report.to_string(), stderr: String::new() }
+                    }
                     Ok(Err(e)) => Reply::Done { re: id, code: 1, stdout: String::new(), stderr: format!("{e:#}") },
                     Err(e) => Reply::Failed { re: id, error: e.to_string() },
                 };
@@ -273,7 +284,8 @@ async fn sh(me: &Arc<Builder>, id: u64, script: &str, stream: bool, timeout_s: u
 
 /// A folder under the builder's home, from the server: relative and plain.
 fn under_home(rel: &str) -> anyhow::Result<PathBuf> {
-    let r = crate::builds::safe_relative(Path::new(rel)).with_context(|| format!("{rel:?} isn't a folder in the builder's home"))?;
+    let r = crate::builds::safe_relative(Path::new(rel))
+        .with_context(|| format!("{rel:?} isn't a folder in the builder's home"))?;
     Ok(crate::util::home_dir().join(r))
 }
 
@@ -290,7 +302,12 @@ fn fetch_blobs(me: &Builder, shas: &[String]) -> anyhow::Result<u64> {
     }
     let c = client(me);
     let tmp = tempfile::NamedTempFile::new()?;
-    let res = c.http.post(format!("{}/api/builders/blobs", c.base)).bearer_auth(&me.token).json(&json!({"shas": missing})).send()?;
+    let res = c
+        .http
+        .post(format!("{}/api/builders/blobs", c.base))
+        .bearer_auth(&me.token)
+        .json(&json!({"shas": missing}))
+        .send()?;
     if !res.status().is_success() {
         bail!("{}: the server didn't send the files", res.status());
     }
@@ -333,7 +350,8 @@ fn sync(me: &Builder, work: &str, manifest: &str, bundle: &str) -> anyhow::Resul
     for e in &m.files {
         let target = dir.join(&e.path);
         now.insert(e.path.clone(), e.sha.clone());
-        let same = before.get(&e.path) == Some(&e.sha) && target.metadata().map(|md| md.len() == e.size).unwrap_or(false);
+        let same =
+            before.get(&e.path) == Some(&e.sha) && target.metadata().map(|md| md.len() == e.size).unwrap_or(false);
         if same {
             continue;
         }
@@ -361,7 +379,8 @@ fn sync(me: &Builder, work: &str, manifest: &str, bundle: &str) -> anyhow::Resul
             let b = st.path(bundle).display().to_string();
             let _ = git(&["fetch", "-q", "--force", &b, "+HEAD:refs/heads/agentflow", "+refs/tags/*:refs/tags/*"]);
         }
-        let have = git(&["cat-file", "-e", &format!("{}^{{commit}}", m.commit)]).map(|o| o.status.success()).unwrap_or(false);
+        let have =
+            git(&["cat-file", "-e", &format!("{}^{{commit}}", m.commit)]).map(|o| o.status.success()).unwrap_or(false);
         if have {
             git_ok = git(&["reset", "-q", "--mixed", &m.commit]).map(|o| o.status.success()).unwrap_or(false);
         }

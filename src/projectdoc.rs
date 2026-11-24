@@ -135,7 +135,11 @@ pub fn revisions(conn: &Connection, project_id: i64, limit: i64) -> anyhow::Resu
 
 pub fn revision_text(conn: &Connection, project_id: i64, rev: i64) -> anyhow::Result<Option<String>> {
     Ok(conn
-        .query_row("SELECT text FROM project_doc_revs WHERE project_id = ?1 AND rev = ?2", params![project_id, rev], |r| r.get(0))
+        .query_row(
+            "SELECT text FROM project_doc_revs WHERE project_id = ?1 AND rev = ?2",
+            params![project_id, rev],
+            |r| r.get(0),
+        )
         .optional()?)
 }
 

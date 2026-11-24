@@ -244,7 +244,9 @@ pub fn scan(buf: &[u8], sub: Option<&SubagentInfo>, found: &mut Found) {
     }
     // A subagent's brief and what its parent sends it later: its user lines with text (not tool
     // results, not Claude Code's own reminders).
-    if kind == "user" && sub.is_some() && !line.get("isMeta").and_then(Value::as_bool).unwrap_or(false)
+    if kind == "user"
+        && sub.is_some()
+        && !line.get("isMeta").and_then(Value::as_bool).unwrap_or(false)
         && let Some(text) = message.and_then(|m| m.get("content")).and_then(text_of)
         && !text.trim().is_empty()
         && !text.trim_start().starts_with("<system-reminder>")
@@ -372,7 +374,10 @@ pub fn store(
             params![k, m.at, thread, from, to, m.body, folder, cwd, own_session, project_id],
         )?;
         if let Some(id) = thread.strip_prefix("sub:") {
-            conn.execute("UPDATE subagent_threads SET last_at = max(last_at, ?1) WHERE agent_id = ?2", params![m.at, id])?;
+            conn.execute(
+                "UPDATE subagent_threads SET last_at = max(last_at, ?1) WHERE agent_id = ?2",
+                params![m.at, id],
+            )?;
         }
     }
     Ok(n)
@@ -466,11 +471,17 @@ pub fn subagent_threads(conn: &Connection, project_id: Option<i64>, limit: i64) 
         let (id, description, agent_type, session, folder, cwd, project_id, last_at, count) = row?;
         let session_name: String = conn
             .query_row("SELECT name FROM session_names WHERE session = ?1", [&session], |r| r.get(0))
-            .unwrap_or_else(|_| Path::new(&cwd).file_name().and_then(|f| f.to_str()).map(str::to_owned).unwrap_or(folder));
+            .unwrap_or_else(|_| {
+                Path::new(&cwd).file_name().and_then(|f| f.to_str()).map(str::to_owned).unwrap_or(folder)
+            });
         out.push(Thread {
             key: format!("sub:{id}"),
             title: if description.is_empty() { "Subagent".into() } else { description },
-            sub: [agent_type, format!("for {session_name}")].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join(" · "),
+            sub: [agent_type, format!("for {session_name}")]
+                .into_iter()
+                .filter(|s| !s.is_empty())
+                .collect::<Vec<_>>()
+                .join(" · "),
             project_id,
             count,
             last_at,
@@ -491,7 +502,8 @@ pub struct LogMsg {
 pub fn messages(conn: &Connection, thread: &str) -> anyhow::Result<Vec<LogMsg>> {
     let mut stmt =
         conn.prepare("SELECT at, from_name, to_name, body FROM session_messages WHERE thread = ?1 ORDER BY at, id")?;
-    let rows = stmt.query_map([thread], |r| Ok(LogMsg { at: r.get(0)?, from: r.get(1)?, to: r.get(2)?, body: r.get(3)? }))?;
+    let rows =
+        stmt.query_map([thread], |r| Ok(LogMsg { at: r.get(0)?, from: r.get(1)?, to: r.get(2)?, body: r.get(3)? }))?;
     Ok(rows.collect::<Result<_, _>>()?)
 }
 
@@ -511,11 +523,15 @@ mod tests {
         assert!(is_agent_id("a0ca2a7e879b8b08a") && !is_agent_id("Imaginarium") && !is_agent_id("all"));
 
         let mut f = Found::default();
-        let line = serde_json::json!({"type": "queue-operation", "operation": "enqueue", "timestamp": "2026-11-12T10:00:00Z",
-            "content": t}).to_string();
+        let line =
+            serde_json::json!({"type": "queue-operation", "operation": "enqueue", "timestamp": "2026-11-12T10:00:00Z",
+            "content": t})
+            .to_string();
         scan(line.as_bytes(), None, &mut f);
-        let line = serde_json::json!({"type": "assistant", "timestamp": "2026-11-12T10:01:00Z", "message": {"content": [
-            {"type": "tool_use", "name": "SendMessage", "input": {"to": "uds:/run/x.sock", "message": "Hi back"}}]}}).to_string();
+        let line =
+            serde_json::json!({"type": "assistant", "timestamp": "2026-11-12T10:01:00Z", "message": {"content": [
+            {"type": "tool_use", "name": "SendMessage", "input": {"to": "uds:/run/x.sock", "message": "Hi back"}}]}})
+            .to_string();
         scan(line.as_bytes(), None, &mut f);
         let line = serde_json::json!({"type": "custom-title", "customTitle": "agent-flow"}).to_string();
         scan(line.as_bytes(), None, &mut f);
@@ -523,7 +539,12 @@ mod tests {
         assert_eq!(f.msgs[1].to, Who::Address("uds:/run/x.sock".into()));
         assert_eq!(f.title.as_deref(), Some("agent-flow"));
 
-        let sub = SubagentInfo { id: "a1".into(), parent_session: "s".into(), description: "Review".into(), agent_type: "general".into() };
+        let sub = SubagentInfo {
+            id: "a1".into(),
+            parent_session: "s".into(),
+            description: "Review".into(),
+            agent_type: "general".into(),
+        };
         let mut f = Found::default();
         for line in [
             serde_json::json!({"type": "user", "parentUuid": null, "timestamp": "2026-11-12T10:00:00Z", "message": {"content": "Review the diff"}}),

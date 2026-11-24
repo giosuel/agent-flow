@@ -84,7 +84,11 @@ pub async fn run_script(
     if server.kind == "daemon" {
         let script = script.to_owned();
         let (code, stdout, stderr) = crate::builders::hub()
-            .ask(&server.name, |id| crate::builders::Request::Sh { id, script, stream: false, timeout_s: timeout.as_secs() }, timeout + Duration::from_secs(5))
+            .ask(
+                &server.name,
+                |id| crate::builders::Request::Sh { id, script, stream: false, timeout_s: timeout.as_secs() },
+                timeout + Duration::from_secs(5),
+            )
             .await?;
         if code != 0 {
             bail!("{}", stderr.trim().lines().last().unwrap_or("failed"));
@@ -704,9 +708,9 @@ pub fn check_server(b: &BuildServer) -> anyhow::Result<()> {
     }
     let target_ok = b.kind == "daemon"
         || !b.ssh.is_empty()
-        && b.ssh.len() <= 200
-        && !b.ssh.starts_with('-')
-        && b.ssh.bytes().all(|c| c.is_ascii_alphanumeric() || b"-_.@:[]".contains(&c));
+            && b.ssh.len() <= 200
+            && !b.ssh.starts_with('-')
+            && b.ssh.bytes().all(|c| c.is_ascii_alphanumeric() || b"-_.@:[]".contains(&c));
     if !target_ok {
         bail!("connect to user@host, or a Host from ~/.ssh/config");
     }
@@ -769,7 +773,10 @@ pub fn remove_server(conn: &Connection, name: &str) -> anyhow::Result<()> {
     conn.execute("DELETE FROM project_build_server WHERE server = ?1", [name])?;
     conn.execute("DELETE FROM build_servers WHERE name = ?1", [name])?;
     // A builder that connected itself loses its token with it.
-    conn.execute("UPDATE tokens SET revoked_at = ?2 WHERE kind = 'builder' AND name = ?1 AND revoked_at IS NULL", params![name, now_ms()])?;
+    conn.execute(
+        "UPDATE tokens SET revoked_at = ?2 WHERE kind = 'builder' AND name = ?1 AND revoked_at IS NULL",
+        params![name, now_ms()],
+    )?;
     Ok(())
 }
 
@@ -779,7 +786,8 @@ pub fn rename_server(conn: &mut Connection, old: &str, new: &str) -> anyhow::Res
     let probe = BuildServer { name: new.to_owned(), kind: "daemon".into(), ..Default::default() };
     check_server(&probe)?;
     let tx = conn.transaction()?;
-    let taken: bool = tx.query_row("SELECT EXISTS (SELECT 1 FROM build_servers WHERE name = ?1)", [new], |r| r.get(0))?;
+    let taken: bool =
+        tx.query_row("SELECT EXISTS (SELECT 1 FROM build_servers WHERE name = ?1)", [new], |r| r.get(0))?;
     if taken {
         bail!("there's a builder called {new} already");
     }
@@ -1303,7 +1311,12 @@ async fn run_job(state: crate::web::AppState, server: BuildServer, job: Job, thr
 
     let daemon = server.kind == "daemon";
     if !job.setup {
-        out.line(&note(&format!("copying {} to {}", if job.dir.is_empty() { "the snapshot" } else { &job.dir }, server.name))).await;
+        out.line(&note(&format!(
+            "copying {} to {}",
+            if job.dir.is_empty() { "the snapshot" } else { &job.dir },
+            server.name
+        )))
+        .await;
     }
     let synced = if job.setup {
         Ok(Synced { sha: String::new(), changed: 0, sent: 0 })
@@ -1321,14 +1334,16 @@ async fn run_job(state: crate::web::AppState, server: BuildServer, job: Job, thr
             return;
         }
     };
-    if !job.setup { out.line(&note(&format!(
-        "at commit {} plus {} changed file{} ({} bytes sent)",
-        synced.sha.get(..8).unwrap_or(""),
-        synced.changed,
-        if synced.changed == 1 { "" } else { "s" },
-        synced.sent
-    )))
-    .await; }
+    if !job.setup {
+        out.line(&note(&format!(
+            "at commit {} plus {} changed file{} ({} bytes sent)",
+            synced.sha.get(..8).unwrap_or(""),
+            synced.changed,
+            if synced.changed == 1 { "" } else { "s" },
+            synced.sent
+        )))
+        .await;
+    }
     let (id, sha, changed, sent) = (job.id, synced.sha.clone(), synced.changed as i64, synced.sent);
     let _ = state
         .db
@@ -1443,7 +1458,13 @@ async fn stream_ssh(
 
 /// Runs the job's script on a builder that connected itself. A dropped connection doesn't end
 /// it: the builder sends the rest when it's back.
-async fn stream_daemon(state: &crate::web::AppState, server: &BuildServer, job: &Job, script: String, out: &mut Out) -> Option<i64> {
+async fn stream_daemon(
+    state: &crate::web::AppState,
+    server: &BuildServer,
+    job: &Job,
+    script: String,
+    out: &mut Out,
+) -> Option<i64> {
     let (rid, mut events) = match crate::builders::hub().stream(&server.name, script) {
         Ok(x) => x,
         Err(e) => {
@@ -1477,14 +1498,25 @@ async fn stream_daemon(state: &crate::web::AppState, server: &BuildServer, job: 
 }
 
 /// What follows a run: bring back what was asked for, and finish.
-async fn after_run(state: &crate::web::AppState, data_dir: &Path, server: &BuildServer, job: &Job, code: Option<i64>, out: &mut Out) {
+async fn after_run(
+    state: &crate::web::AppState,
+    data_dir: &Path,
+    server: &BuildServer,
+    job: &Job,
+    code: Option<i64>,
+    out: &mut Out,
+) {
     let (state, server, job) = (state.clone(), server.clone(), job.clone());
     match code {
         Some(0) => {
             // Bring back what was asked for.
             let mut fetched = Vec::new();
             for f in &job.fetch {
-                let got = if server.kind == "daemon" { daemon_fetch(&state, &server, &job, f).await } else { fetch(data_dir, &server, &job, f).await };
+                let got = if server.kind == "daemon" {
+                    daemon_fetch(&state, &server, &job, f).await
+                } else {
+                    fetch(data_dir, &server, &job, f).await
+                };
                 match got {
                     Ok(()) => fetched.push(f.clone()),
                     Err(e) => out.line(&note(&format!("couldn't bring back {f}: {e:#}"))).await,
@@ -1535,7 +1567,11 @@ async fn daemon_sync(server: &BuildServer, job: &Job) -> anyhow::Result<Synced> 
     let v: serde_json::Value = serde_json::from_str(&stdout).context("the builder's sync report")?;
     Ok(Synced {
         // Only a commit git there really has: the next bundle starts from it.
-        sha: if v["git"].as_bool().unwrap_or(false) { v["commit"].as_str().unwrap_or("").to_owned() } else { String::new() },
+        sha: if v["git"].as_bool().unwrap_or(false) {
+            v["commit"].as_str().unwrap_or("").to_owned()
+        } else {
+            String::new()
+        },
         changed: v["changed"].as_u64().unwrap_or(0) as usize,
         sent: v["received"].as_i64().unwrap_or(0),
     })
@@ -1552,7 +1588,11 @@ async fn daemon_fetch(state: &crate::web::AppState, server: &BuildServer, job: &
     let name = crate::web::builders::result_name(path);
     let (jid, n2) = (job.id, name.clone());
     let (code, _, stderr) = crate::builders::hub()
-        .ask(&server.name, |id| crate::builders::Request::Upload { id, job: jid, from, name: n2 }, Duration::from_secs(1800))
+        .ask(
+            &server.name,
+            |id| crate::builders::Request::Upload { id, job: jid, from, name: n2 },
+            Duration::from_secs(1800),
+        )
         .await?;
     if code != 0 {
         bail!("{}", stderr.trim().lines().last().unwrap_or("the upload failed"));

@@ -264,7 +264,9 @@ pub fn enabled(conn: &Connection, a: &ActionRow) -> anyhow::Result<Result<(), St
         }
         // A stacked PR merges after the one it's based on (or with "Merge up to here"); one at
         // the bottom must be based on main.
-        if let Some(o) = crate::prs::merge_order(conn, record.project_id)?.into_iter().find(|o| o.record.id == record.id) {
+        if let Some(o) =
+            crate::prs::merge_order(conn, record.project_id)?.into_iter().find(|o| o.record.id == record.id)
+        {
             if let Some(after) = o.after {
                 return Ok(Err(format!("merge #{after} first")));
             }
@@ -393,11 +395,40 @@ mod tests {
         let db = Db::open_memory();
         db.call_blocking(|c| {
             let p = crate::projects::create(c, "v", "V", "t")?;
-            let m = crate::projects::add_milestone(c, p.id, &crate::projects::NewMilestone { name: "M4", title: "Keybinds", description: "", parent: None, before: None }, "v")?;
+            let m = crate::projects::add_milestone(
+                c,
+                p.id,
+                &crate::projects::NewMilestone {
+                    name: "M4",
+                    title: "Keybinds",
+                    description: "",
+                    parent: None,
+                    before: None,
+                },
+                "v",
+            )?;
             let mut data = serde_json::Map::new();
             data.insert("tag".into(), "v0.0.5-m4".into());
-            let rel = records::create(c, p.id, "v", records::NewRecord { kind: Some(Kind::Release), title: "M4".into(), state: Some("waiting".into()), milestone_id: Some(m.id), data, ..Default::default() })?;
-            let b = NewButton { label: "Push tag v0.0.5-m4", kind: ButtonKind::Tag, command: "git push origin v0.0.5-m4", workdir: "", requires: &[] };
+            let rel = records::create(
+                c,
+                p.id,
+                "v",
+                records::NewRecord {
+                    kind: Some(Kind::Release),
+                    title: "M4".into(),
+                    state: Some("waiting".into()),
+                    milestone_id: Some(m.id),
+                    data,
+                    ..Default::default()
+                },
+            )?;
+            let b = NewButton {
+                label: "Push tag v0.0.5-m4",
+                kind: ButtonKind::Tag,
+                command: "git push origin v0.0.5-m4",
+                workdir: "",
+                requires: &[],
+            };
             let id = add(c, &rel, &b, "v")?;
             let row = get(c, id)?.unwrap();
             finish(c, &row, &RunResult { ok: true, exit_code: Some(0), output: String::new() })?;

@@ -37,7 +37,8 @@ pub fn top_of(dir: &Path) -> anyhow::Result<(PathBuf, String)> {
 type Cache = HashMap<String, (u64, i128, String)>;
 
 fn cache_path(top: &Path) -> PathBuf {
-    crate::util::expand_home("~/.cache/agentflow/hashes").join(format!("{}.json", crate::usage::folder_for(&top.display().to_string())))
+    crate::util::expand_home("~/.cache/agentflow/hashes")
+        .join(format!("{}.json", crate::usage::folder_for(&top.display().to_string())))
 }
 
 /// Every file git would see here (tracked and new, not ignored, that exists), by content.
@@ -137,7 +138,8 @@ pub fn upload(client: &Client, top: &Path, server: Option<&str>) -> anyhow::Resu
     }
     if !files.is_empty() || !extra.is_empty() {
         // Files first, then the small ones, in one pack.
-        let tmp = tempfile::NamedTempFile::new_in(crate::util::expand_home("~/.cache/agentflow")).or_else(|_| tempfile::NamedTempFile::new())?;
+        let tmp = tempfile::NamedTempFile::new_in(crate::util::expand_home("~/.cache/agentflow"))
+            .or_else(|_| tempfile::NamedTempFile::new())?;
         {
             let enc = zstd::stream::write::Encoder::new(std::fs::File::create(tmp.path())?, 3)?.auto_finish();
             let mut tar = tar::Builder::new(enc);
@@ -169,7 +171,13 @@ pub fn upload(client: &Client, top: &Path, server: Option<&str>) -> anyhow::Resu
 }
 
 /// Brings back what the job sent: each `--fetch` path into the checkout.
-pub fn fetch_results(client: &Client, id: i64, top: &Path, fetch: &[String], results: &[String]) -> anyhow::Result<Vec<String>> {
+pub fn fetch_results(
+    client: &Client,
+    id: i64,
+    top: &Path,
+    fetch: &[String],
+    results: &[String],
+) -> anyhow::Result<Vec<String>> {
     let mut got = Vec::new();
     for f in fetch {
         let name = crate::web::builders::result_name(f);

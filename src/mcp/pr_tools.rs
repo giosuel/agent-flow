@@ -201,12 +201,10 @@ impl FlowMcp {
         self.finish(&actor, "pull_requests", Action::Read, outcome).await
     }
 
-    #[tool(
-        description = "Plan a tag (a milestone's closing tag or a release) that waits for PRs to be merged. Its \
+    #[tool(description = "Plan a tag (a milestone's closing tag or a release) that waits for PRs to be merged. Its \
         \"Push tag …\" button comes by itself (an annotated tag on origin/main); the owner presses it once every PR is \
         merged, and the milestone it closes is closed with it. Your PRs' Merge buttons come by themselves too (the \
-        project's merge method; update_project merge_method)."
-    )]
+        project's merge method; update_project merge_method).")]
     async fn add_release(
         &self,
         Extension(parts): Extension<Parts>,
@@ -221,7 +219,10 @@ impl FlowMcp {
                 let tx = c.transaction()?;
                 let project = target_project(&tx, &a, None, true)?;
                 let tag = p.tag.trim();
-                if tag.is_empty() || tag.starts_with('-') || !tag.chars().all(|c| c.is_ascii_alphanumeric() || "._-+".contains(c)) {
+                if tag.is_empty()
+                    || tag.starts_with('-')
+                    || !tag.chars().all(|c| c.is_ascii_alphanumeric() || "._-+".contains(c))
+                {
                     anyhow::bail!("tag: one word of letters, digits and . _ - +, e.g. v0.0.5-m4");
                 }
                 let mut waits = Vec::new();
@@ -261,7 +262,9 @@ impl FlowMcp {
                 if p.tag_button.unwrap_or(true) {
                     let proj = crate::projects::get_by_id(&tx, project.id)?;
                     if !crate::projects::looks_like_repo(proj.repo.trim()) {
-                        button = "none: the project has no repository set (update_project repo); add it with add_button".into();
+                        button =
+                            "none: the project has no repository set (update_project repo); add it with add_button"
+                                .into();
                     } else {
                         let command = crate::prs::tag_command(proj.repo.trim(), tag);
                         let requires: Vec<String> = p.waits_for.clone();

@@ -146,8 +146,19 @@ pub fn parse_day_or_time(s: &str) -> anyhow::Result<i64> {
 /// The commands that were `agentflow <command>` and are `flow <command>` since the split
 /// (2026-11-13). The server forwards them for one release.
 pub const MOVED_TO_FLOW: &[&str] = &[
-    "whoami", "publish", "screenshot", "contribute", "remote", "time", "note", "run", "hello", "news", "wait",
-    "mcp-headers", "sync",
+    "whoami",
+    "publish",
+    "screenshot",
+    "contribute",
+    "remote",
+    "time",
+    "note",
+    "run",
+    "hello",
+    "news",
+    "wait",
+    "mcp-headers",
+    "sync",
 ];
 
 /// The `flow` program: next to this one (they're installed together), else the one on PATH.

@@ -220,12 +220,32 @@ async fn render_page(
         github: {
             use crate::secrets::{GitHub, token};
             let login = |k: &'static str| async move {
-                state.db.call(move |c| Ok(c.query_row("SELECT value FROM settings WHERE key = ?1", [k], |r| r.get::<_, String>(0)).ok())).await.ok().flatten()
+                state
+                    .db
+                    .call(move |c| {
+                        Ok(c.query_row("SELECT value FROM settings WHERE key = ?1", [k], |r| r.get::<_, String>(0))
+                            .ok())
+                    })
+                    .await
+                    .ok()
+                    .flatten()
             };
-            let show = |t: Option<String>, l: Option<String>| t.map(|t| format!("…{}{}", crate::secrets::hint(&t), l.map(|l| format!(" · {l}")).unwrap_or_default()));
+            let show = |t: Option<String>, l: Option<String>| {
+                t.map(|t| format!("…{}{}", crate::secrets::hint(&t), l.map(|l| format!(" · {l}")).unwrap_or_default()))
+            };
             vec![
-                ("own", "Your repositories", "merging, tags, reading PRs", show(token(GitHub::Own), login("github.login.own").await)),
-                ("external", "Other people's repositories", "sending the contributions you approve", show(token(GitHub::External), login("github.login.external").await)),
+                (
+                    "own",
+                    "Your repositories",
+                    "merging, tags, reading PRs",
+                    show(token(GitHub::Own), login("github.login.own").await),
+                ),
+                (
+                    "external",
+                    "Other people's repositories",
+                    "sending the contributions you approve",
+                    show(token(GitHub::External), login("github.login.external").await),
+                ),
             ]
         },
         consultant: super::consultant::view(state).await,
@@ -427,7 +447,9 @@ async fn github_save(
     let which = crate::secrets::GitHub::parse(&f.which).map_err(|e| AppError::BadRequest(format!("{e:#}")))?;
     let token = f.token.trim().to_owned();
     crate::secrets::check_token(&token).map_err(|e| AppError::BadRequest(format!("{e:#}")))?;
-    let login = github_login(&token).await.map_err(|e| AppError::BadRequest(format!("GitHub didn't take that token: {e:#}")))?;
+    let login = github_login(&token)
+        .await
+        .map_err(|e| AppError::BadRequest(format!("GitHub didn't take that token: {e:#}")))?;
     let data = state.config.data_dir();
     let (t, l, w) = (token.clone(), login.clone(), f.which.clone());
     state
@@ -472,7 +494,10 @@ async fn github_login(token: &str) -> anyhow::Result<String> {
     .await
     .map_err(|_| anyhow::anyhow!("GitHub didn't answer within 30 seconds"))??;
     if !out.status.success() {
-        anyhow::bail!("{}", String::from_utf8_lossy(&out.stderr).replace(token, "…").trim().lines().last().unwrap_or("refused"));
+        anyhow::bail!(
+            "{}",
+            String::from_utf8_lossy(&out.stderr).replace(token, "…").trim().lines().last().unwrap_or("refused")
+        );
     }
     Ok(String::from_utf8_lossy(&out.stdout).trim().to_owned())
 }

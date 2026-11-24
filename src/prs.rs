@@ -174,7 +174,8 @@ fn link_by_branch(conn: &Connection, project_id: i64, pr: &Record, head: &str, a
         "SELECT id FROM records WHERE project_id = ?1 AND kind = 'task' AND state != 'archived' AND json_extract(data, '$.branch') = ?2
          AND id NOT IN (SELECT to_id FROM links WHERE from_id = ?3 AND relation = 'implements')",
     )?;
-    let ids: Vec<i64> = stmt.query_map(rusqlite::params![project_id, head, pr.id], |r| r.get(0))?.collect::<Result<_, _>>()?;
+    let ids: Vec<i64> =
+        stmt.query_map(rusqlite::params![project_id, head, pr.id], |r| r.get(0))?.collect::<Result<_, _>>()?;
     for id in ids {
         let t = records::get(conn, id)?;
         records::link(conn, pr, &t, "implements", author)?;
@@ -238,7 +239,13 @@ pub fn merge_order(conn: &Connection, project_id: i64) -> anyhow::Result<Vec<Ord
     let by_head: HashMap<String, i64> = open.iter().map(|r| (r.str("head").to_owned(), r.number)).collect();
     let merged_heads: std::collections::HashSet<String> = records::query(
         conn,
-        &Query { project_id: Some(project_id), kinds: vec![Kind::Pr], states: vec!["merged".into()], limit: 0, ..Default::default() },
+        &Query {
+            project_id: Some(project_id),
+            kinds: vec![Kind::Pr],
+            states: vec!["merged".into()],
+            limit: 0,
+            ..Default::default()
+        },
     )?
     .iter()
     .map(|r| r.str("head").to_owned())
@@ -324,7 +331,11 @@ pub fn import(
     for info in wanted {
         let exists = crate::records::try_find(
             &tx,
-            &crate::records::RecordRef { project: Some(p.slug.clone()), kind: crate::records::Kind::Pr, number: info.number },
+            &crate::records::RecordRef {
+                project: Some(p.slug.clone()),
+                kind: crate::records::Kind::Pr,
+                number: info.number,
+            },
             None,
         )?
         .is_some();
@@ -378,7 +389,10 @@ mod tests {
             sync(c, &p, "o/r", &pr(62, "b61", "b62"), "poller")?;
             let order = merge_order(c, p.id)?;
             let of = |n: i64| order.iter().find(|o| o.record.number == n).unwrap();
-            assert_eq!(ready_in_order(of(60)).unwrap_err(), "based on some-branch, which isn't main and has no open PR");
+            assert_eq!(
+                ready_in_order(of(60)).unwrap_err(),
+                "based on some-branch, which isn't main and has no open PR"
+            );
             assert!(ready_in_order(of(61)).is_ok());
             assert!(ready_in_order(of(62)).is_ok(), "stacked on an open PR: its turn comes after #61");
             Ok(())
@@ -391,9 +405,21 @@ mod tests {
         let db = Db::open_memory();
         db.call_blocking(|c| {
             let p = crate::projects::create(c, "v", "V", "t")?;
-            let patch = crate::projects::ProjectPatch { repo: Some("o/r".into()), merge_method: Some("squash".into()), ..Default::default() };
+            let patch = crate::projects::ProjectPatch {
+                repo: Some("o/r".into()),
+                merge_method: Some("squash".into()),
+                ..Default::default()
+            };
             crate::projects::update(c, p.id, &patch, "owner")?;
-            assert!(crate::projects::update(c, p.id, &crate::projects::ProjectPatch { merge_method: Some("yolo".into()), ..Default::default() }, "o").is_err());
+            assert!(
+                crate::projects::update(
+                    c,
+                    p.id,
+                    &crate::projects::ProjectPatch { merge_method: Some("yolo".into()), ..Default::default() },
+                    "o"
+                )
+                .is_err()
+            );
             let p = crate::projects::get_by_id(c, p.id)?;
             let (r, _) = sync(c, &p, "o/r", &pr(48, "main", "b48"), "poller")?;
             sync(c, &p, "o/r", &pr(48, "main", "b48"), "poller")?;
@@ -401,8 +427,16 @@ mod tests {
             assert_eq!(buttons.len(), 1, "once, however often it syncs");
             assert_eq!(buttons[0].command, "gh pr merge 48 -R o/r --squash --delete-branch");
             // A new merge method reaches the waiting buttons.
-            crate::projects::update(c, p.id, &crate::projects::ProjectPatch { merge_method: Some("merge".into()), ..Default::default() }, "owner")?;
-            assert_eq!(crate::actions::for_record(c, r.id)?[0].command, "gh pr merge 48 -R o/r --merge --delete-branch");
+            crate::projects::update(
+                c,
+                p.id,
+                &crate::projects::ProjectPatch { merge_method: Some("merge".into()), ..Default::default() },
+                "owner",
+            )?;
+            assert_eq!(
+                crate::actions::for_record(c, r.id)?[0].command,
+                "gh pr merge 48 -R o/r --merge --delete-branch"
+            );
             assert!(buttons[0].is_merge());
             // Another repository's PR gets none; the agent's own button replaces AgentFlow's.
             let (other, _) = sync(c, &p, "x/y", &pr(7, "main", "b7"), "poller")?;
@@ -415,7 +449,8 @@ mod tests {
                 requires: &[],
             };
             crate::actions::add(c, &r, &mine, "v")?;
-            let live: Vec<_> = crate::actions::for_record(c, r.id)?.into_iter().filter(|b| b.state != "withdrawn").collect();
+            let live: Vec<_> =
+                crate::actions::for_record(c, r.id)?.into_iter().filter(|b| b.state != "withdrawn").collect();
             assert_eq!(live.len(), 1);
             assert_eq!(live[0].command, "gh pr merge 48 -R o/r --merge");
             Ok(())

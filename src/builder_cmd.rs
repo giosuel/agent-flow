@@ -60,7 +60,10 @@ fn home_of(user: &str) -> Option<PathBuf> {
 }
 
 fn me() -> String {
-    std::env::var("USER").ok().filter(|u| !u.is_empty()).unwrap_or_else(|| rustix::process::getuid().as_raw().to_string())
+    std::env::var("USER")
+        .ok()
+        .filter(|u| !u.is_empty())
+        .unwrap_or_else(|| rustix::process::getuid().as_raw().to_string())
 }
 
 /// Shows a command, then runs it (sudo asks for the password itself).
@@ -87,7 +90,11 @@ fn machine() -> (u64, f64) {
     let threads = std::thread::available_parallelism().map(|n| n.get() as u64).unwrap_or(1);
     let mem = std::fs::read_to_string("/proc/meminfo")
         .ok()
-        .and_then(|t| t.lines().find(|l| l.starts_with("MemTotal:")).and_then(|l| l.split_whitespace().nth(1)?.parse::<f64>().ok()))
+        .and_then(|t| {
+            t.lines()
+                .find(|l| l.starts_with("MemTotal:"))
+                .and_then(|l| l.split_whitespace().nth(1)?.parse::<f64>().ok())
+        })
         .map(|kb| kb / 1024.0 / 1024.0)
         .unwrap_or(0.0);
     (threads, (mem * 10.0).round() / 10.0)
@@ -132,7 +139,8 @@ pub struct AddArgs {
 /// `flow builder add`.
 pub fn add(config_path: &Path, args: &ClientArgs, a: AddArgs) -> anyhow::Result<()> {
     use std::io::IsTerminal;
-    let client = Client::new(config_path, args).context("adding a builder needs a connected machine: flow connect <server> first")?;
+    let client = Client::new(config_path, args)
+        .context("adding a builder needs a connected machine: flow connect <server> first")?;
     let interactive = std::io::stdin().is_terminal();
     let host = crate::machine::hostname();
     // Its own user, unless asked otherwise (the owner, 2026-11-13: new user by default).
@@ -159,15 +167,27 @@ pub fn add(config_path: &Path, args: &ClientArgs, a: AddArgs) -> anyhow::Result<
         None => host.clone(),
     };
     // One builder per user.
-    let home = if new_user { home_of(&user).unwrap_or_else(|| PathBuf::from(format!("/home/{user}"))) } else { crate::util::home_dir() };
+    let home = if new_user {
+        home_of(&user).unwrap_or_else(|| PathBuf::from(format!("/home/{user}")))
+    } else {
+        crate::util::home_dir()
+    };
     let conf = home.join(".config/agentflow/builder.toml");
     let exists = if new_user && user != me() {
-        std::process::Command::new("sudo").args(["-n", "test", "-e"]).arg(&conf).status().map(|s| s.success()).unwrap_or(false)
+        std::process::Command::new("sudo")
+            .args(["-n", "test", "-e"])
+            .arg(&conf)
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
     } else {
         conf.exists()
     };
     if exists {
-        let current = std::fs::read_to_string(&conf).ok().and_then(|t| t.parse::<toml::Table>().ok()).and_then(|t| t.get("name").and_then(|v| v.as_str()).map(str::to_owned));
+        let current = std::fs::read_to_string(&conf)
+            .ok()
+            .and_then(|t| t.parse::<toml::Table>().ok())
+            .and_then(|t| t.get("name").and_then(|v| v.as_str()).map(str::to_owned));
         bail!(
             "A builder is already registered for this user{}. Change it with `flow builder edit`, or remove it with `flow builder remove` first.",
             current.map(|c| format!(" ({c})")).unwrap_or_default()
@@ -182,7 +202,8 @@ pub fn add(config_path: &Path, args: &ClientArgs, a: AddArgs) -> anyhow::Result<
     )?;
     let token = result["token"].as_str().context("the server sent no token")?.to_owned();
     eprintln!("  ✓ approved: builder {name}");
-    let toml_text = format!("url = {}\nname = {}\n", toml::Value::String(client.base.clone()), toml::Value::String(name.clone()));
+    let toml_text =
+        format!("url = {}\nname = {}\n", toml::Value::String(client.base.clone()), toml::Value::String(name.clone()));
     if new_user {
         set_up_other_user(&user, &program, &toml_text, &token)?;
     } else {
@@ -209,7 +230,9 @@ pub fn add(config_path: &Path, args: &ClientArgs, a: AddArgs) -> anyhow::Result<
                 b["memory_gb"].as_f64().unwrap_or(memory_gb),
                 if new_user { format!(", as {user}") } else { String::new() }
             );
-            println!("Projects use it once you pick it in their Settings; agents set up their tools with flow remote --setup.");
+            println!(
+                "Projects use it once you pick it in their Settings; agents set up their tools with flow remote --setup."
+            );
             return Ok(());
         }
         std::thread::sleep(Duration::from_secs(1));
@@ -256,20 +279,73 @@ fn set_up_other_user(user: &str, program: &Path, toml_text: &str, token: &str) -
     run_shown(&["sudo", "loginctl", "enable-linger", user], None)?;
     let home = home_of(user).context("the new user has no home")?;
     let h = |p: &str| home.join(p).display().to_string();
-    run_shown(&["sudo", "install", "-d", "-o", user, "-g", user, "-m", "700", &h(".config"), &h(".config/agentflow"), &h(".config/systemd"), &h(".config/systemd/user"), &h(".local"), &h(".local/bin")], None)?;
+    run_shown(
+        &[
+            "sudo",
+            "install",
+            "-d",
+            "-o",
+            user,
+            "-g",
+            user,
+            "-m",
+            "700",
+            &h(".config"),
+            &h(".config/agentflow"),
+            &h(".config/systemd"),
+            &h(".config/systemd/user"),
+            &h(".local"),
+            &h(".local/bin"),
+        ],
+        None,
+    )?;
     let program_there = if program.starts_with("/usr/") {
         program.to_path_buf()
     } else {
         let to = home.join(".local/bin/agentflow-builder");
-        run_shown(&["sudo", "install", "-o", user, "-g", user, "-m", "755", &program.display().to_string(), &to.display().to_string()], None)?;
+        run_shown(
+            &[
+                "sudo",
+                "install",
+                "-o",
+                user,
+                "-g",
+                user,
+                "-m",
+                "755",
+                &program.display().to_string(),
+                &to.display().to_string(),
+            ],
+            None,
+        )?;
         to
     };
-    run_shown(&["sudo", "install", "-o", user, "-g", user, "-m", "600", "/dev/stdin", &h(".config/agentflow/builder.toml")], Some(toml_text.as_bytes()))?;
+    run_shown(
+        &["sudo", "install", "-o", user, "-g", user, "-m", "600", "/dev/stdin", &h(".config/agentflow/builder.toml")],
+        Some(toml_text.as_bytes()),
+    )?;
     eprintln!("  (the token goes in through stdin, so it's in no command line)");
-    run_shown(&["sudo", "install", "-o", user, "-g", user, "-m", "600", "/dev/stdin", &h(".config/agentflow/builder.token")], Some(format!("{token}\n").as_bytes()))?;
+    run_shown(
+        &["sudo", "install", "-o", user, "-g", user, "-m", "600", "/dev/stdin", &h(".config/agentflow/builder.token")],
+        Some(format!("{token}\n").as_bytes()),
+    )?;
     if !packaged_unit() {
         let unit = unit_text(&program_there);
-        run_shown(&["sudo", "install", "-o", user, "-g", user, "-m", "644", "/dev/stdin", &h(&format!(".config/systemd/user/{UNIT}"))], Some(unit.as_bytes()))?;
+        run_shown(
+            &[
+                "sudo",
+                "install",
+                "-o",
+                user,
+                "-g",
+                user,
+                "-m",
+                "644",
+                "/dev/stdin",
+                &h(&format!(".config/systemd/user/{UNIT}")),
+            ],
+            Some(unit.as_bytes()),
+        )?;
     }
     let machine = format!("{user}@");
     run_shown(&["sudo", "systemctl", "--user", "-M", &machine, "daemon-reload"], None)?;
@@ -359,17 +435,26 @@ pub fn remove(config_path: &Path, args: &ClientArgs, name: Option<String>) -> an
         }
         let unit = home.join(".config/systemd/user").join(UNIT);
         let _ = std::fs::remove_file(&unit);
-        let delete = if std::io::stdin().is_terminal() { yes("Delete its work folders and stored files (they can be rebuilt)?", true)? } else { false };
+        let delete = if std::io::stdin().is_terminal() {
+            yes("Delete its work folders and stored files (they can be rebuilt)?", true)?
+        } else {
+            false
+        };
         if delete {
             let _ = std::fs::remove_dir_all(home.join("agentflow"));
             let _ = std::fs::remove_dir_all(home.join(".local/share/agentflow-builder"));
         }
-        println!("{n} is removed: its token no longer works, its service is off{}.", if delete { ", its folders are gone" } else { "" });
+        println!(
+            "{n} is removed: its token no longer works, its service is off{}.",
+            if delete { ", its folders are gone" } else { "" }
+        );
         return Ok(());
     }
     let Some(name) = name else { bail!("which builder? flow builder remove <name> (flow builder list shows them)") };
     let client = Client::new(config_path, args)?;
     crate::connect::approve(&client, "builder_remove", json!({"name": name}))?;
-    println!("{name} is removed: its token no longer works. On that machine, its service keeps trying until you stop it.");
+    println!(
+        "{name} is removed: its token no longer works. On that machine, its service keeps trying until you stop it."
+    );
     Ok(())
 }

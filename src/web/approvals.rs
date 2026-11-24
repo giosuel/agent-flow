@@ -38,7 +38,13 @@ pub fn routes() -> Router<AppState> {
 pub fn is_public(path: &str) -> bool {
     matches!(
         path,
-        "/api/approvals" | "/api/approvals/poll" | "/api/setup/redeem" | "/install.sh" | "/download/flow" | "/download/agentflow" | "/download/flow.sha256"
+        "/api/approvals"
+            | "/api/approvals/poll"
+            | "/api/setup/redeem"
+            | "/install.sh"
+            | "/download/flow"
+            | "/download/agentflow"
+            | "/download/flow.sha256"
     )
 }
 
@@ -264,14 +270,20 @@ async fn redeem(
     let m2 = machine.clone();
     match state.db.call(move |c| crate::onboard::redeem_setup_code(c, &b.code, &m2)).await {
         Ok((p, token)) => {
-            let e = Entry::new(&Actor::Anonymous, Via::Api, Action::Write, format!("setup code used for {} on {machine}", p.slug))
-                .project(p.slug.clone())
-                .ip(Some(ip));
+            let e = Entry::new(
+                &Actor::Anonymous,
+                Via::Api,
+                Action::Write,
+                format!("setup code used for {} on {machine}", p.slug),
+            )
+            .project(p.slug.clone())
+            .ip(Some(ip));
             activity::write(&state.db, e).await;
             Json(json!({"project": p.slug, "name": p.name, "token": token})).into_response()
         }
         Err(e) => {
-            let e2 = Entry::new(&Actor::Anonymous, Via::Api, Action::Denied, format!("setup code refused: {e:#}")).ip(Some(ip));
+            let e2 = Entry::new(&Actor::Anonymous, Via::Api, Action::Denied, format!("setup code refused: {e:#}"))
+                .ip(Some(ip));
             activity::write(&state.db, e2).await;
             json_error(StatusCode::FORBIDDEN, format!("{e:#}"))
         }
@@ -285,7 +297,11 @@ struct DoneBody {
 }
 
 /// `flow project setup` reports where the project now lies.
-async fn set_up(State(state): State<AppState>, Extension(actor): Extension<Actor>, Json(b): Json<DoneBody>) -> Response {
+async fn set_up(
+    State(state): State<AppState>,
+    Extension(actor): Extension<Actor>,
+    Json(b): Json<DoneBody>,
+) -> Response {
     let Actor::Project { project_id, .. } = actor else {
         return json_error(StatusCode::FORBIDDEN, "this needs the project's token");
     };
@@ -346,8 +362,13 @@ async fn revoke_self(
     let Some(id) = actor.token_id() else { return json_error(StatusCode::BAD_REQUEST, "this needs a token") };
     match state.db.call(move |c| crate::auth::revoke_token(c, id)).await {
         Ok(_) => {
-            let e = Entry::new(&actor, Via::Api, Action::Write, format!("token {id} revoked by its machine (flow disconnect)"))
-                .ip(Some(ip));
+            let e = Entry::new(
+                &actor,
+                Via::Api,
+                Action::Write,
+                format!("token {id} revoked by its machine (flow disconnect)"),
+            )
+            .ip(Some(ip));
             activity::write(&state.db, e).await;
             Json(json!({"revoked": id})).into_response()
         }
