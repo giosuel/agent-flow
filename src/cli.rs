@@ -103,6 +103,22 @@ impl Client {
         self
     }
 
+    /// Uploads a file as the request body with its content type and returns the JSON answer.
+    pub fn post_file_as(&self, path: &str, file: std::fs::File, content_type: &str) -> anyhow::Result<serde_json::Value> {
+        let len = file.metadata()?.len();
+        let res = self
+            .request(reqwest::Method::POST, path)
+            .header("Content-Type", content_type)
+            .body(reqwest::blocking::Body::sized(file, len))
+            .send()?;
+        let status = res.status();
+        let body: serde_json::Value = res.json().unwrap_or(serde_json::Value::Null);
+        if !status.is_success() {
+            bail!("{status}: {}", body.get("error").and_then(|e| e.as_str()).unwrap_or("upload failed"));
+        }
+        Ok(body)
+    }
+
     /// Uploads a file as the request body (a build archive) and returns the JSON answer.
     pub fn post_file(&self, path: &str, file: std::fs::File) -> anyhow::Result<serde_json::Value> {
         let len = file.metadata()?.len();
@@ -594,6 +610,10 @@ pub struct RemoteArgs {
     /// Where to run it: a folder in your git checkout (default: here).
     #[arg(long, default_value = ".")]
     pub dir: PathBuf,
+    /// Run it in the builder's home instead of the checkout, to install tools the project needs
+    /// (rustup, Go, Node…): `flow remote --setup -- sh -c '…'`. Logged on both sides.
+    #[arg(long)]
+    pub setup: bool,
     /// The command, after `--`, e.g. `-- cargo build --release`.
     #[arg(last = true, required = true)]
     pub command: Vec<String>,
@@ -751,9 +771,23 @@ pub fn time(config_path: &Path, a: TimeArgs) -> anyhow::Result<i32> {
 pub fn remote(config_path: &Path, a: RemoteArgs) -> anyhow::Result<i32> {
     let client = Client::new(config_path, &a.client)?.with_timeout(std::time::Duration::from_secs(60));
     let dir = std::fs::canonicalize(&a.dir).with_context(|| format!("{} doesn't exist", a.dir.display()))?;
+    // A snapshot of the checkout (only what the server lacks travels), for builders that connect
+    // themselves; an SSH builder reads the checkout on the server's machine as before.
+    let (top, subdir, up) = if a.setup {
+        (dir.clone(), String::new(), None)
+    } else {
+        let (top, sub) = crate::snapshot::top_of(&dir)?;
+        let up = crate::snapshot::upload(&client, &top, a.server.as_deref())?;
+        (top, sub, Some(up))
+    };
     let body = serde_json::json!({
-        "dir": dir, "command": a.command, "fetch": a.fetch, "gpu": a.gpu, "server": a.server,
+        "dir": if a.setup { dir.clone() } else { top.clone() }, "command": a.command, "fetch": a.fetch, "gpu": a.gpu,
+        "server": a.server, "subdir": subdir, "setup": a.setup,
+        "manifest": up.as_ref().map(|u| u.manifest.clone()).unwrap_or_default(),
+        "bundle": up.as_ref().map(|u| u.bundle.clone()).unwrap_or_default(),
     });
+    // An SSH builder reads the checkout itself; the field stays the checkout's path.
+    let body = if a.setup { body } else { let mut b = body; b["dir"] = serde_json::json!(dir); b };
     let res =
         client.http.post(format!("{}/api/remote/jobs", client.base)).bearer_auth(&client.token).json(&body).send()?;
     let status = res.status();
@@ -798,6 +832,19 @@ pub fn remote(config_path: &Path, a: RemoteArgs) -> anyhow::Result<i32> {
         }
         last_reason = reason;
         if o["finished"].as_bool().unwrap_or(false) && text.is_empty() {
+            let results: Vec<String> =
+                o["results"].as_array().map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_owned)).collect()).unwrap_or_default();
+            if state == "done" && !results.is_empty() {
+                let long = Client::with_token(&client.base, &client.token).with_timeout(std::time::Duration::from_secs(1800));
+                match crate::snapshot::fetch_results(&long, id, &top, &a.fetch, &results) {
+                    Ok(got) if !got.is_empty() => eprintln!("· brought back {}", got.join(", ")),
+                    Ok(_) => {}
+                    Err(e) => {
+                        eprintln!("· couldn't bring the results back: {e:#}");
+                        return Ok(1);
+                    }
+                }
+            }
             return Ok(match state {
                 "done" => 0,
                 "cancelled" => 130,

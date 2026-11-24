@@ -1,0 +1,15 @@
+# AgentFlow's builder: runs the builds and tests agents send with `flow remote`. A user service of
+# the build user; `flow builder add` writes its config and enables it. To keep it running while
+# that user isn't logged in: sudo loginctl enable-linger <user>
+[Unit]
+Description=AgentFlow builder
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=@BIN@
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

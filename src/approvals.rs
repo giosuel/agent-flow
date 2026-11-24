@@ -29,6 +29,7 @@ pub const ACTIONS: &[&str] = &[
     "token_rotate",
     "project_add",
     "project_create",
+    "builder_create",
     "backup",
     "import_prs",
 ];
@@ -81,6 +82,7 @@ pub fn check_args(c: &Connection, action: &str, args: &Value) -> anyhow::Result<
                 }
                 TokenKind::Admin => {}
                 TokenKind::Device => bail!("a machine's token comes from flow connect"),
+                TokenKind::Builder => bail!("a builder's token comes from flow builder add"),
             }
             if s("name").is_empty() && kind != TokenKind::Project {
                 bail!("give the token a name");
@@ -115,6 +117,16 @@ pub fn check_args(c: &Connection, action: &str, args: &Value) -> anyhow::Result<
                 if !repo.is_empty() && !crate::projects::looks_like_repo(&repo) {
                     bail!("repo {repo:?} isn't owner/name");
                 }
+            }
+            Ok(())
+        }
+        "builder_create" => {
+            let name = s("name");
+            let b = crate::config::BuildServer { name: name.clone(), ssh: "daemon".into(), ..Default::default() };
+            crate::remote::check_server(&b)?;
+            let taken: bool = c.query_row("SELECT EXISTS (SELECT 1 FROM build_servers WHERE name = ?1)", [&name], |r| r.get(0))?;
+            if taken {
+                bail!("a builder called {name} exists already");
             }
             Ok(())
         }
@@ -321,6 +333,25 @@ pub fn execute(c: &mut Connection, a: &Approval, data_dir: &std::path::Path) -> 
             }
             Ok(json!({"project": new.slug, "name": new.name, "token": secret}))
         }
+        // `flow builder add`: the builder and a token that can only connect as it.
+        "builder_create" => {
+            let tx = c.transaction()?;
+            let threads = a.args.get("threads").and_then(Value::as_f64).unwrap_or(8.0);
+            let memory = a.args.get("memory_gb").and_then(Value::as_f64).unwrap_or(16.0);
+            let b = crate::config::BuildServer {
+                name: s("name"),
+                // Starting limits from the machine: a quarter of its threads and memory free
+                // before another job starts, an eighth of its memory kept for its user.
+                min_threads: (threads / 4.0).round().max(1.0),
+                min_memory_gb: (memory / 4.0).round().max(2.0),
+                reserve_memory_gb: (memory / 8.0).round().max(1.0),
+                ..Default::default()
+            };
+            crate::remote::add_daemon(&tx, &b)?;
+            let (id, secret) = auth::create_token(&tx, TokenKind::Builder, &b.name, None)?;
+            tx.commit()?;
+            Ok(json!({"token": secret, "id": id, "name": b.name, "min_threads": b.min_threads, "min_memory_gb": b.min_memory_gb, "reserve_memory_gb": b.reserve_memory_gb}))
+        }
         "backup" => {
             let now = now_ms();
             let stamp = format!("{}-{}", crate::util::fmt_date(now), crate::util::fmt_hm(now).replace(':', ""));
@@ -345,6 +376,7 @@ pub fn describe(a: &Approval) -> String {
         "project_add" => format!("Add the project {} ({})", s("name"), s("slug")),
         "project_create" => format!("Create the project {} ({}) in {}", s("name"), s("slug"), s("folder")),
         "backup" => "Back up the database and export every project".into(),
+        "builder_create" => format!("Add {} as a builder (it runs agents' builds and tests)", a.machine),
         "import_prs" => format!("Import PRs #{}–#{} into {}", n("from"), n("to"), s("project")),
         other => other.to_owned(),
     }

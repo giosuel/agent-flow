@@ -18,6 +18,8 @@ chmod 755 "$stage"
 
 install -Dm755 "$bin" "$stage/usr/bin/agentflow"
 install -Dm755 "$(dirname "$bin")/flow" "$stage/usr/bin/flow"
+install -Dm755 "$(dirname "$bin")/agentflow-builder" "$stage/usr/bin/agentflow-builder"
+sed 's|@BIN@|/usr/bin/agentflow-builder|' packaging/system/agentflow-builder.service | install -Dm644 /dev/stdin "$stage/usr/lib/systemd/user/agentflow-builder.service"
 sed 's|@BIN@|/usr/bin/agentflow|' packaging/system/agentflow.service >"$stage/agentflow.service"
 sed 's|@BIN@|/usr/bin/agentflow|' packaging/system/agentflow-hands.service >"$stage/agentflow-hands.service"
 install -Dm644 "$stage/agentflow.service" "$stage/usr/lib/systemd/system/agentflow.service"

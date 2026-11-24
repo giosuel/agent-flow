@@ -93,6 +93,8 @@ pub struct BuildServer {
     pub ssh_program: String,
     /// A private key AgentFlow made for this server; empty: ssh's own config decides.
     pub key_file: String,
+    /// "ssh": the server connects to it; "daemon": it connects to the server (agentflow-builder).
+    pub kind: String,
 }
 
 impl Default for BuildServer {
@@ -106,6 +108,7 @@ impl Default for BuildServer {
             reserve_memory_gb: 8.0,
             keep_days: 14,
             ssh_program: "ssh".into(),
+            kind: "ssh".into(),
             key_file: String::new(),
         }
     }

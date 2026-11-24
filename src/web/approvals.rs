@@ -204,6 +204,9 @@ async fn decide(
         let id = a.id;
         let ok = done.is_ok();
         state.db.call(move |c| approvals::finish(c, id, &done)).await?;
+        if ok && a.action == "builder_create" {
+            crate::remote::reload(&state).await;
+        }
         (ok, line)
     };
     let verb = if approve { "approved" } else { "denied" };

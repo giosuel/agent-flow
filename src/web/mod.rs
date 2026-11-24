@@ -3,6 +3,7 @@
 
 pub(crate) mod admin_socket;
 mod api;
+pub(crate) mod builders;
 mod sync;
 mod approvals;
 mod assets;
@@ -152,6 +153,7 @@ pub fn router(state: AppState) -> Router {
         .merge(api::routes())
         .merge(approvals::routes())
         .merge(sync::routes())
+        .merge(builders::routes())
         .merge(buttons::routes())
         .merge(builds::routes())
         .merge(screenshots::routes())
@@ -423,6 +425,11 @@ async fn authenticate(State(state): State<AppState>, jar: CookieJar, mut req: Re
             return unauthenticated(&path, wants_html(req.headers()));
         }
     };
+
+    // A builder's token opens the builder's own endpoints and nothing else.
+    if matches!(actor, Actor::Builder { .. }) && !path.starts_with("/api/builders/") {
+        return (StatusCode::FORBIDDEN, axum::Json(serde_json::json!({"error": "a builder's token is only for /api/builders"}))).into_response();
+    }
 
     // A browser session may only change things from AgentFlow's own pages, so another site can't
     // make the owner's browser press a button (CSRF). Tokens aren't sent by browsers on their own.

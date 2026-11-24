@@ -2922,3 +2922,69 @@ async fn flow_sync_sends_each_call_once_for_its_project() {
     let res = s.http.post(s.url("/api/sync/state")).bearer_auth(&device).json(&json!({"file": "m:/x"})).send().await.unwrap();
     assert_eq!(res.status(), StatusCode::FORBIDDEN);
 }
+
+/// A builder that connects itself gets its token after the owner approves it; the token opens the
+/// builder's endpoints and nothing else, and agents' tokens can't use those.
+#[tokio::test]
+async fn a_builders_token_is_only_for_building() {
+    let s = TestServer::start().await;
+    let device = s.token(TokenKind::Device, None).await;
+    let cookie = s.owner_cookie().await;
+    let asked: Value = s
+        .http
+        .post(s.url("/api/approvals"))
+        .bearer_auth(&device)
+        .json(&json!({"action": "builder_create", "args": {"name": "testbox", "threads": 16, "memory_gb": 64}, "machine": "builder@testbox"}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let code = asked["code"].as_str().unwrap().to_owned();
+    s.http
+        .post(s.url(&format!("/approve/{code}")))
+        .header(COOKIE, &cookie)
+        .header(ORIGIN, &s.base)
+        .form(&[("decision", "approve")])
+        .send()
+        .await
+        .unwrap();
+    let got: Value = s
+        .http
+        .post(s.url("/api/approvals/poll"))
+        .json(&json!({"poll": asked["poll"]}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let token = got["result"]["token"].as_str().unwrap().to_owned();
+    assert!(token.starts_with("af_bld_"), "{got}");
+    assert_eq!(got["result"]["min_threads"], 4.0, "a quarter of its threads");
+    let (kind,): (String,) = s.db.call(|c| Ok(c.query_row("SELECT kind FROM build_servers WHERE name = 'testbox'", [], |r| Ok((r.get(0)?,)))?)).await.unwrap();
+    assert_eq!(kind, "daemon");
+    for path in ["/api/status", "/api/projects", "/mcp"] {
+        let res = s.http.get(s.url(path)).bearer_auth(&token).send().await.unwrap();
+        assert_eq!(res.status(), StatusCode::FORBIDDEN, "{path}");
+    }
+    let res = s.http.post(s.url("/api/builders/blobs")).bearer_auth(&token).json(&json!({"shas": []})).send().await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK, "its own endpoint");
+    let agent = s.token(TokenKind::Project, Some("vinculum")).await;
+    let res = s.http.post(s.url("/api/builders/blobs")).bearer_auth(&agent).json(&json!({"shas": []})).send().await.unwrap();
+    assert_eq!(res.status(), StatusCode::FORBIDDEN, "not for agents");
+    // Agents upload snapshots; the store takes only what matches its hash.
+    let data = b"fn main() {}\n".to_vec();
+    let sha = crate::blobs::sha_of(&data);
+    let missing: Value = s.http.post(s.url("/api/remote/blobs/missing")).bearer_auth(&agent).json(&json!({"shas": [sha]})).send().await.unwrap().json().await.unwrap();
+    assert_eq!(missing["missing"][0], sha.as_str());
+    let mut pack = Vec::new();
+    crate::blobs::pack_bytes(&[(sha.clone(), data)], &mut pack).unwrap();
+    let res = s.http.post(s.url("/api/remote/blobs")).bearer_auth(&agent).body(pack).send().await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let mut bad = Vec::new();
+    crate::blobs::pack_bytes(&[(sha, b"other".to_vec())], &mut bad).unwrap();
+    let res = s.http.post(s.url("/api/remote/blobs")).bearer_auth(&agent).body(bad).send().await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK, "known already: kept as it was");
+}
