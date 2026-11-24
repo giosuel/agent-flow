@@ -1385,6 +1385,19 @@ html.no-scroll { overflow: hidden; }
 .lim-c { display: flex; align-items: center; gap: 10px; flex: none; }
 .lim-c input:not(.num) { width: 240px; }
 .lim-c .num { width: 96px; text-align: right; }
+/* Number fields: our own steppers inside the field's right edge instead of the browser's (the
+   owner, 2026-11-23: "make sure the up/down buttons inside the input fields look nice"). */
+.numf { position: relative; display: inline-flex; flex: none; }
+.numf .num { padding-right: 36px; appearance: textfield; -moz-appearance: textfield; }
+.numf .num::-webkit-inner-spin-button, .numf .num::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.numf-b { position: absolute; top: 5px; bottom: 5px; right: 5px; width: 24px; display: flex; flex-direction: column; gap: 2px; }
+.numf-b button { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; padding: 0; border: 0; border-radius: 4px; background: var(--chip); color: var(--muted); cursor: pointer; }
+.numf-b button:hover { background: var(--chip-accent); color: var(--chip-accent-ink); }
+.numf-b button:active { background: var(--soft); color: var(--ink); }
+.numf-b button:disabled { opacity: .35; cursor: default; background: var(--chip); color: var(--muted); }
+.numf-b .i { width: 12px; height: 12px; }
+.numf-b [data-step="1"] .i { rotate: -90deg; }
+.numf-b [data-step="-1"] .i { rotate: 90deg; }
 .lim-c .unit { width: 52px; color: var(--muted); font-size: 14px; }
 .lim-save { display: flex; justify-content: flex-end; padding: 6px 0 14px; }
 .lim-danger { border-top: 1px solid var(--line); }

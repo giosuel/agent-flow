@@ -1151,3 +1151,32 @@ document.addEventListener("click", (e) => {
   addEventListener('resize', () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(render); });
   render();
 })();
+
+// Number fields' own steppers (.numf): one step up or down, within min and max, as the browser's
+// arrows would; the ends are greyed out.
+(() => {
+  const ends = (input) => {
+    const box = input.closest(".numf");
+    if (!box) return;
+    const v = input.valueAsNumber;
+    const [up, down] = box.querySelectorAll("[data-step]");
+    up.disabled = input.max !== "" && !Number.isNaN(v) && v >= Number(input.max);
+    down.disabled = input.min !== "" && !Number.isNaN(v) && v <= Number(input.min);
+  };
+  const all = (root) => root.querySelectorAll(".numf input").forEach(ends);
+  document.addEventListener("click", (e) => {
+    const b = e.target.closest && e.target.closest(".numf [data-step]");
+    if (!b) return;
+    const input = b.closest(".numf").querySelector("input");
+    if (b.dataset.step === "1") input.stepUp();
+    else input.stepDown();
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+    ends(input);
+  });
+  document.addEventListener("input", (e) => {
+    if (e.target.matches && e.target.matches(".numf input")) ends(e.target);
+  });
+  document.addEventListener("DOMContentLoaded", () => all(document));
+  document.addEventListener("af:content", (e) => all(e.detail));
+})();
