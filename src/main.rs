@@ -31,6 +31,7 @@ mod records;
 mod remote;
 mod screenshots;
 mod setup;
+mod steps;
 mod tokens;
 mod totest;
 mod tz;

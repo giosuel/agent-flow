@@ -12,7 +12,7 @@
 // page as before.
 "use strict";
 (() => {
-  const SMALL = /^\/p\/[a-z0-9-]+\/(T|Q|D|ADR|PR|TT|S|F)-\d+$/;
+  const SMALL = /^\/p\/[a-z0-9-]+\/((T|Q|D|ADR|PR|TT|S|F)-\d+|steps\/\d+)$/;
   let box = null;
   let list = [];
   let at = -1;

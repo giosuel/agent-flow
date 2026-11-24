@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}{{ name }} · {{ project_name }}{% endblock %}
+{% block content %}
+<div class="head">
+  <div class="crumb-row"><nav class="crumbs" aria-label="Back"><a class="crumb-back" href="/p/{{ project_slug }}?tab=tasks">{{ crate::web::icons::icon("back")|safe }}<span>{{ project_name }}</span></a><span class="crumb-where">Step</span></nav></div>
+  <p class="row wrap"><span class="mono sub">{{ project_slug }} · {% if !milestone.is_empty() %}{{ milestone }} / {% endif %}{{ name }}</span><span class="chip{% if state == "concluded" %} state-done{% else if state == "active" %} accent{% endif %}">{{ state }}</span><span class="sub">{{ when }}</span></p>
+  <h1 class="rec-title">{{ title }}</h1>
+</div>
+<div class="stack-lg">
+  {% if !summary_html.is_empty() %}
+  <section class="stack-sm" aria-labelledby="sum-h">
+    <h2 class="label" id="sum-h">The agent's summary</h2>
+    <div class="prose">{{ summary_html|safe }}</div>
+  </section>
+  {% else if !description.is_empty() %}
+  <section class="stack-sm" aria-labelledby="desc-h">
+    <h2 class="label" id="desc-h">About this step</h2>
+    <p>{{ description }}</p>
+  </section>
+  {% endif %}
+  <section class="stack-sm" aria-labelledby="tasks-h">
+    <h2 class="label" id="tasks-h">Tasks</h2>
+    {% if rows.is_empty() %}<p class="sub">No tasks.</p>{% endif %}
+    <ol class="ord">{% for t in rows %}<li><span class="n">{{ t.n }}</span><span class="mono sub">{{ t.short }}</span><span class="t"><a href="{{ t.url }}">{{ t.title }}</a></span><span class="chip state-{{ t.state }}">{{ t.state }}</span><span class="tm sub">{% if !t.est.is_empty() %}est. {{ t.est }}{% endif %}</span></li>{% endfor %}</ol>
+  </section>
+</div>
+{% endblock %}

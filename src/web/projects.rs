@@ -464,11 +464,39 @@ struct Board {
     columns: Vec<Column>,
 }
 
+/// A milestone on the Tasks tab: its own tasks, then its steps (the owner, 2026-11-12).
 struct TaskGroup {
     name: String,
     title: String,
     state: String,
-    rows: Vec<RecordRow>,
+    sub: String,
+    rows: Vec<TaskLine>,
+    steps: Vec<StepBox>,
+}
+
+/// A step: concluded (one line and its summary), under way (its tasks in order) or planned.
+struct StepBox {
+    name: String,
+    title: String,
+    /// concluded, active, blocked (every open task is) or planned.
+    state: &'static str,
+    sub: String,
+    url: String,
+    rows: Vec<TaskLine>,
+}
+
+/// One task in the agent's order, with what blocks it.
+struct TaskLine {
+    n: usize,
+    short: String,
+    url: String,
+    title: String,
+    state: String,
+    est: String,
+    next: bool,
+    /// Open questions it waits for: (Q-1, url).
+    blocked_by: Vec<(String, String)>,
+    blocked_note: String,
 }
 
 /// One PR or issue on someone else's repository, or a draft of one, on the project's overview.
@@ -1091,37 +1119,89 @@ fn build_project_page(
     };
 
     let groups = if tab == "tasks" {
+        let line = |i: usize, t: &Record, next: bool| -> anyhow::Result<TaskLine> {
+            let blocked_by = if t.state == "blocked" {
+                crate::steps::blocking_questions(c, t.id)?.into_iter().map(|(s, _, u)| (s, u)).collect()
+            } else {
+                Vec::new()
+            };
+            Ok(TaskLine {
+                n: i + 1,
+                short: t.short_id(),
+                url: t.url(),
+                title: t.title.clone(),
+                state: t.state.clone(),
+                est: t.str("estimate").to_owned(),
+                next,
+                blocked_by,
+                blocked_note: if t.state == "blocked" { t.str("blocked_note").to_owned() } else { String::new() },
+            })
+        };
+        let lines = |list: &[&Record], active: bool| -> anyhow::Result<Vec<TaskLine>> {
+            let next = if active { list.iter().position(|t| t.state == "todo") } else { None };
+            list.iter().enumerate().map(|(i, t)| line(i, t, Some(i) == next)).collect()
+        };
+        let mut sorted: Vec<&Record> = tasks.clone();
+        sorted.sort_by(|a, b| {
+            a.position.unwrap_or(f64::MAX).partial_cmp(&b.position.unwrap_or(f64::MAX)).unwrap_or(std::cmp::Ordering::Equal)
+        });
+        let of = |id: i64| -> Vec<&Record> { sorted.iter().copied().filter(|t| t.milestone_id == Some(id)).collect() };
         let mut groups = Vec::new();
         for m in ms.iter().filter(|m| m.parent_id.is_none()) {
-            let ids: Vec<i64> = projects::with_steps(&ms, m.id);
-            let mut rows: Vec<&Record> =
-                tasks.iter().copied().filter(|t| t.milestone_id.is_some_and(|x| ids.contains(&x))).collect();
-            rows.sort_by(|a, b| a.position.partial_cmp(&b.position).unwrap_or(std::cmp::Ordering::Equal));
-            if rows.is_empty() {
+            let steps: Vec<&Milestone> = ms.iter().filter(|s| s.parent_id == Some(m.id)).collect();
+            let own = of(m.id);
+            let count: usize = own.len() + steps.iter().map(|s| of(s.id).len()).sum::<usize>();
+            if count == 0 && steps.is_empty() && m.state != "active" {
                 continue;
             }
+            let mut boxes = Vec::new();
+            for st in &steps {
+                let mine = of(st.id);
+                let open = mine.iter().filter(|t| crate::steps::OPEN.contains(&t.state.as_str())).count();
+                let blocked = mine.iter().filter(|t| t.state == "blocked").count();
+                let state = match st.state.as_str() {
+                    "closed" => "concluded",
+                    "active" if open > 0 && blocked == open => "blocked",
+                    "active" => "active",
+                    _ => "planned",
+                };
+                let n = mine.len();
+                let sub = match state {
+                    "concluded" => format!("{n} task{}", if n == 1 { "" } else { "s" }),
+                    "planned" if n == 0 => "starts when its first task does".into(),
+                    _ => format!("{open} open of {n}"),
+                };
+                boxes.push(StepBox {
+                    name: st.name.clone(),
+                    title: st.title.clone(),
+                    state,
+                    sub,
+                    url: format!("/p/{}/steps/{}", p.slug, st.id),
+                    rows: if state == "concluded" { Vec::new() } else { lines(&mine, st.state == "active")? },
+                });
+            }
+            let sub = match (steps.len(), count) {
+                (0, n) => format!("{n} task{}", if n == 1 { "" } else { "s" }),
+                (k, n) => format!("{k} step{} · {n} task{}", if k == 1 { "" } else { "s" }, if n == 1 { "" } else { "s" }),
+            };
             groups.push(TaskGroup {
                 name: m.name.clone(),
                 title: m.title.clone(),
                 state: m.state.clone(),
-                rows: rows
-                    .iter()
-                    .map(|t| {
-                        let step = step_name(t.milestone_id);
-                        let sub = if step.is_empty() { t.state.clone() } else { format!("{step} · {}", t.state) };
-                        RecordRow::new(t, sub)
-                    })
-                    .collect(),
+                sub,
+                rows: lines(&own, m.state == "active" && steps.is_empty())?,
+                steps: boxes,
             });
         }
-        let loose: Vec<RecordRow> =
-            tasks.iter().filter(|t| t.milestone_id.is_none()).map(|t| RecordRow::new(t, t.state.clone())).collect();
+        let loose: Vec<&Record> = sorted.iter().copied().filter(|t| t.milestone_id.is_none()).collect();
         if !loose.is_empty() {
             groups.push(TaskGroup {
                 name: String::new(),
                 title: "Without a milestone".into(),
                 state: String::new(),
-                rows: loose,
+                sub: format!("{} tasks", loose.len()),
+                rows: lines(&loose, false)?,
+                steps: Vec::new(),
             });
         }
         groups
@@ -1261,6 +1341,12 @@ struct RecordPage {
     going_ahead: Option<String>,
     extra: Vec<(String, String)>,
     links: Vec<LinkGroup>,
+    /// A question: the tasks it holds up, with their step (the owner, 2026-11-12: "The question
+    /// should also link what its currently blocking").
+    blocking: Vec<(RecordRow, String)>,
+    /// A blocked task: the open questions it waits for, or the note on what blocks it.
+    waits_for: Vec<RecordRow>,
+    blocked_note: String,
     stale: Vec<RecordRow>,
     history: Vec<HistoryRow>,
     error: Option<String>,
@@ -1376,6 +1462,18 @@ async fn load_record_page(
         .ok_or(AppError::NotFound)?;
     let (r, project, links, history, buttons, (session_url, draft, draft_notice, to_test)) = page;
 
+    let mut blocking = Vec::new();
+    let mut waits_for = Vec::new();
+    for l in links.iter().filter(|l| l.relation == "blocks") {
+        if l.outgoing && r.kind == Kind::Question && l.other.kind == Kind::Task && l.other.state == "blocked" {
+            let step = l.other.milestone.clone().unwrap_or_default();
+            blocking.push((RecordRow::new(&l.other, l.other.state.clone()), step));
+        }
+        if !l.outgoing && r.kind == Kind::Task && r.state == "blocked" && l.other.kind == Kind::Question && l.other.state == "open" {
+            waits_for.push(RecordRow::new(&l.other, "open".into()));
+        }
+    }
+    let blocked_note = if r.state == "blocked" { r.str("blocked_note").to_owned() } else { String::new() };
     let mut groups: Vec<LinkGroup> = Vec::new();
     let mut stale = Vec::new();
     for l in &links {
@@ -1507,6 +1605,9 @@ async fn load_record_page(
         options,
         extra,
         links: groups,
+        blocking,
+        waits_for,
+        blocked_note,
         stale,
         history: history
             .iter()

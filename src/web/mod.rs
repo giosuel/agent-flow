@@ -22,6 +22,7 @@ mod pages;
 mod projects;
 mod pwa;
 mod settings;
+mod steps;
 mod usage;
 
 use std::net::{IpAddr, SocketAddr};
@@ -150,6 +151,7 @@ pub fn router(state: AppState) -> Router {
         .merge(outgoing::routes())
         .merge(remote::routes())
         .merge(totest::routes())
+        .merge(steps::routes())
         .merge(conversations::routes())
         .merge(guides::routes())
         .merge(log::routes())
