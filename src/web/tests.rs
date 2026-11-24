@@ -4536,3 +4536,29 @@ async fn the_ui_catalogue_shows_the_library() {
     let res = s.http.get(s.url("/ui")).send().await.unwrap();
     assert_ne!(res.status(), reqwest::StatusCode::OK, "not without signing in");
 }
+
+#[tokio::test]
+async fn tasks_on_a_milestone_with_steps_show_on_plan() {
+    let s = TestServer::start().await;
+    let token = s.token(TokenKind::Project, Some("vinculum")).await;
+    let sess = mcp_session(&s, &token).await;
+    for (name, args) in [
+        ("add_milestone", json!({"name": "M4", "title": "Keybinds"})),
+        ("add_milestone", json!({"name": "K1", "title": "Read binds", "step_of": "M4"})),
+        ("add_task", json!({"milestone": "K1", "title": "Parse binds", "estimate": "1 h"})),
+        ("add_task", json!({"milestone": "M4", "title": "Document binds", "estimate": "1 h"})),
+    ] {
+        let (ok, r) = mcp_tool(&s, &token, &sess, name, args).await;
+        assert!(ok, "{name}: {r}");
+    }
+    let cookie = s.owner_cookie().await;
+    // The step's board, and the milestone's own task one entry further down the rail.
+    let board = owner_page(&s, &cookie, "/p/vinculum/plan/M4").await;
+    assert!(board.contains("Parse binds"), "{board}");
+    assert!(board.contains(r#"href="/p/vinculum/plan/M4?step=none""#) && board.contains("Not in a step"), "{board}");
+    let own = owner_page(&s, &cookie, "/p/vinculum/plan/M4?step=none").await;
+    assert!(own.contains("Document binds"), "{own}");
+    // Its page's path opens Plan there.
+    let page = owner_page(&s, &cookie, "/p/vinculum/T-2").await;
+    assert!(page.contains(r#"href="/p/vinculum/plan/M4?step=none""#), "{page}");
+}

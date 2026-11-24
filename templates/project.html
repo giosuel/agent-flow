@@ -118,7 +118,7 @@
     <div class="plan-lay{% if b.rail.is_empty() %} norail{% endif %}">
       {% if !b.rail.is_empty() %}
       <details class="srail" open data-srail>
-        <summary>{% for s in b.rail %}{% if s.on %}<span class="srail-i {{ s.class }}" aria-hidden="true"></span><span class="mono k">{{ s.name }}</span><span class="t">{{ s.title }}</span>{% endif %}{% endfor %}<span class="sub">{{ b.rail.len() }} steps</span>{{ crate::web::icons::icon("chevron")|safe }}</summary>
+        <summary>{% for s in b.rail %}{% if s.on %}<span class="srail-i {{ s.class }}" aria-hidden="true"></span><span class="mono k">{{ s.name }}</span><span class="t">{{ s.title }}</span>{% endif %}{% endfor %}<span class="sub">{{ b.steps }} steps</span>{{ crate::web::icons::icon("chevron")|safe }}</summary>
         <nav class="navlist" aria-label="Steps">{% for s in b.rail %}<a class="srail-row {{ s.class }}{% if s.on %} on{% endif %}" href="{{ s.href }}" data-ms{% if s.on %} aria-current="true"{% endif %}><span class="srail-i {{ s.class }}" aria-hidden="true"></span><span class="mono k" title="{{ s.name }}">{{ s.name }}</span><span class="t">{{ s.title }}</span><span class="mono sub n">{{ s.count }}</span></a>{% endfor %}</nav>
       </details>
       {% endif %}
