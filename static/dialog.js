@@ -77,10 +77,16 @@
     nav.querySelector("[data-step='-1']").disabled = at <= 0;
     nav.querySelector("[data-step='1']").disabled = at < 0 || at >= list.length - 1;
     // An answer sent from here goes back to the page under the dialog when it's the record's
-    // project's (its tab), as the form's own `next` does for the project's page (09-9).
+    // project's (its tab), as the form's own `next` does for the project's page (09-9). Over
+    // the Dashboard it goes back there, to its "Sent to…" notice and the next question.
     for (const n of body.querySelectorAll("form[data-answer] input[name=next]")) {
       const u = new URL(under, location.origin);
       const want = new URL(n.value, location.origin);
+      if (u.pathname === "/") {
+        const slug = want.pathname.split("/")[2] || "";
+        n.value = "/?answered=" + slug + "/" + (want.searchParams.get("answered") || "");
+        continue;
+      }
       if (u.pathname !== want.pathname) continue;
       u.searchParams.set("answered", want.searchParams.get("answered") || "");
       n.value = u.pathname + u.search;
