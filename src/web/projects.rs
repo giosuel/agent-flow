@@ -432,6 +432,9 @@ struct MsView {
     title: String,
     class: &'static str,
     note: String,
+    /// Its tasks are on the board below (the owner, 2026-11-11: "make the milestones into
+    /// buttons, and the kanban board switches based on the selected milestone").
+    selected: bool,
 }
 
 struct StepView {
@@ -662,6 +665,8 @@ struct TabQuery {
     settings: Option<String>,
     /// After Send on the To test list: how many were marked tested.
     tested: Option<usize>,
+    /// The milestone whose board the overview shows (its name); the current one if left out.
+    ms: Option<String>,
 }
 
 /// The line shown after pressing a button, from the redirect's query.
@@ -722,6 +727,7 @@ async fn project(
     let (notice, notice_bad) = press_notice(&q);
     let tab = q.tab.filter(|t| TABS.iter().any(|(k, _)| k == t)).unwrap_or_else(|| "overview".into());
     let now = now_ms();
+    let chosen = q.ms.clone();
     let t = tab.clone();
     let page = state
         .db
@@ -730,7 +736,7 @@ async fn project(
             let ms = projects::milestones(c, p.id)?;
             let all = records::query(c, &records::Query { project_id: Some(p.id), limit: 0, ..Default::default() })?;
             let checkout = p.checkout.trim().to_owned();
-            Ok(Some((build_project_page(c, p, ms, all, &t, now, &tz)?, checkout)))
+            Ok(Some((build_project_page(c, p, ms, all, &t, chosen.as_deref(), now, &tz)?, checkout)))
         })
         .await?
         .ok_or(AppError::NotFound)?;
@@ -783,12 +789,14 @@ async fn project(
     render(page)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_project_page(
     c: &Connection,
     p: Project,
     ms: Vec<Milestone>,
     all: Vec<Record>,
     tab: &str,
+    chosen: Option<&str>,
     now: i64,
     tz: &Tz,
 ) -> anyhow::Result<ProjectPage> {
@@ -834,12 +842,17 @@ fn build_project_page(
     meta("port", "Ports", p.ports.join(", "), vec![]);
     meta("rules", "PM rules for this project", String::new(), p.pm_rules.clone());
 
-    let current = current_milestone(&ms).cloned();
+    // The board shows the chosen milestone (a top-level one), else the current one.
+    let current = chosen
+        .and_then(|name| ms.iter().find(|m| m.parent_id.is_none() && m.name.eq_ignore_ascii_case(name)))
+        .or_else(|| current_milestone(&ms))
+        .cloned();
+    let now_ms_id = current_milestone(&ms).map(|m| m.id);
     let milestones = ms
         .iter()
         .filter(|m| m.parent_id.is_none())
         .map(|m| {
-            let is_current = current.as_ref().is_some_and(|c| c.id == m.id);
+            let is_current = now_ms_id == Some(m.id);
             let step =
                 ms.iter().filter(|s| s.parent_id == Some(m.id) && s.state == "active").map(|s| s.name.clone()).next();
             MsView {
@@ -859,6 +872,7 @@ fn build_project_page(
                     },
                     _ => "planned".into(),
                 },
+                selected: current.as_ref().is_some_and(|c| c.id == m.id),
             }
         })
         .collect();
@@ -951,6 +965,7 @@ fn build_project_page(
                 col("In progress", &["doing"]),
                 col("In review", &["review"]),
                 col("Blocked or parked", &["blocked", "parked"]),
+                col("Done", &["done"]),
             ],
         }
     });

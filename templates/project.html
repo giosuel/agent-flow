@@ -14,69 +14,23 @@
 {% if let Some(n) = notice %}<p class="notice{% if notice_bad %} warn{% else %} ok{% endif %}" role="status">{{ n }}</p>{% endif %}
 
 {% if tab == "overview" %}
-<section class="stack ms-wide" aria-labelledby="ms-h">
-      <div class="sec"><h2 class="label" id="ms-h">Milestones</h2><span class="sub">set by the project agent · every milestone ends with a tag</span></div>
-      {% if milestones.is_empty() %}<p class="sub">The agent hasn't set milestones yet.</p>{% else %}
-      <ol class="ms-strip">
-        {% for m in milestones %}
-        <li class="ms {{ m.class }}" title="{{ m.name }}: {{ m.title }}"><span class="mono">{{ m.name }}</span><span class="mt">{{ m.title }}</span><span class="tag{% if m.class != "now" %} mono{% endif %}">{{ m.note }}</span></li>
-        {% endfor %}
-      </ol>
-      {% endif %}
-    </section>
-<div class="split proj">
-  <div class="split-main stack-lg">
-    {% if !about.is_empty() %}
-    <section class="card pad meta" aria-label="About">
+<div class="stack-lg ov">
+{% if status == "archived" %}<p class="notice">Archived: it's out of the Dashboard and the project list. <a href="/p/{{ slug }}?tab=settings">Restore it in Settings</a>.</p>{% endif %}
+{# Info and the agent side by side in one card; then the milestones, whose buttons pick the board
+   below; then merge order and releases; then questions, decisions and external PRs (the owner,
+   2026-11-11). #}
+<section class="card ov-card" aria-label="About the project and its agent">
+  <div class="ov-info">
+    <h2 class="label">Project</h2>
+    {% if about.is_empty() %}<p class="sub">No details yet; the agent sets them, or you do in Settings.</p>{% endif %}
+    <dl class="mi-grid">
       {% for m in about %}
-      <div class="meta-row"><span class="meta-ico">{{ m.icon|safe }}</span><div class="meta-txt"><span class="label">{{ m.label }}</span>{% if !m.value.is_empty() %}<span>{{ m.value }}</span>{% endif %}{% if !m.list.is_empty() %}<ul class="plain">{% for l in m.list %}<li>{{ l }}</li>{% endfor %}</ul>{% endif %}</div></div>
+      <div class="mi{% if m.label == "About" || !m.list.is_empty() %} mi-wide{% endif %}"><dt><span class="mi-ico">{{ m.icon|safe }}</span>{{ m.label }}</dt><dd>{% if !m.value.is_empty() %}{{ m.value }}{% endif %}{% if !m.list.is_empty() %}<ul class="plain">{% for l in m.list %}<li>{{ l }}</li>{% endfor %}</ul>{% endif %}</dd></div>
       {% endfor %}
-    </section>
-    {% endif %}
-
-
-
-    {% if !prs.is_empty() || !releases.is_empty() %}
-    <div class="duo">
-      {% if !prs.is_empty() %}
-      <section class="card pad stack" aria-labelledby="mo-h">
-        <div class="sec"><h2 class="label" id="mo-h">Merge order</h2><span class="sub">from PR bases</span></div>
-        <p class="sub">PRs based on main can merge in any order once ready; a PR based on another merges after it.{% if has_stack_button %} "Merge #a–#b" merges every PR up to that one, in order.{% endif %}</p>
-        {% include "pr_list.html" %}
-        {% if prs_total > prs.len() %}<a class="sub" href="/p/{{ slug }}?tab=prs">All {{ prs_total }} open PRs</a>{% endif %}
-      </section>
-      {% endif %}
-      {% for rel in releases %}
-      <section class="card pad stack" aria-label="Release {{ rel.tag }}">
-        <div class="sec"><h2 class="label">Release</h2><a class="sub" href="{{ rel.url }}">details</a></div>
-        <p><span class="mono">{{ rel.tag }}</span> · {{ rel.title }}</p>
-        <p class="sub">{{ rel.waits }}{% for (n, u) in rel.open_prs %} <a class="mono" href="{{ u }}">{{ n }}</a>{% endfor %}</p>
-        {% for b in rel.buttons %}{% include "button.html" %}{% endfor %}
-        {% if rel.buttons.is_empty() %}<p class="sub">The agent hasn't added the tag button yet.</p>{% endif %}
-      </section>
-      {% endfor %}
-    </div>
-    {% endif %}
-    {% if let Some(b) = board %}
-    <section class="stack" aria-labelledby="board-h">
-      <div class="sec"><h2 id="board-h">{{ b.title }}</h2><span class="sub">{{ b.summary }}</span></div>
-      {% if !b.steps.is_empty() %}<ol class="steps">{% for s in b.steps %}<li class="step {{ s.class }}"><span class="mono">{{ s.name }}</span> {{ s.title }}{% if s.class == "done" %} · done{% endif %}{% if s.class == "now" %} · now{% endif %}</li>{% endfor %}</ol>{% endif %}
-      <div class="board">
-        {% for col in b.columns %}
-        <div class="col"><div class="col-h"><span class="label">{{ col.title }}</span><span class="mono sub">{{ col.tasks.len() }}</span></div>
-          {% for t in col.tasks %}
-          <a class="task" href="{{ t.url }}"><span class="sub mono">{% if !t.step.is_empty() %}{{ t.step }} · {% endif %}{{ t.short }}</span><span class="task-t">{{ t.title }}</span>{% for (u, q) in t.blocked_by %}<span class="warn-text sub">blocked by {{ q }}</span>{% endfor %}{% if !t.sub.is_empty() %}<span class="sub">{{ t.sub }}</span>{% endif %}</a>
-          {% endfor %}
-        </div>
-        {% endfor %}
-      </div>
-    </section>
-    {% endif %}
+    </dl>
   </div>
-
-  <aside class="split-side stack-lg">
-    <section class="card pad stack" aria-labelledby="agent-h">
-      <h2 class="label" id="agent-h">Project agent</h2>
+  <div class="ov-agent stack-sm" aria-labelledby="agent-h">
+    <h2 class="label" id="agent-h">Project agent</h2>
       <dl class="kv">
         <dt>Session</dt><dd>{{ agent.session }}</dd>
         <dt>Machine</dt><dd>{{ agent.machine }}</dd>
@@ -101,8 +55,69 @@
         </div>
       </details>
       {% endif %}
-    </section>
+  </div>
+</section>
 
+<section class="stack ms-wide" aria-labelledby="ms-h">
+  <div class="sec"><h2 class="label" id="ms-h">Milestones</h2><span class="sub">pick one to see its board · every milestone ends with a tag</span></div>
+  {% if milestones.is_empty() %}<p class="sub">The agent hasn't set milestones yet.</p>{% else %}
+  <div class="ms-strip" role="list">
+    {% for m in milestones %}
+    <a role="listitem" class="ms {{ m.class }}{% if m.selected %} sel{% endif %}" href="/p/{{ slug }}?ms={{ m.name }}#board"{% if m.selected %} aria-current="true"{% endif %} title="{{ m.name }}: {{ m.title }}" data-ms><span class="mono">{{ m.name }}</span><span class="mt">{{ m.title }}</span><span class="tag{% if m.class != "now" %} mono{% endif %}">{{ m.note }}</span></a>
+    {% endfor %}
+  </div>
+  {% endif %}
+</section>
+
+    {% if let Some(b) = board %}
+    <section class="stack" aria-labelledby="board-h" id="board">
+      <div class="sec"><h2 id="board-h">{{ b.title }}</h2><span class="sub">{{ b.summary }}</span></div>
+      {% if !b.steps.is_empty() %}<ol class="steps">{% for s in b.steps %}<li class="step {{ s.class }}"><span class="mono">{{ s.name }}</span> {{ s.title }}{% if s.class == "done" %} · done{% endif %}{% if s.class == "now" %} · now{% endif %}</li>{% endfor %}</ol>{% endif %}
+      <div class="board">
+        {% for col in b.columns %}
+        <div class="col"><div class="col-h"><span class="label">{{ col.title }}</span><span class="mono sub">{{ col.tasks.len() }}</span></div>
+          {% for t in col.tasks %}
+          <a class="task" href="{{ t.url }}"><span class="sub mono">{% if !t.step.is_empty() %}{{ t.step }} · {% endif %}{{ t.short }}</span><span class="task-t">{{ t.title }}</span>{% for (u, q) in t.blocked_by %}<span class="warn-text sub">blocked by {{ q }}</span>{% endfor %}{% if !t.sub.is_empty() %}<span class="sub">{{ t.sub }}</span>{% endif %}</a>
+          {% endfor %}
+        </div>
+        {% endfor %}
+      </div>
+    </section>
+    {% endif %}
+
+    {% if !prs.is_empty() || !releases.is_empty() %}
+    <div class="duo">
+      {% if !prs.is_empty() %}
+      <section class="card pad stack" aria-labelledby="mo-h">
+        <div class="sec"><h2 class="label" id="mo-h">Merge order</h2><span class="sub">from PR bases</span></div>
+        <p class="sub">PRs based on main can merge in any order once ready; a PR based on another merges after it.{% if has_stack_button %} "Merge #a–#b" merges every PR up to that one, in order.{% endif %}</p>
+        {% include "pr_list.html" %}
+        {% if prs_total > prs.len() %}<a class="sub" href="/p/{{ slug }}?tab=prs">All {{ prs_total }} open PRs</a>{% endif %}
+      </section>
+      {% endif %}
+      {% for rel in releases %}
+      <section class="card pad stack" aria-label="Release {{ rel.tag }}">
+        <div class="sec"><h2 class="label">Release</h2><a class="sub" href="{{ rel.url }}">details</a></div>
+        <p><span class="mono">{{ rel.tag }}</span> · {{ rel.title }}</p>
+        <p class="sub">{{ rel.waits }}{% for (n, u) in rel.open_prs %} <a class="mono" href="{{ u }}">{{ n }}</a>{% endfor %}</p>
+        {% for b in rel.buttons %}{% include "button.html" %}{% endfor %}
+        {% if rel.buttons.is_empty() %}<p class="sub">The agent hasn't added the tag button yet.</p>{% endif %}
+      </section>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+<div class="ov-bottom">
+    <section class="card pad stack" aria-labelledby="oq-h">
+      <div class="sec"><h2 class="label" id="oq-h">Open questions</h2><a class="sub" href="/p/{{ slug }}?tab=questions">All questions</a></div>
+      {% if open_questions.is_empty() %}<p class="sub">None. Nothing is waiting on you here.</p>{% endif %}
+      <ul class="rows">{% for q in open_questions %}<li class="item-row"><div class="ttl"><a href="{{ q.url }}">{{ q.title }}</a><span class="sub mono">{{ q.short }} · {{ q.sub }}</span></div></li>{% endfor %}</ul>
+    </section>
+    <section class="card pad stack" aria-labelledby="dec-h">
+      <div class="sec"><h2 class="label" id="dec-h">Latest decisions</h2><a class="sub" href="/p/{{ slug }}?tab=decisions">All decisions</a></div>
+      {% if decisions.is_empty() %}<p class="sub">No decisions recorded yet.</p>{% endif %}
+      <ul class="rows">{% for d in decisions %}<li class="item-row"><div class="ttl"><span class="sub mono">{{ d.id }} · {{ d.sub }}</span><a href="{{ d.url }}">{{ d.title }}</a></div></li>{% endfor %}</ul>
+    </section>
     {% if !external.is_empty() || !external_done.is_empty() %}
     <section class="card pad stack" aria-labelledby="ext-h">
       <h2 class="label" id="ext-h">External PRs / issues</h2>
@@ -116,20 +131,7 @@
       {% endif %}
     </section>
     {% endif %}
-
-    <section class="card pad stack" aria-labelledby="oq-h">
-      <div class="sec"><h2 class="label" id="oq-h">Open questions</h2><a class="sub" href="/p/{{ slug }}?tab=questions">All questions</a></div>
-      {% if open_questions.is_empty() %}<p class="sub">None. Nothing is waiting on you here.</p>{% endif %}
-      <ul class="rows">{% for q in open_questions %}<li class="item-row"><div class="ttl"><a href="{{ q.url }}">{{ q.title }}</a><span class="sub mono">{{ q.short }} · {{ q.sub }}</span></div></li>{% endfor %}</ul>
-    </section>
-
-    <section class="card pad stack" aria-labelledby="dec-h">
-      <div class="sec"><h2 class="label" id="dec-h">Latest decisions</h2><a class="sub" href="/p/{{ slug }}?tab=decisions">All decisions</a></div>
-      {% if decisions.is_empty() %}<p class="sub">No decisions recorded yet.</p>{% endif %}
-      <ul class="rows">{% for d in decisions %}<li class="item-row"><div class="ttl"><span class="sub mono">{{ d.id }} · {{ d.sub }}</span><a href="{{ d.url }}">{{ d.title }}</a></div></li>{% endfor %}</ul>
-    </section>
-    {% if status == "archived" %}<p class="notice">Archived: it's out of the Dashboard and the project list. <a href="/p/{{ slug }}?tab=settings">Restore it in Settings</a>.</p>{% endif %}
-  </aside>
+</div>
 </div>
 {% endif %}
 

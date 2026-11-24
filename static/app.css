@@ -791,3 +791,30 @@ html.rdlg-on { overflow: hidden; }
   .rdlg-body { padding: 16px 16px calc(24px + env(safe-area-inset-bottom)); }
 }
 @media (prefers-reduced-motion: reduce) { .rdlg, .rdlg-back { transition: none; } }
+
+/* Project overview (the owner, 2026-11-11): Info | Agent in one compact card, then the milestones
+   as buttons that pick the board, the board, Merge order | Releases, then the rest. */
+.ov-card { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); }
+.ov-card > div { padding: 18px 22px; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+.ov-card > .ov-agent { border-left: 1px solid var(--line2); }
+.mi-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px 22px; margin: 0; }
+.mi { min-width: 0; display: flex; flex-direction: column; gap: 2px; font-size: 14px; }
+.mi.mi-wide { grid-column: 1 / -1; }
+.mi dt { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+.mi dd { margin: 0; overflow-wrap: anywhere; color: var(--ink); }
+.mi-ico { display: inline-flex; color: var(--muted); }
+.mi-ico .i { width: 14px; height: 14px; }
+a.ms { color: inherit; text-decoration: none; cursor: pointer; transition: border-color .12s, background .12s; }
+a.ms:hover { border-color: var(--accent); }
+a.ms.sel { outline: 2px solid var(--ink2); outline-offset: 2px; }
+a.ms:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ov .board { flex-wrap: nowrap; }
+.ov-bottom { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr)); gap: 22px; align-items: start; }
+.ov .ms-strip { grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }
+#board.loading { opacity: .55; transition: opacity .1s; }
+@media (max-width: 900px) {
+  .ov-card { grid-template-columns: 1fr; }
+  .ov-card > .ov-agent { border-left: 0; border-top: 1px solid var(--line2); }
+  .ov .board { flex-wrap: wrap; }
+}
+@media (max-width: 600px) { .ov-card > div { padding: 14px 16px; } .mi-grid { grid-template-columns: 1fr 1fr; gap: 10px 14px; } }
