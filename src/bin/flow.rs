@@ -8,8 +8,18 @@ use agentflow::cli;
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
-#[command(name = "flow", version = env!("APP_VERSION"), about = "AgentFlow: test builds, projects and the agents' commands")]
+#[command(
+    name = "flow",
+    version = env!("APP_VERSION"),
+    about = "AgentFlow: test builds, projects and the agents' commands",
+    disable_version_flag = true,
+    styles = agentflow::ui::clap_styles(),
+    max_term_width = 100
+)]
 struct Args {
+    /// Print flow's version (also `flow version`).
+    #[arg(short = 'v', short_alias = 'V', long = "version", action = clap::ArgAction::Version)]
+    version: Option<bool>,
     /// A file with the server's address (public_url), instead of ~/.config/agentflow/config.toml.
     #[arg(long, global = true, env = "AGENTFLOW_CONFIG", hide = true)]
     config: Option<PathBuf>,
@@ -19,6 +29,8 @@ struct Args {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Print flow's version.
+    Version,
     /// Connect this machine to an AgentFlow server: you approve it in the browser (it opens when
     /// it can; otherwise open the link it shows, e.g. on your phone).
     Connect {
@@ -217,6 +229,12 @@ enum ProjectCommand {
 
 #[derive(Subcommand)]
 enum BuilderCommand {
+    /// Follow a builder live: its CPU, memory, GPU and disk, its jobs and their output (q quits,
+    /// ↑↓ picks a job, ⏎ follows it or holds it still, p pauses the builds there).
+    Status {
+        /// The builder (the only one, or this machine's, if left out).
+        name: Option<String>,
+    },
     /// Make this machine a builder: asks whether it gets a user of its own (recommended), its
     /// name, and your approval in the browser; then starts its service.
     Add {
@@ -269,7 +287,15 @@ enum ServerCommand {
     },
 }
 
-fn main() -> anyhow::Result<()> {
+fn main() {
+    // Errors in flow's own style: "flow: what went wrong", the causes below it.
+    if let Err(e) = real_main() {
+        eprintln!("{}", agentflow::ui::error(&e));
+        std::process::exit(1);
+    }
+}
+
+fn real_main() -> anyhow::Result<()> {
     let args = Args::parse();
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "warn".into()))
@@ -278,6 +304,10 @@ fn main() -> anyhow::Result<()> {
     let config_path = args.config.unwrap_or_else(agentflow::config::Config::default_path);
     use agentflow::connect;
     match args.command {
+        Command::Version => {
+            println!("flow {}", env!("APP_VERSION"));
+            Ok(())
+        }
         Command::Connect { url } => connect::connect(&url),
         Command::Disconnect => connect::disconnect(&config_path),
         Command::Status(client) => connect::status(&config_path, &client),
@@ -317,6 +347,7 @@ fn main() -> anyhow::Result<()> {
                     b::add(&config_path, &client, b::AddArgs { name, user, current_user })
                 }
                 BuilderCommand::List => b::list(&config_path, &client),
+                BuilderCommand::Status { name } => agentflow::builder_tui::run(&config_path, &client, name),
                 BuilderCommand::Edit { name, rename, min_threads, min_memory, reserve_memory, keep_days, slots } => {
                     b::edit(
                         &config_path,

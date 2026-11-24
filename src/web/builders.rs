@@ -325,6 +325,80 @@ pub fn admin_routes() -> Router<AppState> {
         .route("/api/builders", get(list))
         .route("/api/builders/self", axum::routing::delete(remove_self))
         .route("/api/builders/edit/{name}", axum::routing::patch(edit))
+        .route("/api/builders/status/{name}", get(status))
+        .route("/api/builders/pause/{name}", axum::routing::post(pause))
+}
+
+/// `flow builder status`: a builder's machine and its jobs, every two seconds.
+async fn status(
+    State(state): State<AppState>,
+    Extension(actor): Extension<Actor>,
+    Path(name): Path<String>,
+) -> Response {
+    if !matches!(actor, Actor::Device { .. } | Actor::Owner { .. }) {
+        return json_error(StatusCode::FORBIDDEN, "for your machines");
+    }
+    let Some(b) = crate::remote::servers(&state).into_iter().find(|s| s.name.eq_ignore_ascii_case(&name)) else {
+        return json_error(StatusCode::NOT_FOUND, format!("no builder called {name}"));
+    };
+    let (probe, paused) = {
+        let live = state.remote.lock().unwrap_or_else(|e| e.into_inner());
+        let l = live.servers.get(&b.name);
+        (l.map(|l| l.probe.clone()).unwrap_or_default(), l.is_some_and(|l| l.paused))
+    };
+    let n = b.name.clone();
+    let jobs = state.db.call(move |c| crate::remote::recent(c, Some(&n), 30)).await.unwrap_or_default();
+    let hello = hub().hello(&b.name);
+    let now = crate::util::now_ms();
+    Json(json!({
+        "name": b.name,
+        "online": hub().is_online(&b.name),
+        "paused": paused,
+        "version": hello.as_ref().map(|h| h.0.clone()),
+        "slots": b.slots,
+        "probe": {
+            "at": probe.at, "model": probe.model.trim(), "threads": probe.threads, "busy": probe.busy, "builds": probe.builds,
+            "mem_total_gb": probe.mem_total_gb, "mem_free_gb": probe.mem_free_gb, "mem_builds_gb": probe.mem_builds_gb,
+            "gpu_name": probe.gpu_name, "gpu_util": probe.gpu_util,
+            "disk_free_gb": probe.disk_free_gb, "disk_total_gb": probe.disk_total_gb,
+        },
+        "jobs": jobs.iter().map(|j| json!({
+            "id": j.id, "project": j.project, "command": j.command_line(), "state": j.state, "reason": j.reason,
+            "exit_code": j.exit_code, "threads": j.threads, "slot": j.slot, "lines": j.lines, "warnings": j.warnings, "errors": j.errors,
+            "seconds": j.started_at.map(|s| (j.finished_at.unwrap_or(now) - s) / 1000),
+            "commit": j.commit_sha.chars().take(7).collect::<String>(),
+        })).collect::<Vec<_>>(),
+    }))
+    .into_response()
+}
+
+#[derive(Deserialize)]
+struct PauseBody {
+    paused: bool,
+}
+
+/// `p` in `flow builder status`: pause or resume the builds there, as the Machine page's button.
+async fn pause(
+    State(state): State<AppState>,
+    Extension(actor): Extension<Actor>,
+    Path(name): Path<String>,
+    Json(b): Json<PauseBody>,
+) -> Response {
+    if !matches!(actor, Actor::Device { .. } | Actor::Owner { .. }) {
+        return json_error(StatusCode::FORBIDDEN, "for your machines");
+    }
+    let Some(server) = crate::remote::servers(&state).into_iter().find(|s| s.name.eq_ignore_ascii_case(&name)) else {
+        return json_error(StatusCode::NOT_FOUND, format!("no builder called {name}"));
+    };
+    state.remote.lock().unwrap_or_else(|e| e.into_inner()).servers.entry(server.name.clone()).or_default().paused =
+        b.paused;
+    let what = if b.paused {
+        format!("paused builds on {}", server.name)
+    } else {
+        format!("resumed builds on {}", server.name)
+    };
+    activity::write(&state.db, Entry::new(&actor, Via::Cli, Action::Run, what)).await;
+    Json(json!({"paused": b.paused})).into_response()
 }
 
 /// `flow builder list`: every builder, online or not, with its limits.

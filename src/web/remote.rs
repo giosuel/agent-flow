@@ -141,6 +141,12 @@ async fn start(State(state): State<AppState>, Extension(actor): Extension<Actor>
 }
 
 /// May this actor see or stop the job? Its project's agent, the owner, the consultant.
+/// May this actor read the job's output? Those who may stop it, and the owner's connected
+/// machines, which read everything (`flow builder status`).
+fn may_read(actor: &Actor, job: &Job) -> bool {
+    matches!(actor, Actor::Device { .. }) || may(actor, job)
+}
+
 fn may(actor: &Actor, job: &Job) -> bool {
     match actor {
         Actor::Owner { .. } | Actor::Admin { .. } => true,
@@ -165,7 +171,7 @@ async fn output(
     let Ok(Some(job)) = state.db.call(move |c| remote::get(c, id)).await else {
         return json_error(StatusCode::NOT_FOUND, "no such job");
     };
-    if !may(&actor, &job) {
+    if !may_read(&actor, &job) {
         return json_error(StatusCode::FORBIDDEN, "not your job");
     }
     let (text, next) = remote::read_output(&state.config.data_dir(), id, a.after, 256 * 1024);
