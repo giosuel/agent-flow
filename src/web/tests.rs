@@ -701,7 +701,7 @@ async fn prs_merge_in_order_from_the_owners_buttons() {
         assert!(ok, "{r}");
     }
     let (ok, r) =
-        call("add_release", json!({"tag": "v0.0.5-m4", "title": "M4: Keybinds", "waits_for": ["PR-48", "PR-49"]}))
+        call("add_release", json!({"tag": "v0.0.5-m4", "title": "M4: Keybinds", "waits_for": ["PR-48", "PR-49"], "tag_button": false}))
             .await;
     assert!(ok, "{r}");
     call("add_button", json!({"record": "R-1", "label": "Push tag v0.0.5-m4", "kind": "tag", "command": "echo tagged > tagged", "workdir": wd, "requires": ["PR-49"]})).await;
@@ -1677,16 +1677,16 @@ async fn answers_make_scoped_decisions_and_releases_bring_their_tag_button() {
     assert!(!call("update_decision", json!({"id": "D-1", "state": "deleted", "reason": "x"})).await.0);
     assert!(call("update_decision", json!({"id": id, "state": "current", "reason": "owner: keep it after all"})).await.0);
 
-    // A release brings its Push tag button once the project has a folder.
+    // A release brings its Push tag button once the project has a repository: GitHub's API makes
+    // the tag, so no folder is needed (the project may lie on any machine).
     let (ok, r) = call("add_release", json!({"tag": "v0.0.5-m4", "title": "M4: Keybinds"})).await;
     assert!(ok && r["tag_button"].as_str().unwrap_or("").starts_with("none"), "{r}");
-    assert!(call("update_project", json!({"checkout": "~/vinculum"})).await.0);
+    assert!(call("update_project", json!({"repo": "giosuel/vinculum"})).await.0);
     let (ok, r) = call("add_release", json!({"tag": "v0.0.6-m5", "title": "M5"})).await;
     assert!(ok, "{r}");
     let cmd = r["tag_button"]["command"].as_str().unwrap();
-    assert_eq!(cmd, "git fetch origin main && git tag -a v0.0.6-m5 -m v0.0.6-m5 origin/main && git push origin v0.0.6-m5");
-    // It never touches the checkout's own branch (Imaginarium's folder sits on another one).
-    assert!(!cmd.contains("checkout") && !cmd.contains("HEAD") && !cmd.contains("switch") && !cmd.contains("reset"));
+    assert!(cmd.contains("repos/giosuel/vinculum/git/ref/heads/main") && cmd.contains("-f tag=v0.0.6-m5") && cmd.contains("ref=refs/tags/v0.0.6-m5"), "{cmd}");
+    assert!(!cmd.contains("git push") && !cmd.contains("checkout") && !cmd.contains("cd "), "{cmd}");
     // After a context reset: hello brief leaves out the document and milestones.
     let (_, b) = call("hello", json!({"session": "V", "machine": "m", "model": "o", "effort": "h", "brief": true})).await;
     assert!(b.get("doc").is_none() && b.get("milestones").is_none() && b.get("where").is_some(), "{b}");
@@ -2802,37 +2802,123 @@ async fn tool_schemas_have_no_refs() {
     assert!(um["inputSchema"]["properties"]["review"]["properties"]["reports"].is_object(), "{um}");
 }
 
-/// The project page sets the agent up in the project's folder, for a project from before New
-/// project did that.
+/// "Set up on another machine" (the owner, 2026-11-13): the page makes a setup code, `flow
+/// project setup` there trades it once for the project's token and says where the project lies.
 #[tokio::test]
-async fn the_owner_sets_a_projects_agent_up_from_its_page() {
+async fn a_setup_code_sets_a_project_up_on_a_machine() {
     let s = TestServer::start().await;
-    let token = s.token(TokenKind::Project, Some("vinculum")).await;
-    let dir = tempfile::tempdir().unwrap();
-    let folder = dir.path().to_owned();
-    let f = folder.display().to_string();
-    s.db.call(move |c| {
-        let p = crate::projects::require(c, "vinculum")?;
-        crate::projects::update(c, p.id, &crate::projects::ProjectPatch { checkout: Some(f), ..Default::default() }, "owner")?;
-        Ok(())
-    })
-    .await
-    .unwrap();
+    let agent = s.token(TokenKind::Project, Some("vinculum")).await;
     let cookie = s.owner_cookie().await;
     let page = s.http.get(s.url("/p/vinculum")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
-    assert!(page.contains("Set up the agent"), "{page}");
-    let res = s.http.post(s.url("/p/vinculum/setup")).header(COOKIE, &cookie).header(ORIGIN, &s.base).send().await.unwrap();
-    assert!(res.status().is_redirection(), "{}", res.status());
-    let text = std::fs::read_to_string(folder.join(".claude/settings.local.json")).unwrap();
-    assert!(text.contains("hello --doc") && text.contains("hello --no-doc") && text.contains(" news --token-file"), "{text}");
-    assert!(text.contains("AGENTFLOW_TOKEN_FILE") && text.contains("enabledMcpjsonServers"), "{text}");
-    let mcp = std::fs::read_to_string(folder.join(".mcp.json")).unwrap();
-    assert!(mcp.contains("/mcp") && mcp.contains("mcp-headers"), "{mcp}");
+    assert!(page.contains("/p/vinculum/setup-code"), "{page}");
+    let res = s.http.post(s.url("/p/vinculum/setup-code")).bearer_auth(&agent).send().await.unwrap();
+    assert!(!res.status().is_success(), "not for an agent");
+    let shown = s
+        .http
+        .post(s.url("/p/vinculum/setup-code"))
+        .header(COOKIE, &cookie)
+        .header(ORIGIN, &s.base)
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(shown.contains("install.sh | sh") && shown.contains("flow project setup"), "{shown}");
+    let start = shown.find("id=\"setup-code\">").unwrap() + "id=\"setup-code\">".len();
+    let code: String = shown[start..].chars().take_while(|c| *c != '<').collect();
+    assert_eq!(code.len(), 14, "{code}");
+    assert!(!s.log_summaries().await.iter().any(|l| l.contains(&code)), "the code isn't logged");
+
+    let redeem = |code: String| {
+        let s = &s;
+        async move { s.http.post(s.url("/api/setup/redeem")).json(&json!({"code": code, "machine": "giosuel@mothman"})).send().await.unwrap() }
+    };
+    let got: Value = redeem(code.to_lowercase()).await.json().await.unwrap();
+    assert_eq!(got["project"], "vinculum");
+    let token = got["token"].as_str().unwrap().to_owned();
+    assert_eq!(redeem(code).await.status(), StatusCode::FORBIDDEN, "once");
+    assert_eq!(redeem("AAAA-BBBB-CCCC".into()).await.status(), StatusCode::FORBIDDEN);
+
+    let res = s
+        .http
+        .post(s.url("/api/setup/done"))
+        .bearer_auth(&token)
+        .json(&json!({"folder": "/home/giosuel/vinculum", "machine": "giosuel@mothman"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let res = s.http.post(s.url("/api/setup/done")).bearer_auth(&token).json(&json!({"folder": "relative", "machine": "m"})).send().await.unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
     let page = s.http.get(s.url("/p/vinculum")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
-    assert!(page.contains("Its folder is set up") && !page.contains("Set up the agent"), "{page}");
-    assert!(page.contains(&format!("cd {} &#38;&#38; claude</pre>", folder.display())), "{page}");
-    assert!(s.log_summaries().await.iter().any(|l| l.contains("Set the agent up")));
-    // Not for an agent.
-    let res = s.http.post(s.url("/p/vinculum/setup")).bearer_auth(&token).send().await.unwrap();
-    assert!(!res.status().is_success() && !res.status().is_redirection());
+    assert!(page.contains("/home/giosuel/vinculum") && page.contains("mothman") && page.contains("Set up on another machine"), "{page}");
+}
+
+/// Add project: the commands for `flow project setup`, or a project created here with a setup code.
+#[tokio::test]
+async fn add_project_hands_out_the_commands_or_a_setup_code() {
+    let s = TestServer::start().await;
+    let cookie = s.owner_cookie().await;
+    let page = s.http.get(s.url("/projects/new")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
+    assert!(page.contains("install.sh | sh") && page.contains("flow project setup"), "{page}");
+    let shown = s
+        .http
+        .post(s.url("/projects/new"))
+        .header(COOKIE, &cookie)
+        .header(ORIGIN, &s.base)
+        .form(&[("name", "Speculum Tool"), ("description", "Mirror")])
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(shown.contains("id=\"setup-code\"") && shown.contains("cd ~/speculum-tool"), "{shown}");
+    let p = s.db.call(|c| crate::projects::require(c, "speculum-tool")).await.unwrap();
+    assert!(p.checkout.is_empty(), "no folder until it's set up");
+    let tokens: i64 = s.db.call(move |c| Ok(c.query_row("SELECT count(*) FROM tokens WHERE project_id = ?1", [p.id], |r| r.get(0))?)).await.unwrap();
+    assert_eq!(tokens, 0, "the setup code brings the token");
+}
+
+/// `flow sync` (the owner, 2026-11-13): a project's conversations reach AgentFlow from wherever
+/// it lies, counted for that project, never twice.
+#[tokio::test]
+async fn flow_sync_sends_each_call_once_for_its_project() {
+    let s = TestServer::start().await;
+    let token = s.token(TokenKind::Project, Some("vinculum")).await;
+    let other = s.token(TokenKind::Project, Some("imaginarium")).await;
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("s1.jsonl");
+    let line = |id: &str, at: &str| {
+        format!(
+            "{{\"type\":\"assistant\",\"timestamp\":\"{at}\",\"sessionId\":\"s1\",\"cwd\":\"/home/giosuel/vinculum\",\"message\":{{\"id\":\"{id}\",\"model\":\"claude-opus-5-5\",\"role\":\"assistant\",\"usage\":{{\"input_tokens\":5,\"output_tokens\":10,\"cache_creation_input_tokens\":100,\"cache_read_input_tokens\":1000}}}}}}\n"
+        )
+    };
+    std::fs::write(&file, line("m1", "2026-11-13T01:00:00Z") + &line("m2", "2026-11-13T01:01:00Z")).unwrap();
+    let send = |tok: String, f: std::path::PathBuf, base: String| {
+        tokio::task::spawn_blocking(move || crate::sync::send(&crate::cli::Client::with_token(&base, &tok), &[f]).unwrap())
+    };
+    assert_eq!(send(token.clone(), file.clone(), s.base.clone()).await.unwrap(), 2);
+    assert_eq!(send(token.clone(), file.clone(), s.base.clone()).await.unwrap(), 0, "nothing twice");
+    // Another project's token keeps its own offsets: its upload counts nothing new either.
+    assert_eq!(send(other, file.clone(), s.base.clone()).await.unwrap(), 0);
+    let mut f = std::fs::OpenOptions::new().append(true).open(&file).unwrap();
+    std::io::Write::write_all(&mut f, line("m3", "2026-11-13T01:02:00Z").as_bytes()).unwrap();
+    assert_eq!(send(token.clone(), file.clone(), s.base.clone()).await.unwrap(), 1);
+    let rows: Vec<(String, Option<String>)> = s
+        .db
+        .call(|c| {
+            let mut st = c.prepare("SELECT u.message_id, p.slug FROM usage u LEFT JOIN projects p ON p.id = u.project_id ORDER BY 1")?;
+            let v = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<Result<Vec<_>, _>>()?;
+            Ok(v)
+        })
+        .await
+        .unwrap();
+    assert_eq!(rows.len(), 3);
+    assert!(rows.iter().all(|(_, p)| p.as_deref() == Some("vinculum")), "{rows:?}");
+    // Only projects' tokens sync.
+    let device = s.token(TokenKind::Device, None).await;
+    let res = s.http.post(s.url("/api/sync/state")).bearer_auth(&device).json(&json!({"file": "m:/x"})).send().await.unwrap();
+    assert_eq!(res.status(), StatusCode::FORBIDDEN);
 }

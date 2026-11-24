@@ -22,8 +22,16 @@ pub const MINUTES: i64 = 10;
 pub const MAX_PENDING: i64 = 30;
 
 /// What can be asked for.
-pub const ACTIONS: &[&str] =
-    &["connect", "token_create", "token_revoke", "token_rotate", "project_add", "backup", "import_prs"];
+pub const ACTIONS: &[&str] = &[
+    "connect",
+    "token_create",
+    "token_revoke",
+    "token_rotate",
+    "project_add",
+    "project_create",
+    "backup",
+    "import_prs",
+];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Approval {
@@ -90,13 +98,23 @@ pub fn check_args(c: &Connection, action: &str, args: &Value) -> anyhow::Result<
             }
             Ok(())
         }
-        "project_add" => {
+        "project_add" | "project_create" => {
             crate::projects::check_slug(&s("slug"))?;
             if s("name").is_empty() || s("name").chars().count() > 60 {
                 bail!("give the project a name (up to 60 characters)");
             }
             if crate::projects::get(c, &s("slug"))?.is_some() {
                 bail!("project {} exists already", s("slug"));
+            }
+            if action == "project_create" {
+                let f = s("folder");
+                if !f.starts_with('/') || f.len() > 500 || f.chars().any(char::is_control) {
+                    bail!("the project's folder must be an absolute path");
+                }
+                let repo = s("repo");
+                if !repo.is_empty() && !crate::projects::looks_like_repo(&repo) {
+                    bail!("repo {repo:?} isn't owner/name");
+                }
             }
             Ok(())
         }
@@ -284,6 +302,25 @@ pub fn execute(c: &mut Connection, a: &Approval, data_dir: &std::path::Path) -> 
             let p = crate::projects::create(c, &s("slug"), &s("name"), "owner")?;
             Ok(json!({"project": p.slug}))
         }
+        // `flow project setup` in a folder without a code: the project with its M0 and token,
+        // set up in that folder on the asking machine.
+        "project_create" => {
+            let new = crate::onboard::NewProject {
+                name: s("name"),
+                slug: s("slug"),
+                folder: s("folder"),
+                description: s("description"),
+                ..Default::default()
+            };
+            let host = a.machine.rsplit('@').next().unwrap_or(&a.machine).to_owned();
+            let folder = std::path::PathBuf::from(s("folder"));
+            let (id, secret) = crate::onboard::create_records(c, &new, Some(&folder), Some(&host), true)?;
+            if !s("repo").is_empty() {
+                let patch = crate::projects::ProjectPatch { repo: Some(s("repo")), ..Default::default() };
+                crate::projects::update(c, id, &patch, "owner")?;
+            }
+            Ok(json!({"project": new.slug, "name": new.name, "token": secret}))
+        }
         "backup" => {
             let now = now_ms();
             let stamp = format!("{}-{}", crate::util::fmt_date(now), crate::util::fmt_hm(now).replace(':', ""));
@@ -306,6 +343,7 @@ pub fn describe(a: &Approval) -> String {
         "token_revoke" => format!("Revoke token {}", n("id")),
         "token_rotate" => format!("Replace token {} with a new one", n("id")),
         "project_add" => format!("Add the project {} ({})", s("name"), s("slug")),
+        "project_create" => format!("Create the project {} ({}) in {}", s("name"), s("slug"), s("folder")),
         "backup" => "Back up the database and export every project".into(),
         "import_prs" => format!("Import PRs #{}–#{} into {}", n("from"), n("to"), s("project")),
         other => other.to_owned(),

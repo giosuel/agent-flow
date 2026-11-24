@@ -45,16 +45,13 @@
       {% if session_url.is_none() %}<p class="sub">The button to its Claude Code session shows up once the agent runs with <span class="mono">/remote-control</span>.</p>{% endif %}
       {% if let Some(c) = connect %}
       <details class="connect">
-        <summary class="sub">Connect the agent</summary>
+        <summary class="sub">{% if c.folder.is_empty() %}Set up on a machine{% else %}Where it's set up{% endif %}</summary>
         <div class="stack-sm">
-          {% if c.set_up %}<p class="sub">Its folder is set up: the AgentFlow MCP server, hello at every start and after compaction, the news before each of your prompts, and the token for its commands. Start the agent there:</p>
-          <pre class="cmd mono">{{ c.start }}</pre>
-          {% else %}<p class="sub">Its folder isn't set up yet, or not as AgentFlow sets it up now. This writes the AgentFlow MCP server into <span class="mono">.mcp.json</span>, and hooks (hello at every start and after compaction, the news before each of your prompts) and the token for its commands into <span class="mono">.claude/settings.local.json</span>. Both stay out of git, and the rest of those files stays as it is:</p>
-          <form method="post" action="/p/{{ slug }}/setup"><button class="btn sm" type="submit">Set up the agent</button></form>
-          <p class="sub">Then start it there:</p>
-          <pre class="cmd mono">{{ c.start }}</pre>{% endif %}
-          <p class="sub">The first time in a folder, Claude Code asks whether you trust it. Say yes once: until then it doesn't connect to AgentFlow.</p>
-          {% if !c.has_file %}<p class="notice warn">The token file <span class="mono">{{ c.token_file }}</span> doesn't exist. Rotate the project's token in <a href="/settings">Settings</a>; that writes it.</p>{% endif %}
+          {% if c.folder.is_empty() %}<p class="sub">Not set up on a machine yet.</p>
+          {% else %}<p class="sub">In <span class="mono">{{ c.folder }}</span>{% if !c.machine.is_empty() %} on <span class="mono">{{ c.machine }}</span>{% endif %}. Start the agent there:</p>
+          <pre class="cmd mono">cd {{ c.folder }} && claude</pre>{% endif %}
+          <p class="sub">Setting it up on a machine (or moving it) takes a setup code: <span class="mono">flow project setup</span> in its folder writes the token, the agent's first note and its Claude Code setup.</p>
+          <form method="post" action="/p/{{ slug }}/setup-code"><button class="btn sm" type="submit">{% if c.folder.is_empty() %}Set up on a machine{% else %}Set up on another machine{% endif %}</button></form>
         </div>
       </details>
       {% endif %}

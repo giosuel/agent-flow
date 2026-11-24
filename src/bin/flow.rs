@@ -135,6 +135,17 @@ enum Command {
         #[arg(long, default_value_t = 480)]
         minutes: u64,
     },
+    /// Send what's new in this project's Claude conversations to AgentFlow (its hooks run this
+    /// after each reply, subagent and session end). `--all`: every earlier conversation of the folder.
+    Sync {
+        #[command(flatten)]
+        client: cli::ClientArgs,
+        #[arg(long)]
+        all: bool,
+        /// The files to send (the detached copy a hook starts).
+        #[arg(long = "file", hide = true)]
+        files: Vec<PathBuf>,
+    },
     /// Print the Authorization header for Claude Code's `headersHelper`, from a token file.
     McpHeaders {
         /// File holding the token, e.g. ~/.config/agentflow/tokens/<project>.token
@@ -173,6 +184,18 @@ enum TokenCommand {
 
 #[derive(Subcommand)]
 enum ProjectCommand {
+    /// Set a project up in this folder (or the one given): with the setup code from its page, or,
+    /// pressing Enter at the prompt, as a new project (with your approval in the browser).
+    Setup {
+        /// The folder, if not this one; made if it doesn't exist.
+        folder: Option<PathBuf>,
+        /// The setup code from the project's page (asked for if left out).
+        #[arg(long)]
+        code: Option<String>,
+        /// A new project's name (asked for if left out).
+        #[arg(long)]
+        name: Option<String>,
+    },
     /// Add a project (its folder and agent come with `flow project setup` there).
     Add {
         /// Short name used in record ids and URLs, e.g. "speculum".
@@ -222,6 +245,7 @@ fn main() -> anyhow::Result<()> {
         Command::Project { command, client } => match command {
             ProjectCommand::Add { slug, name } => connect::project_add(&config_path, &client, &slug, &name),
             ProjectCommand::List => connect::project_list(&config_path, &client),
+            ProjectCommand::Setup { folder, code, name } => connect::project_setup(&config_path, &client, folder, code, name),
         },
         Command::Backup(client) => connect::backup(&config_path, &client),
         Command::ImportPrs { project, range, client } => connect::import_prs(&config_path, &client, &project, &range),
@@ -247,5 +271,6 @@ fn main() -> anyhow::Result<()> {
         Command::News { client, again } => cli::news(&config_path, client, again),
         Command::Wait { client, record, minutes } => cli::wait(&config_path, client, record, minutes),
         Command::McpHeaders { token_file } => cli::mcp_headers(&token_file),
+        Command::Sync { client, all, files } => agentflow::sync::run(&config_path, &client, all, files),
     }
 }

@@ -3,6 +3,7 @@
 
 pub(crate) mod admin_socket;
 mod api;
+mod sync;
 mod approvals;
 mod assets;
 mod builds;
@@ -150,6 +151,7 @@ pub fn router(state: AppState) -> Router {
         .merge(projects::routes())
         .merge(api::routes())
         .merge(approvals::routes())
+        .merge(sync::routes())
         .merge(buttons::routes())
         .merge(builds::routes())
         .merge(screenshots::routes())
@@ -192,8 +194,16 @@ pub async fn serve(state: AppState) -> anyhow::Result<()> {
     if swept > 0 {
         tracing::info!("removed {swept} unfinished build upload(s)");
     }
+    {
+        let data = state.config.data_dir();
+        let _ = state.db.call(move |c| { crate::secrets::load_all(c, &data); Ok(()) }).await;
+    }
     crate::poller::spawn(state.clone());
-    spawn_usage(state.clone());
+    if state.config.local_transcripts {
+        spawn_usage(state.clone());
+    } else {
+        tracing::info!("conversations come by flow sync (local_transcripts is off)");
+    }
     crate::backup::spawn(state.clone());
     crate::machine::spawn_sampler(state.clone());
     crate::remote::spawn(state.clone());

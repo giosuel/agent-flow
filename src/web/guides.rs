@@ -335,7 +335,7 @@ async fn merge(
     argv.extend(["pull", "--ff-only", "-q"].map(String::from));
     let pulled = {
         let _checkout = state.handbook.lock().await;
-        crate::hands::run_async::<crate::hands::ExecOut>(crate::hands::Job::Exec { argv, cwd: None, timeout_s: 120 })
+        crate::hands::run_async::<crate::hands::ExecOut>(crate::hands::Job::Exec { argv, cwd: None, timeout_s: 120, env: crate::secrets::gh_env() })
             .await
     };
     let _ = crate::poller::refresh_guide_prs(&state).await;

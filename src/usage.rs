@@ -186,12 +186,13 @@ pub struct Call {
 /// database's lock.
 #[derive(Serialize, Deserialize)]
 pub struct Read {
+    /// The file: its path here, or for an upload the key the server keeps its offset under.
     pub path: String,
-    folder: String,
-    subagent: bool,
+    pub folder: String,
+    pub subagent: bool,
     calls: Vec<Call>,
-    offset: u64,
-    first_at: Option<i64>,
+    pub offset: u64,
+    pub first_at: Option<i64>,
     #[serde(default)]
     remotes: Vec<Remote>,
     /// What sessions and subagents told each other (crate::sessionlog).
@@ -336,13 +337,19 @@ pub fn read_new(root: &Path, path: &Path, offset: u64, first_at: Option<i64>) ->
 
 /// Stores what was read and moves the file's offset; returns how many calls were new.
 pub fn store(conn: &mut Connection, read: &Read) -> anyhow::Result<usize> {
+    store_as(conn, read, None)
+}
+
+/// Like [`store`]; `project` given, everything read counts for that project (an upload from
+/// `flow sync`, whose folders the server can't see).
+pub fn store_as(conn: &mut Connection, read: &Read, project: Option<i64>) -> anyhow::Result<usize> {
     let checkouts = Checkouts::load(conn)?;
     let mut touches: HashMap<i64, Vec<(i64, i64)>> = HashMap::new();
     let tx = conn.transaction()?;
     let mut calls = 0;
     let mut first_at = read.first_at;
     for c in &read.calls {
-        let project_id = checkouts.project(&c.cwd, &read.folder);
+        let project_id = project.or_else(|| checkouts.project(&c.cwd, &read.folder));
         // A subagent works for the task its session was on when it started: when it made its
         // first call of its own. Its transcript opens with copies of its parent's calls, which
         // carry the parent's older times.
@@ -386,7 +393,7 @@ pub fn store(conn: &mut Connection, read: &Read) -> anyhow::Result<usize> {
     }
     if !read.log.is_empty() {
         let cwd = if read.cwd.is_empty() { read.calls.first().map(|c| c.cwd.as_str()).unwrap_or("") } else { read.cwd.as_str() };
-        let project_id = checkouts.project(cwd, &read.folder);
+        let project_id = project.or_else(|| checkouts.project(cwd, &read.folder));
         crate::sessionlog::store(&tx, &read.log, &read.session, &read.folder, cwd, project_id)?;
     }
     for r in &read.remotes {

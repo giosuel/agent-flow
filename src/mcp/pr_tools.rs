@@ -260,12 +260,10 @@ impl FlowMcp {
                 let mut button = Value::Null;
                 if p.tag_button.unwrap_or(true) {
                     let proj = crate::projects::get_by_id(&tx, project.id)?;
-                    if proj.checkout.trim().is_empty() {
-                        button = "none: the project has no folder set (update_project checkout); add it with add_button".into();
+                    if !crate::projects::looks_like_repo(proj.repo.trim()) {
+                        button = "none: the project has no repository set (update_project repo); add it with add_button".into();
                     } else {
-                        let command = format!(
-                            "git fetch origin main && git tag -a {tag} -m {tag} origin/main && git push origin {tag}"
-                        );
+                        let command = crate::prs::tag_command(proj.repo.trim(), tag);
                         let requires: Vec<String> = p.waits_for.clone();
                         let id = crate::actions::add(
                             &tx,
@@ -274,7 +272,8 @@ impl FlowMcp {
                                 label: &format!("Push tag {tag}"),
                                 kind: crate::actions::ButtonKind::parse("tag")?,
                                 command: &command,
-                                workdir: proj.checkout.trim(),
+                                // GitHub's API, not a checkout: the project may lie on any machine.
+                                workdir: "",
                                 requires: &requires,
                             },
                             &a.name(),

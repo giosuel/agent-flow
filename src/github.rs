@@ -109,6 +109,7 @@ async fn pr_query(args: &[&str]) -> anyhow::Result<Vec<u8>> {
 pub fn all_prs_blocking(repo: &str, limit: u32) -> anyhow::Result<Vec<PrInfo>> {
     check_repo(repo)?;
     let out = std::process::Command::new("gh")
+        .envs(crate::secrets::gh_env())
         .args(["pr", "list", "-R", repo, "--state", "all", "--limit", &limit.to_string(), "--json", FIELDS_NO_CI])
         .output()
         .context("running gh")?;
@@ -182,7 +183,7 @@ impl GhCli {
     async fn run(args: &[&str]) -> anyhow::Result<Vec<u8>> {
         let argv = std::iter::once("gh").chain(args.iter().copied()).map(String::from).collect();
         let out: crate::hands::ExecOut =
-            crate::hands::run_async(crate::hands::Job::Exec { argv, cwd: None, timeout_s: 60 }).await?;
+            crate::hands::run_async(crate::hands::Job::Exec { argv, cwd: None, timeout_s: 60, env: crate::secrets::gh_env() }).await?;
         if out.timed_out {
             bail!("gh took longer than a minute");
         }

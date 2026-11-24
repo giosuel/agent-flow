@@ -151,6 +151,12 @@ pub struct ProjectPatch {
 }
 
 /// Slugs end up in record ids and URLs: lowercase letters, digits and dashes.
+/// A GitHub repository as owner/name: letters, digits, `-`, `_` and `.`.
+pub fn looks_like_repo(repo: &str) -> bool {
+    let ok = |p: &str| !p.is_empty() && p.len() <= 100 && p.chars().all(|c| c.is_ascii_alphanumeric() || "-_.".contains(c));
+    matches!(repo.split_once('/'), Some((o, n)) if ok(o) && ok(n) && !n.contains('/'))
+}
+
 pub fn check_slug(slug: &str) -> anyhow::Result<()> {
     let ok = !slug.is_empty()
         && slug.len() <= 40

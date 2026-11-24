@@ -309,6 +309,8 @@ pub async fn execute(a: &ActionRow) -> RunResult {
         argv: vec!["bash".into(), "-c".into(), a.command.clone()],
         cwd: Some(dir.clone()),
         timeout_s: TIMEOUT.as_secs(),
+        // Merge and tag buttons use gh: with the server's own token when it has one.
+        env: crate::secrets::gh_env(),
     };
     match crate::hands::run_async::<crate::hands::ExecOut>(job).await {
         Ok(out) if out.timed_out => {
