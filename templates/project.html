@@ -9,7 +9,7 @@
 </div>
 <nav class="tabs proj-tabs" aria-label="Project">
   {% for (key, name) in tabs %}
-  <a href="/p/{{ slug }}{% if *key == "settings" %}/settings" data-dlg{% else if *key == "plan" %}/plan"{% else %}{% if *key != "overview" %}?tab={{ key }}{% endif %}"{% endif %}{% if tab == *key %} class="on" aria-current="page"{% endif %}>{% if *key == "prs" %}<span class="hide-phone">{{ name }}</span><span class="only-phone">PRs</span>{% else if *key == "screenshots" %}<span class="hide-phone">{{ name }}</span><span class="only-phone">Shots</span>{% else if *key == "to-test" %}<span class="hide-phone">{{ name }}</span><span class="only-phone">Test</span>{% else %}{{ name }}{% endif %}{% if *key == "questions" && !open_questions.is_empty() %} <span class="mono count">{{ open_questions.len() }}</span>{% endif %}{% if *key == "prs" && prs_total > 0 %} <span class="mono sub">{{ prs_total }}</span>{% endif %}{% if *key == "to-test" && to_test_open > 0 %} <span class="mono count">{{ to_test_open }}</span>{% endif %}</a>
+  <a href="/p/{{ slug }}{% if *key == "settings" %}/settings" data-dlg{% else if *key == "plan" %}/plan"{% else %}{% if *key != "overview" %}?tab={{ key }}{% endif %}"{% endif %}{% if tab == *key %} class="on" aria-current="page"{% endif %}>{% if *key == "prs" %}<span class="hide-phone">{{ name }}</span><span class="only-phone">PRs</span>{% else if *key == "screenshots" %}<span class="hide-phone">{{ name }}</span><span class="only-phone">Shots</span>{% else if *key == "to-test" %}<span class="hide-phone">{{ name }}</span><span class="only-phone">Test</span>{% else %}{{ name }}{% endif %}{% if *key == "questions" && !open_questions.is_empty() %} <span class="count warn">{{ open_questions.len() }}</span>{% endif %}{% if *key == "prs" && prs_total > 0 %} <span class="count">{{ prs_total }}</span>{% endif %}{% if *key == "to-test" && to_test_open > 0 %} <span class="count warn">{{ to_test_open }}</span>{% endif %}</a>
   {% endfor %}
 </nav>
 {% if let Some(n) = notice %}<p class="notice{% if notice_bad %} warn{% else %} ok{% endif %}" role="status">{{ n }}</p>{% endif %}
@@ -119,7 +119,7 @@
       {% if !b.rail.is_empty() %}
       <details class="srail" open data-srail>
         <summary>{% for s in b.rail %}{% if s.on %}<span class="srail-i {{ s.class }}" aria-hidden="true"></span><span class="mono k">{{ s.name }}</span><span class="t">{{ s.title }}</span>{% endif %}{% endfor %}<span class="sub">{{ b.rail.len() }} steps</span>{{ crate::web::icons::icon("chevron")|safe }}</summary>
-        <nav aria-label="Steps">{% for s in b.rail %}<a class="srail-row {{ s.class }}{% if s.on %} on{% endif %}" href="{{ s.href }}" data-ms{% if s.on %} aria-current="true"{% endif %}><span class="srail-i {{ s.class }}" aria-hidden="true"></span><span class="mono k" title="{{ s.name }}">{{ s.name }}</span><span class="t">{{ s.title }}</span><span class="mono sub n">{{ s.count }}</span></a>{% endfor %}</nav>
+        <nav class="navlist" aria-label="Steps">{% for s in b.rail %}<a class="srail-row {{ s.class }}{% if s.on %} on{% endif %}" href="{{ s.href }}" data-ms{% if s.on %} aria-current="true"{% endif %}><span class="srail-i {{ s.class }}" aria-hidden="true"></span><span class="mono k" title="{{ s.name }}">{{ s.name }}</span><span class="t">{{ s.title }}</span><span class="mono sub n">{{ s.count }}</span></a>{% endfor %}</nav>
       </details>
       {% endif %}
       <div class="plan-board stack">

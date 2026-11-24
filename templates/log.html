@@ -9,8 +9,8 @@
    and the time range its second band; the chart and the rows follow. #}
 <section class="card lpanel" aria-labelledby="lp-h">
 <div class="lbar">
-  <nav class="ltabs" aria-label="Categories">
-    {% for t in tabs %}<a href="{{ t.href }}"{% if t.on %} class="on" aria-current="true"{% endif %}>{{ crate::web::icons::icon(t.icon)|safe }}<span>{{ t.label }}</span><span class="mono n">{{ t.count }}</span></a>{% endfor %}
+  <nav class="tabs flush ltabs" aria-label="Categories">
+    {% for t in tabs %}<a href="{{ t.href }}"{% if t.on %} class="on" aria-current="true"{% endif %}>{{ crate::web::icons::icon(t.icon)|safe }}<span>{{ t.label }}</span><span class="count">{{ t.count }}</span></a>{% endfor %}
   </nav>
   {% if live %}<div class="lright"><span class="livedot" id="livedot">Live</span><button class="btn sm secondary" type="button" id="live" data-q="{{ q }}" data-range="{{ range }}" data-after="{{ latest }}">{{ crate::web::icons::icon("pause")|safe }}<span>Pause</span></button></div>{% endif %}
 </div>

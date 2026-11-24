@@ -218,6 +218,25 @@ summary.card-head { list-style: none; cursor: pointer; }
 summary.card-head::-webkit-details-marker { display: none; }
 .card-body { padding: var(--sp-4) var(--sp-5); }
 .card-foot { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; min-height: 52px; padding: var(--sp-3) var(--sp-5); border-top: 1px solid var(--line2); }
+/* ---------------------------------------------------------------- Tabs: underline, one "on"
+   The project's tabs in the bar, the Log's categories, a project's tabs on the phone (one line
+   that scrolls). .flush when the band they sit in draws the rule. Counts: .count. */
+.tabs { display: flex; align-items: stretch; gap: 2px; border-bottom: 1px solid var(--line); overflow-x: auto; scrollbar-width: none; }
+.tabs::-webkit-scrollbar { display: none; }
+.tabs.flush { border-bottom: 0; }
+.tabs > a { display: inline-flex; align-items: center; gap: var(--sp-2); min-height: var(--h-md); padding: 0 14px; color: var(--ink2); text-decoration: none; font-weight: 500; white-space: nowrap; box-shadow: inset 0 -2px 0 transparent; }
+.tabs > a .i { width: var(--ic-sm); height: var(--ic-sm); color: var(--muted); }
+.tabs > a:hover { color: var(--ink); }
+.tabs > a.on { color: var(--ink); box-shadow: inset 0 -2px 0 var(--accent); }
+.tabs > a.on .i { color: var(--accent); }
+
+/* Nav list: side lists and rails (Settings, the Handbook, contents, conversations, steps, More):
+   one hover, one picked look (the selected surface with an accent bar) */
+.navlist a { text-decoration: none; }
+.navlist a:hover { background: var(--hover-bg); color: var(--ink); }
+.navlist a.on, .navlist a[aria-current] { background: var(--selected); color: var(--ink); box-shadow: inset 3px 0 0 var(--accent); }
+.navlist a.on .i { color: var(--accent-ink); }
+
 /* Callout: a box in a tone (waiting on you, a conflict, an estimate) */
 .callout { border: 1px solid var(--warn-line); background: var(--warn-bg); border-radius: var(--r-lg); }
 .callout.bad { border-color: var(--bad-line); background: var(--bad-bg); }

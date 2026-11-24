@@ -34,7 +34,7 @@
 <div class="split conv cv2 cv3{% if picked %} picked{% endif %}{% if opened %} opened{% endif %}">
   <nav class="split-side card cv-list" aria-label="Conversations">
     <div class="card-head cv-lh"><h3>{{ list_label }}</h3><span class="sub">{{ list_meta }}</span></div>
-    <div class="cv-rows">
+    <div class="cv-rows navlist">
     {% for r in rows %}
     <a class="cv-row{% if r.on %} on{% endif %}" href="{{ r.href }}"{% if r.on %} aria-current="true"{% endif %}>
       <span class="avs" aria-hidden="true">{% for a in r.avatars %}<span class="av t-{{ a.tint }}">{{ a.initials }}</span>{% endfor %}{% if r.fork %}<span class="av fork">{{ crate::web::icons::icon("fork")|safe }}</span>{% endif %}</span>
@@ -53,7 +53,7 @@
     </div>
     <div class="cv-days" data-cv-days>
       {% for d in s.days %}
-      <div class="cv-day">
+      <div class="cv-day navlist">
         <p class="cv-dh"><span>{{ d.label }}</span><span class="mono">{{ d.items.len() }}</span></p>
         {% for it in d.items %}<a class="cv-item{% if it.on %} on{% endif %}" href="{{ it.href }}" data-find="{{ it.find }}"{% if it.on %} aria-current="true"{% endif %}><span class="ci-t"><span class="mono">{{ it.span }}</span>{% if !it.chip.is_empty() %}<span class="chip">{{ it.chip }}</span>{% endif %}<span class="grow"></span><span class="sub">{{ it.count }}</span>{% if !it.model.is_empty() %}<span class="tag {% if it.model == "model unknown" %}dashed{% else %}line{% endif %}">{{ it.model }}</span>{% endif %}</span><span class="ci-x">{{ it.text }}</span></a>{% endfor %}
       </div>

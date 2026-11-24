@@ -10,7 +10,7 @@
 {% else %}
 <div class="split guides hb{% if picked %} picked{% endif %}">
   <nav class="split-side stack" aria-label="Handbook">
-    <div class="card list">
+    <div class="card list navlist">
       {% for f in files %}
       <a class="item conv-row{% if f.selected %} on{% endif %}" href="/handbook?f={{ f.name }}"{% if f.selected %} aria-current="true"{% endif %}>
         <div class="ttl"><strong class="mono">{{ f.name }}</strong>{% if !f.blurb.is_empty() %}<span class="sub">{{ f.blurb }}</span>{% endif %}</div>
@@ -45,7 +45,7 @@
     </div>
     {% else %}
     <div class="pd-view">
-      <nav class="pd-toc" aria-label="Contents">{% for s in sections %}<a href="#pd-s{{ s.index }}"{% if loop.first %} class="on"{% endif %}>{{ s.title }}</a>{% endfor %}</nav>
+      <nav class="pd-toc navlist" aria-label="Contents">{% for s in sections %}<a href="#pd-s{{ s.index }}"{% if loop.first %} class="on"{% endif %}>{{ s.title }}</a>{% endfor %}</nav>
       <div class="prose pd-doc">{% for s in sections %}<section id="pd-s{{ s.index }}">{% if !s.intro %}<h2>{{ s.title }}</h2>{% endif %}{{ s.html|safe }}</section>{% endfor %}</div>
     </div>
     {% endif %}

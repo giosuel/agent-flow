@@ -812,22 +812,24 @@ document.addEventListener("click", (e) => {
   });
 })();
 
-// Filter menus (the Log, the Notes tab): one open at a time, closed by Esc or a click beside them;
-// "Find a category" narrows a long list as you type.
+// Menus, the UI library's one dropdown: the filters (details.dd) and the bar's project switcher and
+// More (details[data-menu]). One open at a time, closed by Esc or a click beside it; "Find a
+// category" narrows a long list as you type. (Two scripts did this before, N-19 #9.)
 (() => {
+  const MENU = "details.dd, details[data-menu]";
   const closeAll = (except) => {
-    for (const d of document.querySelectorAll("details.dd[open]")) if (d !== except) d.open = false;
+    for (const d of document.querySelectorAll("details.dd[open], details[data-menu][open]")) if (d !== except) d.open = false;
   };
   document.addEventListener("toggle", (e) => {
     const d = e.target;
-    if (!(d instanceof HTMLDetailsElement) || !d.matches("details.dd") || !d.open) return;
+    if (!(d instanceof HTMLDetailsElement) || !d.matches(MENU) || !d.open) return;
     closeAll(d);
     d.querySelector("[data-find]")?.focus();
   }, true);
-  document.addEventListener("click", (e) => { if (!e.target.closest("details.dd")) closeAll(null); });
+  document.addEventListener("click", (e) => { if (!e.target.closest(MENU)) closeAll(null); });
   document.addEventListener("keydown", (e) => {
     if (e.key !== "Escape") return;
-    const open = document.querySelector("details.dd[open]");
+    const open = document.querySelector("details.dd[open], details[data-menu][open]");
     if (!open) return;
     e.preventDefault();
     open.open = false;
@@ -1045,31 +1047,9 @@ document.addEventListener("click", (e) => {
   }, { passive: true });
 })();
 
-// The desktop bar (the owner, 2026-11-19, D-232). Its menus (the project switcher, More) close on
-// a click elsewhere or Escape, and one opening closes the other. The project's tabs that don't fit
-// fold into More, from the last one; the current tab folded marks More.
+// The desktop bar (the owner, 2026-11-19, D-232). Its menus close like every menu (above). The
+// project's tabs that don't fit fold into More, from the last one; the current tab folded marks More.
 (() => {
-  const menus = () => document.querySelectorAll("details[data-menu]");
-  document.addEventListener("click", (e) => {
-    for (const d of menus()) if (d.open && !d.contains(e.target)) d.open = false;
-  });
-  document.addEventListener("keydown", (e) => {
-    if (e.key !== "Escape") return;
-    for (const d of menus()) {
-      if (!d.open) continue;
-      d.open = false;
-      d.querySelector("summary").focus();
-    }
-  });
-  document.addEventListener(
-    "toggle",
-    (e) => {
-      const d = e.target;
-      if (!(d instanceof HTMLDetailsElement) || !d.matches("[data-menu]") || !d.open) return;
-      for (const o of menus()) if (o !== d) o.open = false;
-    },
-    true,
-  );
   const fold = () => {
     const bar = document.querySelector(".btabs");
     const more = document.querySelector(".btabs-more");

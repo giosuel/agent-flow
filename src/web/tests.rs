@@ -965,7 +965,7 @@ async fn prs_merge_in_order_from_the_owners_buttons() {
     // The overview has no merge panel any more, only the count on the Pull requests tab.
     let overview = s.http.get(s.url("/p/vinculum")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
     assert!(!overview.contains("Merge order") && !overview.contains("Merge #48–#49"), "no merge panel");
-    assert!(overview.contains(r#"<span class="only-phone">PRs</span> <span class="mono sub">2</span>"#), "the count");
+    assert!(overview.contains(r#"<span class="only-phone">PRs</span> <span class="count">2</span>"#), "the count");
     let start = html.find(r#"name="actions" value=""#).unwrap() + r#"name="actions" value=""#.len();
     let ids = html[start..].split('"').next().unwrap().to_owned();
 
@@ -1027,6 +1027,14 @@ async fn prs_merge_in_order_from_the_owners_buttons() {
 /// on a global page the switcher says All projects and that page's icon is a pill with its name.
 #[tokio::test]
 async fn the_bar_shows_the_project_its_tabs_and_the_global_pages() {
+    // The project's tabs are hidden on the phone (app.css, outside the desktop query) and shown
+    // again on the desktop: that rule has to say display, or the hiding one wins over the
+    // library's .tabs (it did in PR 7, 2026-11-24: the bar lost its tabs).
+    let css = std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("static/app.css")).unwrap();
+    assert!(css.contains(".pswitch, .btabs, .btabs-more, .vsep { display: none; }"), "the phone hides them");
+    let desk =
+        css.lines().find(|l| l.trim_start().starts_with(".btabs { ")).expect("the desktop rule for the bar's tabs");
+    assert!(desk.contains("display: flex"), "the desktop shows the bar's tabs: {desk}");
     let s = TestServer::start().await;
     let token = s.token(TokenKind::Project, Some("vinculum")).await;
     let sess = mcp_session(&s, &token).await;
@@ -1044,7 +1052,7 @@ async fn the_bar_shows_the_project_its_tabs_and_the_global_pages() {
     assert!(bar.contains(r#"<summary class="pswitch-btn"><span>vinculum</span>"#), "{bar}");
     assert!(bar.contains(r#"href="/p/vinculum" aria-current="page""#), "the project is checked in the switcher");
     assert!(bar.contains(r#"<a href="/p/vinculum?tab=decisions" class="on" aria-current="page">Decisions</a>"#));
-    assert!(bar.contains(r#"Questions<span class="mono n y">1</span>"#), "the open question is counted");
+    assert!(bar.contains(r#"Questions<span class="count warn">1</span>"#), "the open question is counted");
     assert!(bar.contains(r#"href="/p/vinculum/settings" data-dlg>Settings"#));
     assert!(bar.contains(r#"aria-label="Usage" data-name="Usage""#), "global pages are icons");
 
@@ -1070,7 +1078,7 @@ async fn the_bar_shows_the_project_its_tabs_and_the_global_pages() {
     let bar = &usage[usage.find("<header").unwrap()..usage.find("</header>").unwrap()];
     assert!(bar.contains(r#"<summary class="pswitch-btn"><span>vinculum</span>"#), "{bar}");
     assert!(bar.contains(r#"<a href="/p/vinculum">Overview</a>"#), "its tabs, none lit: {bar}");
-    assert!(bar.contains(r#"Questions<span class="mono n y">1</span>"#), "with their counts");
+    assert!(bar.contains(r#"Questions<span class="count warn">1</span>"#), "with their counts");
     assert!(bar.contains(r#"<a href="/usage" class="on" aria-current="page">"#), "the page is still Usage");
     let unknown = owner_page(&s, &format!("{cookie}; af_project=nope"), "/usage").await;
     assert!(unknown.contains("<span>All projects</span>"), "a project that isn't there is ignored");
