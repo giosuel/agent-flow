@@ -4,7 +4,6 @@
 {# The handbook, kept by AgentFlow (D-208); read and edited like the project document (D-211). #}
 <div class="head{% if picked %} hide-on-phone{% endif %}">
   <h1>Handbook</h1>
-  <p class="status-line">Your rules for every project. Agents read them through AgentFlow and have a copy on every machine; you and the consultant edit them here. Every edit is kept, and the backup holds them.</p>
 </div>
 {% if files.is_empty() %}
 <section class="card pad empty"><h2>No files yet</h2><p class="sub">The handbook's files come in once from the ai-handbook folder at the next start, or the consultant adds them with <span class="mono">handbook_edit</span>.</p></section>
