@@ -112,11 +112,12 @@ impl Kind {
     /// The states a record of this kind can be in; the first is where it starts.
     pub fn states(self) -> &'static [&'static str] {
         match self {
-            Kind::Question => &["open", "answered", "withdrawn"],
+            // archived: put away by the agent (kept, restorable); hidden from the lists.
+            Kind::Question => &["open", "answered", "withdrawn", "archived"],
             // archived: put away in a cleanup the owner asked for (kept, with its history).
             Kind::Decision => &["current", "replaced", "archived"],
             Kind::Adr => &["current", "replaced"],
-            Kind::Task => &["todo", "doing", "review", "done", "blocked", "parked", "skipped"],
+            Kind::Task => &["todo", "doing", "review", "done", "blocked", "parked", "skipped", "archived"],
             Kind::Pr => &["open", "merged", "closed"],
             Kind::Release => &["planned", "waiting", "tagged", "dropped"],
             Kind::Build => &["published", "tried", "withdrawn"],
@@ -565,7 +566,7 @@ pub fn revisions(conn: &Connection, record_id: i64) -> anyhow::Result<Vec<Revisi
 }
 
 /// The owner answers a question: a numbered option, their own words, or both. The words are
-/// stored exactly as typed.
+/// stored exactly as typed. No decision (record_decision with answers makes its own).
 pub fn answer_question(
     conn: &Connection,
     q: &Record,
@@ -573,6 +574,35 @@ pub fn answer_question(
     words: &str,
     author: &str,
 ) -> anyhow::Result<Record> {
+    Ok(answer(conn, q, option, words, author, None)?.0)
+}
+
+/// The owner answers, and the answer becomes a decision in the question's scope (the owner,
+/// 2026-11-12: "Once that question is answered, it automatically is converted into a decision
+/// inside that scope"). `title` is the decision in one statement; made from the question and the
+/// answer when None. The answer's event tells the agent to check older decisions: what the answer
+/// means for them is its call.
+pub fn answer_and_decide(
+    conn: &Connection,
+    q: &Record,
+    option: Option<u32>,
+    words: &str,
+    author: &str,
+    title: Option<&str>,
+    source: &str,
+) -> anyhow::Result<(Record, Record)> {
+    let (q, d) = answer(conn, q, option, words, author, Some((title, source)))?;
+    Ok((q, d.context("no decision")?))
+}
+
+fn answer(
+    conn: &Connection,
+    q: &Record,
+    option: Option<u32>,
+    words: &str,
+    author: &str,
+    decide: Option<(Option<&str>, &str)>,
+) -> anyhow::Result<(Record, Option<Record>)> {
     if q.kind != Kind::Question {
         bail!("{} isn't a question", q.ref_id);
     }
@@ -637,10 +667,63 @@ pub fn answer_question(
         ),
         _ => ("question.answered", format!("Owner answered {}: {what}", q.short_id())),
     };
+    let (summary, d) = match decide {
+        None => (summary, None),
+        Some((title, source)) => {
+            let d = decision_from_answer(conn, &q, title, source, author)?;
+            let scope = crate::projects::scope_name(conn, d.milestone_id);
+            (
+                format!(
+                    "{summary} → {} recorded ({scope}); check whether it changes an earlier decision \
+                     (update_decision: edit, archive, scope or replaced_by)",
+                    d.short_id()
+                ),
+                Some(d),
+            )
+        }
+    };
     event(conn, Some(q.project_id), Some(q.id), kind, &summary, author)?;
     // The tasks it blocked go back to todo (the owner, 2026-11-12).
     crate::steps::unblock_after_answer(conn, &q, author)?;
-    Ok(q)
+    Ok((q, d))
+}
+
+/// The decision an answer makes, in the question's scope: the owner's words are their answer,
+/// the title says what was chosen (or `title` when given).
+fn decision_from_answer(conn: &Connection, q: &Record, title: Option<&str>, source: &str, author: &str) -> anyhow::Result<Record> {
+    let option = q.str("answer_option_title").to_owned();
+    let words = q.str("answer").trim().to_owned();
+    let owner_words = match (option.is_empty(), words.is_empty()) {
+        (false, true) => option.clone(),
+        (false, false) => format!("{option}. {words}"),
+        _ => words.clone(),
+    };
+    let title = match title.map(str::trim).filter(|t| !t.is_empty()) {
+        Some(t) => t.to_owned(),
+        None => {
+            let what = if option.is_empty() { words.chars().take(120).collect::<String>() } else { option };
+            format!("{}: {what}", q.title.trim().trim_end_matches('?'))
+        }
+    };
+    let mut data = Map::new();
+    data.insert("owner_words".into(), owner_words.into());
+    data.insert("said_at".into(), q.data.get("answered_at").cloned().unwrap_or_else(|| now_ms().into()));
+    data.insert("source".into(), source.into());
+    let d = create(
+        conn,
+        q.project_id,
+        author,
+        NewRecord {
+            kind: Some(Kind::Decision),
+            title,
+            body: format!("The answer to {}.", q.short_id()),
+            milestone_id: q.milestone_id,
+            data,
+            ..Default::default()
+        },
+    )?;
+    link(conn, &d, q, "answers", author)?;
+    Ok(d)
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -748,6 +831,11 @@ pub struct Query {
     pub text: Option<String>,
     pub since: Option<i64>,
     pub limit: i64,
+    /// Archived records too (left out unless asked for, or unless `states` names "archived").
+    pub include_archived: bool,
+    /// Decisions and questions only of open scopes: project-wide, or of a milestone that isn't
+    /// closed or archived; replaced decisions left out. Agents' default reads.
+    pub open_scopes: bool,
 }
 
 pub fn query(conn: &Connection, q: &Query) -> anyhow::Result<Vec<Record>> {
@@ -786,6 +874,19 @@ pub fn query(conn: &Connection, q: &Query) -> anyhow::Result<Vec<Record>> {
     }
     if let Some(s) = q.since {
         push(&mut sql, " AND r.updated_at >= ?", s.into());
+    }
+    if !q.include_archived && !q.states.iter().any(|s| s == "archived") {
+        sql.push_str(" AND r.state != 'archived'");
+    }
+    if q.open_scopes {
+        sql.push_str(
+            " AND (r.kind NOT IN ('decision', 'question') OR r.milestone_id IS NULL OR r.milestone_id IN \
+             (SELECT id FROM milestones WHERE state != 'closed' AND archived_at IS NULL))",
+        );
+        // Replaced decisions too, unless a state was asked for.
+        if q.states.is_empty() {
+            sql.push_str(" AND NOT (r.kind = 'decision' AND r.state = 'replaced')");
+        }
     }
     sql.push_str(" ORDER BY r.updated_at DESC");
     // 0 means everything (AgentFlow's own views); agents ask for a page.
@@ -859,6 +960,17 @@ pub fn recent_events(conn: &Connection, project_id: Option<i64>, limit: i64) -> 
          WHERE (?1 IS NULL OR e.project_id = ?1) ORDER BY e.seq DESC LIMIT ?2",
     )?;
     let rows = stmt.query_map(params![project_id, limit], event_from_row)?;
+    Ok(rows.collect::<Result<_, _>>()?)
+}
+
+/// Events by others since a time, oldest first: to see news again that was already read.
+pub fn events_by_others_since(conn: &Connection, project_id: i64, actor: &str, since: i64, limit: i64) -> anyhow::Result<Vec<Event>> {
+    let mut stmt = conn.prepare(
+        "SELECT e.seq, e.at, p.slug, r.kind, r.number, e.kind, e.summary, e.actor
+         FROM events e LEFT JOIN projects p ON p.id = e.project_id LEFT JOIN records r ON r.id = e.record_id
+         WHERE e.project_id = ?1 AND e.at >= ?2 AND e.actor != ?3 ORDER BY e.seq LIMIT ?4",
+    )?;
+    let rows = stmt.query_map(params![project_id, since, actor, limit], event_from_row)?;
     Ok(rows.collect::<Result<_, _>>()?)
 }
 

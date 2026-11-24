@@ -160,7 +160,7 @@ fn link_by_branch(conn: &Connection, project_id: i64, pr: &Record, head: &str, a
         return Ok(());
     }
     let mut stmt = conn.prepare(
-        "SELECT id FROM records WHERE project_id = ?1 AND kind = 'task' AND json_extract(data, '$.branch') = ?2
+        "SELECT id FROM records WHERE project_id = ?1 AND kind = 'task' AND state != 'archived' AND json_extract(data, '$.branch') = ?2
          AND id NOT IN (SELECT to_id FROM links WHERE from_id = ?3 AND relation = 'implements')",
     )?;
     let ids: Vec<i64> = stmt.query_map(rusqlite::params![project_id, head, pr.id], |r| r.get(0))?.collect::<Result<_, _>>()?;

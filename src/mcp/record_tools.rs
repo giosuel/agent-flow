@@ -86,8 +86,8 @@ pub struct UpdateTask {
     /// Several tasks at once, e.g. the three one PR carries: the same change for each.
     #[serde(default)]
     pub ids: Vec<String>,
-    /// todo, doing, review, done, blocked, parked or skipped. Set doing when you start it: that also
-    /// starts its step. "blocked" needs blocked_by, "skipped" a note on why.
+    /// todo, doing, review, done, blocked, parked, skipped or archived. Set doing when you start it:
+    /// that also starts its step. "blocked" needs blocked_by, "skipped" and "archived" a note on why.
     pub state: Option<String>,
     /// What blocks it: the question (e.g. "Q-12") for anything that needs the owner, or a short
     /// note for anything internal ("the UX agent's review", "remote job 17"). Sets it blocked; an
@@ -110,14 +110,6 @@ pub struct UpdateTask {
     /// A line for the task's history; for skipped or a time correction, why.
     #[serde(default)]
     pub note: String,
-}
-
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct DeleteTasks {
-    /// The tasks, e.g. ["T-14", "T-15"].
-    pub ids: Vec<String>,
-    /// Why, in a line; kept in the project's event log.
-    pub reason: String,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -156,7 +148,16 @@ pub struct UpdateNote {
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct UpdateDecision {
     /// The decision, e.g. "D-112".
+    #[serde(default)]
     pub id: String,
+    /// Several at once, e.g. to re-scope many: the same change for each. All or none.
+    #[serde(default)]
+    pub ids: Vec<String>,
+    /// Move it to another scope: a milestone ("M9") or "project" (promote a milestone's decision
+    /// to a project-wide one).
+    pub scope: Option<String>,
+    /// The newer decision that replaces it, e.g. "D-40": linked, and this one marked replaced.
+    pub replaced_by: Option<String>,
     pub title: Option<String>,
     /// Why, and what it means in practice.
     pub body: Option<String>,
@@ -168,7 +169,7 @@ pub struct UpdateDecision {
     /// "archived" puts it away (a duplicate, a mistake, no longer worth keeping); "current" brings
     /// an archived one back. Nothing is deleted: it stays findable, with its history.
     pub state: Option<String>,
-    /// Why: the owner's request this is part of. Kept in the decision's history.
+    /// Why, in a line. Kept in the decision's history.
     pub reason: String,
 }
 
@@ -180,6 +181,9 @@ pub struct AnswerQuestion {
     pub owner_words: String,
     /// The option they picked, counting from 1, if they picked one ("lets go with 1").
     pub option: Option<u32>,
+    /// The decision it makes, in one statement, e.g. "The sidebar is a list of names"; made from
+    /// the question and the answer if left out.
+    pub decision: Option<String>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -257,6 +261,32 @@ pub struct AskQuestion {
     /// 2026-11-12: "when I am just talking to it, I don't want to always get notifications").
     #[serde(default)]
     pub in_chat: bool,
+    /// Where its answer applies (it becomes a decision there): a milestone ("M9"; a step means its
+    /// milestone) or "project". Default: the current milestone. The owner can change it on the page.
+    pub scope: Option<String>,
+    /// Earlier decisions this question touches, e.g. ["D-12"]: shown with it, so the owner sees
+    /// what they might change. What the answer means for them is yours to act on afterwards.
+    #[serde(default)]
+    pub related: Vec<String>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct UpdateQuestion {
+    /// The question, e.g. "Q-4".
+    #[serde(default)]
+    pub id: String,
+    /// Several at once: the same change for each. All or none.
+    #[serde(default)]
+    pub ids: Vec<String>,
+    /// Move it to another scope: a milestone ("M9") or "project".
+    pub scope: Option<String>,
+    pub title: Option<String>,
+    pub body: Option<String>,
+    /// "archived" puts it away (no longer needed; it stops blocking its tasks and leaves the owner's
+    /// list); "open" or "answered" brings an archived one back as it was.
+    pub state: Option<String>,
+    /// Why, in a line. Kept in its history.
+    pub reason: String,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -313,6 +343,10 @@ pub struct RecordDecision {
     pub supersedes: Option<String>,
     #[serde(default)]
     pub tags: Vec<String>,
+    /// Where it applies: a milestone ("M9"; a step means its milestone) or "project" for what
+    /// holds across the project (rules about the owner, the architecture, the process). Default:
+    /// the question's scope when it answers one, otherwise the current milestone.
+    pub scope: Option<String>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -364,6 +398,14 @@ pub struct FindRecords {
     pub since: Option<String>,
     /// At most this many (default 50).
     pub limit: Option<i64>,
+    /// Decisions and questions are those in force by default: project-wide ones and those of
+    /// milestones that aren't closed, without replaced decisions. include_closed adds closed
+    /// milestones' ones and replaced decisions.
+    #[serde(default)]
+    pub include_closed: bool,
+    /// Archived records too (milestones' and steps' tasks, decisions, questions).
+    #[serde(default)]
+    pub include_archived: bool,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -378,7 +420,9 @@ pub struct NotifyOwner {
 
 fn brief(r: &Record) -> Value {
     let mut v = json!({"id": r.ref_id, "title": r.title, "state": r.state});
-    if let Some(m) = &r.milestone {
+    if matches!(r.kind, Kind::Decision | Kind::Question) {
+        v["scope"] = r.milestone.clone().unwrap_or_else(|| "project".into()).into();
+    } else if let Some(m) = &r.milestone {
         v["milestone"] = m.clone().into();
     }
     v
@@ -500,9 +544,21 @@ fn add_one(tx: &rusqlite::Connection, project_id: i64, m: Option<&projects::Mile
 
 /// One task's update (update_task applies it to each of `ids`).
 fn update_one(tx: &rusqlite::Connection, a: &crate::auth::Actor, id: &str, p: &UpdateTask) -> anyhow::Result<(Record, bool, Vec<String>)> {
-    let r = writable(tx, a, id)?;
+    let mut r = writable(tx, a, id)?;
     if r.kind != Kind::Task {
         anyhow::bail!("{} isn't a task", r.ref_id);
+    }
+    // Archived: hidden, kept, restorable (the owner, 2026-11-12: agents archive tasks freely).
+    if p.state.as_deref() == Some("archived") {
+        if p.note.trim().is_empty() {
+            anyhow::bail!("say why it's archived, in note");
+        }
+        let changed = r.state != "archived";
+        let r = crate::steps::archive_record(tx, &r, &p.note, None, &a.name())?;
+        return Ok((r, changed, Vec::new()));
+    }
+    if r.state == "archived" && p.state.is_some() {
+        r = crate::steps::restore_record(tx, &r, &a.name())?;
     }
     let milestone_id = match &p.milestone {
         Some(name) => {
@@ -596,6 +652,76 @@ fn update_one(tx: &rusqlite::Connection, a: &crate::auth::Actor, id: &str, p: &U
     Ok((r, changed, started))
 }
 
+/// `id` or `ids`, not both, at least one.
+fn one_or_many(id: &str, ids: &[String]) -> anyhow::Result<Vec<String>> {
+    let id = id.trim();
+    match (id.is_empty(), ids.is_empty()) {
+        (false, true) => Ok(vec![id.to_owned()]),
+        (true, false) => Ok(ids.iter().map(|i| i.trim().to_owned()).collect()),
+        (true, true) => anyhow::bail!("give id, or ids for several"),
+        (false, false) => anyhow::bail!("give id or ids, not both"),
+    }
+}
+
+fn update_decision_one(tx: &rusqlite::Connection, a: &crate::auth::Actor, id: &str, p: &UpdateDecision) -> anyhow::Result<(Record, bool)> {
+    let d = writable(tx, a, id)?;
+    if d.kind != Kind::Decision {
+        anyhow::bail!("{} isn't a decision", d.ref_id);
+    }
+    let reason = p.reason.trim();
+    if reason.is_empty() {
+        anyhow::bail!("reason: say why, in a line");
+    }
+    if let Some(st) = &p.state
+        && !["archived", "current"].contains(&st.as_str())
+    {
+        anyhow::bail!("state: archived, or current to bring an archived one back (replaced_by marks one replaced)");
+    }
+    if p.state.as_deref() == Some("current") && d.state != "archived" {
+        anyhow::bail!("{} is {}, not archived", d.short_id(), d.state);
+    }
+    let mut data = Map::new();
+    if let Some(w) = p.owner_words.as_deref().map(str::trim) {
+        if w.is_empty() {
+            anyhow::bail!("owner_words can't be empty; archive the decision instead");
+        }
+        data.insert("owner_words".into(), w.into());
+    }
+    if let Some(at) = &p.said_at {
+        data.insert("said_at".into(), parse_date(at)?.into());
+    }
+    let milestone_id = match p.scope.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        Some(s) => Some(projects::scope(tx, d.project_id, Some(s))?.map(|m| m.id)),
+        None => None,
+    };
+    let (mut d, mut changed) = records::update(
+        tx,
+        &d,
+        &a.name(),
+        Patch { title: p.title.clone(), body: p.body.clone(), tags: p.tags.clone(), milestone_id, data, note: reason.to_owned(), ..Default::default() },
+    )?;
+    if let Some(by) = p.replaced_by.as_deref().map(str::trim).filter(|b| !b.is_empty()) {
+        let newer = records::find_str(tx, by, Some(&d.project))?;
+        if newer.kind != Kind::Decision || newer.project_id != d.project_id {
+            anyhow::bail!("replaced_by is a newer decision of the same project");
+        }
+        changed |= records::link(tx, &newer, &d, "supersedes", &a.name())?;
+        d = records::get(tx, d.id)?;
+    }
+    match p.state.as_deref() {
+        Some("archived") if d.state != "archived" => {
+            d = crate::steps::archive_record(tx, &d, reason, None, &a.name())?;
+            changed = true;
+        }
+        Some("current") => {
+            d = crate::steps::restore_record(tx, &d, &a.name())?;
+            changed = true;
+        }
+        _ => {}
+    }
+    Ok((d, changed))
+}
+
 /// Records one decision (record_decision, and each of record_decisions). `earlier` maps "#n" to
 /// the decisions made before it in the same batch, so a batch can replace its own entries.
 fn decide(tx: &rusqlite::Connection, a: &crate::auth::Actor, project: &projects::Project, p: &RecordDecision, earlier: &[Record]) -> anyhow::Result<Record> {
@@ -619,6 +745,14 @@ fn decide(tx: &rusqlite::Connection, a: &crate::auth::Actor, project: &projects:
     data.insert("owner_words".into(), p.owner_words.trim().into());
     data.insert("said_at".into(), said_at.into());
     data.insert("source".into(), p.source.trim().into());
+    // The question's scope when it answers one and none is given.
+    let scope = match (&p.scope, &p.answers) {
+        (None, Some(q)) => match find(q) {
+            Ok(q) if q.kind == Kind::Question => q.milestone_id,
+            _ => projects::scope(tx, project.id, None)?.map(|m| m.id),
+        },
+        _ => projects::scope(tx, project.id, p.scope.as_deref())?.map(|m| m.id),
+    };
     let d = records::create(
         tx,
         project.id,
@@ -628,6 +762,7 @@ fn decide(tx: &rusqlite::Connection, a: &crate::auth::Actor, project: &projects:
             title: p.title.clone(),
             body: p.body.clone(),
             tags: p.tags.clone(),
+            milestone_id: scope,
             data,
             ..Default::default()
         },
@@ -1028,8 +1163,9 @@ impl FlowMcp {
     }
 
     #[tool(description = "The owner answered one of your questions in chat: record it. Answers the question with their \
-        words and unblocks the tasks it blocked. An answer isn't a decision by itself (the owner, 2026-11-12): when it \
-        decides something worth keeping, record that with record_decision yourself.")]
+        words, unblocks the tasks it blocked, and records the decision in the question's scope (with their words, said \
+        now). Then check whether it changes an earlier decision (update_decision). Questions they answer in AgentFlow \
+        need nothing from you: the decision is recorded by itself, and you hear of it in your news.")]
     async fn answer_question(
         &self,
         Extension(parts): Extension<Parts>,
@@ -1049,10 +1185,12 @@ impl FlowMcp {
                 if p.owner_words.trim().is_empty() {
                     anyhow::bail!("owner_words: quote what the owner said");
                 }
-                let q = records::answer_question(&tx, &q, p.option, p.owner_words.trim(), &a.name())?;
+                let (q, d) = records::answer_and_decide(&tx, &q, p.option, p.owner_words.trim(), &a.name(), p.decision.as_deref(), "owner, in chat")?;
+                let scope = projects::scope_name(&tx, d.milestone_id);
                 tx.commit()?;
-                Ok(Outcome::new(json!({"question": q.ref_id, "state": q.state}))
-                    .summary(format!("{} answered in chat", q.short_id()))
+                Ok(Outcome::new(json!({"question": q.ref_id, "state": q.state, "decision": d.ref_id, "scope": scope,
+                    "check": "does this change an earlier decision? update_decision: edit, archive, scope or replaced_by"}))
+                    .summary(format!("{} answered in chat; decision {}", q.short_id(), d.short_id()))
                     .project(q.project.clone())
                     .target(q.ref_id))
             })
@@ -1060,11 +1198,12 @@ impl FlowMcp {
         self.finish(&actor, "answer_question", Action::Write, outcome).await
     }
 
-    #[tool(description = "Clean up a decision, when the owner asks you to (the owner, 2026-11-12: \"as some kind of \
-        cleanup if I request it\"): fix its title, why, tags, a wrongly recorded quote or date, or archive it (a \
-        duplicate or a mistake; state \"archived\", hidden from the lists, never deleted). A change of mind isn't a \
-        cleanup: record the new decision with supersedes. Every change keeps the old text in the history, with your \
-        reason.")]
+    #[tool(description = "Change decisions, one or several at once with ids (the owner, 2026-11-12: agents edit \
+        and archive decisions freely): fix the title, why, tags, a wrongly recorded quote or date; move it to another \
+        scope (a milestone, or \"project\" to promote it); mark it replaced by a newer one (replaced_by); archive it \
+        (state archived: hidden, kept, restorable with state current). After an answer becomes a decision, check \
+        whether it changes an earlier one and do whichever fits. Every change keeps the old text in the history, \
+        with your reason. All or none.")]
     async fn update_decision(
         &self,
         Extension(parts): Extension<Parts>,
@@ -1077,92 +1216,26 @@ impl FlowMcp {
             .db
             .call(move |c| {
                 let tx = c.transaction()?;
-                let d = writable(&tx, &a, &p.id)?;
-                if d.kind != Kind::Decision {
-                    anyhow::bail!("{} isn't a decision", d.ref_id);
+                let ids = one_or_many(&p.id, &p.ids)?;
+                let mut done = Vec::new();
+                let mut project = String::new();
+                for id in &ids {
+                    let (d, changed) = update_decision_one(&tx, &a, id, &p)?;
+                    project = d.project.clone();
+                    done.push(json!({"id": d.ref_id, "state": d.state, "scope": projects::scope_name(&tx, d.milestone_id), "changed": changed}));
                 }
-                if p.reason.trim().is_empty() {
-                    anyhow::bail!("reason: say why (the owner's request this belongs to)");
-                }
-                if let Some(st) = &p.state
-                    && !["archived", "current"].contains(&st.as_str())
-                {
-                    anyhow::bail!("state: archived, or current to bring it back (a replaced one stays replaced)");
-                }
-                if p.state.as_deref() == Some("current") && d.state != "archived" {
-                    anyhow::bail!("{} is {}, not archived", d.short_id(), d.state);
-                }
-                let mut data = Map::new();
-                if let Some(w) = p.owner_words.as_deref().map(str::trim) {
-                    if w.is_empty() {
-                        anyhow::bail!("owner_words can't be empty; archive the decision instead");
-                    }
-                    data.insert("owner_words".into(), w.into());
-                }
-                if let Some(at) = &p.said_at {
-                    data.insert("said_at".into(), parse_date(at)?.into());
-                }
-                let (d, changed) = records::update(
-                    &tx,
-                    &d,
-                    &a.name(),
-                    Patch {
-                        title: p.title,
-                        body: p.body,
-                        state: p.state,
-                        tags: p.tags,
-                        data,
-                        note: format!("cleanup: {}", p.reason.trim()),
-                        ..Default::default()
-                    },
-                )?;
                 tx.commit()?;
-                Ok(Outcome::new(json!({"id": d.ref_id, "state": d.state, "changed": changed}))
-                    .summary(format!("decision {} {}", d.short_id(), if d.state == "archived" { "archived" } else { "updated" }))
-                    .project(d.project.clone())
-                    .target(d.ref_id))
+                let reply = if done.len() == 1 { done[0].clone() } else { json!({"decisions": done}) };
+                Ok(Outcome::new(reply).summary(format!("{} decision(s) updated", ids.len())).project(project))
             })
             .await;
         self.finish(&actor, "update_decision", Action::Write, outcome).await
     }
 
-    #[tool(description = "Delete tasks for good (the owner, 2026-11-12: agents edit or delete steps and tasks \
-        freely): a duplicate, a mistake, or one folded into another. Their history and links go with them; the event \
-        log keeps a line with each one's title and your reason. A task you decided not to do is skipped instead \
-        (update_task), so the step shows it. All or none.")]
-    async fn delete_tasks(
-        &self,
-        Extension(parts): Extension<Parts>,
-        Parameters(p): Parameters<DeleteTasks>,
-    ) -> Result<CallToolResult, ErrorData> {
-        let actor = actor_of(&parts);
-        let a = actor.clone();
-        let outcome = self
-            .state
-            .db
-            .call(move |c| {
-                let tx = c.transaction()?;
-                if p.ids.is_empty() {
-                    anyhow::bail!("name the tasks in ids, e.g. [\"T-14\"]");
-                }
-                let mut done = Vec::new();
-                let mut project = String::new();
-                for id in &p.ids {
-                    let t = writable(&tx, &a, id)?;
-                    crate::steps::delete_task(&tx, &t, &p.reason, &a.name())?;
-                    project = t.project.clone();
-                    done.push(t.short_id());
-                }
-                tx.commit()?;
-                Ok(Outcome::new(json!({"deleted": done})).summary(format!("deleted {}", done.join(", "))).project(project))
-            })
-            .await;
-        self.finish(&actor, "delete_tasks", Action::Write, outcome).await
-    }
-
     #[tool(description = "Change a task, or several at once with ids: its state (todo, doing, review, done, blocked, \
-        parked, skipped), title, details, step (any step, concluded ones too), tags, estimate, branch, or when a parked \
-        task comes back. Doing starts its step; blocked needs blocked_by; skipped a note on why.")]
+        parked, skipped, archived), title, details, step (any step, concluded ones too), tags, estimate, branch, or when \
+        a parked task comes back. Doing starts its step; blocked needs blocked_by; skipped and archived a note on why. \
+        Archived tasks are hidden and kept; any other state brings one back.")]
     async fn update_task(
         &self,
         Extension(parts): Extension<Parts>,
@@ -1208,12 +1281,82 @@ impl FlowMcp {
         self.finish(&actor, "update_task", Action::Write, outcome).await
     }
 
+    #[tool(description = "Change questions, one or several at once with ids (the owner, 2026-11-12: agents edit \
+        and archive questions freely): their scope (where the answer's decision lands), title or details; archive one \
+        that's no longer needed (it stops blocking its tasks and leaves the owner's list), or bring an archived one \
+        back. All or none, with your reason in the history.")]
+    async fn update_question(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(p): Parameters<UpdateQuestion>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let actor = actor_of(&parts);
+        let a = actor.clone();
+        let outcome = self
+            .state
+            .db
+            .call(move |c| {
+                let tx = c.transaction()?;
+                let ids = one_or_many(&p.id, &p.ids)?;
+                let reason = p.reason.trim();
+                if reason.is_empty() {
+                    anyhow::bail!("reason: say why, in a line");
+                }
+                let mut done = Vec::new();
+                let mut project = String::new();
+                for id in &ids {
+                    let q = writable(&tx, &a, id)?;
+                    if q.kind != Kind::Question {
+                        anyhow::bail!("{} isn't a question", q.ref_id);
+                    }
+                    let milestone_id = match p.scope.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+                        Some(s) => Some(projects::scope(&tx, q.project_id, Some(s))?.map(|m| m.id)),
+                        None => None,
+                    };
+                    let (mut q, mut changed) = records::update(
+                        &tx,
+                        &q,
+                        &a.name(),
+                        Patch { title: p.title.clone(), body: p.body.clone(), milestone_id, note: reason.to_owned(), ..Default::default() },
+                    )?;
+                    match p.state.as_deref() {
+                        None => {}
+                        Some("archived") => {
+                            if q.state != "archived" {
+                                q = crate::steps::archive_record(&tx, &q, reason, None, &a.name())?;
+                                changed = true;
+                            }
+                        }
+                        Some(st @ ("open" | "answered")) => {
+                            if q.state != "archived" {
+                                anyhow::bail!("{} is {}; only an archived question is brought back", q.short_id(), q.state);
+                            }
+                            q = crate::steps::restore_record(&tx, &q, &a.name())?;
+                            if q.state != st {
+                                anyhow::bail!("{} comes back as {} (what it was)", q.short_id(), q.state);
+                            }
+                            changed = true;
+                        }
+                        Some(other) => anyhow::bail!("state {other:?}: archived, or open/answered to bring one back"),
+                    }
+                    project = q.project.clone();
+                    done.push(json!({"id": q.ref_id, "state": q.state, "scope": projects::scope_name(&tx, q.milestone_id), "changed": changed}));
+                }
+                tx.commit()?;
+                let reply = if done.len() == 1 { done[0].clone() } else { json!({"questions": done}) };
+                Ok(Outcome::new(reply).summary(format!("{} question(s) updated", ids.len())).project(project))
+            })
+            .await;
+        self.finish(&actor, "update_question", Action::Write, outcome).await
+    }
+
     #[tool(description = "Ask the owner a question. One question per call, with the context they need, numbered \
         options and your recommendation when it's a choice. Ask in chat as well: your chat reply (or the summary at the \
         end of a long task) repeats the same numbered questions with their ids (Q-12), so the owner can answer in either \
-        place (the owner, 2026-11-12). When the owner is talking with you right now, set in_chat: no notification. An \
-        answer on the page comes back verbatim in hello and get_record; one given in chat you record with \
-        answer_question. An answer isn't a decision by itself: record one with record_decision when it's worth keeping. Never stop for a question: when the \
+        place (the owner, 2026-11-12). When the owner is talking with you right now, set in_chat: no notification. \
+        Give it a scope (a milestone, default the current one, or \"project\"): the answer becomes a decision there by \
+        itself, and you hear of it in your news (one given in chat you record with answer_question). Name earlier \
+        decisions it touches in related; afterwards, what the answer means for them is yours to act on. Never stop for a question: when the \
         choice is cheap to change, set going_ahead and build your recommendation meanwhile; otherwise keep working on \
         whatever doesn't depend on it (blocks names the tasks that wait, and they come back when it's answered).")]
     async fn ask_question(
@@ -1264,6 +1407,18 @@ impl FlowMcp {
                     }
                     data.insert("in_chat".into(), true.into());
                 }
+                let scope = projects::scope(&tx, project.id, p.scope.as_deref())?;
+                let related: Vec<Record> = p
+                    .related
+                    .iter()
+                    .map(|r| {
+                        let d = records::find_str(&tx, r, Some(&project.slug))?;
+                        if d.kind != Kind::Decision || d.project_id != project.id {
+                            anyhow::bail!("related: {} isn't a decision of {}", d.ref_id, project.slug);
+                        }
+                        Ok(d)
+                    })
+                    .collect::<anyhow::Result<_>>()?;
                 let q = records::create(
                     &tx,
                     project.id,
@@ -1273,10 +1428,14 @@ impl FlowMcp {
                         title: p.title,
                         body: p.body,
                         tags: p.tags,
+                        milestone_id: scope.as_ref().map(|m| m.id),
                         data,
                         ..Default::default()
                     },
                 )?;
+                for d in &related {
+                    records::link(&tx, &q, d, "relates", &a.name())?;
+                }
                 for b in &p.blocks {
                     let target = records::find_str(&tx, b, Some(&project.slug))?;
                     // A task it blocks waits for the answer (the owner, 2026-11-12: "if its facing
@@ -1289,7 +1448,8 @@ impl FlowMcp {
                 }
                 tx.commit()?;
                 Ok((
-                    Outcome::new(json!({"id": q.ref_id, "state": "open", "going_ahead": going_ahead}))
+                    Outcome::new(json!({"id": q.ref_id, "state": "open", "going_ahead": going_ahead,
+                        "scope": scope.as_ref().map(|m| m.name.clone()).unwrap_or_else(|| "project".into())}))
                         .summary(format!("question {} asked", q.short_id()))
                         .project(project.slug.clone())
                         .target(q.ref_id.clone()),
@@ -1648,6 +1808,9 @@ impl FlowMcp {
                     tag: p.tag,
                     text: p.text,
                     limit: p.limit.unwrap_or(50),
+                    include_archived: p.include_archived,
+                    // Asking for a milestone reaches past the default (and a state, for replaced ones).
+                    open_scopes: !p.include_closed && p.milestone.is_none(),
                     ..Default::default()
                 };
                 if let Some(k) = &p.kind {
@@ -1658,11 +1821,13 @@ impl FlowMcp {
                 }
                 if let Some(m) = &p.milestone {
                     let project = project.as_ref().ok_or_else(|| anyhow::anyhow!("milestone needs a project"))?;
-                    let m = projects::find_milestone(c, project.id, m)?;
+                    let m = projects::find_milestone_any(c, project.id, m, p.include_archived)?;
                     q.milestone_ids.push(m.id);
-                    q.milestone_ids.extend(
-                        projects::milestones(c, project.id)?.iter().filter(|s| s.parent_id == Some(m.id)).map(|s| s.id),
-                    );
+                    let mut all = projects::milestones(c, project.id)?;
+                    if p.include_archived {
+                        all.extend(projects::archived_milestones(c, project.id)?);
+                    }
+                    q.milestone_ids.extend(all.iter().filter(|s| s.parent_id == Some(m.id)).map(|s| s.id));
                 }
                 if let Some(s) = &p.since {
                     q.since = Some(parse_date(s)?);

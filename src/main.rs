@@ -93,6 +93,15 @@ enum Command {
     Run(cli::RunArgs),
     /// Wait until something happens in your project (the owner answers, presses a button…), print
     /// it and exit. Agents run this in the background, so the session is woken when it ends.
+    /// What's new from the owner and others since the agent last read its news (marked read);
+    /// prints nothing when nothing is. For a Claude Code hook before each prompt.
+    News {
+        #[command(flatten)]
+        client: cli::ClientArgs,
+        /// Show the last stretch again, read or not, e.g. "1h" or "30 min".
+        #[arg(long)]
+        again: Option<String>,
+    },
     Wait {
         #[command(flatten)]
         client: cli::ClientArgs,
@@ -168,6 +177,7 @@ fn main() -> anyhow::Result<()> {
             std::process::exit(code);
         }
         Command::Run(args) => cli::run(&config_path, args),
+        Command::News { client, again } => cli::news(&config_path, client, again),
         Command::Wait { client, record, minutes } => cli::wait(&config_path, client, record, minutes),
         Command::McpHeaders { token_file } => cli::mcp_headers(&token_file),
         Command::Setup(a) => setup::setup(a),

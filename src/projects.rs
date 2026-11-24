@@ -307,6 +307,7 @@ pub fn update(
 }
 
 /// The agent introduces itself at the start of a session.
+/// Returns when the agent said hello before (None the first time).
 pub fn hello(
     conn: &Connection,
     project_id: i64,
@@ -314,14 +315,16 @@ pub fn hello(
     machine: &str,
     model: &str,
     effort: &str,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<Option<i64>> {
+    let prev: Option<i64> = conn.query_row("SELECT agent_hello_at FROM projects WHERE id = ?1", [project_id], |r| r.get(0))?;
+    conn.execute("UPDATE projects SET agent_hello_at = ?1 WHERE id = ?2", params![now_ms(), project_id])?;
     conn.execute(
         // A new session starts without the last one's "working on" note (it'd be stale).
         "UPDATE projects SET agent_session = ?1, agent_machine = ?2, agent_model = ?3, agent_effort = ?4, agent_seen_at = ?5,
          agent_note = '' WHERE id = ?6",
         params![session.trim(), machine.trim(), model.trim(), effort.trim(), now_ms(), project_id],
     )?;
-    Ok(())
+    Ok(prev)
 }
 
 /// Every call from a project's token counts as a sign of life.
@@ -361,10 +364,13 @@ pub struct Milestone {
     pub summary: String,
     /// A review step: reviewers, commit, the owner's words, reports (JSON); empty otherwise.
     pub review: String,
+    /// Archived (hidden from the lists, kept, restorable), and why.
+    pub archived_at: Option<i64>,
+    pub archived_reason: String,
 }
 
 const MILESTONE_COLUMNS: &str =
-    "id, project_id, parent_id, name, title, description, position, state, tag, reopened_because, closed_at, started_at, summary, review";
+    "id, project_id, parent_id, name, title, description, position, state, tag, reopened_because, closed_at, started_at, summary, review, archived_at, archived_reason";
 
 fn milestone_from_row(r: &Row) -> rusqlite::Result<Milestone> {
     Ok(Milestone {
@@ -382,15 +388,104 @@ fn milestone_from_row(r: &Row) -> rusqlite::Result<Milestone> {
         started_at: r.get(11)?,
         summary: r.get(12)?,
         review: r.get(13)?,
+        archived_at: r.get(14)?,
+        archived_reason: r.get(15)?,
     })
 }
 
 /// All milestones and steps of a project, in order (steps after their milestone's siblings sort).
+/// Archived ones are left out.
 pub fn milestones(conn: &Connection, project_id: i64) -> anyhow::Result<Vec<Milestone>> {
-    let mut stmt = conn
-        .prepare(&format!("SELECT {MILESTONE_COLUMNS} FROM milestones WHERE project_id = ?1 ORDER BY position, id"))?;
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {MILESTONE_COLUMNS} FROM milestones WHERE project_id = ?1 AND archived_at IS NULL ORDER BY position, id"
+    ))?;
     let rows = stmt.query_map([project_id], milestone_from_row)?;
     Ok(rows.collect::<Result<_, _>>()?)
+}
+
+/// Archived milestones and steps, in order.
+pub fn archived_milestones(conn: &Connection, project_id: i64) -> anyhow::Result<Vec<Milestone>> {
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {MILESTONE_COLUMNS} FROM milestones WHERE project_id = ?1 AND archived_at IS NOT NULL ORDER BY position, id"
+    ))?;
+    let rows = stmt.query_map([project_id], milestone_from_row)?;
+    Ok(rows.collect::<Result<_, _>>()?)
+}
+
+/// Finds a milestone or step by name among the live ones, or among the archived ones too.
+pub fn find_milestone_any(conn: &Connection, project_id: i64, name: &str, archived: bool) -> anyhow::Result<Milestone> {
+    match find_milestone(conn, project_id, name) {
+        Ok(m) => Ok(m),
+        Err(e) if !archived => Err(e),
+        Err(e) => find_in(&archived_milestones(conn, project_id)?, conn, name).map_err(|_| e),
+    }
+}
+
+fn find_in(all: &[Milestone], conn: &Connection, name: &str) -> anyhow::Result<Milestone> {
+    let name = name.trim();
+    let (parent, step) = match name.split_once('/') {
+        Some((p, s)) => (Some(p), s),
+        None => (None, name),
+    };
+    let hits: Vec<&Milestone> = all
+        .iter()
+        .filter(|m| m.name.eq_ignore_ascii_case(step))
+        .filter(|m| match parent {
+            None => true,
+            Some(p) => m.parent_id.and_then(|id| get_milestone(conn, id).ok()).is_some_and(|pm| pm.name.eq_ignore_ascii_case(p)),
+        })
+        .collect();
+    match hits.as_slice() {
+        [m] => Ok((*m).clone()),
+        [] => bail!("no milestone {name:?}"),
+        _ => bail!("{name:?} names more than one; write it as MILESTONE/STEP"),
+    }
+}
+
+/// The scope a question or decision lands in when none is given (the owner, 2026-11-12: "the
+/// default being the current milestone"): the active milestone; with several, the one whose step
+/// has a task in doing, otherwise the one started last. None (project-wide) when none is active.
+pub fn default_scope(conn: &Connection, project_id: i64) -> anyhow::Result<Option<Milestone>> {
+    let all = milestones(conn, project_id)?;
+    let active: Vec<&Milestone> = all.iter().filter(|m| m.parent_id.is_none() && m.state == "active").collect();
+    if active.len() <= 1 {
+        return Ok(active.first().map(|m| (*m).clone()));
+    }
+    let doing: Vec<Option<i64>> = {
+        let mut stmt = conn.prepare("SELECT milestone_id FROM records WHERE project_id = ?1 AND kind = 'task' AND state = 'doing'")?;
+        stmt.query_map([project_id], |r| r.get(0))?.collect::<Result<_, _>>()?
+    };
+    for id in doing.into_iter().flatten() {
+        if let Some(m) = all.iter().find(|m| m.id == id) {
+            let top = m.parent_id.unwrap_or(m.id);
+            if let Some(a) = active.iter().find(|a| a.id == top) {
+                return Ok(Some((*a).clone()));
+            }
+        }
+    }
+    Ok(active.iter().max_by_key(|m| (m.started_at.unwrap_or(0), m.id)).map(|m| (*m).clone()))
+}
+
+/// A scope as an agent writes it: "project", a milestone ("M9"), or a step ("P9.3", meaning its
+/// milestone). None or empty: the default scope. Returns the milestone, or None for project-wide.
+pub fn scope(conn: &Connection, project_id: i64, raw: Option<&str>) -> anyhow::Result<Option<Milestone>> {
+    match raw.map(str::trim).filter(|s| !s.is_empty()) {
+        None => default_scope(conn, project_id),
+        Some(s) if s.eq_ignore_ascii_case("project") => Ok(None),
+        Some(s) => {
+            let m = find_milestone(conn, project_id, s)
+                .map_err(|e| anyhow::anyhow!("scope is \"project\" or a milestone, e.g. \"M9\": {e:#}"))?;
+            Ok(Some(match m.parent_id {
+                Some(p) => get_milestone(conn, p)?,
+                None => m,
+            }))
+        }
+    }
+}
+
+/// How a scope reads: "M9" or "project".
+pub fn scope_name(conn: &Connection, milestone_id: Option<i64>) -> String {
+    milestone_id.and_then(|id| get_milestone(conn, id).ok()).map(|m| m.name).unwrap_or_else(|| "project".into())
 }
 
 /// Finds a milestone or step by name ("M4", or "K2" for a step; "M4/K2" when a step name repeats).
@@ -410,7 +505,12 @@ pub fn find_milestone(conn: &Connection, project_id: i64, name: &str) -> anyhow:
     match (hits.next(), hits.next()) {
         (Some(m), None) => Ok(m.clone()),
         (Some(_), Some(_)) => bail!("{name:?} names more than one step; write it as MILESTONE/STEP, e.g. M4/{name}"),
-        (None, _) => bail!("no milestone {name:?}"),
+        (None, _) => {
+            if let Ok(m) = find_in(&archived_milestones(conn, project_id)?, conn, name) {
+                bail!("{} is archived; restore_milestone brings it back", m.name);
+            }
+            bail!("no milestone {name:?}")
+        }
     }
 }
 
@@ -458,7 +558,7 @@ pub fn add_milestone(conn: &Connection, project_id: i64, m: &NewMilestone, actor
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)",
         params![project_id, m.parent, name, m.title.trim(), m.description.trim(), position, now],
     )
-    .with_context(|| format!("{name} exists already"))?;
+    .with_context(|| format!("{name} exists already (maybe archived: names stay taken; rename one of them)"))?;
     let id = conn.last_insert_rowid();
     let what = if m.parent.is_some() { "Step" } else { "Milestone" };
     event(conn, Some(project_id), None, "milestone.added", &format!("{what} {name} added: {}", m.title.trim()), actor)?;
@@ -501,12 +601,11 @@ pub struct MilestonePatch {
     pub name: Option<String>,
     pub title: Option<String>,
     pub description: Option<String>,
-    /// planned, active or closed. Reopening a closed milestone (not a step) needs `reopened_because`.
+    /// planned, active or closed.
     pub state: Option<String>,
     /// The tag that closed it, e.g. "v0.0.5-m4".
     pub tag: Option<String>,
-    /// Why a closed milestone is reopened. Closed milestones should stay closed: say why. Steps
-    /// reopen freely.
+    /// Why a closed milestone or step is reopened, if there's something worth saying.
     pub reopened_because: Option<String>,
     /// Move it before this milestone (by name); "end" moves it to the end.
     pub move_before: Option<String>,
@@ -536,12 +635,8 @@ pub fn update_milestone(
             bail!("state must be planned, active or closed");
         }
         if m.state == "closed" {
-            // A milestone closed with its tag stays closed unless there's a reason; steps are the
-            // agent's to edit freely (the owner, 2026-11-12).
+            // Milestones and steps reopen freely (the owner, 2026-11-12); the event log keeps it.
             let why = patch.reopened_because.as_deref().map(str::trim).unwrap_or("");
-            if why.is_empty() && m.parent_id.is_none() {
-                bail!("{} is closed; reopening it needs reopened_because", m.name);
-            }
             conn.execute(
                 "UPDATE milestones SET reopened_because = ?1, closed_at = NULL WHERE id = ?2",
                 params![why, m.id],
@@ -705,15 +800,10 @@ mod tests {
                 "a",
             )?;
             assert_eq!(closed.state, "closed");
-            assert!(
-                update_milestone(
-                    c,
-                    &closed,
-                    &MilestonePatch { state: Some("active".into()), ..Default::default() },
-                    "a"
-                )
-                .is_err()
-            );
+            // Reopening needs no reason any more (the owner, 2026-11-12: agents edit freely).
+            let open = update_milestone(c, &closed, &MilestonePatch { state: Some("active".into()), ..Default::default() }, "a")?;
+            assert_eq!(open.state, "active");
+            let closed = update_milestone(c, &open, &MilestonePatch { state: Some("closed".into()), ..Default::default() }, "a")?;
             let reopened = update_milestone(
                 c,
                 &closed,
