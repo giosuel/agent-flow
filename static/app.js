@@ -27,13 +27,73 @@
   if (document.cookie.split("; ").includes(want)) location.reload();
 })();
 
-// Buttons with data-confirm ask before they submit (no inline handlers: the CSP forbids them).
+// Dialogs in the page's own style instead of the browser's (the owner, 2026-11-17: "remove all
+// the simple alerts and replace them with actual styled dialogs that fit into the design"): a
+// centred card over a dimmed page, on the phone too. window.afDialog({title, text, ok, cancel,
+// danger}) resolves true for OK; without cancel it's a message with one button.
+window.afDialog = ({ title, text = "", ok = "OK", cancel = null, danger = false }) =>
+  new Promise((resolve) => {
+    const back = document.createElement("div");
+    back.className = "cdlg-back";
+    back.innerHTML = `<div class="cdlg" role="${cancel ? "alertdialog" : "dialog"}" aria-modal="true" aria-labelledby="cdlg-t" aria-describedby="cdlg-x">
+      <h2 id="cdlg-t"></h2><p id="cdlg-x" class="sub"></p>
+      <div class="cdlg-btns">${cancel ? '<button type="button" class="btn ghost" data-v="0"></button>' : ""}<button type="button" class="btn${danger ? " solid-danger" : ""}" data-v="1"></button></div></div>`;
+    back.querySelector("#cdlg-t").textContent = title;
+    const body = back.querySelector("#cdlg-x");
+    body.textContent = text;
+    body.hidden = !text;
+    back.querySelector('[data-v="1"]').textContent = ok;
+    if (cancel) back.querySelector('[data-v="0"]').textContent = cancel;
+    const opener = document.activeElement;
+    const done = (v) => {
+      back.classList.remove("open");
+      document.removeEventListener("keydown", key, true);
+      setTimeout(() => back.remove(), 160);
+      if (opener && opener.focus) opener.focus();
+      resolve(v);
+    };
+    const key = (e) => {
+      if (e.key === "Escape") { e.preventDefault(); done(false); }
+      // Focus stays in the dialog.
+      if (e.key === "Tab") {
+        const b = [...back.querySelectorAll("button")];
+        const i = b.indexOf(document.activeElement);
+        e.preventDefault();
+        b[(i + (e.shiftKey ? b.length - 1 : 1)) % b.length].focus();
+      }
+    };
+    back.addEventListener("click", (e) => {
+      const btn = e.target.closest("button[data-v]");
+      if (btn) done(btn.dataset.v === "1");
+      else if (e.target === back) done(false);
+    });
+    document.addEventListener("keydown", key, true);
+    document.body.append(back);
+    requestAnimationFrame(() => back.classList.add("open"));
+    // The safe choice has focus, so Enter never removes something by accident.
+    back.querySelector(cancel ? '[data-v="0"]' : '[data-v="1"]').focus();
+  });
+
+// Buttons with data-confirm ask first (no inline handlers: the CSP forbids them). The question's
+// first sentence is the title, the rest the text; the button's own label confirms, red when it
+// removes or ends something.
 document.addEventListener("click", (e) => {
   const el = e.target.closest("[data-confirm]");
-  if (el && !window.confirm(el.dataset.confirm)) {
-    e.preventDefault();
-    e.stopImmediatePropagation();
-  }
+  if (!el || el.dataset.confirmed) return;
+  e.preventDefault();
+  e.stopImmediatePropagation();
+  const q = el.dataset.confirm;
+  const cut = q.search(/[?.]\s/);
+  const title = cut < 0 ? q : q.slice(0, cut + 1);
+  const text = cut < 0 ? "" : q.slice(cut + 2);
+  const label = (el.dataset.confirmOk || el.textContent || el.getAttribute("aria-label") || "OK").trim() || "OK";
+  const danger = el.classList.contains("danger") || /^(remove|revoke|delete|rotate|sign out|switch off|turn off|cancel job)/i.test(label) || el.dataset.danger !== undefined;
+  window.afDialog({ title, text, ok: label, cancel: "Cancel", danger }).then((yes) => {
+    if (!yes) return;
+    el.dataset.confirmed = "1";
+    el.click();
+    delete el.dataset.confirmed;
+  });
 }, true);
 
 // Keep the current milestone in view in the (scrolling) milestone strip, and the current page's
@@ -431,5 +491,64 @@ document.addEventListener("click", async (e) => {
     } catch (err) {
       if (err.name !== "AbortError") location.replace(url);
     }
+  });
+})();
+
+// Forms marked data-autosubmit save as soon as a switch in them changes (the owner, 2026-11-17:
+// toggles save at once, no Save button; the button stays for pages without scripts).
+document.addEventListener("change", (e) => {
+  const form = e.target.closest("form[data-autosubmit]");
+  if (form && e.target.matches("input[type=checkbox]")) form.requestSubmit();
+});
+
+// The bell (the owner, 2026-11-17: "like youtube, so when the user opens the notifications on the
+// desktop or phone, they are all marked as read and the badge goes away"): a panel under it (a
+// sheet on the phone). Opening it marks everything read and removes the badge; what was new keeps
+// its dot until it closes. Without scripts the bell is a link to /notifications.
+(() => {
+  let panel = null;
+  const close = () => {
+    if (!panel) return;
+    panel.classList.remove("open");
+    const p = panel;
+    panel = null;
+    setTimeout(() => p.remove(), 160);
+    document.removeEventListener("keydown", onKey, true);
+    document.removeEventListener("click", outside, true);
+    const bell = document.querySelector("[data-bell]");
+    if (bell) bell.setAttribute("aria-expanded", "false");
+  };
+  const onKey = (e) => { if (e.key === "Escape") { e.preventDefault(); close(); } };
+  const outside = (e) => {
+    if (panel && !e.target.closest(".ntf-panel") && !e.target.closest("[data-bell]")) close();
+  };
+  const open = async (bell) => {
+    const res = await fetch("/notifications/panel", { credentials: "same-origin" });
+    if (!res.ok) { location.href = bell.href; return; }
+    const html = await res.text();
+    panel = document.createElement("div");
+    panel.className = "ntf-back";
+    panel.innerHTML = `<div class="ntf-panel" role="dialog" aria-modal="false" aria-label="Notifications">
+      <div class="ntf-head"><strong>Notifications</strong><span class="grow"></span><a class="icon-only" href="/settings?s=notifications" aria-label="Notification settings"></a><button type="button" class="icon-only ntf-x" aria-label="Close">×</button></div>
+      <div class="ntf-list"></div></div>`;
+    panel.querySelector(".ntf-list").innerHTML = html;
+    panel.querySelector('a.icon-only').innerHTML = document.querySelector('a[href="/settings"].icon-btn')?.innerHTML || "⚙";
+    panel.querySelector(".ntf-x").addEventListener("click", close);
+    panel.addEventListener("click", (e) => { if (e.target === panel) close(); });
+    document.body.append(panel);
+    requestAnimationFrame(() => panel && panel.classList.add("open"));
+    bell.setAttribute("aria-expanded", "true");
+    document.addEventListener("keydown", onKey, true);
+    document.addEventListener("click", outside, true);
+    // Read: the badge goes now (here and on the phone's bell).
+    for (const b of document.querySelectorAll(".bell-badge")) b.remove();
+    for (const b of document.querySelectorAll("[data-bell]")) b.setAttribute("aria-label", "Notifications");
+    fetch("/notifications/read", { method: "POST", credentials: "same-origin", headers: { Accept: "application/json" } }).catch(() => {});
+  };
+  document.addEventListener("click", (e) => {
+    const bell = e.target.closest("[data-bell]");
+    if (!bell || e.metaKey || e.ctrlKey || e.shiftKey || e.button) return;
+    e.preventDefault();
+    if (panel) close(); else open(bell);
   });
 })();

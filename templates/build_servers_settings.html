@@ -1,15 +1,16 @@
-{# The Settings page's Build servers card. #}
-<section class="card pad stack" aria-labelledby="s-builds" id="s-builds">
-  <div class="sec"><h2 id="s-builds">Build servers</h2><span class="sub">machines agents build and test on with <span class="mono">flow remote</span></span></div>
-  <p class="sub">To add one, run this on that machine. It asks whether the builder gets a user of its own (recommended) and its name, then asks for your approval here:</p>
-  <pre class="cmd mono">flow builder add</pre>
+{# The Settings page's Build servers section. #}
+<section aria-labelledby="h-sec">
+  <h2 id="h-sec">Build servers</h2>
+  <p class="sub set-lead">Machines agents build and test on with <span class="mono">flow remote</span>. Each project picks one in its own Settings.</p>
   {% if let Some((ok, text)) = notice %}<p class="notice{% if *ok %} ok{% else %} warn{% endif %}" role="status">{{ text }}</p>{% endif %}
+  <div class="set-row stack-row"><div class="set-txt"><strong>Add one</strong><span class="sub">Run this on that machine. It asks whether the builder gets a user of its own (recommended) and its name, then asks for your approval here.</span></div>
+    <pre class="cmd mono">flow builder add</pre></div>
   {% for s in servers %}
-  <div class="bsrv stack-sm">
-    <div class="bs-head"><span class="dot{% if s.online %} ok{% endif %}" aria-hidden="true"></span><h3>{{ s.name }}</h3></div>
-    <p class="sub">{{ s.line }}</p>
-    {% if s.waiting %}<p class="sub">It was an SSH builder. Run <span class="mono">flow builder add</span> on that machine, named {{ s.name }}: it takes this one over, with its projects and jobs.</p>{% else %}<p class="sub">Agents set up the tools their projects need with <span class="mono">flow remote --setup</span>.</p>{% endif %}
-    <details><summary class="sub">Name and limits</summary>
+  <div class="set-row stack-row bsrv">
+    <div class="set-txt"><strong><span class="dot{% if s.online %} ok{% endif %}" aria-hidden="true"></span> {{ s.name }}</strong><span class="sub">{{ s.line }}</span>
+      {% if s.waiting %}<span class="sub">It was an SSH builder. Run <span class="mono">flow builder add</span> on that machine, named {{ s.name }}: it takes this one over, with its projects and jobs.</span>{% endif %}
+      <span class="sub">{% if s.projects.is_empty() %}No project uses it yet.{% else %}Used by {% for p in s.projects %}{% if !loop.first %}, {% endif %}{{ p }}{% endfor %}.{% endif %}</span></div>
+    <details class="bs-more"><summary class="sub">Name and limits</summary>
       <form method="post" action="/settings/build-servers/{{ s.name }}/rename" class="row wrap"><label class="vh" for="rn-{{ s.name }}">Name</label><input id="rn-{{ s.name }}" name="name" required maxlength="64" value="{{ s.name }}"><button class="btn sm ghost" type="submit">Rename</button></form>
       <form method="post" action="/settings/build-servers/{{ s.name }}/limits" class="form-grid">
         <label>Start another job while at least … threads are free<input name="min_threads" type="number" min="0" step="1" value="{{ s.min_threads }}"></label>
@@ -18,10 +19,9 @@
         <label>Delete a project's folder unused for (days)<input name="keep_days" type="number" min="1" step="1" value="{{ s.keep_days }}"></label>
         <div><button class="btn sm" type="submit">Save</button></div>
       </form>
+      <form method="post" action="/settings/build-servers/{{ s.name }}/remove"><button class="btn sm ghost" type="submit" data-confirm="Remove {{ s.name }}? Projects that use it build where their agent is. Its work folders there stay until you delete them.">Remove</button></form>
     </details>
-    <div class="row wrap"><span class="sub">{% if s.projects.is_empty() %}No project uses it yet: pick it in a project's Settings.{% else %}Used by {% for p in s.projects %}{% if !loop.first %}, {% endif %}{{ p }}{% endfor %}.{% endif %}</span><span class="grow"></span>
-      <form method="post" action="/settings/build-servers/{{ s.name }}/remove"><button class="btn sm danger" type="submit" data-confirm="Remove {{ s.name }}? Projects that use it build where their agent is. Its work folders there stay until you delete them.">Remove</button></form></div>
   </div>
   {% endfor %}
-  {% if servers.is_empty() %}<p class="sub">None yet. Any Linux machine that reaches this server can be one.</p>{% endif %}
+  {% if servers.is_empty() %}<div class="set-row"><div class="set-txt"><strong>None yet</strong><span class="sub">Any Linux machine that reaches this server can be one.</span></div></div>{% endif %}
 </section>

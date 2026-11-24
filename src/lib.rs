@@ -27,6 +27,7 @@ pub mod machine;
 pub mod markdown;
 pub mod mcp;
 pub mod notes;
+pub mod notifications;
 pub mod onboard;
 pub mod outgoing;
 pub mod passkey;

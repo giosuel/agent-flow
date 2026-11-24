@@ -24,6 +24,7 @@ mod log;
 mod machine;
 mod new_project;
 mod notes;
+mod notifications;
 mod pages;
 mod projectdoc;
 mod projects;
@@ -157,6 +158,7 @@ pub fn router(state: AppState) -> Router {
         .merge(builders::routes())
         .merge(builders::admin_routes())
         .merge(consultant::routes())
+        .merge(notifications::routes())
         .merge(buttons::routes())
         .merge(builds::routes())
         .merge(screenshots::routes())
@@ -311,6 +313,7 @@ fn spawn_archiver(state: AppState) {
             tick.tick().await;
             let data = state.config.data_dir();
             let now = crate::util::now_ms();
+            let _ = state.db.call(|c| crate::notifications::purge(c)).await;
             match state.db.call(move |c| crate::logview::archive_old_reads(c, &data, now)).await {
                 Ok(0) => {}
                 Ok(n) => tracing::info!("archived {n} reads older than 90 days"),

@@ -3,120 +3,140 @@
 {% block scripts %}<script src="/static/passkey.js?v={{ nav.version }}" defer></script>
 <script src="/static/settings.js?v={{ nav.version }}" defer></script>{% endblock %}
 {% block content %}
-<div class="head"><h1>Settings</h1></div>
-{% if let Some(notice) = notice %}<p class="notice ok" role="status">{{ notice }}</p>{% endif %}
-
-<div class="settings">
-<section class="card pad stack" aria-labelledby="s-passkeys" id="passkeys">
-  <div class="sec"><h2 id="s-passkeys">Your passkeys</h2></div>
-  {% if passkeys.is_empty() %}<p class="sub">No passkey yet. You're signed in with a one-time link.</p>{% endif %}
-  <ul class="rows">
-  {% for p in passkeys %}
-    <li class="item-row"><div class="ttl"><strong>{{ p.name }}</strong><span class="sub">added {{ p.added }} · used {{ p.used }}</span></div>
-      <form method="post" action="/settings/passkeys/{{ p.id }}/remove"><button class="btn sm ghost" type="submit" data-confirm="Remove the passkey &quot;{{ p.name }}&quot;?">Remove</button></form></li>
-  {% endfor %}
-  </ul>
-  {% if passkeys_available %}
-  <div class="row wrap"><label class="vh" for="passkey-name">Name for the new passkey</label><input id="passkey-name" placeholder="e.g. iPhone" maxlength="60"><button class="btn" id="passkey-add" type="button">Add a passkey</button></div>
-  <p class="notice" id="passkey-status" role="status" hidden></p>
-  {% else %}
-  <p class="notice">Passkeys work only at AgentFlow's https address. This page is open at {{ public_url }}.</p>
-  {% endif %}
-  <p class="sub">Lost every passkey? Run <code>sudo flow server add-passkey</code> on the server for a one-time link.</p>
-</section>
-
-<section class="card pad stack" aria-labelledby="s-notify">
-  <div class="sec"><h2 id="s-notify">Notifications</h2></div>
-  <div class="row wrap"><button class="btn" id="push-on" type="button" data-key="{{ push_key }}">Turn on for this device</button>
-    <form method="post" action="/settings/push/test"><button class="btn ghost" type="submit">Send a test notification</button></form></div>
-  <p class="notice" id="push-status" role="status" hidden></p>
-  <ul class="rows">
-  {% for d in push_devices %}
-    <li class="item-row"><div class="ttl"><strong>{{ d.device }}</strong><span class="sub{% if d.failing %} warn-text{% endif %}">on since {{ d.added }} · {{ d.status }}</span></div>
-      <form method="post" action="/settings/push/{{ d.id }}/remove"><button class="btn sm ghost" type="submit">Turn off</button></form></li>
-  {% endfor %}
-  </ul>
-  <form method="post" action="/settings/notify" class="stack">
-    <fieldset class="toggles"><legend class="label">Send a notification for</legend>
-    {% for t in toggles %}
-      <label class="toggle"><input type="checkbox" name="notify.{{ t.key }}" {% if t.on %}checked{% endif %}><span>{{ t.label }}</span></label>
+{# A classic settings dialog (the owner, 2026-11-17: "I don't like the settings page right now with
+   all the floating islands with the uneven heights"): the sections on the left, one at a time on
+   the right; on the phone the list first, a section on its own screen. #}
+<div class="head set-title{% if chosen %} chosen{% endif %}"><h1>Settings</h1></div>
+<div class="set-shell{% if chosen %} chosen{% endif %}">
+  <nav class="set-nav" aria-label="Settings sections">
+    {% for (group, links) in groups %}
+    <p class="set-group">{{ group }}</p>
+    {% for l in links %}<a href="/settings?s={{ l.key }}"{% if l.key == section %} class="on" aria-current="page"{% endif %}>{{ crate::web::icons::icon(l.icon)|safe }}<span>{{ l.label }}</span>{% if let Some(b) = l.badge %}<span class="chip warn">{{ b }}</span>{% endif %}<span class="chev" aria-hidden="true">{{ crate::web::icons::icon("chevron")|safe }}</span></a>{% endfor %}
     {% endfor %}
-    </fieldset>
-    <div><button class="btn sm ghost" type="submit">Save</button></div>
-  </form>
-</section>
+  </nav>
+  <div class="set-pane">
+  {% if let Some(notice) = notice %}<p class="notice ok" role="status">{{ notice }}</p>{% endif %}
 
-<section class="card pad stack" aria-labelledby="s-devices">
-  <div class="sec"><h2 id="s-devices">Your devices</h2></div>
-  {% if !approvals.is_empty() %}
-  <div class="stack-sm"><h3 class="label">Waiting for your approval</h3>
-  <ul class="rows">{% for (code, what, machine) in approvals %}<li class="item-row"><div class="ttl"><a href="/approve/{{ code }}"><strong>{{ what }}</strong></a><span class="sub mono">{{ code }} · {{ machine }}</span></div></li>{% endfor %}</ul></div>
-  {% endif %}
-  <p class="sub">To use <span class="mono">flow</span> on a machine (test builds with <span class="mono">flow run</span>, builders, projects), run this there, as the user who'll use it. It installs <span class="mono">flow</span> and asks for your approval here. Linux, x86-64, glibc {{ glibc }} or newer.</p>
-  <pre class="cmd mono">curl -fsSL {{ public_url }}/install.sh | sh</pre>
-  <p class="sub">Has <span class="mono">flow</span> already: <span class="mono">flow connect {{ public_url }}</span>. Connected machines can read, not change; changes need your approval each time. The four characters after a name are the token's end; <span class="mono">flow status</span> on a machine shows which one it has.</p>
-  <ul class="rows">
-  {% for t in device_tokens %}
-    <li class="item-row"><div class="ttl"><strong>{{ t.holder }}{% if !t.hint.is_empty() %} <span class="mono sub">{{ t.hint }}</span>{% endif %}</strong><span class="sub">added {{ t.added }} · used {{ t.used }}{% if !t.from.is_empty() %} from {{ t.from }}{% endif %}</span></div>
-      <form method="post" action="/settings/tokens/{{ t.id }}/revoke"><button class="btn sm ghost" type="submit" data-confirm="Revoke the token for {{ t.holder }}?">Revoke</button></form></li>
-  {% endfor %}
-  </ul>
-</section>
+  {% if section == "passkeys" %}
+  <section aria-labelledby="h-sec">
+    <h2 id="h-sec">Passkeys</h2>
+    <p class="sub set-lead">How you sign in to AgentFlow. Lost every one? <code>sudo flow server add-passkey</code> on the server gives a one-time link.</p>
+    {% if passkeys.is_empty() %}<div class="set-row"><div class="set-txt"><strong>No passkey yet</strong><span class="sub">You're signed in with a one-time link.</span></div></div>{% endif %}
+    {% for p in passkeys %}
+    <div class="set-row"><div class="set-txt"><strong>{{ p.name }}</strong><span class="sub">added {{ p.added }} · used {{ p.used }}</span></div>
+      <form method="post" action="/settings/passkeys/{{ p.id }}/remove"><button class="btn sm ghost" type="submit" data-confirm="Remove the passkey &quot;{{ p.name }}&quot;? You can't sign in with it any more.">Remove</button></form></div>
+    {% endfor %}
+    {% if passkeys_available %}
+    <div class="set-row"><div class="set-txt"><strong>Add a passkey</strong><span class="sub">For this device, e.g. "iPhone".</span></div>
+      <div class="row"><label class="vh" for="passkey-name">Name for the new passkey</label><input id="passkey-name" placeholder="Name" maxlength="60"><button class="btn sm" id="passkey-add" type="button">Add</button></div></div>
+    <p class="notice" id="passkey-status" role="status" hidden></p>
+    {% else %}
+    <p class="notice">Passkeys work only at AgentFlow's https address. This page is open at {{ public_url }}.</p>
+    {% endif %}
+  </section>
 
-<section class="card pad stack" aria-labelledby="s-consultant" id="s-consultant">
-  <div class="sec"><h2 id="s-consultant">Consultant</h2><span class="sub">{% if consultant.on && consultant.waiting_trust %}waiting for you{% else if consultant.on && consultant.running %}running{% else if consultant.on %}on, not running{% else %}off{% endif %}</span></div>
-  <p class="sub">A Claude Code session the server runs (Opus 5.5, with Remote Control), as the server's user. Agents ask it with SendMessage ("AgentFlow Consultant"). It uses AgentFlow's tools freely; shell commands and edits wait for you to allow them, in tmux or on claude.ai.</p>
-  {% if let Some(e) = consultant.error %}<p class="notice warn" role="alert">{{ e }}</p>{% endif %}
-  {% if consultant.on %}
-  {% if consultant.waiting_trust %}<p class="notice warn" role="alert">It's waiting at Claude Code's question whether to trust its folder. Open it with the command below and choose "Yes, I trust this folder"; it starts then.</p>{% endif %}
-  {% if let Some(l) = consultant.link %}<p><a class="btn sm ghost" href="{{ l }}" target="_blank" rel="noopener">Open its session on claude.ai</a></p>{% else %}<p class="sub">Its claude.ai link shows here once it has connected Remote Control.</p>{% endif %}
-  <p class="sub">To reach it directly on the server, as the server's user:</p>
-  <pre class="cmd mono">{{ consultant.attach }}</pre>
-  <form method="post" action="/settings/consultant/off"><button class="btn sm ghost" type="submit" data-confirm="Switch the consultant off? Its session ends; switching it on again continues it.">Switch off</button></form>
-  {% else %}
-  <form method="post" action="/settings/consultant/on"><button class="btn sm" type="submit">Switch on</button></form>
-  {% endif %}
-</section>
+  {% else if section == "browsers" %}
+  <section aria-labelledby="h-sec">
+    <h2 id="h-sec">Signed-in browsers</h2>
+    <p class="sub set-lead">Every browser that's signed in now.</p>
+    {% for s in sessions %}
+    <div class="set-row"><div class="set-txt"><strong>{{ s.device }}{% if s.current %} <span class="chip accent">this one</span>{% endif %}</strong><span class="sub">signed in with {{ s.how }} · last seen {{ s.seen }}</span></div>
+      {% if !s.current %}<form method="post" action="/settings/sessions/{{ s.id }}/end"><button class="btn sm ghost" type="submit" data-confirm="Sign out {{ s.device }}?">Sign out</button></form>{% endif %}</div>
+    {% endfor %}
+  </section>
 
-<section class="card pad stack" aria-labelledby="s-github" id="s-github">
-  <div class="sec"><h2 id="s-github">GitHub</h2><span class="sub">AgentFlow's own tokens, kept encrypted</span></div>
-  <p class="sub">With a token here, AgentFlow talks to GitHub with it, from wherever it runs. Without one, <span class="mono">gh</span> uses the login of the user it runs as. For your repositories: a fine-grained token with read and write access to Contents and Pull requests.</p>
-  {% for (which, label, what, set) in github %}
-  <div class="stack-sm">
-    <h3 class="label">{{ label }}</h3>
-    <p class="sub">For {{ what }}.{% if let Some(s) = set %} Set: <span class="mono">{{ s }}</span>{% endif %}</p>
-    <form method="post" action="/settings/github" class="row wrap"><input type="hidden" name="which" value="{{ which }}"><label class="vh" for="gh-{{ which }}">{{ label }} token</label><input id="gh-{{ which }}" name="token" type="password" autocomplete="off" required placeholder="{% if set.is_some() %}Replace with another token{% else if *which == "own" %}github_pat_…{% else %}ghp_…{% endif %}"><button class="btn sm" type="submit">{% if set.is_some() %}Replace{% else %}Save{% endif %}</button></form>
-    {% if set.is_some() %}<form method="post" action="/settings/github/remove"><input type="hidden" name="which" value="{{ which }}"><button class="btn sm ghost" type="submit" data-confirm="Remove the token for {{ label|lower }}?">Remove</button></form>{% endif %}
-  </div>
-  {% endfor %}
-</section>
+  {% else if section == "notifications" %}
+  <section aria-labelledby="h-sec">
+    <h2 id="h-sec">Notifications</h2>
+    <p class="sub set-lead">Push notifications on your devices. Everything that comes in is also kept under the bell at the top.</p>
+    <div class="set-row"><div class="set-txt"><strong>This device</strong><span class="sub">Turn notifications on for the browser you're using now.</span></div>
+      <button class="btn sm" id="push-on" type="button" data-key="{{ push_key }}">Turn on</button></div>
+    <p class="notice" id="push-status" role="status" hidden></p>
+    <div class="set-row"><div class="set-txt"><strong>Send a test notification</strong><span class="sub">Checks that your devices get them.</span></div>
+      <form method="post" action="/settings/push/test"><button class="btn sm ghost" type="submit">Send a test</button></form></div>
+    <form method="post" action="/settings/notify" data-autosubmit>
+      <h3 class="label set-sub">Send a notification for</h3>
+      {% for t in toggles %}
+      <div class="set-row"><div class="set-txt"><strong id="t-{{ t.key }}">{{ t.label }}</strong></div>
+        <label class="switch"><input type="checkbox" role="switch" name="notify.{{ t.key }}" aria-labelledby="t-{{ t.key }}" {% if t.on %}checked{% endif %}><span aria-hidden="true"></span></label></div>
+      {% endfor %}
+      <noscript><div class="set-row"><span></span><button class="btn sm ghost" type="submit">Save</button></div></noscript>
+    </form>
+    {% if !push_devices.is_empty() %}<h3 class="label set-sub">Devices with notifications</h3>{% endif %}
+    {% for d in push_devices %}
+    <div class="set-row"><div class="set-txt"><strong>{{ d.device }}</strong><span class="sub{% if d.failing %} warn-text{% endif %}">on since {{ d.added }} · {{ d.status }}</span></div>
+      <form method="post" action="/settings/push/{{ d.id }}/remove"><button class="btn sm ghost" type="submit">Turn off</button></form></div>
+    {% endfor %}
+  </section>
 
-<section class="card pad stack" aria-labelledby="s-agents">
-  <div class="sec"><h2 id="s-agents">Agent tokens</h2></div>
-  {% if agent_tokens.is_empty() %}<p class="sub">No agent has a token yet. Projects get theirs when they're added.</p>{% else %}
-  <div class="table-wrap"><table class="table">
-    <thead><tr><th scope="col">Holder</th><th scope="col">Can</th><th scope="col">Last used</th><th scope="col"><span class="vh">Actions</span></th></tr></thead>
-    <tbody>
+  {% else if section == "devices" %}
+  <section aria-labelledby="h-sec">
+    <h2 id="h-sec">Devices</h2>
+    <p class="sub set-lead">Machines with <span class="mono">flow</span>. They can read; every change needs your approval. The four characters after a name are the token's end (<span class="mono">flow status</span> shows a machine's).</p>
+    {% if !approvals.is_empty() %}
+    <h3 class="label set-sub">Waiting for your approval</h3>
+    {% for (code, what, machine) in approvals %}
+    <div class="set-row"><div class="set-txt"><strong>{{ what }}</strong><span class="sub mono">{{ code }} · {{ machine }}</span></div><a class="btn sm" href="/approve/{{ code }}">Review</a></div>
+    {% endfor %}
+    {% endif %}
+    <h3 class="label set-sub">Add a machine</h3>
+    <div class="set-row stack-row"><div class="set-txt"><strong>Run this there, as the user who'll use it</strong><span class="sub">It installs <span class="mono">flow</span> and asks for your approval here. Linux, x86-64, glibc {{ glibc }} or newer. Has <span class="mono">flow</span> already: <span class="mono">flow connect {{ public_url }}</span>.</span></div>
+      <pre class="cmd mono">curl -fsSL {{ public_url }}/install.sh | sh</pre></div>
+    {% if !device_tokens.is_empty() %}<h3 class="label set-sub">Connected</h3>{% endif %}
+    {% for t in device_tokens %}
+    <div class="set-row"><div class="set-txt"><strong>{{ t.holder }}{% if !t.hint.is_empty() %} <span class="mono sub">{{ t.hint }}</span>{% endif %}</strong><span class="sub">added {{ t.added }} · used {{ t.used }}{% if !t.from.is_empty() %} from {{ t.from }}{% endif %}</span></div>
+      <form method="post" action="/settings/tokens/{{ t.id }}/revoke"><button class="btn sm ghost" type="submit" data-confirm="Revoke {{ t.holder }}? flow on that machine stops working until you connect it again.">Revoke</button></form></div>
+    {% endfor %}
+  </section>
+
+  {% else if section == "builders" %}
+  {{ build_servers|safe }}
+
+  {% else if section == "agents" %}
+  <section aria-labelledby="h-sec">
+    <h2 id="h-sec">Agent tokens</h2>
+    <p class="sub set-lead">Each project's agent has one; Claude Code reads it from its file in <code>~/.config/agentflow/tokens/</code> when it connects.</p>
+    {% if agent_tokens.is_empty() %}<div class="set-row"><div class="set-txt"><strong>None yet</strong><span class="sub">Projects get theirs when they're added.</span></div></div>{% endif %}
     {% for t in agent_tokens %}
-      <tr><td>{{ t.holder }}{% if !t.hint.is_empty() %} <span class="mono sub">{{ t.hint }}</span>{% endif %} <span class="sub">· added {{ t.added }}</span></td><td class="muted">{{ t.can }}</td><td class="muted">{{ t.used }}{% if !t.from.is_empty() %} · {{ t.from }}{% endif %}</td>
-        <td class="actions"><form method="post" action="/settings/tokens/{{ t.id }}/rotate"><button class="btn sm ghost" type="submit" data-confirm="Replace {{ t.holder }}'s token? The agent reconnects with the new one.">Rotate</button></form></td></tr>
+    <div class="set-row"><div class="set-txt"><strong>{{ t.holder }}{% if !t.hint.is_empty() %} <span class="mono sub">{{ t.hint }}</span>{% endif %}</strong><span class="sub">{{ t.can }} · added {{ t.added }} · used {{ t.used }}{% if !t.from.is_empty() %} from {{ t.from }}{% endif %}</span></div>
+      <form method="post" action="/settings/tokens/{{ t.id }}/rotate"><button class="btn sm ghost" type="submit" data-confirm="Rotate {{ t.holder }}'s token? A new one goes to its file and the old one stops working; the agent picks it up when it reconnects.">Rotate</button></form></div>
     {% endfor %}
-    </tbody>
-  </table></div>
+  </section>
+
+  {% else if section == "consultant" %}
+  <section aria-labelledby="h-sec">
+    <h2 id="h-sec">Consultant</h2>
+    <p class="sub set-lead">A Claude Code session the server runs, as the server's user. Agents ask it with SendMessage ("AgentFlow Consultant").</p>
+    {% if let Some(e) = consultant.error %}<p class="notice warn" role="alert">{{ e }}</p>{% endif %}
+    {% if consultant.on && consultant.waiting_trust %}<p class="notice warn" role="alert">It's waiting at Claude Code's question whether to trust its folder. Open it with the terminal command below and choose "Yes, I trust this folder"; it starts then.</p>{% endif %}
+    <form method="post" action="/settings/consultant/{% if consultant.on %}off{% else %}on{% endif %}" data-autosubmit>
+      <div class="set-row"><div class="set-txt"><strong id="c-on">Run the consultant</strong><span class="sub">{% if consultant.on && consultant.waiting_trust %}Waiting for you{% else if consultant.on && consultant.running %}Running{% else if consultant.on %}On, starting{% else %}Off{% endif %}</span></div>
+        <label class="switch"><input type="checkbox" role="switch" name="on" aria-labelledby="c-on" {% if consultant.on %}checked data-confirm="Switch the consultant off? Its session ends; switching it on again continues it." data-confirm-ok="Switch off"{% endif %}><span aria-hidden="true"></span></label></div>
+      <noscript><div class="set-row"><span></span><button class="btn sm ghost" type="submit">{% if consultant.on %}Switch off{% else %}Switch on{% endif %}</button></div></noscript>
+    </form>
+    <div class="set-rows{% if !consultant.on %} dim{% endif %}">
+      <div class="set-row"><div class="set-txt"><strong>On claude.ai</strong><span class="sub">{% if consultant.link.is_some() %}Its Remote Control session.{% else %}Its link shows here once it has connected Remote Control.{% endif %}</span></div>
+        {% if let Some(l) = consultant.link %}<a class="btn sm ghost" href="{{ l }}" target="_blank" rel="noopener">Open</a>{% endif %}</div>
+      <div class="set-row stack-row"><div class="set-txt"><strong>In a terminal</strong><span class="sub">On the server, as the server's user.</span></div><pre class="cmd mono">{{ consultant.attach }}</pre></div>
+      <div class="set-row"><div class="set-txt"><strong>Model</strong></div><span class="mono">Opus 5.5</span></div>
+      {% if let Some(h) = consultant.token_hint %}<div class="set-row"><div class="set-txt"><strong>Token</strong><span class="sub">A new one each time it starts.</span></div><span class="mono">{{ h }}</span></div>{% endif %}
+      <div class="set-row"><div class="set-txt"><strong>Permissions</strong><span class="sub">AgentFlow's tools without asking; everything else as its Claude Code permission mode says.</span></div></div>
+    </div>
+  </section>
+
+  {% else if section == "github" %}
+  <section aria-labelledby="h-sec">
+    <h2 id="h-sec">GitHub</h2>
+    <p class="sub set-lead">AgentFlow's own tokens, kept encrypted. Without one, <span class="mono">gh</span> uses the login of the user it runs as. For your repositories: a fine-grained token with read and write access to Contents and Pull requests.</p>
+    {% for (which, label, what, set) in github %}
+    <div class="set-row stack-row"><div class="set-txt"><strong>{{ label }}</strong><span class="sub">For {{ what }}.{% if let Some(s) = set %} Set: <span class="mono">{{ s }}</span>{% else %} Not set.{% endif %}</span></div>
+      <div class="row wrap">
+        <form method="post" action="/settings/github" class="row grow-form"><input type="hidden" name="which" value="{{ which }}"><label class="vh" for="gh-{{ which }}">{{ label }} token</label><input id="gh-{{ which }}" name="token" type="password" autocomplete="off" required placeholder="{% if set.is_some() %}Replace with another token{% else if *which == "own" %}github_pat_…{% else %}ghp_…{% endif %}"><button class="btn sm" type="submit">{% if set.is_some() %}Replace{% else %}Save{% endif %}</button></form>
+        {% if set.is_some() %}<form method="post" action="/settings/github/remove"><input type="hidden" name="which" value="{{ which }}"><button class="btn sm ghost" type="submit" data-confirm="Remove the token for {{ label|lower }}? gh uses the login of the user it runs as again.">Remove</button></form>{% endif %}
+      </div></div>
+    {% endfor %}
+  </section>
   {% endif %}
-  <p class="sub">Claude Code reads each token from its file in <code>~/.config/agentflow/tokens/</code> when it connects.</p>
-</section>
-
-{{ build_servers|safe }}
-
-<section class="card pad stack" aria-labelledby="s-sessions">
-  <div class="sec"><h2 id="s-sessions">Signed-in browsers</h2></div>
-  <ul class="rows">
-  {% for s in sessions %}
-    <li class="item-row"><div class="ttl"><strong>{{ s.device }}{% if s.current %} <span class="chip accent">this one</span>{% endif %}</strong><span class="sub">signed in with {{ s.how }} · last seen {{ s.seen }}</span></div>
-      {% if !s.current %}<form method="post" action="/settings/sessions/{{ s.id }}/end"><button class="btn sm ghost" type="submit">Sign out</button></form>{% endif %}</li>
-  {% endfor %}
-  </ul>
-</section>
+  </div>
 </div>
 {% endblock %}

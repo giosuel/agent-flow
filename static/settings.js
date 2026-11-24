@@ -32,15 +32,25 @@ async function post(url, body) {
 async function turnOn(button, status) {
   const say = (t, kind) => { status.textContent = t; status.className = "notice" + (kind ? " " + kind : ""); status.hidden = !t; };
   if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
-    say(/iPhone|iPad/.test(navigator.userAgent)
-      ? "On iPhone, add AgentFlow to your home screen first (Share, then Add to Home Screen), then open it from there."
-      : "This browser can't receive push notifications.", "warn");
+    window.afDialog({
+      title: "Notifications aren't available here",
+      text: /iPhone|iPad/.test(navigator.userAgent)
+        ? "On iPhone, add AgentFlow to your Home Screen first (Share, then Add to Home Screen), open it from there and turn them on again."
+        : "This browser can't receive push notifications.",
+    });
     return;
   }
   button.disabled = true;
   try {
     const permission = await Notification.requestPermission();
-    if (permission !== "granted") throw new Error("notifications are blocked for this site");
+    if (permission !== "granted") {
+      button.disabled = false;
+      await window.afDialog({
+        title: "Notifications are blocked",
+        text: "This browser doesn't allow them for AgentFlow. Allow notifications for this site in its settings, then turn them on again.",
+      });
+      return;
+    }
     const reg = await navigator.serviceWorker.register("/sw.js");
     await navigator.serviceWorker.ready;
     let sub = await reg.pushManager.getSubscription();

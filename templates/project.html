@@ -173,7 +173,7 @@
     <label>Build server<select name="build_server">
       <option value=""{% if e.build_server.is_empty() %} selected{% endif %}>None: builds where the agent is</option>
       {% for b in e.servers %}<option value="{{ b }}"{% if *b == e.build_server %} selected{% endif %}>{{ b }}</option>{% endfor %}
-    </select><span class="sub">Where <span class="mono">flow remote</span> runs its builds and tests. Add machines in <a href="/settings#s-builds">Settings</a>.</span></label>
+    </select><span class="sub">Where <span class="mono">flow remote</span> runs its builds and tests. Add machines in <a href="/settings?s=builders">Settings</a>.</span></label>
     <p class="sub span-all">Tech stack, platform, git and project rules are in the <a href="/p/{{ slug }}?tab=notes">project document</a> now.</p>
     <label class="span-all">Ports<textarea name="ports" rows="2" placeholder="One per line, e.g. 5173 vite">{{ e.ports }}</textarea></label>
   </div>

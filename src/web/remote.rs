@@ -627,7 +627,7 @@ pub async fn servers_card(state: &AppState, code: Option<&str>) -> anyhow::Resul
 }
 
 fn back_to_card(code: &str) -> Response {
-    Redirect::to(&format!("/settings?bs={code}#s-builds")).into_response()
+    Redirect::to(&format!("/settings?s=builders&bs={code}")).into_response()
 }
 
 fn find_server(state: &AppState, name: &str) -> AppResult<crate::config::BuildServer> {
