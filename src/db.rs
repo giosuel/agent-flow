@@ -37,6 +37,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/024_no_ssh_builders.sql"),
     include_str!("../migrations/025_notifications.sql"),
     include_str!("../migrations/026_job_requests.sql"),
+    include_str!("../migrations/027_job_slots.sql"),
 ];
 
 const POOL_SIZE: usize = 6;

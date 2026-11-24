@@ -22,8 +22,20 @@ use tokio::sync::{mpsc, oneshot};
 pub enum Request {
     /// Run a script with `sh` in the builder's home; `stream`: send its lines as they come.
     Sh { id: u64, script: String, stream: bool, timeout_s: u64 },
-    /// Bring a project's work folder to a snapshot in the server's store.
-    Sync { id: u64, work: String, manifest: String, bundle: String, commit: String },
+    /// Bring a project's work folder to a snapshot in the server's store. `shared`: the project's
+    /// git objects there, shared by its slots; `seed`: a work folder whose history fills it the
+    /// first time (both empty from an older server).
+    Sync {
+        id: u64,
+        work: String,
+        manifest: String,
+        bundle: String,
+        commit: String,
+        #[serde(default)]
+        shared: String,
+        #[serde(default)]
+        seed: String,
+    },
     /// Send a path of a finished job back to the server.
     Upload { id: u64, job: i64, from: String, name: String },
     /// Stop a streamed script.

@@ -215,10 +215,11 @@ fn handle(me: Arc<Builder>, req: Request) {
                 me.out.push(reply);
             });
         }
-        Request::Sync { id, work, manifest, bundle, commit: _ } => {
+        Request::Sync { id, work, manifest, bundle, commit: _, shared, seed } => {
             let me2 = me.clone();
             tokio::spawn(async move {
-                let got = tokio::task::spawn_blocking(move || sync(&me2, &work, &manifest, &bundle)).await;
+                let got =
+                    tokio::task::spawn_blocking(move || sync(&me2, &work, &manifest, &bundle, &shared, &seed)).await;
                 let reply = match got {
                     Ok(Ok(report)) => {
                         Reply::Done { re: id, code: 0, stdout: report.to_string(), stderr: String::new() }
@@ -367,7 +368,14 @@ fn fetch_blobs(me: &Builder, shas: &[String]) -> anyhow::Result<u64> {
 /// Brings a work folder to a snapshot: writes only files whose content changed, deletes files the
 /// snapshot no longer has (only files an earlier snapshot put there; builds stay), and moves
 /// git's index to the commit, so `git describe` sees what the agent sees.
-fn sync(me: &Builder, work: &str, manifest: &str, bundle: &str) -> anyhow::Result<serde_json::Value> {
+fn sync(
+    me: &Builder,
+    work: &str,
+    manifest: &str,
+    bundle: &str,
+    shared: &str,
+    seed: &str,
+) -> anyhow::Result<serde_json::Value> {
     crate::blobs::check_sha(manifest)?;
     let mut received = fetch_blobs(me, &[manifest.to_owned()])?;
     let m: Manifest = serde_json::from_slice(&std::fs::read(me.cfg.store().path(manifest))?)?;
@@ -431,11 +439,61 @@ fn sync(me: &Builder, work: &str, manifest: &str, bundle: &str) -> anyhow::Resul
     std::fs::write(&state_file, serde_json::to_vec(&now)?)?;
     // Git: new commits and tags from the bundle, then the index to the commit (files stay).
     let mut git_ok = false;
-    if !m.commit.is_empty() {
-        if !bundle.is_empty() {
-            let b = st.path(bundle).display().to_string();
-            let _ = git(&["fetch", "-q", "--force", &b, "+HEAD:refs/heads/agentflow", "+refs/tags/*:refs/tags/*"]);
+    if !m.commit.is_empty() && !shared.is_empty() {
+        // Several slots of a project (the owner, 2026-11-17): their history lives once, in a bare
+        // repository they all borrow objects from; the bundle goes there, the slot takes refs.
+        let sh = under_home(me, shared)?;
+        let at = |repo: &Path, args: &[&str]| {
+            std::process::Command::new("git")
+                .arg("-C")
+                .arg(repo)
+                .args(args)
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false)
+        };
+        if !sh.join("HEAD").exists() {
+            std::fs::create_dir_all(&sh)?;
+            at(&sh, &["init", "-q", "--bare"]);
         }
+        let alternates = dir.join(".git/objects/info/alternates");
+        let objects = sh.join("objects").display().to_string();
+        if !std::fs::read_to_string(&alternates).unwrap_or_default().lines().any(|l| l == objects) {
+            std::fs::create_dir_all(alternates.parent().context("objects/info")?)?;
+            use std::io::Write;
+            writeln!(std::fs::OpenOptions::new().create(true).append(true).open(&alternates)?, "{objects}")?;
+        }
+        let refs = ["+refs/heads/agentflow:refs/heads/agentflow", "+refs/tags/*:refs/tags/*"];
+        let fetch_bundle = || {
+            !bundle.is_empty() && {
+                let b = st.path(bundle).display().to_string();
+                at(&sh, &["fetch", "-q", "--force", &b, "+HEAD:refs/heads/agentflow", "+refs/tags/*:refs/tags/*"])
+            }
+        };
+        let in_shared = || at(&sh, &["cat-file", "-e", &format!("{}^{{commit}}", m.commit)]);
+        if !fetch_bundle() && !in_shared() && !seed.is_empty() {
+            // The first time: the history the first slot already has, then the bundle again.
+            let sd = under_home(me, seed)?;
+            if sd.join(".git").exists() && sd != dir {
+                let sd = sd.display().to_string();
+                let mut args = vec!["fetch", "-q", "--force", sd.as_str()];
+                args.extend(refs);
+                at(&sh, &args);
+            } else if sd == dir {
+                let d = dir.display().to_string();
+                at(&sh, &["fetch", "-q", "--force", &d, "+refs/heads/*:refs/heads/*", "+refs/tags/*:refs/tags/*"]);
+            }
+            fetch_bundle();
+        }
+        let shp = sh.display().to_string();
+        let mut args = vec!["fetch", "-q", "--force", shp.as_str()];
+        args.extend(refs);
+        let _ = git(&args);
+    } else if !m.commit.is_empty() && !bundle.is_empty() {
+        let b = st.path(bundle).display().to_string();
+        let _ = git(&["fetch", "-q", "--force", &b, "+HEAD:refs/heads/agentflow", "+refs/tags/*:refs/tags/*"]);
+    }
+    if !m.commit.is_empty() {
         let have =
             git(&["cat-file", "-e", &format!("{}^{{commit}}", m.commit)]).map(|o| o.status.success()).unwrap_or(false);
         if have {
