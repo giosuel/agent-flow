@@ -1048,6 +1048,32 @@ async fn the_bar_shows_the_project_its_tabs_and_the_global_pages() {
     assert!(!bar.contains("btabs"), "no project tabs on a global page");
     assert!(bar.contains(r#"<a href="/usage" class="on" aria-current="page">"#));
     assert!(bar.contains("<span>Usage</span>"), "the current page's icon carries its name");
+
+    // The project last opened is kept in a cookie, and the bar outside the projects shows it,
+    // drawn by the server (the owner, 2026-11-23: "lets do cookie").
+    let set_cookie = |res: &reqwest::Response| {
+        res.headers().get_all(SET_COOKIE).iter().map(|v| v.to_str().unwrap().to_owned()).collect::<Vec<_>>().join("\n")
+    };
+    let res = s.http.get(s.url("/p/vinculum?tab=prs")).header(COOKIE, &cookie).send().await.unwrap();
+    let kept = set_cookie(&res);
+    assert!(kept.contains("af_project=vinculum") && kept.contains("HttpOnly") && kept.contains("Path=/"), "{kept}");
+    let with = format!("{cookie}; af_project=vinculum");
+    let res = s.http.get(s.url("/p/vinculum")).header(COOKIE, &with).send().await.unwrap();
+    assert!(set_cookie(&res).is_empty(), "already kept");
+    let usage = owner_page(&s, &with, "/usage").await;
+    let bar = &usage[usage.find("<header").unwrap()..usage.find("</header>").unwrap()];
+    assert!(bar.contains(r#"<summary class="pswitch-btn"><span>vinculum</span>"#), "{bar}");
+    assert!(bar.contains(r#"<a href="/p/vinculum">Overview</a>"#), "its tabs, none lit: {bar}");
+    assert!(bar.contains(r#"Questions<span class="mono n y">1</span>"#), "with their counts");
+    assert!(bar.contains(r#"<a href="/usage" class="on" aria-current="page">"#), "the page is still Usage");
+    let unknown = owner_page(&s, &format!("{cookie}; af_project=nope"), "/usage").await;
+    assert!(unknown.contains("<span>All projects</span>"), "a project that isn't there is ignored");
+    // All projects forgets it.
+    let res = s.http.get(s.url("/projects")).header(COOKIE, &with).send().await.unwrap();
+    let gone = set_cookie(&res);
+    assert!(gone.contains("af_project=;") && gone.contains("Max-Age=0"), "{gone}");
+    let list = res.text().await.unwrap();
+    assert!(list.contains("<span>All projects</span>"), "the projects list isn't one project's");
 }
 
 /// A release's tag pushed by hand, outside AgentFlow: the poller sees it on GitHub, marks the
