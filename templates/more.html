@@ -2,7 +2,7 @@
 {% block title %}More{% endblock %}
 {% block content %}
 <div class="head"><h1>More</h1></div>
-<ul class="card more-list plain">
+<ul class="card more-list navlist plain">
   {% for i in items %}<li><a href="{{ i.href }}"{% if i.href == "/settings" %} data-settings{% endif %}>{{ i.icon|safe }}<span>{{ i.name }}</span><span class="chev">{{ crate::web::icons::icon("chevron")|safe }}</span></a></li>{% endfor %}
 </ul>
 {% endblock %}

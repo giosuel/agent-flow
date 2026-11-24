@@ -41,12 +41,12 @@
     </details>
     {% endif %}
     {% if let Some(h) = nav.here %}
-    <nav class="btabs" aria-label="{{ h.name }}" data-fold>
-      {% for t in h.tabs %}<a href="{{ t.href }}"{% if t.dlg %} data-dlg{% endif %}{% if t.on %} class="on" aria-current="page"{% endif %}>{{ t.label }}{% if !t.count.is_empty() %}<span class="mono n{% if t.warn %} y{% endif %}">{{ t.count }}</span>{% endif %}</a>{% endfor %}
+    <nav class="tabs flush btabs" aria-label="{{ h.name }}" data-fold>
+      {% for t in h.tabs %}<a href="{{ t.href }}"{% if t.dlg %} data-dlg{% endif %}{% if t.on %} class="on" aria-current="page"{% endif %}>{{ t.label }}{% if !t.count.is_empty() %}<span class="count{% if t.warn %} warn{% endif %}">{{ t.count }}</span>{% endif %}</a>{% endfor %}
     </nav>
     <details class="btabs-more" data-menu hidden>
         <summary>More<span class="chev-d">{{ crate::web::icons::icon("chevron")|safe }}</span></summary>
-        <div class="bmenu">{% for t in h.tabs %}<a class="bmi{% if t.on %} on{% endif %}" href="{{ t.href }}"{% if t.dlg %} data-dlg{% endif %} hidden><span>{{ t.label }}</span>{% if !t.count.is_empty() %}<span class="mono n{% if t.warn %} y{% endif %}">{{ t.count }}</span>{% endif %}</a>{% endfor %}</div>
+        <div class="bmenu">{% for t in h.tabs %}<a class="bmi{% if t.on %} on{% endif %}" href="{{ t.href }}"{% if t.dlg %} data-dlg{% endif %} hidden><span>{{ t.label }}</span>{% if !t.count.is_empty() %}<span class="count{% if t.warn %} warn{% endif %}">{{ t.count }}</span>{% endif %}</a>{% endfor %}</div>
     </details>
     {% endif %}
     <div class="grow"></div>

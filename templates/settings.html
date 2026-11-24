@@ -6,7 +6,7 @@
    the right; on the phone the list first, a section on its own screen. #}
 <div class="head set-title{% if chosen %} chosen{% endif %}"><h1>Settings</h1></div>
 <div class="set-shell{% if chosen %} chosen{% endif %}">
-  <nav class="set-nav" aria-label="Settings sections">
+  <nav class="set-nav navlist" aria-label="Settings sections">
     {% for (group, links) in groups %}
     <p class="set-group">{{ group }}</p>
     {% for l in links %}<a href="/settings?s={{ l.key }}"{% if l.key == section %} class="on" aria-current="page"{% endif %}>{{ crate::web::icons::icon(l.icon)|safe }}<span>{{ l.label }}</span>{% if let Some(b) = l.badge %}<span class="chip warn">{{ b }}</span>{% endif %}<span class="chev" aria-hidden="true">{{ crate::web::icons::icon("chevron")|safe }}</span></a>{% endfor %}
