@@ -18,8 +18,10 @@ pub enum Via {
     Button,
     Poller,
     System,
-    /// A build or test on a build server, and its output.
+    /// A build or test on a build server, and its output; builders connecting.
     Build,
+    /// What Claude sessions and subagents told each other (from their transcripts).
+    Session,
 }
 
 impl Via {
@@ -33,6 +35,7 @@ impl Via {
             Via::Poller => "poller",
             Via::System => "system",
             Via::Build => "build",
+            Via::Session => "session",
         }
     }
 }

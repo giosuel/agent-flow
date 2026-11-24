@@ -94,6 +94,26 @@ pub fn icon(name: &str) -> &'static str {
         "server" => {
             r#"<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="4" width="17" height="7" rx="1.5"/><rect x="3.5" y="13" width="17" height="7" rx="1.5"/><path d="M7 7.5h.01M7 16.5h.01"/></svg>"#
         }
+        "code" => {
+            r#"<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="m8 7-5 5 5 5M16 7l5 5-5 5"/></svg>"#
+        }
+        "person" => {
+            r#"<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3.5"/><path d="M5 20a7 7 0 0 1 14 0"/></svg>"#
+        }
+        "hammer" => {
+            r#"<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="m14 6 4 4M3 21l9-9M12.5 4.5l7 7-2.5 2.5-7-7z"/></svg>"#
+        }
+        "pause" => r#"<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14M16 5v14"/></svg>"#,
+        "play" => r#"<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5v14l11-7z"/></svg>"#,
+        "search" => {
+            r#"<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/></svg>"#
+        }
+        "filter" => {
+            r#"<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M7 12h10M10 18h4"/></svg>"#
+        }
+        "copy" => {
+            r#"<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/></svg>"#
+        }
         "message" => r#"<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v11H8l-4 4z"/></svg>"#,
         "grid" => {
             r#"<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/></svg>"#

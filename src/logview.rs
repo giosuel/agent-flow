@@ -65,7 +65,36 @@ const FIELDS: &[(&str, &str)] = &[
     ("via", "via"),
     ("target", "target"),
     ("ip", "ip"),
+    ("cat", "cat"),
 ];
+
+/// The categories the Log is filtered by first (the owner, 2026-11-17: "not just by actor but
+/// also by category, so like, API itself, builder stuff, agent conversations"): (key, label).
+pub const CATEGORIES: &[(&str, &str)] = &[
+    ("agents", "Agents"),
+    ("api", "API"),
+    ("builds", "Builds & jobs"),
+    ("conversations", "Conversations"),
+    ("you", "You"),
+    ("system", "System"),
+];
+
+/// An entry's category, from where it came in: SQL for the database, [`category`] for archives.
+const CATEGORY_SQL: &str = "CASE WHEN via = 'mcp' THEN 'agents' WHEN via IN ('api', 'cli') THEN 'api' \
+    WHEN via = 'build' THEN 'builds' WHEN via = 'session' THEN 'conversations' \
+    WHEN via IN ('page', 'button') OR actor_kind = 'owner' THEN 'you' ELSE 'system' END";
+
+pub fn category(via: &str, actor_kind: &str) -> &'static str {
+    match via {
+        "mcp" => "agents",
+        "api" | "cli" => "api",
+        "build" => "builds",
+        "session" => "conversations",
+        "page" | "button" => "you",
+        _ if actor_kind == "owner" => "you",
+        _ => "system",
+    }
+}
 
 /// A parsed query: `severity:warn project:vinculum -action:read merge failed`.
 #[derive(Debug, Default, Clone, PartialEq)]
@@ -108,7 +137,8 @@ impl Filter {
         for (col, v, neg) in &self.fields {
             args.push(V::Text(v.clone()));
             // Columns come from FIELDS only, never from the query text.
-            sql.push_str(&format!(" AND lower(coalesce({col}, '')) {} ?{}", if *neg { "!=" } else { "=" }, args.len()));
+            let expr = if col == "cat" { format!("({CATEGORY_SQL})") } else { format!("lower(coalesce({col}, ''))") };
+            sql.push_str(&format!(" AND {expr} {} ?{}", if *neg { "!=" } else { "=" }, args.len()));
         }
         for w in &self.words {
             args.push(V::Text(format!("%{}%", w.replace('%', "\\%").replace('_', "\\_"))));
@@ -140,6 +170,7 @@ impl Filter {
                 "via" => r.via.clone(),
                 "target" => r.target.clone().unwrap_or_default(),
                 "ip" => r.ip.clone().unwrap_or_default(),
+                "cat" => category(&r.via, &r.actor_kind).to_owned(),
                 _ => String::new(),
             }
             .to_lowercase()
@@ -180,6 +211,17 @@ pub fn newer(conn: &Connection, f: &Filter, after: i64) -> anyhow::Result<Vec<Lo
 
 pub fn latest_seq(conn: &Connection) -> anyhow::Result<i64> {
     Ok(conn.query_row("SELECT coalesce(max(seq), 0) FROM log", [], |r| r.get(0))?)
+}
+
+/// How many matching entries each category has, the category itself left out of the filter (the
+/// tabs).
+pub fn category_counts(conn: &Connection, f: &Filter) -> anyhow::Result<Vec<(String, i64)>> {
+    let mut f = f.clone();
+    f.fields.retain(|(c, _, _)| c != "cat");
+    let (sql, args) = f.sql();
+    let mut stmt = conn.prepare(&format!("SELECT {CATEGORY_SQL} AS c, count(*) FROM log{sql} GROUP BY c"))?;
+    let rows = stmt.query_map(params_from_iter(args), |r| Ok((r.get(0)?, r.get(1)?)))?;
+    Ok(rows.collect::<Result<_, _>>()?)
 }
 
 /// How many matching entries have each value of `column` (the sidebar).

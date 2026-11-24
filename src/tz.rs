@@ -56,6 +56,11 @@ impl Tz {
         self.at(ms).strftime("%A %-d %B · %H:%M").to_string()
     }
 
+    /// "02:04:05", a Log row's time.
+    pub fn hms(&self, ms: i64) -> String {
+        self.at(ms).strftime("%H:%M:%S").to_string()
+    }
+
     /// "02:04".
     pub fn hm(&self, ms: i64) -> String {
         self.at(ms).strftime("%H:%M").to_string()
