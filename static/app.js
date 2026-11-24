@@ -1042,3 +1042,57 @@ document.addEventListener("click", (e) => {
     go(dx < 0 ? "a[data-older]" : "a[data-newer]");
   }, { passive: true });
 })();
+
+// The desktop bar (the owner, 2026-11-19, D-232). Its menus (the project switcher, More) close on
+// a click elsewhere or Escape, and one opening closes the other. The project's tabs that don't fit
+// fold into More, from the last one; the current tab folded marks More.
+(() => {
+  const menus = () => document.querySelectorAll("details[data-menu]");
+  document.addEventListener("click", (e) => {
+    for (const d of menus()) if (d.open && !d.contains(e.target)) d.open = false;
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape") return;
+    for (const d of menus()) {
+      if (!d.open) continue;
+      d.open = false;
+      d.querySelector("summary").focus();
+    }
+  });
+  document.addEventListener(
+    "toggle",
+    (e) => {
+      const d = e.target;
+      if (!(d instanceof HTMLDetailsElement) || !d.matches("[data-menu]") || !d.open) return;
+      for (const o of menus()) if (o !== d) o.open = false;
+    },
+    true,
+  );
+  const fold = () => {
+    const bar = document.querySelector(".btabs");
+    const more = document.querySelector(".btabs-more");
+    if (!bar || !more) return;
+    const tabs = [...bar.children];
+    const items = [...more.querySelectorAll(".bmi")];
+    for (const t of tabs) t.hidden = false;
+    more.hidden = true;
+    if (bar.offsetParent === null || bar.scrollWidth <= bar.clientWidth) {
+      for (const i of items) i.hidden = true;
+      more.classList.remove("on");
+      return;
+    }
+    more.hidden = false;
+    let n = tabs.length;
+    while (n > 1 && bar.scrollWidth > bar.clientWidth) tabs[--n].hidden = true;
+    items.forEach((i, k) => (i.hidden = k < n));
+    more.classList.toggle("on", tabs.slice(n).some((t) => t.classList.contains("on")));
+  };
+  let raf = 0;
+  window.addEventListener("resize", () => {
+    cancelAnimationFrame(raf);
+    raf = requestAnimationFrame(fold);
+  });
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", fold);
+  else fold();
+  document.fonts?.ready.then(fold);
+})();

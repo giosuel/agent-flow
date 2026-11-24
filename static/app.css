@@ -1972,3 +1972,59 @@ html.no-scroll { overflow: hidden; }
   .dov .ov-bigrow .sub { padding: 0; }
   .dov .ov-agents .label::after { content: ""; }
 }
+
+/* The desktop bar (the owner, 2026-11-19, D-232: "option 2 with 3 icons and when I open usage
+   for example, the icon expands with the text"): the logo, the project switcher, the project's
+   tabs (those that don't fit fold into More), the global pages as icons, the current one a pill
+   with its name; the bell and settings after a divider. The phone keeps its own navigation. */
+.pswitch, .btabs, .btabs-more, .vsep { display: none; }
+@media (min-width: 701px) {
+  .top { position: relative; z-index: 15; border-bottom: 1px solid #18181E; }
+  .top-in { flex-wrap: nowrap; align-items: stretch; gap: 18px; }
+  .top-in > * { align-self: center; }
+  .top .brand span { display: none; }
+  .pswitch { display: block; position: relative; flex: none; }
+  .pswitch-btn { list-style: none; display: inline-flex; align-items: center; gap: 8px; height: 40px; max-width: 280px; padding: 0 10px 0 12px; border: 1px solid var(--line); border-radius: 9px; background: #121216; color: var(--ink); font-weight: 600; font-size: 15.5px; white-space: nowrap; cursor: pointer; }
+  .pswitch-btn::-webkit-details-marker, .btabs-more > summary::-webkit-details-marker { display: none; }
+  .pswitch-btn > span:first-child { overflow: hidden; text-overflow: ellipsis; }
+  .pswitch-btn:hover { border-color: #3A3A44; }
+  .pswitch[open] > .pswitch-btn, .pswitch-btn.on { border-color: #5B4A99; background: var(--soft); }
+  .chev-d { display: inline-flex; color: var(--muted); }
+  .chev-d .i { width: 16px; height: 16px; rotate: 90deg; }
+  .bmenu { position: absolute; top: calc(100% + 8px); left: 0; z-index: 30; min-width: 220px; display: flex; flex-direction: column; gap: 1px; padding: 8px; box-sizing: border-box; background: #0F0F12; border: 1px solid #34343D; border-radius: 12px; box-shadow: 0 24px 80px rgba(0, 0, 0, .7); }
+  .pswitch-menu { width: 320px; max-height: calc(100vh - 90px); overflow-y: auto; }
+  .bmenu-h { display: flex; justify-content: space-between; align-items: center; padding: 10px 10px 6px; }
+  .bmenu-h a { font-size: 12.5px; }
+  .bmenu hr { border: 0; border-top: 1px solid #1E1E25; margin: 6px 0; width: 100%; }
+  .bmi { display: flex; align-items: center; gap: 11px; min-height: 36px; padding: 0 10px; border-radius: 8px; color: #C6C6CE; text-decoration: none; font-size: 14.5px; white-space: nowrap; }
+  .bmi:hover { background: #17171C; color: var(--ink); }
+  .bmi .i { width: 17px; height: 17px; flex: none; color: var(--muted); }
+  .bmi.on { background: var(--soft); color: var(--ink); }
+  .bmi.on .i { color: var(--accent); }
+  .bmi > span:first-of-type { overflow: hidden; text-overflow: ellipsis; }
+  .bmi .dot, .bmi .n { margin-left: auto; }
+  .bmi[hidden], .btabs > a[hidden] { display: none; }
+  .btabs { display: flex; align-self: stretch; gap: 2px; flex: 0 1 auto; min-width: 0; overflow: hidden; margin-left: 6px; }
+  .btabs > a, .btabs-more > summary { display: flex; align-items: center; gap: 6px; padding: 0 13px; border-bottom: 2px solid transparent; color: #C6C6CE; text-decoration: none; font-size: 14.5px; font-weight: 500; white-space: nowrap; }
+  .btabs > a:hover, .btabs-more > summary:hover { color: #fff; }
+  .btabs > a.on, .btabs-more.on > summary { color: var(--ink); border-bottom-color: var(--accent); }
+  .btabs .n, .bmi .n { color: var(--muted); font-size: 12.5px; }
+  .btabs .n.y, .bmi .n.y { color: var(--warn-ink); }
+  .btabs-more { display: flex; position: relative; align-self: stretch; flex: none; margin-left: -18px; }
+  .btabs-more > summary { list-style: none; cursor: pointer; gap: 4px; }
+  .btabs-more .bmenu { top: 100%; }
+  .btabs-more[hidden] { display: none; }
+  .gnav { flex: none; flex-wrap: nowrap; gap: 2px; }
+  .gnav a { position: relative; display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 38px; min-width: 38px; padding: 0 9px; box-sizing: border-box; border: 1px solid transparent; border-radius: 9px; color: var(--nav-ink); }
+  .gnav a .i { width: 19px; height: 19px; }
+  .gnav a.on { padding: 0 12px 0 10px; border-color: #5B4A99; background: var(--soft); color: var(--ink); font-size: 14.5px; font-weight: 600; }
+  .gnav a.on .i { width: 18px; height: 18px; color: var(--accent); }
+  .gbadge { position: absolute; top: 0; right: -3px; min-width: 17px; height: 17px; padding: 0 4px; box-sizing: border-box; border-radius: 9px; background: var(--warn); color: #1A1300; font-size: 11px; font-weight: 700; line-height: 17px; text-align: center; }
+  .gnav a.on .gbadge { position: static; }
+  .gnav a[data-name]:hover::after, .gnav a[data-name]:focus-visible::after { content: attr(data-name); position: absolute; top: calc(100% + 6px); left: 50%; transform: translateX(-50%); z-index: 31; padding: 4px 9px; border-radius: 6px; background: var(--ink); color: #0A0A0C; font-size: 12.5px; font-weight: 500; white-space: nowrap; pointer-events: none; }
+  .vsep { display: block; flex: none; width: 1px; height: 22px; background: var(--line); }
+  .top .icon-btn { width: 40px; height: 40px; }
+  /* In a project the bar names it and holds its tabs: the page's own title and tabs are the phone's. */
+  .proj-head { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .proj-tabs { display: none; }
+}

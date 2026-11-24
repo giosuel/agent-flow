@@ -74,7 +74,6 @@
     <div class="cv-pager">
       {% if let Some(n) = s.next %}<a class="pg-btn" href="{{ n }}" data-newer aria-label="Newer {{ s.noun }}">{{ crate::web::icons::icon("back")|safe }}</a>{% else %}<span class="pg-btn off" aria-hidden="true">{{ crate::web::icons::icon("back")|safe }}</span>{% endif %}
       <div class="grow cv-pg-t"><strong>{{ s.pager }}</strong> <span class="sub">{{ s.pager_sub }}</span></div>
-      <span class="sub hide-phone">← → or ↑ ↓ to step</span>
       {% if let Some(p) = s.prev %}<a class="pg-btn" href="{{ p }}" data-older aria-label="Older {{ s.noun }}">{{ crate::web::icons::icon("chevron")|safe }}</a>{% else %}<span class="pg-btn off" aria-hidden="true">{{ crate::web::icons::icon("chevron")|safe }}</span>{% endif %}
     </div>
     <div class="cv-body" data-swipe>
