@@ -722,8 +722,11 @@ fn decision_from_answer(
     let title = match title.map(str::trim).filter(|t| !t.is_empty()) {
         Some(t) => t.to_owned(),
         None => {
-            let what = if option.is_empty() { words.chars().take(120).collect::<String>() } else { option };
-            format!("{}: {what}", q.title.trim().trim_end_matches('?'))
+            // Cut to fit the 300 characters a title may have: a long question (or option) must
+            // never cost the owner their answer. Their words are kept whole in owner_words.
+            let what = crate::activity::clip(if option.is_empty() { &words } else { &option }, 120);
+            let room = 300 - 2 - what.chars().count();
+            format!("{}: {what}", crate::activity::clip(q.title.trim().trim_end_matches('?'), room - 1))
         }
     };
     let mut data = Map::new();
@@ -1196,5 +1199,36 @@ mod tests {
             })
             .unwrap();
         assert_eq!(n, 200);
+    }
+
+    /// A long question still takes the owner's answer: the decision's title is cut to fit, and
+    /// their words are kept whole.
+    #[test]
+    fn long_questions_make_decisions_that_fit() {
+        let db = Db::open_memory();
+        db.call_blocking(|c| {
+            let p = setup(c);
+            let mut data = Map::new();
+            data.insert("options".into(), json!([{"title": "o".repeat(400)}]));
+            let question = |data| NewRecord {
+                kind: Some(Kind::Question),
+                title: format!("{}?", "x".repeat(290)),
+                data,
+                ..Default::default()
+            };
+            let q = create(c, p, "v", question(Map::new()))?;
+            let words = "y".repeat(150);
+            let (q, d) = answer_and_decide(c, &q, None, &words, "owner", None, "owner")?;
+            assert_eq!(q.state, "answered");
+            assert!(d.title.chars().count() <= 300 && d.title.starts_with("xxx"), "{}", d.title);
+            assert!(d.title.contains("…: yyy"), "{}", d.title);
+            assert_eq!(d.str("owner_words"), words);
+            // An option's title has no limit of its own.
+            let q = create(c, p, "v", question(data))?;
+            let (_, d) = answer_and_decide(c, &q, Some(1), "", "owner", None, "owner")?;
+            assert!(d.title.chars().count() <= 300 && d.title.contains("…: ooo"), "{}", d.title);
+            Ok(())
+        })
+        .unwrap();
     }
 }
