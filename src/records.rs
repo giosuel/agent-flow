@@ -328,6 +328,19 @@ pub struct NewRecord {
 
 /// Creates a record with revision 1 and an event. The caller decides who may.
 pub fn create(conn: &Connection, project_id: i64, author: &str, new: NewRecord) -> anyhow::Result<Record> {
+    if !conn.is_autocommit() {
+        return create_in(conn, project_id, author, new);
+    }
+    // Outside a transaction the next number and the insert would be two statements, and two
+    // records made at once in one project (an agent's screenshot and its subagent's) took the
+    // same number: the second failed on UNIQUE. One transaction, holding the write lock.
+    let tx = rusqlite::Transaction::new_unchecked(conn, rusqlite::TransactionBehavior::Immediate)?;
+    let record = create_in(&tx, project_id, author, new)?;
+    tx.commit()?;
+    Ok(record)
+}
+
+fn create_in(conn: &Connection, project_id: i64, author: &str, new: NewRecord) -> anyhow::Result<Record> {
     // Agents paste logs and commands; tokens in them are never stored.
     let mut new = new;
     new.title = crate::activity::redact(&new.title);
@@ -1150,5 +1163,38 @@ mod tests {
             Ok(())
         })
         .unwrap();
+    }
+
+    /// Records made at the same time in one project, outside a transaction, each get their own
+    /// number: max + 1 and the insert were two statements, and the slower one failed on UNIQUE.
+    #[test]
+    fn parallel_creates_take_their_own_numbers() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Db::open(&dir.path().join("flow.db")).unwrap();
+        let p = db.call_blocking(|c| Ok(setup(c))).unwrap();
+        let workers: Vec<_> = (0..4)
+            .map(|w| {
+                let db = db.clone();
+                std::thread::spawn(move || {
+                    db.call_blocking(|c| {
+                        for i in 0..50 {
+                            let new =
+                                NewRecord { kind: Some(Kind::Task), title: format!("{w}.{i}"), ..Default::default() };
+                            create(c, p, "v", new)?;
+                        }
+                        Ok(())
+                    })
+                })
+            })
+            .collect();
+        for w in workers {
+            w.join().unwrap().unwrap();
+        }
+        let n: i64 = db
+            .call_blocking(|c| {
+                Ok(c.query_row("SELECT count(DISTINCT number) FROM records WHERE project_id = ?1", [p], |r| r.get(0))?)
+            })
+            .unwrap();
+        assert_eq!(n, 200);
     }
 }
