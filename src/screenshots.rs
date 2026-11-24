@@ -47,6 +47,25 @@ pub fn category(raw: &str) -> anyhow::Result<String> {
     Ok(c)
 }
 
+/// A mockup's state (the owner, 2026-11-12: "mockups will be visible as screenshots in agent flow.
+/// it might be good to put their claude artifact URL in the description, as well as the state").
+pub const MOCKUP_STATES: &[&str] = &["proposed", "approved", "built"];
+
+pub fn check_mockup_state(s: &str) -> anyhow::Result<()> {
+    if !MOCKUP_STATES.contains(&s) {
+        bail!("a mockup is proposed, approved or built");
+    }
+    Ok(())
+}
+
+/// A link to the design (a claude.ai artifact, usually): https only.
+pub fn check_design_url(u: &str) -> anyhow::Result<()> {
+    if !u.starts_with("https://") || u.len() > 500 || u.chars().any(|c| c.is_whitespace() || c == '"' || c == '<') {
+        bail!("the design link is an https:// address");
+    }
+    Ok(())
+}
+
 pub fn dir(data_dir: &Path) -> PathBuf {
     data_dir.join("screenshots")
 }

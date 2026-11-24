@@ -887,3 +887,13 @@ a.blk.q:hover { text-decoration: underline; }
 .md-doc { background: var(--ground); border: 1px solid var(--line); border-radius: 10px; padding: 16px 20px; font-size: 14px; line-height: 1.6; }
 .note-plain { white-space: pre-wrap; overflow-x: auto; max-height: 70vh; }
 @media (max-width: 760px) { .notes li { grid-template-columns: 34px minmax(0, 1fr); } .notes li > .btn, .notes li > span:last-child { display: none; } }
+
+/* A mockup's state (the owner, 2026-11-12). */
+.mstate { font-size: 12px; font-weight: 600; border-radius: 6px; padding: 2px 8px; }
+.mstate.proposed { background: var(--warn-bg); color: var(--warn-ink); }
+.mstate.approved { background: #0F2A1A; color: #86EFAC; }
+.mstate.built { background: var(--chip-accent); color: var(--chip-accent-ink); }
+.seg3 { align-self: flex-start; display: inline-flex; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+.seg3 button { font: inherit; font-size: 15px; padding: 10px 18px; min-height: 44px; background: var(--ground); color: var(--ink2); border: 0; border-left: 1px solid var(--border); cursor: pointer; text-transform: capitalize; }
+.seg3 button:first-child { border-left: 0; }
+.seg3 button.on { background: var(--chip-accent); color: var(--chip-accent-ink); font-weight: 600; }

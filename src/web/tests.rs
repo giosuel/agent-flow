@@ -1475,6 +1475,28 @@ async fn screenshots_are_uploaded_shown_and_linked() {
     // Signed out: nothing.
     let res = s.http.get(s.url("/p/vinculum/S-1/image")).send().await.unwrap();
     assert!(res.status().is_client_error() || res.status().is_redirection(), "{}", res.status());
+
+    // A mockup is proposed until approved; it links to its design; owner and agent move it on.
+    assert!(page.contains("mstate proposed"), "{page}");
+    assert_eq!(up("name=x&category=mockup&design_url=javascript:alert(1)", png.clone()).await.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(up("name=x&category=mockup&state=done", png.clone()).await.status(), StatusCode::BAD_REQUEST);
+    assert!(up("name=Sidebar%20B&category=mockup&design_url=https%3A%2F%2Fclaude.ai%2Fartifact%2Fabc", png.clone()).await.status().is_success());
+    let res = s
+        .http
+        .post(s.url("/p/vinculum/S-1/mockup-state"))
+        .header(COOKIE, &cookie)
+        .header(ORIGIN, &s.base)
+        .form(&[("state", "approved")])
+        .send()
+        .await
+        .unwrap();
+    assert!(res.status().is_redirection());
+    let page = get("/p/vinculum/S-1".into()).await.text().await.unwrap();
+    assert!(page.contains("class=\"on\" aria-pressed=\"true\">approved"), "{page}");
+    let (ok, r) = mcp_tool(&s, &token, &sess, "update_screenshot", json!({"id": "S-1", "state": "built"})).await;
+    assert!(ok && r["mockup_state"] == "built", "{r}");
+    let page = get("/p/vinculum/S-3".into()).await.text().await.unwrap();
+    assert!(page.contains("https://claude.ai/artifact/abc"), "{page}");
 }
 
 #[tokio::test]

@@ -140,6 +140,19 @@ pub struct UpdateNote {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct UpdateScreenshot {
+    /// The screenshot, e.g. "S-4".
+    pub id: String,
+    /// A mockup's state: proposed, approved or built (set built when the PR that implements it
+    /// merges).
+    pub state: Option<String>,
+    /// The design it shows, e.g. the claude.ai artifact link.
+    pub design_url: Option<String>,
+    pub name: Option<String>,
+    pub description: Option<String>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct LogTiming {
     /// What ran, e.g. "cargo test --workspace".
     pub what: String,
@@ -799,6 +812,48 @@ impl FlowMcp {
             })
             .await;
         self.finish(&actor, "update_note", Action::Write, outcome).await
+    }
+
+    #[tool(description = "Change a screenshot: a mockup's state (proposed, approved, built), the design link, its \
+        name or description. Upload screenshots with `agentflow screenshot` (for a mockup: --design-url and --state).")]
+    async fn update_screenshot(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(p): Parameters<UpdateScreenshot>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let actor = actor_of(&parts);
+        let a = actor.clone();
+        let outcome = self
+            .state
+            .db
+            .call(move |c| {
+                let tx = c.transaction()?;
+                let r = writable(&tx, &a, &p.id)?;
+                if r.kind != Kind::Screenshot {
+                    anyhow::bail!("{} isn't a screenshot", r.ref_id);
+                }
+                let mut data = Map::new();
+                if let Some(st) = p.state.as_deref().map(str::trim) {
+                    crate::screenshots::check_mockup_state(st)?;
+                    data.insert("mockup_state".into(), st.into());
+                }
+                if let Some(u) = p.design_url.as_deref().map(str::trim) {
+                    if u.is_empty() {
+                        data.insert("design_url".into(), Value::Null);
+                    } else {
+                        crate::screenshots::check_design_url(u)?;
+                        data.insert("design_url".into(), u.into());
+                    }
+                }
+                let (r, changed) = records::update(&tx, &r, &a.name(), Patch { title: p.name, body: p.description, data, ..Default::default() })?;
+                tx.commit()?;
+                Ok(Outcome::new(json!({"id": r.ref_id, "mockup_state": r.data.get("mockup_state"), "changed": changed}))
+                    .summary(format!("screenshot {} updated", r.short_id()))
+                    .project(r.project.clone())
+                    .target(r.ref_id))
+            })
+            .await;
+        self.finish(&actor, "update_screenshot", Action::Write, outcome).await
     }
 
     #[tool(description = "Change a task, or several at once with ids: its state (todo, doing, review, done, blocked, \

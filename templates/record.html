@@ -26,8 +26,16 @@
     {% if let Some(sv) = shot %}
     <figure class="shot-full">
       <a href="{{ sv.image }}" target="_blank" rel="noopener" title="Open the full image"><img src="{{ sv.image }}" alt="{{ title }}"></a>
-      <figcaption class="sub"><span class="chip">{{ sv.category }}</span> {{ sv.line }}</figcaption>
+      <figcaption class="sub"><span class="chip">{{ sv.category }}</span>{% if !sv.mstate.is_empty() %} <span class="mstate {{ sv.mstate }}">{{ sv.mstate }}</span>{% endif %} {{ sv.line }}</figcaption>
     </figure>
+    {% if !sv.design_url.is_empty() %}<p>Design: <a href="{{ sv.design_url }}" target="_blank" rel="noopener">{{ sv.design_url }}</a> ↗</p>{% endif %}
+    {% if !sv.mstate.is_empty() %}
+    <section class="stack-sm" aria-labelledby="ms-state-h">
+      <h2 class="label" id="ms-state-h">State</h2>
+      {% if is_owner %}<form method="post" action="{{ sv.state_action }}" class="seg3" role="group" aria-label="Mockup state">{% for st in ["proposed", "approved", "built"] %}<button type="submit" name="state" value="{{ st }}"{% if sv.mstate == *st %} class="on" aria-pressed="true"{% else %} aria-pressed="false"{% endif %}>{{ st }}</button>{% endfor %}</form>
+      <p class="sub">You or the agent can change it; the agent sets built when the PR that implements it merges.</p>{% else %}<p><span class="mstate {{ sv.mstate }}">{{ sv.mstate }}</span></p>{% endif %}
+    </section>
+    {% endif %}
     {% endif %}
 
     {% if let Some(nt) = note %}
