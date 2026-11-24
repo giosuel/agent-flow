@@ -563,8 +563,10 @@ button.opt { font: inherit; color: var(--ink); text-align: left; width: 100%; }
 .tile { display: flex; flex-direction: column; gap: 6px; }
 .tile-v { font-size: 22px; font-weight: 600; color: var(--ink); }
 .tile.warn-card .tile-v { color: var(--warn-ink); }
-.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; padding: 0; margin: 0; list-style: none; font-size: 13px; color: var(--ink2); }
-.legend li { display: inline-flex; align-items: center; gap: 6px; }
+/* Chart legends in a grid, so many projects don't make a long column (the owner, 2026-11-23). */
+.legend, ul.legend.plain { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 6px 20px; padding: 0; margin: 0; list-style: none; font-size: 13px; color: var(--ink2); }
+.legend li { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 700px) { .legend, ul.legend.plain { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); } }
 .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 3px; background: var(--c); margin-right: 6px; vertical-align: middle; flex: none; }
 .swatch.line { height: 3px; border-radius: 2px; width: 14px; }
 .swatch.limit { background: none; border-top: 2px dashed var(--muted); height: 0; width: 14px; border-radius: 0; }
@@ -1011,9 +1013,7 @@ a.blk.q:hover { text-decoration: underline; }
 .nhead { min-height: 38px; margin-top: 12px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); background: #0C0C0F; font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
 .nhead .nh { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); text-decoration: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .nhead .nh:hover { color: var(--ink); }
-.nhead .nh.on { color: var(--ink); }
 .nhead .sort-i { font-size: 13px; opacity: .45; letter-spacing: 0; }
-.nhead .nh.on .sort-i { opacity: 1; color: var(--hover); }
 .nhead .nh:hover .sort-i { opacity: .9; }
 .nrow { min-height: 64px; padding-top: 10px; padding-bottom: 10px; border-bottom: 1px solid var(--line2); font-size: 14px; position: relative; }
 .nrow:last-child { border-bottom: 0; }
@@ -2113,3 +2113,15 @@ html.no-scroll { overflow: hidden; }
   .cbar { width: 40px; }
 }
 .cbar.cbar-none { visibility: hidden; }
+
+/* The table component (templates/table.html): headers that sort, ↕ until sorted, ↑ or ↓ then. */
+.th-sort { appearance: none; background: none; border: 0; padding: 0; margin: 0; font: inherit; color: inherit; letter-spacing: inherit; text-transform: inherit; display: inline-flex; align-items: center; gap: 6px; cursor: pointer; white-space: nowrap; text-align: inherit; }
+.th-sort:hover, [aria-sort] > .th-sort { color: var(--ink); }
+.th-sort:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+.sort-i { font-size: 13px; letter-spacing: 0; opacity: .45; min-width: 1ch; }
+.sort-i::before { content: "↕"; }
+[aria-sort=ascending] > .th-sort .sort-i::before { content: "↑"; }
+[aria-sort=descending] > .th-sort .sort-i::before { content: "↓"; }
+[aria-sort] > .th-sort .sort-i { opacity: 1; color: var(--hover); }
+.th-sort:hover .sort-i { opacity: .9; }
+.table tfoot th, .table tfoot td { border-top: 1px solid var(--line); }

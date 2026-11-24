@@ -47,6 +47,8 @@ struct Legend {
 struct AgentRow {
     name: String,
     color: &'static str,
+    /// CPU-hours and peak memory today, to sort by.
+    v: (f64, i64),
     cpu_hours: String,
     peak: String,
     now: String,
@@ -271,6 +273,7 @@ async fn page(
             Some(AgentRow {
                 name: name.clone(),
                 color,
+                v: (*cpu_h, *peak),
                 cpu_hours: format!("{cpu_h:.1}"),
                 peak: format!("{:.1} GB", *peak as f64 / 1024.0 / 1024.0),
                 now: if *now_cores < 0.05 { "idle".into() } else { format!("{now_cores:.1} cores · {top}") },

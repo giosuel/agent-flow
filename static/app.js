@@ -1180,3 +1180,74 @@ document.addEventListener("click", (e) => {
   document.addEventListener("DOMContentLoaded", () => all(document));
   document.addEventListener("af:content", (e) => all(e.detail));
 })();
+
+// The table component (templates/table.html): a click on a header sorts by its column; the second
+// click turns it around, the third goes back to the order the page came in (the default). Works
+// for <table>s and for the Notes tab's grid of rows (role=row), and for tables in dialogs.
+(() => {
+  const rowsOf = (box) => box.querySelector(":scope tbody, :scope [role=rowgroup]");
+  const headsOf = (box) => {
+    const b = box.querySelector(".th-sort");
+    const th = b && b.closest("th, [role=columnheader]");
+    return th ? [...th.parentElement.children] : [];
+  };
+  const value = (row, col, kind) => {
+    const cell = row.children[col];
+    const raw = cell ? (cell.dataset.v ?? cell.textContent.trim()) : "";
+    if (kind === "text") return raw.toLowerCase();
+    const n = parseFloat(raw);
+    return Number.isNaN(n) ? -Infinity : n;
+  };
+  const other = (d) => (d === "ascending" ? "descending" : "ascending");
+  // Sorts `box` by column `col` in `dir` ("" for the order it came in).
+  const sort = (box, col, dir) => {
+    const body = rowsOf(box);
+    const heads = headsOf(box);
+    const th = heads[col];
+    if (!body || (dir && !th)) return;
+    const kind = (th && th.querySelector(".th-sort")?.dataset.sort) || "text";
+    const rows = [...body.children];
+    rows.forEach((r, i) => { if (r.dataset.i === undefined) r.dataset.i = String(i); });
+    if (dir) {
+      box.dataset.sortCol = String(col);
+      box.dataset.sortDir = dir;
+    } else {
+      delete box.dataset.sortCol;
+      delete box.dataset.sortDir;
+    }
+    for (const h of heads) {
+      const d = dir ? (h === th ? dir : "") : (h.dataset.default || "");
+      if (d) h.setAttribute("aria-sort", d); else h.removeAttribute("aria-sort");
+    }
+    const sign = dir === "ascending" ? 1 : -1;
+    rows.sort((a, z) => {
+      if (dir) {
+        const x = value(a, col, kind), y = value(z, col, kind);
+        if (x < y) return -sign;
+        if (x > y) return sign;
+      }
+      return +a.dataset.i - +z.dataset.i;
+    });
+    body.append(...rows);
+  };
+  document.addEventListener("click", (e) => {
+    const b = e.target.closest && e.target.closest(".th-sort");
+    const box = b && b.closest("[data-sortable]");
+    const th = b && b.closest("th, [role=columnheader]");
+    if (!box || !th) return;
+    const col = [...th.parentElement.children].indexOf(th);
+    // Where this column is now: sorted by a click, or the default order (which may be by it).
+    const mine = box.dataset.sortCol === String(col) ? box.dataset.sortDir : "";
+    const first = b.dataset.sort === "text" ? "ascending" : "descending";
+    let next;
+    if (th.dataset.default) next = mine ? "" : other(th.dataset.default);
+    else next = !mine ? first : mine === first ? other(first) : "";
+    sort(box, col, next);
+  });
+  // A part of the page fetched again (the Build servers section every 5 s) keeps its tables' sort.
+  window.afKeepSort = (from, to) => {
+    const was = [...from.querySelectorAll("[data-sortable]")];
+    const now = [...to.querySelectorAll("[data-sortable]")];
+    was.forEach((b, i) => { if (b.dataset.sortDir && now[i]) sort(now[i], +b.dataset.sortCol, b.dataset.sortDir); });
+  };
+})();

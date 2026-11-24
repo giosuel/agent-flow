@@ -365,6 +365,8 @@ pub struct TimingRow {
     pub when: String,
     pub on: String,
     pub failed: bool,
+    /// Wall ms, CPU ms, peak MB and when, to sort by (-1: not measured).
+    pub v: (i64, i64, i64, i64),
 }
 
 pub fn rows(list: &[Timing], tz: &crate::tz::Tz) -> Vec<TimingRow> {
@@ -378,6 +380,7 @@ pub fn rows(list: &[Timing], tz: &crate::tz::Tz) -> Vec<TimingRow> {
             when: tz.short(t.at),
             on: t.on.clone(),
             failed: t.exit_code.is_some_and(|c| c != 0),
+            v: (t.wall_ms, t.cpu_ms.unwrap_or(-1), t.peak_mb.unwrap_or(-1), t.at),
         })
         .collect()
 }

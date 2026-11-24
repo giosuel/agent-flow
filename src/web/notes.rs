@@ -247,9 +247,8 @@ pub fn text_of(data_dir: &std::path::Path, r: &records::Record) -> Option<(Strin
 /// search for files, similar to how logs look"), from the address: `nq` (words, `category:…`,
 /// `is:file|note|resolved|current`, `ext:…`), `ncat` (categories, `|` between them), `nkind`
 /// (file, note), `nstate` (current by default, resolved, all) and `nrange` (24h, 7d, 30d; all by
-/// default), and `nsort`, the column the table is sorted by (the owner, 2026-11-18: "I can change
-/// the order by clicking on the table header"): title, cat, back, type or added, `-` first for
-/// descending; newest first by default.
+/// default). The table sorts by a click on its headers, in the page (templates/table.html);
+/// newest first by default.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Filter {
     pub q: String,
@@ -257,16 +256,15 @@ pub struct Filter {
     pub kind: String,
     pub state: String,
     pub range: String,
-    pub sort: String,
 }
 
-/// The columns the table sorts by: (key, header).
-const SORTS: [(&str, &str); 5] = [
-    ("title", "Title"),
-    ("cat", "Category"),
-    ("back", "Comes back to the agent"),
-    ("type", "Type"),
-    ("added", "Added"),
+/// The table's headers that sort: (label, kind, default order). The rows come newest first.
+const HEADS: [(&str, &str, &str); 5] = [
+    ("Title", "text", ""),
+    ("Category", "text", ""),
+    ("Comes back to the agent", "text", ""),
+    ("Type", "text", ""),
+    ("Added", "num", "descending"),
 ];
 
 impl Filter {
@@ -276,7 +274,6 @@ impl Filter {
         kind: Option<&str>,
         state: Option<&str>,
         range: Option<&str>,
-        sort: Option<&str>,
     ) -> Self {
         let pick = |v: Option<&str>, ok: &[&str]| v.filter(|v| ok.contains(v)).unwrap_or("").to_owned();
         Filter {
@@ -285,10 +282,6 @@ impl Filter {
             kind: pick(kind, &["file", "note"]),
             state: pick(state, &["resolved", "all"]),
             range: pick(range, &["24h", "7d", "30d"]),
-            sort: sort
-                .filter(|v| SORTS.iter().any(|(k, _)| v.trim_start_matches('-') == *k) && *v != "-added")
-                .unwrap_or("")
-                .to_owned(),
         }
     }
 
@@ -302,7 +295,7 @@ impl Filter {
         if !self.cats.is_empty() {
             u += &format!("&ncat={}", enc(&self.cats.join("|")));
         }
-        for (k, v) in [("nkind", &self.kind), ("nstate", &self.state), ("nrange", &self.range), ("nsort", &self.sort)] {
+        for (k, v) in [("nkind", &self.kind), ("nstate", &self.state), ("nrange", &self.range)] {
             if !v.is_empty() {
                 u += &format!("&{k}={v}");
             }
@@ -417,6 +410,9 @@ pub struct NoteRow {
     pub kind: String,
     pub resurface: String,
     pub added: String,
+    /// To sort by: the title, and when it was added.
+    pub title: String,
+    pub at: i64,
     pub resolved: bool,
     pub download: String,
     /// "code-review · Fable 5.2" when a subagent wrote it (D-229), else "".
@@ -438,8 +434,8 @@ pub struct NotesView {
     pub state_label: String,
     pub states: Vec<Choice>,
     pub ranges: Vec<Choice>,
-    /// The table's headers: (label, href that sorts by it, "ascending", "descending" or "").
-    pub heads: Vec<(String, String, &'static str)>,
+    /// The table's headers: (label, kind, default order).
+    pub heads: &'static [(&'static str, &'static str, &'static str)],
     pub reset: Option<String>,
     pub rows: Vec<NoteRow>,
     /// "37 · 6 files to download", or "3 found".
@@ -581,50 +577,8 @@ pub fn view(c: &rusqlite::Connection, slug: &str, project_id: i64, f: &Filter, n
 
     let mut shown: Vec<&records::Record> =
         all.iter().filter(|r| cat_ok(r) && kind_ok(r) && state_ok(r) && time_ok(r) && search_ok(r)).collect();
-    // Newest first, then by the column picked (ties stay newest first).
+    // Newest first; a click on a header sorts in the page.
     shown.sort_by_key(|r| std::cmp::Reverse(r.created_at));
-    let (col, desc) = match f.sort.strip_prefix('-') {
-        Some(c) => (c, true),
-        None if f.sort.is_empty() => ("added", true),
-        None => (f.sort.as_str(), false),
-    };
-    let key = |r: &records::Record| -> (String, i64) {
-        match col {
-            "title" => (r.title.to_lowercase(), 0),
-            "cat" => (r.str("category").to_lowercase(), 0),
-            // Notes that come back first, then the rest.
-            "back" => {
-                (if r.str("resurface").is_empty() { "\u{10ffff}".into() } else { r.str("resurface").to_lowercase() }, 0)
-            }
-            "type" => (r.str("ext").to_lowercase(), r.data.get("size").and_then(Value::as_i64).unwrap_or(0)),
-            _ => (String::new(), r.created_at),
-        }
-    };
-    if desc {
-        shown.sort_by_key(|r| std::cmp::Reverse(key(r)));
-    } else {
-        shown.sort_by_key(|r| key(r));
-    }
-    let heads = SORTS
-        .iter()
-        .map(|(k, label)| {
-            let on = col == *k;
-            // A click sorts by the column; another click turns it around. Dates start newest first.
-            let next = match (on, desc, *k) {
-                (true, false, _) => format!("-{k}"),
-                (true, true, _) => k.to_string(),
-                (false, _, "added") => String::new(),
-                (false, _, _) => k.to_string(),
-            };
-            let next = if next == "-added" { String::new() } else { next };
-            let state = match (on, desc) {
-                (false, _) => "",
-                (true, false) => "ascending",
-                (true, true) => "descending",
-            };
-            (label.to_string(), f.with(|x| x.sort = next).href(slug), state)
-        })
-        .collect();
     let mut rows = Vec::new();
     for r in &shown {
         let ext = r.str("ext").to_owned();
@@ -652,6 +606,8 @@ pub fn view(c: &rusqlite::Connection, slug: &str, project_id: i64, f: &Filter, n
                 (w, None) => format!("Comes back {w}"),
             },
             added: crate::util::ago(r.created_at, now),
+            title: r.title.clone(),
+            at: r.created_at,
             resolved: r.state != "current",
             download: if ext.is_empty() { String::new() } else { format!("{}/file", r.url()) },
         });
@@ -684,7 +640,6 @@ pub fn view(c: &rusqlite::Connection, slug: &str, project_id: i64, f: &Filter, n
         ("nkind", f.kind.clone()),
         ("nstate", f.state.clone()),
         ("nrange", f.range.clone()),
-        ("nsort", f.sort.clone()),
     ] {
         if !v.is_empty() {
             keep.push((k, v));
@@ -713,7 +668,7 @@ pub fn view(c: &rusqlite::Connection, slug: &str, project_id: i64, f: &Filter, n
         },
         states,
         ranges,
-        heads,
+        heads: &HEADS,
         reset: (filtered || !f.state.is_empty()).then(|| format!("/p/{slug}?tab=notes")),
         rows,
         summary,
@@ -778,17 +733,8 @@ mod tests {
 
     #[test]
     fn filters_round_trip_through_the_address_and_search_words_are_marked_safely() {
-        let f = Filter::new(
-            Some(" flaky "),
-            Some("known issue|plan"),
-            Some("file"),
-            Some("bogus"),
-            Some("7d"),
-            Some("-cat"),
-        );
-        assert_eq!(f.href("im"), "/p/im?tab=notes&nq=flaky&ncat=known+issue%7Cplan&nkind=file&nrange=7d&nsort=-cat");
-        assert_eq!(Filter::new(None, None, None, None, None, Some("-added")).sort, "", "newest first is the default");
-        assert_eq!(Filter::new(None, None, None, None, None, Some("size")).sort, "");
+        let f = Filter::new(Some(" flaky "), Some("known issue|plan"), Some("file"), Some("bogus"), Some("7d"));
+        assert_eq!(f.href("im"), "/p/im?tab=notes&nq=flaky&ncat=known+issue%7Cplan&nkind=file&nrange=7d");
         assert_eq!(f.state, "", "unknown values are left out");
         assert_eq!(marked("Flaky <b> test", &["flaky".into()]), "<mark>Flaky</mark> &lt;b&gt; test");
         assert_eq!(marked("a & b", &["&".into()]), "a <mark>&amp;</mark> b");

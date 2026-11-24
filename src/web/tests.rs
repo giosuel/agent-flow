@@ -2050,9 +2050,14 @@ async fn usage_and_machine_pages_show_the_counts() {
     assert!(html.contains(r#""Not in a task" $"#), "{html}");
     assert!(html.contains(r#"<a class="tk-all" href="/usage/tasks" data-dlg>"#), "{html}");
     assert!(html.contains(r#"href="/usage?days=14#tasks-h""#), "{html}");
+    // Its tables sort by their headers (the table component): Per project, by cost too.
+    assert!(html.contains(r#"<table class="table nums" data-sortable>"#), "{html}");
+    assert!(html.contains(r#"<button type="button" class="th-sort" data-sort="num">Cost<span class="sort-i" aria-hidden="true"></span></button>"#), "{html}");
     let all = get("/usage/tasks").await.text().await.unwrap();
     assert!(all.contains("<div data-dlg-content class=\"tasks-all\">") && all.contains("Not in a task"), "{all}");
-    assert!(all.contains("in the last 7 days"), "{all}");
+    assert!(all.contains("in the last 7 days, last worked on first"), "{all}");
+    assert!(all.contains(r#"<th scope="col" class="hide-phone tk-l" aria-sort="descending" data-default="descending"><button type="button" class="th-sort" data-sort="num">Worked"#), "{all}");
+    assert!(all.contains("<tfoot><tr class=\"tk-out\">"), "Not in a task stays under the tasks: {all}");
     assert!(get("/usage/tasks?days=14").await.text().await.unwrap().contains("in the last 14 days"));
     // The old Tasks tab's address leads there.
     let old = get("/usage?tab=tasks&days=14").await;
@@ -2455,13 +2460,21 @@ async fn notes_are_files_or_text_and_come_back() {
     let t = notes("ncat=known+issue").await;
     assert!(t.contains("x-wing pin") && !t.contains(">Morning report<"), "{t}");
     assert!(t.contains(r#"href="/p/vinculum?tab=notes""#), "Clear: {t}");
-    // Sorted by a click on a column's header; another click turns it around (2026-11-18).
-    let t = notes("nstate=all&nsort=title").await;
-    let at = |t: &str, x: &str| t.find(x).unwrap_or_else(|| panic!("{x}"));
-    assert!(at(&t, ">Later<") < at(&t, ">Loro needs im<") && at(&t, ">Loro needs im<") < at(&t, ">x-wing pin<"), "{t}");
-    assert!(t.contains(r#"aria-sort="ascending""#) && t.contains("nsort=-title"), "{t}");
-    let t = notes("nstate=all&nsort=-title").await;
-    assert!(at(&t, ">x-wing pin<") < at(&t, ">Later<"), "{t}");
+    // Sorted by a click on a column's header, in the page: the table component (2026-11-23);
+    // newest first by default, and every row carries what its columns sort by.
+    let t = notes("nstate=all").await;
+    assert!(t.contains(r#"<div class="ntable" role="table" aria-label="Notes" data-sortable>"#), "{t}");
+    assert!(
+        t.contains(r#"<button type="button" class="th-sort nh" data-sort="text">Title<span class="sort-i""#),
+        "{t}"
+    );
+    assert!(
+        t.contains(r#"<span role="columnheader" aria-sort="descending" data-default="descending"><button type="button" class="th-sort nh" data-sort="num">Added"#),
+        "{t}"
+    );
+    assert!(t.contains(r#"<div class="nt" role="cell" data-v="Later">"#), "{t}");
+    assert!(t.contains(r#"class="when hide-phone" role="cell" data-v=""#), "{t}");
+    assert!(!t.contains("nsort"), "{t}");
     let t = notes("nq=%3Cscript").await;
     assert!(!t.contains("<script>alert") && t.contains("Nothing matches"), "{t}");
     let page = s.http.get(s.url("/p/vinculum/N-1")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();

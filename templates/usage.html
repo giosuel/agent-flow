@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "table.html" as tbl %}
 {% block title %}Usage{% endblock %}
 {% block content %}
 {# No subtitle saying what the page is; Reload is an icon on the right (the owner, 2026-11-23). #}
@@ -73,9 +74,9 @@
 <section class="card pad stack" aria-labelledby="proj-h">
   <div class="sec"><h2 id="proj-h">Per project</h2><span class="sub">{{ range }}</span></div>
   {% if projects.is_empty() %}<p class="sub">Nothing yet.</p>{% else %}
-  <div class="table-wrap"><table class="table nums">
-    <thead><tr><th scope="col">Project</th><th scope="col" class="hide-phone">Sessions</th><th scope="col" class="hide-phone">Calls</th><th scope="col" class="hide-phone">Input</th><th scope="col" class="hide-phone">Cache write</th><th scope="col" class="hide-phone">Output</th><th scope="col">New tokens</th><th scope="col">Cache reads</th><th scope="col">Cost</th></tr></thead>
-    <tbody>{% for p in projects %}<tr><th scope="row"><span class="swatch" style="--c: {{ p.color }}"></span>{{ p.name }}</th><td class="hide-phone">{{ p.sessions }}</td><td class="hide-phone">{{ p.t.calls }}</td><td class="hide-phone">{{ p.t.input }}</td><td class="hide-phone">{{ p.t.cache_write }}</td><td class="hide-phone">{{ p.t.output }}</td><td><strong>{{ p.t.new_tokens }}</strong></td><td>{{ p.t.cache_read }}</td><td><strong>{{ p.t.cost }}</strong></td></tr>{% endfor %}</tbody>
+  <div class="table-wrap"><table class="table nums" data-sortable>
+    <thead><tr>{% call tbl::th("Project", "text", "", "ascending") %}{% endcall %}{% call tbl::th("Sessions", "num", "hide-phone", "") %}{% endcall %}{% call tbl::th("Calls", "num", "hide-phone", "") %}{% endcall %}{% call tbl::th("Input", "num", "hide-phone", "") %}{% endcall %}{% call tbl::th("Cache write", "num", "hide-phone", "") %}{% endcall %}{% call tbl::th("Output", "num", "hide-phone", "") %}{% endcall %}{% call tbl::th("New tokens", "num", "", "") %}{% endcall %}{% call tbl::th("Cache reads", "num", "", "") %}{% endcall %}{% call tbl::th("Cost", "num", "", "") %}{% endcall %}</tr></thead>
+    <tbody>{% for p in projects %}<tr><th scope="row"><span class="swatch" style="--c: {{ p.color }}"></span>{{ p.name }}</th><td class="hide-phone">{{ p.sessions }}</td><td class="hide-phone" data-v="{{ p.t.raw.calls }}">{{ p.t.calls }}</td><td class="hide-phone" data-v="{{ p.t.raw.input }}">{{ p.t.input }}</td><td class="hide-phone" data-v="{{ p.t.raw.cache_write }}">{{ p.t.cache_write }}</td><td class="hide-phone" data-v="{{ p.t.raw.output }}">{{ p.t.output }}</td><td data-v="{{ p.t.raw.new_tokens() }}"><strong>{{ p.t.new_tokens }}</strong></td><td data-v="{{ p.t.raw.cache_read }}">{{ p.t.cache_read }}</td><td data-v="{{ p.t.raw.cost_micro }}"><strong>{{ p.t.cost }}</strong></td></tr>{% endfor %}</tbody>
   </table></div>
   {% endif %}
 </section>
@@ -91,9 +92,9 @@
   {% if top_tasks.is_empty() %}
   <p class="sub">{% if not_in_task.is_empty() %}No tokens in the last {{ days }} days.{% else %}No tokens are counted against a task yet: they are once an agent creates or updates its tasks through AgentFlow while it works. Until then everything is under "Not in a task".{% endif %}</p>
   {% else %}
-  <div class="table-wrap"><table class="table nums tk-table">
-    <thead><tr><th scope="col">Task</th><th scope="col" class="hide-phone tk-l">Worked</th><th scope="col" class="hide-phone">New tokens</th><th scope="col">Cost</th></tr></thead>
-    <tbody>{% for t in top_tasks %}<tr><th scope="row"><a href="{{ t.url }}"><span class="mono sub">{{ t.id }}</span> {{ t.title }}</a></th><td class="sub hide-phone tk-l">{{ t.worked }}</td><td class="hide-phone">{{ t.t.new_tokens }}</td><td><span class="tk-cost"><strong>{{ t.t.cost }}</strong><span class="cbar" aria-hidden="true"><i style="width: {{ t.bar }}%; --c: {{ t.color }}"></i></span></span></td></tr>{% endfor %}</tbody>
+  <div class="table-wrap"><table class="table nums tk-table" data-sortable>
+    <thead><tr>{% call tbl::th("Task", "text", "", "") %}{% endcall %}{% call tbl::th("Worked", "num", "hide-phone tk-l", "") %}{% endcall %}{% call tbl::th("New tokens", "num", "hide-phone", "") %}{% endcall %}{% call tbl::th("Cost", "num", "", "descending") %}{% endcall %}</tr></thead>
+    <tbody>{% for r in top_tasks %}<tr><th scope="row" data-v="{{ r.title }}"><a href="{{ r.url }}"><span class="mono sub">{{ r.id }}</span> {{ r.title }}</a></th><td class="sub hide-phone tk-l" data-v="{{ r.last_at }}">{{ r.worked }}</td><td class="hide-phone" data-v="{{ r.t.raw.new_tokens() }}">{{ r.t.new_tokens }}</td><td data-v="{{ r.t.raw.cost_micro }}"><span class="tk-cost"><strong>{{ r.t.cost }}</strong><span class="cbar" aria-hidden="true"><i style="width: {{ r.bar }}%; --c: {{ r.color }}"></i></span></span></td></tr>{% endfor %}</tbody>
   </table></div>
   {% endif %}
   <div class="tk-foot"><span class="sub">{% if tasks_more > 0 %}{{ tasks_more }} more task{% if tasks_more != 1 %}s{% endif %}{% if !not_in_task.is_empty() %} · {% endif %}{% endif %}{% if !not_in_task.is_empty() %}"Not in a task" {{ not_in_task }}{% endif %}</span>
@@ -102,10 +103,10 @@
 {% if !est_rows.is_empty() %}
 <section class="card pad stack" aria-labelledby="est-h">
   <div class="sec"><h2 id="est-h">How big a window is</h2><span class="sub">finished 5-hour windows, newest first</span></div>
-  <div class="table-wrap"><table class="table nums">
-    <thead><tr><th scope="col">Window</th><th scope="col">Used</th><th scope="col" class="hide-phone">Cost</th><th scope="col">Per 1%</th><th scope="col" class="hide-phone">New tokens per 1%</th></tr></thead>
-    <tbody>{% for r in est_rows %}<tr><th scope="row">{{ r.day }} <span class="sub mono">{{ r.span }}</span></th><td>{{ r.used }}{% if !r.limit.is_empty() %} <span class="bad-text">· {{ r.limit }}</span>{% endif %}</td><td class="hide-phone">{{ r.cost }}</td><td><strong>{{ r.per_pct }}</strong></td><td class="hide-phone">{{ r.tokens_per_pct }}</td></tr>{% endfor %}
-    {% if !est_median.0.is_empty() %}<tr><th scope="row"><strong>Median</strong></th><td></td><td class="hide-phone"></td><td><strong>{{ est_median.0 }}</strong></td><td class="hide-phone"><strong>{{ est_median.1 }}</strong></td></tr>{% endif %}</tbody>
+  <div class="table-wrap"><table class="table nums" data-sortable>
+    <thead><tr>{% call tbl::th("Window", "num", "", "descending") %}{% endcall %}{% call tbl::th("Used", "num", "", "") %}{% endcall %}{% call tbl::th("Cost", "num", "hide-phone", "") %}{% endcall %}{% call tbl::th("Per 1%", "num", "", "") %}{% endcall %}{% call tbl::th("New tokens per 1%", "num", "hide-phone", "") %}{% endcall %}</tr></thead>
+    <tbody>{% for r in est_rows %}<tr><th scope="row" data-v="{{ r.v.0 }}">{{ r.day }} <span class="sub mono">{{ r.span }}</span></th><td data-v="{{ r.v.1 }}">{{ r.used }}{% if !r.limit.is_empty() %} <span class="bad-text">· {{ r.limit }}</span>{% endif %}</td><td class="hide-phone" data-v="{{ r.v.2 }}">{{ r.cost }}</td><td data-v="{{ r.v.3 }}"><strong>{{ r.per_pct }}</strong></td><td class="hide-phone" data-v="{{ r.v.4 }}">{{ r.tokens_per_pct }}</td></tr>{% endfor %}</tbody>
+    {% if !est_median.0.is_empty() %}<tfoot><tr><th scope="row"><strong>Median</strong></th><td></td><td class="hide-phone"></td><td><strong>{{ est_median.0 }}</strong></td><td class="hide-phone"><strong>{{ est_median.1 }}</strong></td></tr></tfoot>{% endif %}
   </table></div>
   <p class="sub">A window's cost ÷ its %. The plan weighs tokens by what they cost, so the dollar figure stays steadier than the token one, which moves with how much is cached and which model runs. Windows under 10% don't count toward the median.</p>
   <p class="sub">Claude on your other devices (claude.ai, a laptop) uses the same plan but isn't counted here: while you use it, a window looks smaller than it is.</p>

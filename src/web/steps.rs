@@ -27,6 +27,8 @@ pub struct Row {
     pub state: String,
     pub est: String,
     pub took: String,
+    /// Estimated minutes and ms taken, to sort by (-1: none).
+    pub v: (i64, i64),
     /// Took more than estimated (by more than a tenth), less, or about right.
     pub over: bool,
     pub under: bool,
@@ -240,6 +242,7 @@ async fn step(
                 state: t.state.clone(),
                 est: if est > 0 { crate::times::fmt_min(est) } else { t.str("estimate").to_owned() },
                 took: if t.state == "skipped" { String::new() } else { crate::times::fmt_ms(took) },
+                v: (if est > 0 { est } else { -1 }, if t.state == "skipped" { -1 } else { took }),
                 over: est > 0 && took > est * 66_000,
                 under: est > 0 && t.state == "done" && took < est * 54_000,
                 added,

@@ -44,7 +44,10 @@
     if (!r.ok) return;
     const doc = new DOMParser().parseFromString(await r.text(), "text/html");
     const fresh = doc.getElementById("builds");
-    if (fresh) old.replaceWith(document.importNode(fresh, true));
+    if (!fresh) return;
+    const node = document.importNode(fresh, true);
+    if (window.afKeepSort) window.afKeepSort(old, node);
+    old.replaceWith(node);
   }
 
   async function tick() {
