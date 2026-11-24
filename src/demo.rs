@@ -114,6 +114,13 @@ pub fn create(c: &mut Connection, data_dir: &Path) -> anyhow::Result<String> {
     let s2 = ms(c, "S2", "Album sidebar", Some(m3.id))?;
     set(c, &s2, "active", None)?;
     let s3 = ms(c, "S3", "Tag editor", Some(m3.id))?;
+    let s4 = ms(c, "S4", "End-of-M3 review", Some(m3.id))?;
+    projects::set_review(
+        c,
+        &s4,
+        &json!({"reviewers": ["correctness", "UX", "performance"], "commit": "9f3c2e1",
+                "owner_words": "rate the issues by importance and implement the ones you think are necessary", "reports": []}),
+    )?;
     let m4 = ms(c, "M4", "Search", None)?;
     ms(c, "M5", "Packaging", None)?;
 
@@ -133,6 +140,18 @@ pub fn create(c: &mut Connection, data_dir: &Path) -> anyhow::Result<String> {
         (m4.id, "Face grouping", "parked"),
     ] {
         tasks.push(rec(c, p.id, Kind::Task, title, body, state, Some(m), json!({"estimate": "2 h"}))?);
+    }
+    // The review's findings: ranked, one skipped with its reason.
+    for (title, importance, state, extra) in [
+        ("Import can follow a symlink out of the library folder", "high", "todo", json!({})),
+        ("Sidebar re-renders every album on each thumbnail load", "medium", "todo", json!({})),
+        ("Album colours aren't in the theme file", "low", "skipped", json!({"skip_reason": "the palette is reworked in M5 anyway"})),
+    ] {
+        let mut data = json!({"estimate": "1 h", "source": "review", "importance": importance});
+        if let (Some(d), Some(e)) = (data.as_object_mut(), extra.as_object()) {
+            d.extend(e.clone());
+        }
+        rec(c, p.id, Kind::Task, title, "", state, Some(s4.id), data)?;
     }
 
     // Questions: one blocking a task, with options; a plain one; one answered.

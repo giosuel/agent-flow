@@ -143,7 +143,7 @@
   {% if !g.rows.is_empty() %}{% let rows = g.rows %}{% include "task_lines.html" %}{% endif %}
   {% for st in g.steps %}
   <div class="stp {{ st.state }}">
-    <div class="stp-h"><span class="mono">{{ st.name }}</span><h3>{{ st.title }}</h3><span class="chip {% if st.state == "concluded" %}state-done{% else if st.state == "active" %}accent{% else if st.state == "blocked" %}state-blocked{% else %}quiet{% endif %}">{{ st.state }}</span><span class="grow"></span><span class="sub">{{ st.sub }}</span>{% if st.state == "concluded" %}<a class="btn sm ghost" href="{{ st.url }}">Summary</a>{% endif %}</div>
+    <div class="stp-h"><span class="mono">{{ st.name }}</span><h3>{{ st.title }}</h3><span class="chip {% if st.state == "concluded" %}state-done{% else if st.state == "active" %}accent{% else if st.state == "blocked" %}state-blocked{% else %}quiet{% endif %}">{% if st.review %}review step · {% endif %}{{ st.state }}</span><span class="grow"></span><span class="sub">{{ st.sub }}</span>{% if st.state == "concluded" %}<a class="btn sm ghost" href="{{ st.url }}">Summary</a>{% else if st.review %}<a class="btn sm ghost" href="{{ st.url }}">Review</a>{% endif %}</div>
     {% if !st.rows.is_empty() %}{% let rows = st.rows %}{% include "task_lines.html" %}{% endif %}
   </div>
   {% endfor %}

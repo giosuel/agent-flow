@@ -31,6 +31,17 @@ pub struct Row {
     pub over: bool,
     pub under: bool,
     pub added: String,
+    pub importance: String,
+    pub skip_reason: String,
+}
+
+pub struct ReviewView {
+    pub reviewers: Vec<String>,
+    pub commit: String,
+    pub owner_words: String,
+    /// (text, url): a note or a link; url empty when it's neither.
+    pub reports: Vec<(String, String)>,
+    pub counts: String,
 }
 
 pub struct Link {
@@ -62,6 +73,7 @@ struct StepPage {
     decisions: Vec<Link>,
     follow_ups: Vec<Link>,
     with_owner: Vec<Link>,
+    review: Option<ReviewView>,
 }
 
 async fn step(
@@ -124,11 +136,59 @@ async fn step(
             if tests > 0 {
                 with_owner.push(Link { short: String::new(), url: format!("/p/{}?tab=to-test", p.slug), title: format!("{tests} item{} to test", if tests == 1 { "" } else { "s" }), sub: String::new() });
             }
-            Ok(Some((p, m, parent, tasks, (times, timings, decisions, follow_ups, with_owner))))
+            let review = if m.review.is_empty() {
+                None
+            } else {
+                let r: serde_json::Value = serde_json::from_str(&m.review).unwrap_or_default();
+                let strs = |k: &str| -> Vec<String> {
+                    r[k].as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_owned)).collect()).unwrap_or_default()
+                };
+                let reports = strs("reports")
+                    .into_iter()
+                    .map(|x| {
+                        if x.starts_with("https://") {
+                            return (x.clone(), x);
+                        }
+                        let url = crate::records::RecordRef::parse(&x)
+                            .ok()
+                            .and_then(|rr| crate::records::try_find(c, &rr, Some(&p.slug)).ok().flatten())
+                            .filter(|rec| rec.project_id == p.id)
+                            .map(|rec| (format!("{} {}", rec.short_id(), rec.title), rec.url()));
+                        url.unwrap_or((x, String::new()))
+                    })
+                    .collect();
+                let n = |st: &str| tasks.iter().filter(|t| t.state == st).count();
+                let open = tasks.iter().filter(|t| crate::steps::OPEN.contains(&t.state.as_str())).count();
+                Some(ReviewView {
+                    reviewers: strs("reviewers"),
+                    commit: r["commit"].as_str().unwrap_or("").to_owned(),
+                    owner_words: r["owner_words"].as_str().unwrap_or("").to_owned(),
+                    reports,
+                    counts: format!(
+                        "{} findings · {} done, {} open, {} parked, {} skipped",
+                        tasks.len(),
+                        n("done") + n("review"),
+                        open,
+                        n("parked"),
+                        n("skipped")
+                    ),
+                })
+            };
+            Ok(Some((p, m, parent, tasks, (times, timings, decisions, follow_ups, with_owner, review))))
         })
         .await?
         .ok_or(AppError::NotFound)?;
-    let (p, m, parent, tasks, (times, timings, decisions, follow_ups, with_owner)) = page;
+    let (p, m, parent, mut tasks, (times, timings, decisions, follow_ups, with_owner, review)) = page;
+    // A review's findings by importance (high first), then in the agent's order.
+    if review.is_some() {
+        let rank = |t: &Record| match t.str("importance") {
+            "high" => 0,
+            "medium" => 1,
+            "low" => 2,
+            _ => 3,
+        };
+        tasks.sort_by_key(rank);
+    }
     let state_word = match m.state.as_str() {
         "closed" => "concluded",
         "active" => "active",
@@ -172,6 +232,8 @@ async fn step(
                 over: est > 0 && took > est * 66_000,
                 under: est > 0 && t.state == "done" && took < est * 54_000,
                 added,
+                importance: t.str("importance").to_owned(),
+                skip_reason: t.str("skip_reason").to_owned(),
             }
         })
         .collect();
@@ -196,5 +258,6 @@ async fn step(
         decisions,
         follow_ups,
         with_owner,
+        review,
     })
 }
