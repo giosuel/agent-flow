@@ -18,8 +18,9 @@ use serde_json::Value;
 use crate::projects;
 use crate::records::{self, Record};
 
-/// No call from the agent for this long: it's away, and the clock stops.
-pub const AWAY_AFTER: i64 = 30 * 60_000;
+/// No call from the agent for this long: it's away, and the clock stops. An hour, so waiting on a
+/// subagent counts (Imaginarium's agent, 2026-11-12: "I often wait over 30 minutes").
+pub const AWAY_AFTER: i64 = 60 * 60_000;
 
 type Span = (i64, i64);
 
@@ -46,18 +47,31 @@ pub fn doing_spans(conn: &Connection, task: &Record, now: i64) -> anyhow::Result
     Ok(spans)
 }
 
-/// When the project's agent was around: each of its calls counts for 30 minutes.
+/// When the project's agent was around: each of its calls counts for an hour, and a build or test
+/// it ran (`agentflow time`, a build server job) for as long as it ran.
 pub fn present_spans(conn: &Connection, slug: &str, from: i64, to: i64) -> anyhow::Result<Vec<Span>> {
     let mut stmt = conn.prepare(
         "SELECT at FROM log WHERE project = ?1 AND actor_kind = 'project' AND at >= ?2 AND at <= ?3 ORDER BY at",
     )?;
-    let ats: Vec<i64> = stmt.query_map(params![slug, from - AWAY_AFTER, to], |r| r.get(0))?.collect::<Result<_, _>>()?;
+    let mut spans: Vec<Span> = stmt
+        .query_map(params![slug, from - AWAY_AFTER, to], |r| r.get::<_, i64>(0))?
+        .map(|r| r.map(|at| (at, at + AWAY_AFTER)))
+        .collect::<Result<_, _>>()?;
+    let mut stmt = conn.prepare(
+        "SELECT t.at - t.wall_ms, t.at FROM timings t JOIN projects p ON p.id = t.project_id
+         WHERE p.slug = ?1 AND t.at >= ?2 AND t.at - t.wall_ms <= ?3
+         UNION ALL
+         SELECT j.started_at, coalesce(j.finished_at, ?3) FROM remote_jobs j JOIN projects p ON p.id = j.project_id
+         WHERE p.slug = ?1 AND j.started_at IS NOT NULL AND coalesce(j.finished_at, ?3) >= ?2 AND j.started_at <= ?3",
+    )?;
+    let runs: Vec<Span> = stmt.query_map(params![slug, from, to], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<Result<_, _>>()?;
+    spans.extend(runs);
+    spans.sort_unstable();
     let mut out: Vec<Span> = Vec::new();
-    for at in ats {
-        let end = at + AWAY_AFTER;
+    for (a, b) in spans {
         match out.last_mut() {
-            Some(last) if at <= last.1 => last.1 = last.1.max(end),
-            _ => out.push((at, end)),
+            Some(last) if a <= last.1 => last.1 = last.1.max(b),
+            _ => out.push((a, b)),
         }
     }
     Ok(out)
@@ -414,15 +428,22 @@ mod tests {
             }
             let (a, b) = (records::get(c, a.id)?, records::get(c, b.id)?);
             let t = times_of(c, "lumen", &[&a, &b], t0 + 200 * min)?;
-            // Present 0–80 and 80–110: all of 0–90 counts. A alone 0–30, both 30–60, B alone 60–90.
+            // Present 0–140: all of 0–90 counts. A alone 0–30, both 30–60, B alone 60–90.
             assert_eq!(t.total_ms, 90 * min);
             assert_eq!(t.share_ms[&a.id], 45 * min);
             assert_eq!(t.share_ms[&b.id], 45 * min);
-            // Away from 50+30=80? No: 80 is a call. Take the 80 call away: 80–90 no longer counts.
-            c.execute("DELETE FROM log WHERE at = ?1", [t0 + 80 * min])?;
+            // Only the calls up to 10: present until 70, so 70–90 no longer counts…
+            c.execute("DELETE FROM log WHERE at > ?1", [t0 + 10 * min])?;
             let t = times_of(c, "lumen", &[&a, &b], t0 + 200 * min)?;
-            assert_eq!(t.total_ms, 80 * min);
-            assert_eq!(t.raw_ms[&b.id], 50 * min);
+            assert_eq!(t.total_ms, 70 * min);
+            assert_eq!(t.raw_ms[&b.id], 40 * min);
+            // …unless a test it timed ran then.
+            c.execute(
+                "INSERT INTO timings (project_id, what, wall_ms, actor, at) VALUES (?1, 'cargo test', ?2, 'lumen', ?3)",
+                params![p.id, 25 * min, t0 + 95 * min],
+            )?;
+            let t = times_of(c, "lumen", &[&a, &b], t0 + 200 * min)?;
+            assert_eq!(t.total_ms, 90 * min);
             Ok(())
         })
         .unwrap();

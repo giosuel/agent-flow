@@ -167,6 +167,9 @@
     <label>Model<input name="model" value="{{ e.model }}" placeholder="e.g. Claude Opus 5.5" list="models"></label>
     <label>Effort<input name="effort" value="{{ e.effort }}" placeholder="e.g. high" list="efforts"></label>
     <label>Build product<input name="build_product" value="{{ e.build_product }}" placeholder="{{ slug }}"><span class="sub">The name test builds go under; empty means the id.</span></label>
+    <label>How PRs merge<select name="merge_method">
+      {% for (v, t) in [("merge", "A merge commit"), ("squash", "Squash"), ("rebase", "Rebase")] %}<option value="{{ v }}"{% if e.merge_method == *v %} selected{% endif %}>{{ t }}</option>{% endfor %}
+    </select><span class="sub">Every PR of the repository gets a Merge button that merges this way and deletes the branch.</span></label>
     <label>Build server<select name="build_server">
       <option value=""{% if e.build_server.is_empty() %} selected{% endif %}>None: builds where the agent is</option>
       {% for b in e.servers %}<option value="{{ b }}"{% if *b == e.build_server %} selected{% endif %}>{{ b }}</option>{% endfor %}

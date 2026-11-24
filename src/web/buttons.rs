@@ -91,7 +91,7 @@ pub fn pr_rows(c: &Connection, project_id: i64, now: i64) -> anyhow::Result<Vec<
     for o in &order {
         let r = &o.record;
         let buttons = views(c, r.id, now)?;
-        let ready = prs::merge_ready(r);
+        let ready = prs::ready_in_order(o);
         let (chip, chip_class) = match (&ready, o.after) {
             (Ok(()), None) => ("ready".to_owned(), "ok"),
             (Ok(()), Some(_)) => ("ready".to_owned(), "accent"),

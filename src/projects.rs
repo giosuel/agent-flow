@@ -25,6 +25,8 @@ pub struct Project {
     pub git_rules: String,
     pub ports: Vec<String>,
     pub build_product: String,
+    /// merge, squash or rebase: how its PRs' Merge buttons merge.
+    pub merge_method: String,
     pub agent: Agent,
 }
 
@@ -47,7 +49,8 @@ impl Agent {
 }
 
 const PROJECT_COLUMNS: &str = "id, slug, name, description, status, repo, checkout, machine, stack, platform, model, effort, \
-     pm_rules, git_rules, ports, build_product, agent_session, agent_machine, agent_model, agent_effort, agent_note, agent_seen_at";
+     pm_rules, git_rules, ports, build_product, agent_session, agent_machine, agent_model, agent_effort, agent_note, agent_seen_at, \
+     merge_method";
 
 fn json_list(s: String) -> Vec<String> {
     serde_json::from_str(&s).unwrap_or_default()
@@ -79,6 +82,7 @@ fn project_from_row(r: &Row) -> rusqlite::Result<Project> {
             note: r.get(20)?,
             seen_at: r.get(21)?,
         },
+        merge_method: r.get(22)?,
     })
 }
 
@@ -141,6 +145,9 @@ pub struct ProjectPatch {
     pub ports: Option<Vec<String>>,
     /// The viber-run product name for test builds.
     pub build_product: Option<String>,
+    /// How its PRs merge: merge (a merge commit, the default), squash or rebase. Every PR of the
+    /// project's repository gets a Merge button that merges this way and deletes the branch.
+    pub merge_method: Option<String>,
 }
 
 /// Slugs end up in record ids and URLs: lowercase letters, digits and dashes.
@@ -236,6 +243,25 @@ pub fn update(
             .optional()?;
         if taken.is_some() {
             bail!("another project publishes builds as {product:?} already");
+        }
+    }
+    if let Some(v) = &patch.merge_method {
+        if !["merge", "squash", "rebase"].contains(&v.trim()) {
+            bail!("merge_method is merge, squash or rebase");
+        }
+        set("merge_method", v.trim().into())?;
+        // Waiting Merge buttons AgentFlow made follow the new method.
+        let p = get_by_id(conn, project_id)?;
+        let mut stmt = conn.prepare(
+            "SELECT a.id, r.number FROM actions a JOIN records r ON r.id = a.record_id
+             WHERE r.project_id = ?1 AND r.kind = 'pr' AND a.kind = 'merge' AND a.added_by = 'agentflow' AND a.state = 'waiting'",
+        )?;
+        let rows: Vec<(i64, i64)> = stmt.query_map([project_id], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<Result<_, _>>()?;
+        for (id, number) in rows {
+            conn.execute(
+                "UPDATE actions SET command = ?1 WHERE id = ?2",
+                params![crate::prs::merge_command(p.repo.trim(), number, v.trim()), id],
+            )?;
         }
     }
     if let Some(v) = &patch.name {

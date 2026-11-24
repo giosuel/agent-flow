@@ -1498,7 +1498,13 @@ async fn answers_make_decisions_and_releases_bring_their_tag_button() {
     assert!(call("update_project", json!({"checkout": "~/vinculum"})).await.0);
     let (ok, r) = call("add_release", json!({"tag": "v0.0.6-m5", "title": "M5"})).await;
     assert!(ok, "{r}");
-    assert_eq!(r["tag_button"]["command"], "git fetch origin main && git tag -a v0.0.6-m5 -m v0.0.6-m5 origin/main && git push origin v0.0.6-m5");
+    let cmd = r["tag_button"]["command"].as_str().unwrap();
+    assert_eq!(cmd, "git fetch origin main && git tag -a v0.0.6-m5 -m v0.0.6-m5 origin/main && git push origin v0.0.6-m5");
+    // It never touches the checkout's own branch (Imaginarium's folder sits on another one).
+    assert!(!cmd.contains("checkout") && !cmd.contains("HEAD") && !cmd.contains("switch") && !cmd.contains("reset"));
+    // After a context reset: hello brief leaves out the document and milestones.
+    let (_, b) = call("hello", json!({"session": "V", "machine": "m", "model": "o", "effort": "h", "brief": true})).await;
+    assert!(b.get("doc").is_none() && b.get("milestones").is_none() && b.get("where").is_some(), "{b}");
     assert!(!call("add_release", json!({"tag": "v1; rm -rf ~", "title": "x"})).await.0);
 }
 
