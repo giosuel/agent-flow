@@ -184,14 +184,15 @@ pub fn run(config_path: &Path, args: &ClientArgs, all: bool, files: Vec<PathBuf>
             println!("No earlier conversations in {}.", folder_of(&dir).display());
             return Ok(());
         }
-        let client = Client::new(config_path, args)?.with_timeout(Duration::from_secs(300));
+        let client = Client::for_project(config_path, args, &dir)?.with_timeout(Duration::from_secs(300));
         let calls = send(&client, &files)?;
         println!("Sent {} conversation files ({calls} calls new to AgentFlow).", files.len());
         return Ok(());
     }
     if !files.is_empty() {
         // The detached copy: no terminal, so errors go to the log file.
-        let client = match Client::new(config_path, args) {
+        let here = std::env::current_dir().unwrap_or_default();
+        let client = match Client::for_project(config_path, args, &here) {
             Ok(c) => c.with_timeout(Duration::from_secs(300)),
             Err(e) => {
                 note(&format!("{e:#}"));
