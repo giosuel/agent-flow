@@ -3,7 +3,7 @@
 //! download (public: the repository is public anyway), `flow status`, and revoking its own token
 //! (`flow disconnect`).
 
-use axum::extract::{Path, State};
+use axum::extract::{DefaultBodyLimit, Path, State};
 use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -20,7 +20,8 @@ use crate::push::{self, Notification};
 
 pub fn routes() -> Router<AppState> {
     Router::new()
-        .route("/api/approvals", post(request))
+        // Anyone may post here, and a request is a few short fields.
+        .route("/api/approvals", post(request).layer(DefaultBodyLimit::max(16 * 1024)))
         .route("/api/approvals/poll", post(poll))
         .route("/approve/{code}", get(page).post(decide))
         .route("/api/status", get(status))
@@ -296,9 +297,12 @@ async fn redeem(
             Json(json!({"project": p.slug, "name": p.name, "token": token})).into_response()
         }
         Err(e) => {
-            let e2 = Entry::new(&Actor::Anonymous, Via::Api, Action::Denied, format!("setup code refused: {e:#}"))
-                .ip(Some(ip));
-            activity::write(&state.db, e2).await;
+            // Guessing codes in a loop doesn't get a row each.
+            if state.log_denial(&ip) {
+                let e2 = Entry::new(&Actor::Anonymous, Via::Api, Action::Denied, format!("setup code refused: {e:#}"))
+                    .ip(Some(ip));
+                activity::write(&state.db, e2).await;
+            }
             json_error(StatusCode::FORBIDDEN, format!("{e:#}"))
         }
     }
