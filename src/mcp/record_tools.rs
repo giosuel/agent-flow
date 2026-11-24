@@ -78,6 +78,13 @@ pub struct AskQuestion {
     pub blocks: Vec<String>,
     #[serde(default)]
     pub tags: Vec<String>,
+    /// Going ahead with your recommendation meanwhile: true when that choice is cheap to change.
+    /// You build the recommended option now (easy to switch), and the owner confirms or picks
+    /// another when they get to it; you hear which. Needs `recommended`. No notification, no
+    /// badge: it waits quietly in its own group. Leave it false (the owner decides first) only
+    /// for choices that are expensive to undo; then keep working on whatever doesn't depend on it.
+    #[serde(default)]
+    pub going_ahead: bool,
     /// Send it as an urgent notification. Only when waiting would really cost something.
     #[serde(default)]
     pub urgent: bool,
@@ -301,7 +308,9 @@ impl FlowMcp {
 
     #[tool(description = "Ask the owner a question. One question per call, with the context they need, numbered \
         options and your recommendation when it's a choice. They answer on their phone or the dashboard; the answer is \
-        stored verbatim and shows up in hello and get_record. Don't ask in chat as well.")]
+        stored verbatim and shows up in hello and get_record. Don't ask in chat as well. Never stop for a question: \
+        when the choice is cheap to change, set going_ahead and build your recommendation meanwhile; otherwise keep \
+        working on whatever doesn't depend on it (blocks names what does).")]
     async fn ask_question(
         &self,
         Extension(parts): Extension<Parts>,
@@ -310,6 +319,7 @@ impl FlowMcp {
         let actor = actor_of(&parts);
         let a = actor.clone();
         let urgent = p.urgent;
+        let going_ahead = p.going_ahead;
         let outcome = self
             .state
             .db
@@ -333,6 +343,15 @@ impl FlowMcp {
                 if urgent {
                     data.insert("urgent".into(), true.into());
                 }
+                if going_ahead {
+                    if p.recommended.is_none() {
+                        anyhow::bail!("going_ahead needs the option you go ahead with as recommended");
+                    }
+                    if urgent {
+                        anyhow::bail!("a question you go ahead on isn't urgent");
+                    }
+                    data.insert("going_ahead".into(), true.into());
+                }
                 let q = records::create(
                     &tx,
                     project.id,
@@ -352,7 +371,7 @@ impl FlowMcp {
                 }
                 tx.commit()?;
                 Ok((
-                    Outcome::new(json!({"id": q.ref_id, "state": "open"}))
+                    Outcome::new(json!({"id": q.ref_id, "state": "open", "going_ahead": going_ahead}))
                         .summary(format!("question {} asked", q.short_id()))
                         .project(project.slug.clone())
                         .target(q.ref_id.clone()),
@@ -364,15 +383,18 @@ impl FlowMcp {
         let outcome = match outcome {
             Ok((o, q, name)) => {
                 let kind = if urgent { push::Kind::Urgent } else { push::Kind::Question };
-                self.state.push.spawn(
-                    kind,
-                    Notification {
-                        title: format!("{name} asks"),
-                        body: q.title.clone(),
-                        url: q.url(),
-                        tag: Some(q.ref_id.clone()),
-                    },
-                );
+                // Going ahead: no notification (the owner, 2026-11-11: no badge, no push).
+                if !going_ahead {
+                    self.state.push.spawn(
+                        kind,
+                        Notification {
+                            title: format!("{name} asks"),
+                            body: q.title.clone(),
+                            url: q.url(),
+                            tag: Some(q.ref_id.clone()),
+                        },
+                    );
+                }
                 Ok(o)
             }
             Err(e) => Err(e),

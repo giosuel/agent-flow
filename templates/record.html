@@ -87,6 +87,7 @@
     {% if kind == "question" %}
     <section class="card pad stack" aria-labelledby="answer-h">
       <h2 id="answer-h">{% if can_answer %}Your answer{% else %}Answer{% endif %}</h2>
+      {% if let Some(d) = going_ahead %}<p class="notice" role="status">The agent is going ahead with <strong>{{ d }}</strong> meanwhile, built so it's easy to change. Pick it to confirm, or another (or your own words) to change course.</p>{% endif %}
       {% if can_answer %}
       {# Pick an option or write your own answer, never both; nothing is sent until Send answer. #}
       <form method="post" action="/p/{{ project_slug }}/{{ short }}/answer" class="stack answer-form" data-answer>

@@ -590,14 +590,32 @@ pub fn answer_question(
         (Some((n, t)), w) => format!("{n}: {t}. \"{w}\""),
         (None, w) => format!("\"{w}\""),
     };
-    event(
-        conn,
-        Some(q.project_id),
-        Some(q.id),
-        "question.answered",
-        &format!("Owner answered {}: {what}", q.short_id()),
-        author,
-    )?;
+    // A question the agent went ahead on: confirmed, or changed (and to what).
+    let going_ahead = q.data.get("going_ahead").and_then(Value::as_bool).unwrap_or(false);
+    let default = q.data.get("recommended").and_then(Value::as_u64).map(|n| n as usize);
+    let default_title = default
+        .and_then(|n| {
+            q.data.get("options")?.as_array()?.get(n.checked_sub(1)?)?.get("title")?.as_str().map(str::to_owned)
+        })
+        .unwrap_or_default();
+    let (kind, summary) = match (going_ahead, &chosen, words.trim()) {
+        (true, Some((n, _)), "") if Some(*n as usize) == default => {
+            ("question.confirmed", format!("Owner confirmed {}: keep {what}", q.short_id()))
+        }
+        (true, Some((n, _)), _) if Some(*n as usize) == default => {
+            ("question.confirmed", format!("Owner confirmed {} with a note: {what}", q.short_id()))
+        }
+        (true, _, _) => (
+            "question.changed",
+            format!(
+                "Owner changed {}: {what} (not the default you went ahead with, {}: {default_title}); switch to it",
+                q.short_id(),
+                default.unwrap_or(0)
+            ),
+        ),
+        _ => ("question.answered", format!("Owner answered {}: {what}", q.short_id())),
+    };
+    event(conn, Some(q.project_id), Some(q.id), kind, &summary, author)?;
     Ok(q)
 }
 
