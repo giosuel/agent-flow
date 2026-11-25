@@ -228,10 +228,81 @@ fn check_shown_whole(command: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// The text of the confirmation dialog: the command itself, whole, not just the button's name.
-pub fn confirm_text(a: &ActionRow) -> String {
-    let dir = if a.workdir.is_empty() { "~" } else { &a.workdir };
-    format!("Run \"{}\" in {dir}?\n\n{}", a.label, a.command)
+/// What the confirmation before a press says. The owner, 2026-11-25 (D-263): "lets make these
+/// dialogs more clear by saying that this will be a command thats executed. We can also make this
+/// more specific in this case and say that pushing tags / merging PRs is always the same command
+/// and the agent can just define the message themselves."
+#[derive(Debug, Clone, Default)]
+pub struct Confirm {
+    /// "Push tag v0.4.1?", "Merge #48?", "Run \"Deploy\"?"
+    pub title: String,
+    /// What pressing it does, in words.
+    pub lead: String,
+    /// What the block under the lead is: "The command", "Message, written by lituus".
+    pub block_label: String,
+    /// The agent's part, shown whole: its command, or the message of AgentFlow's own command.
+    pub block: String,
+    /// The block is a command (monospace) rather than a message.
+    pub block_is_command: bool,
+    /// AgentFlow's own command, folded under the rest; empty when the block is the command.
+    pub command: String,
+}
+
+/// The confirmation of a button. AgentFlow's own Merge and Push tag (the same command every time,
+/// [`own_command`]) say what they do, read from the command itself; any other command is shown
+/// whole as the command it is.
+pub fn confirm(conn: &Connection, a: &ActionRow) -> anyhow::Result<Confirm> {
+    use crate::prs::Described;
+    let own = if own_command(conn, a)? { crate::prs::describe(&a.command) } else { None };
+    Ok(match own {
+        Some(Described::Merge { repo, number, method, head }) => {
+            let how = match method.as_str() {
+                "squash" => "squashed into one commit",
+                "rebase" => "rebased",
+                _ => "with a merge commit",
+            };
+            let pinned = if head.is_empty() {
+                String::new()
+            } else {
+                format!(" GitHub refuses it if the branch got commits after {}.", &head[..7.min(head.len())])
+            };
+            Confirm {
+                title: format!("Merge #{number}?"),
+                lead: format!(
+                    "This runs AgentFlow's merge command: #{number} in {repo} merges {how}, and its branch is \
+                     deleted. It's the same command for every PR.{pinned}"
+                ),
+                command: a.command.clone(),
+                ..Default::default()
+            }
+        }
+        Some(Described::Tag { repo, tag, message }) => Confirm {
+            title: format!("Push tag {tag}?"),
+            lead: format!(
+                "This runs AgentFlow's tag command: the newest commit on main in {repo} is tagged {tag}, and \
+                 the tag is pushed. It's the same command for every release; only the message is the agent's."
+            ),
+            block_label: format!("Message, written by {}", a.added_by),
+            block: message,
+            command: a.command.clone(),
+            ..Default::default()
+        },
+        None => {
+            let dir = if a.workdir.is_empty() { "~" } else { &a.workdir };
+            Confirm {
+                title: format!("Run \"{}\"?", a.label),
+                lead: format!(
+                    "This runs a command that {} wrote, with bash in {dir} on the AgentFlow server. It runs \
+                     exactly as shown.",
+                    a.added_by
+                ),
+                block_label: "The command".into(),
+                block: a.command.clone(),
+                block_is_command: true,
+                ..Default::default()
+            }
+        }
+    })
 }
 
 /// Why the button is disabled, or Ok when it can be pressed.
@@ -596,6 +667,75 @@ mod tests {
                 let a = agents(kind, &command)?;
                 assert!(crate::prs::is_server_command(&a.command));
                 assert!(!own_command(c, &a)?, "{kind:?} {command}");
+            }
+            Ok(())
+        })
+        .unwrap();
+    }
+
+    /// D-263: the confirmation says a command runs; AgentFlow's own say what they do, in words read
+    /// from the command, and anything else is shown whole as the command.
+    #[test]
+    fn the_confirmation_says_what_runs() {
+        let db = Db::open_memory();
+        db.call_blocking(|c| {
+            let (r, own) = project_with_pr(c)?;
+            let m = confirm(c, &own)?;
+            assert_eq!(m.title, "Merge #48?");
+            assert!(m.lead.contains("#48 in o/r merges with a merge commit"), "{}", m.lead);
+            assert!(m.lead.contains("the same command for every PR"), "{}", m.lead);
+            assert!(m.block.is_empty() && m.command == own.command, "the command one click away");
+
+            // A release's Push tag: the agent's message, the command folded.
+            let mut data = serde_json::Map::new();
+            data.insert("tag".into(), "v0.4.1".into());
+            let rel = records::create(
+                c,
+                r.project_id,
+                "v",
+                records::NewRecord {
+                    kind: Some(Kind::Release),
+                    title: "Lituus 0.4.1".into(),
+                    state: Some("waiting".into()),
+                    data,
+                    ..Default::default()
+                },
+            )?;
+            let message = "Lituus 0.4.1: fixes\n\n- Every dropdown shows what's applied.";
+            let command = crate::prs::tag_command("o/r", "v0.4.1", message);
+            let tag = NewButton {
+                label: "Push tag v0.4.1",
+                kind: ButtonKind::Tag,
+                command: &command,
+                workdir: "",
+                requires: &[],
+            };
+            let tag = get(c, add(c, &rel, &tag, "v")?)?.unwrap();
+            let t = confirm(c, &tag)?;
+            assert_eq!(t.title, "Push tag v0.4.1?");
+            assert!(
+                t.lead.contains("main in o/r is tagged v0.4.1") && t.lead.contains("only the message is the agent")
+            );
+            assert_eq!((t.block_label.as_str(), t.block.as_str()), ("Message, written by v", message));
+            assert!(!t.block_is_command && t.command == command);
+
+            // An agent's own command, and AgentFlow's command shape for another repository: whole.
+            let theirs = NewButton {
+                label: "Deploy docs",
+                kind: ButtonKind::Other,
+                command: "make docs && rsync -a site/ host:",
+                workdir: "~/vinculum",
+                requires: &[],
+            };
+            let other = crate::prs::merge_command("o/other", 48, "merge");
+            let elsewhere =
+                NewButton { label: "Merge", kind: ButtonKind::Merge, command: &other, workdir: "", requires: &[] };
+            for (b, title) in [(theirs, "Run \"Deploy docs\"?"), (elsewhere, "Run \"Merge\"?")] {
+                let a = get(c, add(c, &r, &b, "v")?)?.unwrap();
+                let x = confirm(c, &a)?;
+                assert_eq!(x.title, title);
+                assert!(x.block_is_command && x.block == a.command && x.command.is_empty());
+                assert!(x.lead.contains("a command that v wrote, with bash in"), "{}", x.lead);
             }
             Ok(())
         })

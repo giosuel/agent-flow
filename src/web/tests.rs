@@ -1175,6 +1175,45 @@ async fn wait_for_records(s: &TestServer, slug: &str, numbers: &[i64], state: &s
     panic!("PRs {numbers:?} of {slug} never became {state}");
 }
 
+/// D-263: a button's confirmation says a command runs. AgentFlow's own Merge, "Merge #a–#b" and
+/// Push tag say what they do (the same command every time), with the agent's message.
+#[tokio::test]
+async fn confirmations_say_what_runs() {
+    use crate::github::fake::pr;
+    let s = TestServer::start().await;
+    let token = s.token(TokenKind::Project, Some("vinculum")).await;
+    let sess = mcp_session(&s, &token).await;
+    let call = |name: &'static str, args: Value| {
+        let (s, token, sess) = (&s, token.clone(), sess.clone());
+        async move { mcp_tool(s, &token, &sess, name, args).await }
+    };
+    call("update_project", json!({"repo": "giosuel/vinculum"})).await;
+    s.github.set("giosuel/vinculum", pr(48, "main", "b48"));
+    s.github.set("giosuel/vinculum", pr(49, "b48", "b49"));
+    crate::poller::poll_once(&s.state).await.unwrap();
+    let (ok, r) = call(
+        "add_release",
+        json!({"tag": "v0.1.0", "title": "Vinculum 0.1.0", "body": "Keybinds.\n\n- Saved per app"}),
+    )
+    .await;
+    assert!(ok, "{r}");
+    let cookie = s.owner_cookie().await;
+    let html =
+        s.http.get(s.url("/p/vinculum?tab=prs")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
+    assert!(
+        html.contains(r#"data-confirm="Merge #48?" data-confirm-body>Merge</button><template class="confirm-body">"#),
+        "{html}"
+    );
+    assert!(html.contains("merge command for each PR in giosuel/vinculum, one after the other"), "the stack in words");
+    assert!(html.contains(r#"data-confirm="Push tag v0.1.0?" data-confirm-body>"#));
+    assert!(html.contains("Message, written by vinculum"));
+    assert!(
+        html.contains("<pre class=\"cmd wrap msg\">Vinculum 0.1.0\n\nKeybinds.\n\n- Saved per app</pre>"),
+        "{html}"
+    );
+    assert!(html.contains("<summary class=\"sub\">The exact command</summary>"));
+}
+
 /// The owner, 2026-11-18 (D-214, D-215): a stacked PR merges only with the PRs below it, and red
 /// CI in the middle doesn't hold the stack when the PR it ends at is green.
 #[tokio::test]

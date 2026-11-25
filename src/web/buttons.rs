@@ -23,7 +23,7 @@ pub fn routes() -> Router<AppState> {
 /// A button as the page shows it.
 pub struct ButtonView {
     pub id: i64,
-    pub confirm: String,
+    pub confirm: actions::Confirm,
     pub label: String,
     pub hash: String,
     pub command: String,
@@ -40,7 +40,7 @@ pub fn view(c: &Connection, a: &ActionRow, now: i64) -> anyhow::Result<ButtonVie
     let why = actions::enabled(c, a)?.err().unwrap_or_default();
     Ok(ButtonView {
         id: a.id,
-        confirm: actions::confirm_text(a),
+        confirm: actions::confirm(c, a)?,
         label: a.label.clone(),
         hash: a.hash(),
         command: a.command.clone(),
@@ -80,8 +80,8 @@ pub struct PrRow {
     pub base: String,
     pub buttons: Vec<ButtonView>,
     /// "Merge #48–#50": every PR from the bottom of the stack up to this one, in order: the
-    /// label, the buttons' "id:hash" list, and the dialog listing every command.
-    pub up_to: Option<(String, String, String)>,
+    /// label, the buttons' "id:hash" list, and the dialog listing every PR it merges.
+    pub up_to: Option<(String, String, actions::Confirm)>,
 }
 
 pub fn pr_rows(c: &Connection, project_id: i64, now: i64) -> anyhow::Result<Vec<PrRow>> {
@@ -117,14 +117,7 @@ pub fn pr_rows(c: &Connection, project_id: i64, now: i64) -> anyhow::Result<Vec<
                 Ok(steps) => {
                     let label = format!("Merge #{}–#{}", steps[0].number, r.number);
                     let ids = chain_ids(&steps);
-                    let confirm = format!(
-                        "{label}? They merge one after the other, from the bottom, and stop at the first that fails:\n\n{}",
-                        steps
-                            .iter()
-                            .map(|s| format!("#{}: {}", s.number, s.action.command))
-                            .collect::<Vec<_>>()
-                            .join("\n")
-                    );
+                    let confirm = chain_confirm(c, &order, &label, &steps)?;
                     up_to = Some((label, ids, confirm));
                     // A failed one stays, for its output.
                     buttons.retain(|b| !merge_ids.contains(&b.id) || b.state == "failed");
@@ -156,6 +149,51 @@ pub fn pr_rows(c: &Connection, project_id: i64, now: i64) -> anyhow::Result<Vec<
         });
     }
     Ok(rows)
+}
+
+/// The confirmation of "Merge #a–#b" (D-263): AgentFlow's own merges are said in words, with the
+/// PRs in their order; when one is an agent's own command, every command is shown as it runs.
+fn chain_confirm(
+    c: &Connection,
+    order: &[prs::Ordered],
+    label: &str,
+    steps: &[prs::ChainStep],
+) -> anyhow::Result<actions::Confirm> {
+    let title = |n: i64| order.iter().find(|o| o.record.number == n).map(|o| o.record.title.as_str()).unwrap_or("");
+    let mut all = Vec::new();
+    for s in steps {
+        all.push(actions::confirm(c, &s.action)?);
+    }
+    let commands = steps.iter().map(|s| s.action.command.as_str()).collect::<Vec<_>>().join("\n");
+    let own = all.iter().all(|x| !x.block_is_command);
+    let repo = steps.iter().find_map(|s| match prs::describe(&s.action.command) {
+        Some(prs::Described::Merge { repo, .. }) => Some(repo),
+        _ => None,
+    });
+    Ok(match (own, repo) {
+        (true, Some(repo)) => actions::Confirm {
+            title: format!("{label}?"),
+            lead: format!(
+                "This runs AgentFlow's merge command for each PR in {repo}, one after the other from the bottom, \
+                 and stops at the first that fails. It's the same command for every PR; each branch is deleted \
+                 once it's merged."
+            ),
+            block_label: "In this order".into(),
+            block: steps.iter().map(|s| format!("#{}  {}", s.number, title(s.number))).collect::<Vec<_>>().join("\n"),
+            command: commands,
+            ..Default::default()
+        },
+        _ => actions::Confirm {
+            title: format!("{label}?"),
+            lead: "This runs these commands one after the other with bash, from the bottom, and stops at the first \
+                   that fails. They run exactly as shown."
+                .into(),
+            block_label: "The commands".into(),
+            block: steps.iter().map(|s| format!("#{}: {}", s.number, s.action.command)).collect::<Vec<_>>().join("\n"),
+            block_is_command: true,
+            ..Default::default()
+        },
+    })
 }
 
 /// "id:hash,id:hash": a chain's merge buttons as the page shows them, bottom first.

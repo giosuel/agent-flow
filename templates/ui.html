@@ -14,3 +14,8 @@
 {% if !items.is_empty() %}<fieldset class="choice-list"><legend class="vh">Options</legend>{% for c in items %}<label class="choice{% if c.recommended %} rec{% endif %}"><input type="radio" name="option" value="{{ c.n }}"><span class="num">{{ c.n }}</span><span class="txt">{{ c.title }}{% if !c.detail.is_empty() %}<span class="sub">{{ c.detail }}</span>{% endif %}</span>{% if c.recommended %}<span class="chip accent">recommended</span>{% endif %}</label>{% endfor %}</fieldset>{% endif %}
 <div class="choice-own">{% if own %}<label class="vh" for="{{ own_id }}">Answer in your own words</label><input id="{{ own_id }}" name="words" autocomplete="off" placeholder="{% if items.is_empty() %}Your answer{% else %}Or answer in your own words{% endif %}">{% endif %}<button class="btn" type="submit">Send answer</button></div>
 </form>{% endmacro %}
+
+{# A button's confirmation (D-263): what pressing it runs, said plainly. The data-confirm button just
+   before it opens it (app.js) instead of plain text. c is actions::Confirm: AgentFlow's own Merge and
+   Push tag in words, with the agent's message; any other command shown whole. #}
+{% macro confirm_body(c) %}<template class="confirm-body"><div class="confirm-x"><p>{{ c.lead }}</p>{% if !c.block.is_empty() %}<div><p class="sub">{{ c.block_label }}</p><pre class="cmd wrap{% if !c.block_is_command %} msg{% else %} mono{% endif %}">{{ c.block }}</pre></div>{% endif %}{% if !c.command.is_empty() %}<details class="cmd-box"><summary class="sub">The exact command</summary><pre class="cmd wrap mono">{{ c.command }}</pre></details>{% endif %}</div></template>{% endmacro %}

@@ -1,9 +1,9 @@
-<div class="button-box">
+{% import "ui.html" as ui %}<div class="button-box">
   <div class="row wrap">
     <form method="post" action="/actions/{{ b.id }}/run">
       <input type="hidden" name="hash" value="{{ b.hash }}">
       <input type="hidden" name="next" value="{{ next }}">
-      <button class="btn sm" type="submit"{% if !b.enabled %} disabled{% endif %} data-confirm="{{ b.confirm }}">{{ b.label }}</button>
+      <button class="btn sm" type="submit"{% if !b.enabled %} disabled{% endif %} data-confirm="{{ b.confirm.title }}" data-confirm-body>{{ b.label }}</button>{% call ui::confirm_body(b.confirm) %}{% endcall %}
     </form>
     {% if !b.why.is_empty() %}<span class="sub">{{ b.why }}</span>{% endif %}
     {% if !b.result.is_empty() %}<span class="sub{% if b.state == "failed" %} bad-text{% endif %}">{{ b.result }}</span>{% endif %}
