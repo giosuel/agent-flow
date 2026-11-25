@@ -85,7 +85,11 @@ pre code { background: none; padding: 0; }
 /* A path folds its first parts into "…" only when it doesn't fit its line, and "…" shows them
    (the owner, 2026-11-25, D-282: "why is this always ".../" ? can we expand this?"); app.js
    measures it with its parts unshrunk. */
-.crumb-row .path { min-width: 0; max-width: 100%; }
+/* The path shares its row with the session link and the like: it shrinks, they don't, and it
+   folds when they don't fit together. */
+.crumb-row:has(> .path) { flex-wrap: nowrap; }
+.crumb-row > .path { flex: 0 1 auto; min-width: 0; }
+.crumb-row:has(> .path) > :not(.path) { flex: none; }
 .path.pmeasure ol, .path.folded ol { flex-wrap: nowrap; }
 .path.pmeasure li { flex-shrink: 0; }
 .path.folded ol { overflow: hidden; }
