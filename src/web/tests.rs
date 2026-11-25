@@ -3432,6 +3432,7 @@ async fn jobs_run_on_a_builder_and_bring_back_what_was_asked() {
         "{page}"
     );
     assert!(page.contains(r#"<span class="cv-t lv-warn">warning: careful</span>"#), "{page}");
+    assert!(page.contains(r#"<dt>Project</dt><dd><a href="/p/imaginarium">"#), "the project it belongs to: {page}");
     assert!(page.contains(r#"<span class="cv-n">1</span>"#), "{page}");
     // flow remote fetches what came back.
     let job = s.db.call(move |c| crate::remote::get(c, id)).await.unwrap().unwrap();

@@ -30,6 +30,7 @@
         <dl class="kv nkv">
           <dt>State</dt><dd><span class="chip {{ row.chip }}" id="job-state">{{ row.label }}</span></dd>
           <dt>Time</dt><dd class="mono" id="job-time">{{ row.time }}</dd>
+          <dt>Project</dt><dd><a href="{{ project.1 }}">{{ project.0 }}</a></dd>
           <dt>Started by</dt><dd><span class="byline"><span class="itile sm accent" aria-hidden="true">{{ crate::web::icons::icon("robot")|safe }}</span><span>{{ by }}</span></span></dd>
           <dt>Started</dt><dd>{{ started }}</dd>
           {% for (k, v) in facts %}<dt>{{ k }}</dt><dd{% if k == "Command" || k == "Checkout" || k == "Runs in" %} class="mono job-fact"{% endif %}>{{ v }}</dd>{% endfor %}

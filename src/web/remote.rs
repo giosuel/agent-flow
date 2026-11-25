@@ -508,6 +508,8 @@ struct JobPage {
     /// Its name, or its command for a job from before names (then shown as code).
     title: String,
     named: bool,
+    /// The project it belongs to: (name, its page).
+    project: (String, String),
     /// "imaginarium's project agent"
     by: String,
     started: String,
@@ -616,6 +618,7 @@ async fn job_page(
         path,
         row: job_row(&job),
         title: job.title(),
+        project: (if pname.is_empty() { job.project.clone() } else { pname.clone() }, format!("/p/{}", job.project)),
         named: !job.name.is_empty(),
         by,
         started: tz.short(job.created_at),
