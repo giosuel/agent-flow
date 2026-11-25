@@ -29,8 +29,10 @@ struct Featured {
     url: String,
     project: String,
     when: String,
-    /// What it blocks: (title, page).
-    blocks: Vec<(String, String)>,
+    /// What it blocks: (T-12, title, page). The chip names the first few by id, with the title
+    /// on hover: whole titles in a chip that doesn't wrap ran out of the card (the owner,
+    /// 2026-11-25: "this overflows").
+    blocks: Vec<(String, String, String)>,
     title: String,
     body_html: String,
     options: Vec<super::uilib::Choice>,
@@ -112,7 +114,7 @@ async fn dashboard(
             let name = |slug: &str| names.get(slug).cloned().unwrap_or_else(|| slug.to_owned());
 
             let featured = match w.questions.first() {
-                Some(q) => Some(featured(q, name(&q.project), waiting::blocks(c, q)?, now)),
+                Some(q) => Some(featured(q, name(&q.project), waiting::blocked(c, q)?, now)),
                 None => None,
             };
             let mut groups = Vec::new();
@@ -374,7 +376,7 @@ async fn dashboard(
     })
 }
 
-fn featured(q: &Record, project: String, blocks: Vec<(String, String)>, now: i64) -> Featured {
+fn featured(q: &Record, project: String, blocks: Vec<Record>, now: i64) -> Featured {
     let rec = q.data.get("recommended").and_then(Value::as_u64).unwrap_or(0) as usize;
     let options = q
         .data
@@ -397,7 +399,7 @@ fn featured(q: &Record, project: String, blocks: Vec<(String, String)>, now: i64
         url: q.url(),
         project,
         when: format!("asked {}", ago(q.created_at, now)),
-        blocks,
+        blocks: blocks.iter().map(|r| (r.short_id(), r.title.clone(), r.url())).collect(),
         title: q.title.clone(),
         body_html: markdown::to_html(&q.body),
         options,
