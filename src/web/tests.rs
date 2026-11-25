@@ -97,7 +97,7 @@ impl TestServer {
                 }
                 let id = crate::people::create(c, true, None, webauthn_rs::prelude::Uuid::new_v4())?;
                 c.execute(
-                    "UPDATE people SET username = 'giosuel', email = 'me@giosuel.ch', icon = 'orbit' WHERE id = ?1",
+                    "UPDATE people SET username = 'giosuel', email = 'me@giosuel.ch', icon = 'owl' WHERE id = ?1",
                     [id],
                 )?;
                 Ok(id)
@@ -213,7 +213,8 @@ async fn people_get_in_with_setup_invite_and_device_links() {
     let whoami = |cookie: String| {
         let s = &s;
         async move {
-            let res = s.http.get(s.url("/settings")).header(COOKIE, &cookie).send().await.unwrap();
+            // The welcome page works before someone picked their name; nothing else does.
+            let res = s.http.get(s.url("/welcome")).header(COOKIE, &cookie).send().await.unwrap();
             res.status()
         }
     };
@@ -247,6 +248,7 @@ async fn people_get_in_with_setup_invite_and_device_links() {
     assert!(page.contains("You're invited") && page.contains("This invite works once, until"), "{page}");
     let res = s.http.post(s.url(&format!("/invite/{invite}"))).send().await.unwrap();
     assert_eq!(res.status(), StatusCode::SEE_OTHER);
+    assert_eq!(res.headers()["location"], "/welcome?next=/settings?add_passkey=1", "who are you first");
     let mira_cookie = cookie_of(&res);
     let everyone = s.db.call(|c| crate::people::list(c)).await.unwrap();
     assert_eq!(everyone.len(), 2);
@@ -316,6 +318,55 @@ async fn people_get_in_with_setup_invite_and_device_links() {
     let log = s.log_summaries().await;
     assert!(log.iter().any(|l| l.contains("An invite was made on the server, as root")), "{log:?}");
     assert!(log.iter().any(|l| l.contains("invite link refused")), "{log:?}");
+}
+
+/// The first sign-in's step 2 (D-270): someone new picks a username, an email and an icon before
+/// anything else opens.
+#[tokio::test]
+async fn someone_new_says_who_they_are_first() {
+    let s = TestServer::start().await;
+    let admin = s.admin().await;
+    let mira =
+        s.db.call(move |c| crate::people::create(c, false, Some(admin), webauthn_rs::prelude::Uuid::new_v4()))
+            .await
+            .unwrap();
+    let cookie = s.cookie_for(mira).await;
+    let res = s
+        .http
+        .get(s.url("/p/vinculum?tab=notes"))
+        .header(COOKIE, &cookie)
+        .header("accept", "text/html")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::SEE_OTHER);
+    assert_eq!(res.headers()["location"], "/welcome?next=/p/vinculum");
+    let page = owner_page(&s, &cookie, "/welcome?next=/p/vinculum").await;
+    assert!(page.contains("Welcome! Who are you?") && page.contains(r#"name="next" value="/p/vinculum""#), "{page}");
+    assert_eq!(page.matches(r#"name="icon""#).count(), 15, "the 15 icons");
+    let post = |form: Vec<(&'static str, &'static str)>| {
+        let (s, cookie) = (&s, cookie.clone());
+        async move {
+            s.http
+                .post(s.url("/welcome"))
+                .header(COOKIE, &cookie)
+                .header(ORIGIN, &s.base)
+                .form(&form)
+                .send()
+                .await
+                .unwrap()
+        }
+    };
+    let res = post(vec![("username", "giosuel"), ("email", "m@x.org"), ("icon", "fox"), ("next", "/p/vinculum")]).await;
+    assert_eq!(res.status(), StatusCode::UNPROCESSABLE_ENTITY, "taken");
+    assert!(res.text().await.unwrap().contains("already called"));
+    let res = post(vec![("username", "Mira"), ("email", "m@x.org"), ("icon", "fox"), ("next", "//evil.example")]).await;
+    assert_eq!(res.status(), StatusCode::SEE_OTHER);
+    assert_eq!(res.headers()["location"], "/", "only paths on this site");
+    let p = s.db.call(move |c| crate::people::get(c, mira)).await.unwrap().unwrap();
+    assert_eq!((p.username.as_deref(), p.email.as_str(), p.icon.as_str()), (Some("mira"), "m@x.org", "fox"));
+    let res = s.http.get(s.url("/")).header(COOKIE, &cookie).header("accept", "text/html").send().await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK, "everything opens now");
 }
 
 #[tokio::test]

@@ -5,6 +5,7 @@ pub(crate) mod admin_socket;
 mod api;
 mod approvals;
 mod assets;
+pub(crate) mod avatars;
 pub(crate) mod builders;
 mod builds;
 pub(crate) mod consultant;
@@ -31,6 +32,7 @@ mod notes;
 mod notifications;
 mod overview;
 mod pages;
+mod profile;
 mod projectdoc;
 mod projects;
 mod pwa;
@@ -144,6 +146,7 @@ pub fn router(state: AppState) -> Router {
     let app = Router::new()
         .merge(pages::routes())
         .merge(links::routes())
+        .merge(profile::routes())
         .merge(settings::routes())
         .merge(projects::routes())
         .merge(api::routes())
@@ -612,6 +615,17 @@ async fn authenticate(State(state): State<AppState>, jar: CookieJar, mut req: Re
             return unauthenticated(&path, wants_html(req.headers()));
         }
     };
+
+    // Someone signed in who hasn't picked their username, email and icon yet does that first (the
+    // first sign-in's step 2, D-270); the pages they need on the way stay open.
+    if let Actor::Owner { ready: false, .. } = actor
+        && req.method() == axum::http::Method::GET
+        && wants_html(req.headers())
+        && !profile::open_before_profile(&path)
+    {
+        let to = if path == "/" { "/welcome".to_owned() } else { format!("/welcome?next={path}") };
+        return Redirect::to(&to).into_response();
+    }
 
     // A builder's token opens the builder's own endpoints and nothing else.
     if matches!(actor, Actor::Builder { .. }) && !path.starts_with("/api/builders/") {

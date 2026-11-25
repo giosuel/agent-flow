@@ -18,6 +18,8 @@ pub enum Actor {
         person: i64,
         /// The first person, who invites the others.
         admin: bool,
+        /// Their username, email and icon are set (the first sign-in's step 2).
+        ready: bool,
     },
     /// One of the owner's machines: the CLI, flow run.
     Device {
@@ -419,7 +421,8 @@ pub fn session_actor(conn: &Connection, secret: &str, limits: &SessionLimits) ->
     let now = now_ms();
     let row = conn
         .query_row(
-            "SELECT s.id, s.method, s.last_seen_at, p.id, p.admin FROM web_sessions s
+            "SELECT s.id, s.method, s.last_seen_at, p.id, p.admin, p.username IS NOT NULL AND p.icon != ''
+             FROM web_sessions s
              JOIN people p ON p.id = s.person_id AND p.removed_at IS NULL
              WHERE s.hash = ?1 AND s.revoked_at IS NULL AND s.expires_at > ?2",
             params![hash_secret(secret), now],
@@ -430,11 +433,12 @@ pub fn session_actor(conn: &Connection, secret: &str, limits: &SessionLimits) ->
                     r.get::<_, i64>(2)?,
                     r.get::<_, i64>(3)?,
                     r.get::<_, i64>(4)?,
+                    r.get::<_, bool>(5)?,
                 ))
             },
         )
         .optional()?;
-    let Some((id, method, last_seen, person, admin)) = row else { return Ok(None) };
+    let Some((id, method, last_seen, person, admin, ready)) = row else { return Ok(None) };
     if now - last_seen > limits.idle_ms {
         conn.execute("UPDATE web_sessions SET revoked_at = ?1 WHERE id = ?2", params![now, id])?;
         return Ok(None);
@@ -443,7 +447,7 @@ pub fn session_actor(conn: &Connection, secret: &str, limits: &SessionLimits) ->
     if now - last_seen > 60_000 {
         conn.execute("UPDATE web_sessions SET last_seen_at = ?1 WHERE id = ?2", params![now, id])?;
     }
-    Ok(Some(Actor::Owner { session_id: id, method, person, admin: admin != 0 }))
+    Ok(Some(Actor::Owner { session_id: id, method, person, admin: admin != 0, ready }))
 }
 
 pub fn end_session(conn: &Connection, session_id: i64) -> anyhow::Result<()> {

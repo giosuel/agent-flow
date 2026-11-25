@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" fill="none" stroke-linecap="round" stroke-linejoin="round">
+<defs>
+<linearGradient id="fox-bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2E1D0B"/><stop offset="1" stop-color="#140C04"/></linearGradient>
+<linearGradient id="fox-b" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FED7AA"/><stop offset="1" stop-color="#EA6A12"/></linearGradient>
+<linearGradient id="fox-v" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#241A45"/><stop offset="1" stop-color="#120C24"/></linearGradient>
+<radialGradient id="fox-e" cx=".5" cy=".5" r=".5"><stop offset="0" stop-color="#F5F3FF"/><stop offset="1" stop-color="#FED7AA" stop-opacity="0"/></radialGradient>
+</defs>
+<circle cx="32" cy="32" r="32" fill="url(#fox-bg)"/>
+<circle cx="32" cy="32" r="30.5" stroke="#EA6A12" stroke-opacity=".55" stroke-width="1.2" stroke-dasharray="2 4"/>
+
+<path d="M13 25 L19 9 L29 21 H35 L45 9 L51 25 C51 40 43 49 32 52 C21 49 13 40 13 25 Z" fill="url(#fox-b)"/>
+<path d="M18 13 L21 20 L24 18 Z M46 13 L43 20 L40 18 Z" fill="#2A1404" fill-opacity=".55"/>
+<path d="M16 33 C22 36 27 37 32 37 C37 37 42 36 48 33 C46 43 40 49 32 51.5 C24 49 18 43 16 33 Z" fill="#FFF7ED"/>
+<rect x="20" y="26" width="24" height="10" rx="5" fill="url(#fox-v)"/>
+<circle cx="26" cy="31" r="4.4" fill="url(#fox-e)"/><circle cx="38" cy="31" r="4.4" fill="url(#fox-e)"/><circle cx="26" cy="31" r="2" fill="#F5F3FF"/><circle cx="38" cy="31" r="2" fill="#F5F3FF"/>
+<ellipse cx="32" cy="42.5" rx="2.6" ry="1.8" fill="#2A1404"/>
+
+</svg>

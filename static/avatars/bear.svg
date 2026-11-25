@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" fill="none" stroke-linecap="round" stroke-linejoin="round">
+<defs>
+<linearGradient id="bear-bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2E230A"/><stop offset="1" stop-color="#141004"/></linearGradient>
+<linearGradient id="bear-b" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FDE68A"/><stop offset="1" stop-color="#D97706"/></linearGradient>
+<linearGradient id="bear-v" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#241A45"/><stop offset="1" stop-color="#120C24"/></linearGradient>
+<radialGradient id="bear-e" cx=".5" cy=".5" r=".5"><stop offset="0" stop-color="#F5F3FF"/><stop offset="1" stop-color="#FDE68A" stop-opacity="0"/></radialGradient>
+</defs>
+<circle cx="32" cy="32" r="32" fill="url(#bear-bg)"/>
+<circle cx="32" cy="32" r="30.5" stroke="#D97706" stroke-opacity=".55" stroke-width="1.2" stroke-dasharray="2 4"/>
+
+<circle cx="19" cy="21" r="7" fill="url(#bear-b)"/><circle cx="45" cy="21" r="7" fill="url(#bear-b)"/>
+<circle cx="19" cy="21" r="3.2" fill="#2A1A04" fill-opacity=".45"/><circle cx="45" cy="21" r="3.2" fill="#2A1A04" fill-opacity=".45"/>
+<circle cx="32" cy="35" r="17" fill="url(#bear-b)"/>
+<rect x="20" y="27" width="24" height="10" rx="5" fill="url(#bear-v)"/>
+<circle cx="26" cy="32" r="4.4" fill="url(#bear-e)"/><circle cx="38" cy="32" r="4.4" fill="url(#bear-e)"/><circle cx="26" cy="32" r="2" fill="#F5F3FF"/><circle cx="38" cy="32" r="2" fill="#F5F3FF"/>
+<ellipse cx="32" cy="43" rx="7.5" ry="5.5" fill="#FEF3C7"/>
+<ellipse cx="32" cy="41.2" rx="2.8" ry="2" fill="#2A1A04"/>
+
+</svg>

@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" fill="none" stroke-linecap="round" stroke-linejoin="round">
+<defs>
+<linearGradient id="ghost-bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#241A45"/><stop offset="1" stop-color="#100B21"/></linearGradient>
+<linearGradient id="ghost-b" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#C4B5FD"/><stop offset="1" stop-color="#6D4AE0"/></linearGradient>
+<linearGradient id="ghost-v" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#241A45"/><stop offset="1" stop-color="#120C24"/></linearGradient>
+<radialGradient id="ghost-e" cx=".5" cy=".5" r=".5"><stop offset="0" stop-color="#F5F3FF"/><stop offset="1" stop-color="#C4B5FD" stop-opacity="0"/></radialGradient>
+</defs>
+<circle cx="32" cy="32" r="32" fill="url(#ghost-bg)"/>
+<circle cx="32" cy="32" r="30.5" stroke="#6D4AE0" stroke-opacity=".55" stroke-width="1.2" stroke-dasharray="2 4"/>
+
+<path d="M17 51 V29 C17 19 23 13 32 13 C41 13 47 19 47 29 V51 L42 47 L37 51 L32 47 L27 51 L22 47 Z" fill="url(#ghost-b)"/>
+<rect x="21" y="25" width="22" height="11" rx="5.5" fill="url(#ghost-v)"/>
+<circle cx="26.5" cy="30.5" r="4.8" fill="url(#ghost-e)"/><circle cx="37.5" cy="30.5" r="4.8" fill="url(#ghost-e)"/><circle cx="26.5" cy="30.5" r="2.3" fill="#F5F3FF"/><circle cx="37.5" cy="30.5" r="2.3" fill="#F5F3FF"/>
+<circle cx="22" cy="40" r="2.2" fill="#F9A8D4" fill-opacity=".55"/><circle cx="42" cy="40" r="2.2" fill="#F9A8D4" fill-opacity=".55"/>
+
+</svg>

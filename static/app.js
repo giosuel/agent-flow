@@ -1425,3 +1425,19 @@ document.addEventListener("click", (e) => {
   document.addEventListener("af:content", () => requestAnimationFrame(all));
   all();
 })();
+
+// The first sign-in and Settings › Profile: a preview of how you show up, as you type and pick
+// (D-270).
+document.addEventListener("input", (e) => {
+  const form = e.target.closest && e.target.closest("[data-profile]");
+  if (!form) return;
+  if (e.target.matches("[data-pv-name]")) {
+    const who = form.querySelector("[data-pv-who]");
+    if (who) who.textContent = e.target.value.trim().toLowerCase() || "you";
+  }
+});
+document.addEventListener("change", (e) => {
+  const form = e.target.closest && e.target.closest("[data-profile]");
+  if (!form || e.target.name !== "icon") return;
+  for (const img of form.querySelectorAll("[data-pv-icon]")) img.src = "/static/avatars/" + e.target.value + ".svg";
+});

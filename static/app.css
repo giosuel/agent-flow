@@ -1592,3 +1592,9 @@ ol.lrows { padding: 0; margin: 0; list-style: none; gap: 0; }
 .link-steps .num { display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: var(--chip); font-size: var(--fs-label); }
 .link-steps li.on { color: var(--ink); }
 .link-steps li.on .num { background: var(--accent-chip); color: var(--accent-chip-ink); }
+
+/* The first sign-in (welcome.html): the form as one card, a preview of how you show up. */
+.welcome { text-align: left; }
+.welcome .field { display: flex; flex-direction: column; gap: var(--sp-1); }
+.welcome .field label { font-weight: 600; font-size: var(--fs-sm); }
+.welcome-pv { padding: var(--sp-3) var(--sp-4); border: 1px solid var(--line); border-radius: var(--r-md); background: var(--sunken); }

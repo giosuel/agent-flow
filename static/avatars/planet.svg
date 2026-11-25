@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" fill="none" stroke-linecap="round" stroke-linejoin="round">
+<defs>
+<linearGradient id="planet-bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2E230A"/><stop offset="1" stop-color="#141004"/></linearGradient>
+<linearGradient id="planet-b" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FDE68A"/><stop offset="1" stop-color="#D97706"/></linearGradient>
+<linearGradient id="planet-v" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#241A45"/><stop offset="1" stop-color="#120C24"/></linearGradient>
+<radialGradient id="planet-e" cx=".5" cy=".5" r=".5"><stop offset="0" stop-color="#F5F3FF"/><stop offset="1" stop-color="#FDE68A" stop-opacity="0"/></radialGradient>
+</defs>
+<circle cx="32" cy="32" r="32" fill="url(#planet-bg)"/>
+<circle cx="32" cy="32" r="30.5" stroke="#D97706" stroke-opacity=".55" stroke-width="1.2" stroke-dasharray="2 4"/>
+
+<path d="M11 39 C6 44 8 47 16 46 C26 45 42 38 51 31" stroke="#FDE68A" stroke-opacity=".45" stroke-width="2.4"/>
+<circle cx="32" cy="32" r="16" fill="url(#planet-b)"/>
+<path d="M20 26 C26 24 34 25 44 23 M18 36 C26 33 36 35 46 32" stroke="#FEF3C7" stroke-opacity=".35" stroke-width="2"/>
+<rect x="20" y="27" width="24" height="10" rx="5" fill="url(#planet-v)"/>
+<circle cx="26" cy="32" r="4.4" fill="url(#planet-e)"/><circle cx="38" cy="32" r="4.4" fill="url(#planet-e)"/><circle cx="26" cy="32" r="2" fill="#F5F3FF"/><circle cx="38" cy="32" r="2" fill="#F5F3FF"/>
+<path d="M51 31 C58 26 58 21 50 21 C46 21 40 22 34 25" stroke="#FDE68A" stroke-width="2.4"/>
+<path d="M11 39 C14 42 22 42 30 40" stroke="#FDE68A" stroke-width="2.4"/>
+<circle cx="13" cy="17" r="1.2" fill="#FEF3C7"/><circle cx="50" cy="48" r="1" fill="#FEF3C7"/><circle cx="46" cy="12" r="0.9" fill="#FEF3C7"/>
+
+</svg>

@@ -21,3 +21,9 @@
 {#- A question without options is answered in a text box (the owner, 2026-11-25, D-287). -#}
 <div class="choice-own{% if items.is_empty() %} alone{% endif %}">{% if own || items.is_empty() %}<label class="vh" for="{{ own_id }}">Answer in your own words</label>{% if items.is_empty() %}<textarea id="{{ own_id }}" name="words" rows="4" placeholder="Your answer, in your own words"></textarea>{% else %}<input id="{{ own_id }}" name="words" autocomplete="off" placeholder="Or answer in your own words">{% endif %}{% endif %}<button class="btn" type="submit">Send answer</button></div>
 </form>{% endmacro %}
+
+{#- A person's icon (D-270): `size` is "", "sm" or "lg"; no icon yet: the person glyph. -#}
+{% macro avatar(icon, size) %}{% if icon.is_empty() %}<span class="avatar none {{ size }}" aria-hidden="true">{{ crate::web::icons::icon("person")|safe }}</span>{% else %}<img class="avatar {{ size }}" src="/static/avatars/{{ icon }}.svg" alt="" aria-hidden="true">{% endif %}{% endmacro %}
+
+{#- Picking one of the 15 icons: radio buttons named `icon`, `chosen` checked. -#}
+{% macro avatar_picker(chosen) %}<fieldset class="avpick"><legend class="label">Your icon</legend>{% for a in crate::web::avatars::AVATARS %}<label class="avpick-o" title="{{ a }}"><input type="radio" name="icon" value="{{ a }}"{% if crate::web::avatars::same(a, chosen) %} checked{% endif %} required><img class="avatar" src="/static/avatars/{{ a }}.svg" alt="{{ a }}"><span class="avpick-ck" aria-hidden="true">{{ crate::web::icons::icon("check")|safe }}</span></label>{% endfor %}</fieldset>{% endmacro %}
