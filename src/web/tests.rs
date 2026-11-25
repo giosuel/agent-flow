@@ -3865,27 +3865,23 @@ async fn questions_and_decisions_have_scopes() {
     assert_eq!(t1["state"], "todo", "archiving unblocks: {t1}");
     let (ok, r) = call("update_question", json!({"id": "Q-4", "state": "open", "reason": "needed after all"})).await;
     assert!(ok && r["state"] == "open", "{r}");
-    // The owner moves an open question's scope on its page before answering.
+    // The agent moves a question to another scope, not the owner (2026-11-25, D-288): its page
+    // only says where the decision goes.
+    let (ok, r) = call("update_question", json!({"id": "Q-3", "scope": "M9", "reason": "about M9"})).await;
+    assert!(ok && r["scope"] == "M9", "{r}");
     let cookie = s.owner_cookie().await;
     let page = s.http.get(s.url("/p/vinculum/Q-3")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
-    assert!(page.contains("Its decision goes into") && page.contains("Project-wide"), "{page}");
-    let m9: i64 =
-        s.db.call(|c| {
-            let p = crate::projects::require(c, "vinculum")?;
-            Ok(crate::projects::find_milestone(c, p.id, "M9")?.id)
-        })
-        .await
-        .unwrap();
+    assert!(page.contains("Scope: M9 · ") && !page.contains(r#"name="scope""#), "{page}");
     let res = s
         .http
         .post(s.url("/p/vinculum/Q-3/scope"))
         .header(COOKIE, &cookie)
         .header(ORIGIN, &s.base)
-        .form(&[("scope", m9.to_string())])
+        .form(&[("scope", "project")])
         .send()
         .await
         .unwrap();
-    assert!(res.status().is_redirection());
+    assert!(!res.status().is_success() && !res.status().is_redirection(), "{}", res.status());
     let res = s
         .http
         .post(s.url("/p/vinculum/Q-3/answer"))

@@ -665,8 +665,6 @@ a.ms:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 /* A mockup's state (the owner, 2026-11-12). */
 
 /* A question's scope picker: the select gives way on a phone so Move stays inside the card. */
-.scope-form .scope-pick { flex-wrap: nowrap; min-width: 0; max-width: 100%; }
-.scope-form .scope-pick select { flex: 1 1 auto; min-width: 0; }
 
 /* The Reload button under a page's heading; conversation groups in the list. */
 /* A page's title with its few controls on the right (Usage, Conversations). */
