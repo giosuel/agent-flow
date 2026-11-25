@@ -82,9 +82,16 @@ pre code { background: none; padding: 0; }
 .path a:hover { color: var(--hover); background: var(--soft); }
 .path [aria-current] { color: var(--ink); font-weight: 500; }
 /* In a dialog's header: the last three parts, the rest behind "…". */
-.rdlg .dlg-t .path ol { flex-wrap: nowrap; overflow: hidden; }
-.rdlg .dlg-t .path li:nth-last-child(n+4) { display: none; }
-.rdlg .dlg-t .path li:nth-last-child(3):not(:first-child)::before { content: "… /"; color: var(--muted); padding: 0 8px 0 0; }
+/* A path folds its first parts into "…" only when it doesn't fit its line, and "…" shows them
+   (the owner, 2026-11-25, D-282: "why is this always ".../" ? can we expand this?"); app.js
+   measures it with its parts unshrunk. */
+.crumb-row .path { min-width: 0; max-width: 100%; }
+.path.pmeasure ol, .path.folded ol { flex-wrap: nowrap; }
+.path.pmeasure li { flex-shrink: 0; }
+.path.folded ol { overflow: hidden; }
+.path li[hidden] { display: none; }
+.pfold-btn { border: 0; background: none; font: inherit; color: var(--ink2); cursor: pointer; border-radius: 6px; padding: 2px 4px; margin: -2px -4px; }
+.pfold-btn:hover { color: var(--hover); background: var(--soft); }
 .session-link {
   margin-left: auto; display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 0 12px;
   border: 1px solid var(--accent); border-radius: 18px; background: var(--soft);
@@ -1139,9 +1146,7 @@ ol.lrows { padding: 0; margin: 0; list-style: none; gap: 0; }
   .qmini .of-chev { flex: none; }
   .qm-t { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
   .qmini { display: flex; align-items: center; gap: 10px; justify-content: space-between; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); text-decoration: none; font-size: var(--fs-sm); line-height: 1.4; }
-  /* The phone: the back bar goes up one level; the path shows its end. */
-  .crumb-row .path li:nth-last-child(n+3) { display: none; }
-  .crumb-row .path li:nth-last-child(2):not(:first-child)::before { content: "… /"; padding: 0 8px 0 0; }
+  /* The phone: the back bar goes up one level; the path folds when it doesn't fit (D-282). */
   .ml-row { grid-template-columns: 16px 44px minmax(0, 1fr) 16px; gap: 10px; padding: 8px 14px; }
   .ml-row .c { grid-column: 3; grid-row: 2; }
   .ml-row .pbar, .ml-row .tg { display: none; }
