@@ -890,8 +890,8 @@ async fn the_featured_questions_blocks_chip_stays_short() {
     assert!(ok, "{r}");
     let cookie = s.owner_cookie().await;
     let html = s.http.get(s.url("/")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
-    let chip = &html[html.find(r#"<span class="chip bad">Blocks "#).expect("the chip")..];
-    let chip = &chip[..chip.find("</span>").unwrap()];
+    let chip = &html[html.find(r#"<span class="chip bad">Blocks<span>"#).expect("the chip")..];
+    let chip = &chip[..chip.find("</span></span>").unwrap()];
     assert!(chip.contains(r#"<a href="/p/vinculum/T-1" title="R1-1: lines across"#), "{chip}");
     assert!(chip.contains(">T-1</a>, <a") && chip.contains(">T-3</a> +2 more"), "{chip}");
     assert!(!chip.contains(">R1-1") && !chip.contains("T-4"), "{chip}");
