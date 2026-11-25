@@ -10,7 +10,7 @@ use serde::Deserialize;
 use crate::util::expand_home;
 
 pub const SYSTEM_PATH: &str = "/etc/agentflow/config.toml";
-/// A system install's socket for `sudo flow server add-passkey` (systemd's RuntimeDirectory).
+/// A system install's socket for `sudo flow server setup`, `invite` and `add-device` (systemd's RuntimeDirectory).
 pub const SYSTEM_ADMIN_SOCKET: &str = "/run/agentflow/admin.sock";
 
 #[derive(Debug, Clone, Deserialize)]
@@ -33,7 +33,7 @@ pub struct Config {
     pub handbook_dir: String,
     /// No longer used (the handbook left git, 2026-11-18); kept so older configs still load.
     pub handbook_repo: String,
-    /// The socket for `sudo flow server add-passkey`; empty: `$XDG_RUNTIME_DIR/agentflow/admin.sock`
+    /// The socket for `sudo flow server setup` and the like; empty: `$XDG_RUNTIME_DIR/agentflow/admin.sock`
     /// for a user install, `/run/agentflow/admin.sock` otherwise.
     pub admin_socket: String,
     /// The `flow` program the server hands out for download and writes into hooks; empty: the one

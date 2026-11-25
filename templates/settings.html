@@ -19,7 +19,7 @@
   {% if section == "passkeys" %}
   <section aria-labelledby="h-sec">
     <h2 id="h-sec">Passkeys</h2>
-    <p class="sub set-lead">How you sign in to AgentFlow. Lost every one? <code>sudo flow server add-passkey</code> on the server gives a one-time link.</p>
+    <p class="sub set-lead">How you sign in to AgentFlow. Lost every one? <code>sudo flow server add-device</code> on the server gives a one-time link, or <code>sudo flow server setup</code> for the admin.</p>
     {% if passkeys.is_empty() %}<div class="set-row"><div class="set-txt"><strong>No passkey yet</strong><span class="sub">You're signed in with a one-time link.</span></div></div>{% endif %}
     {% for p in passkeys %}
     <div class="set-row"><div class="set-txt"><strong>{{ p.name }}</strong><span class="sub">added {{ p.added }} · used {{ p.used }}</span></div>

@@ -39,15 +39,15 @@ a single-user instance's data along.
 The server runs as `agentflow`; what has to happen as the agents' user goes to `agentflow hands`
 over a Unix socket that only `agentflow` may use (`src/hands.rs`). That covers the buttons, `gh`
 with the agents' login, guide edits, token files, new projects' folders, transcripts and the
-agents' process folders. To sign in the first time (or after losing every passkey):
-`sudo flow server add-passkey` on the server prints a one-time link; the first start also logs one
-(`journalctl -u agentflow`) while no passkey exists.
+agents' process folders. To make the first account, the admin (or make it again after losing
+every passkey): `sudo flow server setup` on the server prints a one-time link; the first start
+also logs one (`journalctl -u agentflow`) while nobody is set up.
 
 **Packages.** Two of them, as `.deb` (`scripts/deb.sh`, from the release programs) and from the AUR
 (`packaging/arch/PKGBUILD`, a split package built from a release tag):
 - `agentflow`, the server: `agentflow`, its system service, the agents' helper service and the
   `agentflow` user. It needs `agentflow-client` (agents on the server use `flow`). Then run
-  `sudo agentflow setup …` as above (no `install` step needed), and `sudo flow server add-passkey`.
+  `sudo agentflow setup …` as above (no `install` step needed), and `sudo flow server setup`.
 - `agentflow-client`: `flow`, and `agentflow-builder` with its user service, for every machine that
   connects to the server (`flow connect`) or builds for agents (`flow builder add`). A builder keeps
   running while its user isn't logged in only with linger on: `sudo loginctl enable-linger <user>`.
@@ -108,10 +108,13 @@ ready to try, something to review, and urgent calls from an agent.
 Every request is authenticated. Public are only the sign-in page, asking to connect a machine,
 the install script and the `flow` download.
 
-- **The owner** signs in in the browser with a passkey (enrolled in Settings). On a new device, or
-  if every passkey is lost, run `sudo flow server add-passkey` on the server and open the one-time
-  link it prints (valid 15 minutes): it leads straight to adding a passkey. It goes through a local
-  socket only root may use, and every link is logged and pushed.
+- **People** sign in in the browser with a passkey. The first account is the admin:
+  `sudo flow server setup` on the server prints a one-time link (valid 15 minutes) that makes it
+  and its first passkey. Only the admin invites others, from Settings › People or with
+  `sudo flow server invite` (a link valid 7 days). A new device gets a link from Settings ›
+  Passkeys, or `sudo flow server add-device [username]`; an admin who lost every passkey runs
+  `setup` again, which replaces their passkeys and signs out their browsers. The commands go
+  through a local socket only root may use, and every link is logged and pushed.
 - **Machines** get `flow` and connect with one command, `curl -fsSL <server>/install.sh | sh`
   (or `flow connect <server>`): the owner approves the machine in the browser, where the page shows
   the same short code as the terminal, and the machine gets a token of its own (read-only).
