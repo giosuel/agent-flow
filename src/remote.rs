@@ -70,7 +70,10 @@ pub fn sh_quote(s: &str) -> String {
 /// The server as last seen.
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct Probe {
+    /// When it was probed last, whether it answered or not.
     pub at: i64,
+    /// When it last answered: an offline builder's "last seen" (0: not since AgentFlow started).
+    pub seen: i64,
     pub online: bool,
     pub error: String,
     pub model: String,
@@ -121,7 +124,7 @@ pub struct Counters {
 
 /// Reads the probe script's output; CPU use is the difference to `prev`.
 pub fn parse_probe(text: &str, prev: Option<Counters>, at: i64) -> (Probe, Counters) {
-    let mut p = Probe { at, online: true, ..Default::default() };
+    let mut p = Probe { at, seen: at, online: true, ..Default::default() };
     let mut c = Counters { at, ..Default::default() };
     for line in text.lines() {
         let (key, rest) = line.split_once(' ').unwrap_or((line, ""));

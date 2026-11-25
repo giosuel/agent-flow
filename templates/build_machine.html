@@ -15,24 +15,24 @@
 <div class="npage">
   <div class="mmain">
     <section class="card" aria-labelledby="now-h" id="mnow" data-live>
-      <div class="card-head"><h2 id="now-h">Right now</h2><span class="sub">{% if !m.online %}offline{% else if m.running.is_empty() && m.waiting.is_empty() %}nothing running{% else %}{{ m.running.len() }} running, {{ m.waiting.len() }} waiting{% endif %}</span></div>
+      <div class="card-head"><h2 id="now-h">Right now</h2><span class="sub">{% if !m.online %}offline{% if !m.waiting.is_empty() %} · {{ m.waiting.len() }} waiting{% endif %}{% else if m.running.is_empty() && m.waiting.is_empty() %}nothing running{% else %}{{ m.running.len() }} running, {{ m.waiting.len() }} waiting{% endif %}</span></div>
       <div class="card-body stack">
         {% if m.paused %}{% call parts::paused() %}{% endcall %}{% endif %}
         {% if !m.meters.is_empty() %}{% call parts::meters(m.meters) %}{% endcall %}
         <ul class="legend"><li><span class="swatch" style="--c: var(--bar-you)"></span>you (not builds)</li><li><span class="swatch" style="--c: var(--accent)"></span>builds</li></ul>
         {% else if m.online %}<p class="sub">Its figures come with its next check, in a few seconds.</p>{% else %}<p class="sub">Offline: it shows its stats again once it connects.</p>{% endif %}
-        {% if m.running.is_empty() && m.waiting.is_empty() %}<p class="sub">{{ m.idle_sentence() }}</p>{% else %}
+        {% if m.running.is_empty() && m.waiting.is_empty() %}{% if m.online %}<p class="sub">{{ m.idle_sentence() }}</p>{% endif %}{% else %}
         <div>{% for j in m.running.iter().chain(m.waiting.iter()) %}<div class="jrow"><a class="mono" href="/machines/jobs/{{ j.id }}">#{{ j.id }}</a><span><a class="jn" href="/machines/jobs/{{ j.id }}">{% if j.named %}{{ j.title }}{% else %}<span class="mono">{{ j.title }}</span>{% endif %}</a> <span class="sub">{{ j.sub }}</span></span><span class="chip {{ j.chip }}">{{ j.label }}</span></div>{% endfor %}</div>
         {% endif %}
       </div>
     </section>
 
     <section class="card" aria-labelledby="hist-h" id="history" data-live>
-      <div class="card-head"><h2 id="hist-h">Build history</h2><span class="sub">{{ m.counts.all }} job{% if m.counts.all != 1 %}s{% endif %}</span><span class="grow"></span><span class="seg sm" role="group" aria-label="Which jobs">{% for (label, href, on) in shows %}<a{% if *on %} class="on" aria-current="true"{% endif %} href="{{ href }}">{{ label }}</a>{% endfor %}</span></div>
+      <div class="card-head"><h2 id="hist-h">Build history</h2><span class="sub">{{ count }}</span><span class="grow"></span><span class="seg sm" role="group" aria-label="Which jobs">{% for (label, href, on) in shows %}<a{% if *on %} class="on" aria-current="true"{% endif %} href="{{ href }}">{{ label }}</a>{% endfor %}</span></div>
       {% if rows.is_empty() %}<div class="card-body"><p class="sub">{{ empty }}</p></div>{% else %}
       <div class="card-body"><div class="table-wrap"><table class="table jobs" data-sortable>
-        <thead><tr>{% call tbl::th("Job", "num", "", "descending") %}{% endcall %}{% call tbl::th("Name", "text", "", "") %}{% endcall %}{% call tbl::th("Project", "text", "hide-phone", "") %}{% endcall %}{% call tbl::th("State", "text", "", "") %}{% endcall %}{% call tbl::th("Started", "num", "hide-phone", "") %}{% endcall %}{% call tbl::th("Time", "num", "", "") %}{% endcall %}{% call tbl::th("Sent", "num", "hide-phone", "") %}{% endcall %}</tr></thead>
-        <tbody>{% for r in rows %}<tr><th scope="row" data-v="{{ r.id }}"><a href="/machines/jobs/{{ r.id }}">#{{ r.id }}</a></th><td class="jn"><a href="/machines/jobs/{{ r.id }}">{% if r.named %}{{ r.title }}{% else %}<span class="mono">{{ r.title }}</span>{% endif %}</a></td><td class="hide-phone">{{ r.project }}</td><td><span class="chip {{ r.chip }}">{{ r.label }}</span></td><td class="mono hide-phone" data-v="{{ r.created_at }}">{{ r.started }}</td><td class="mono" data-v="{{ r.v.0 }}">{{ r.time }}</td><td class="mono hide-phone" data-v="{{ r.v.1 }}">{{ r.sent }}</td></tr>{% endfor %}</tbody>
+        <thead><tr>{% call tbl::th("Job", "num", "", "descending") %}{% endcall %}{% call tbl::th("Name", "text", "", "") %}{% endcall %}{% call tbl::th("Project", "text", "hide-phone", "") %}{% endcall %}{% call tbl::th("State", "text", "", "") %}{% endcall %}{% call tbl::th("Started", "num", "hide-phone", "") %}{% endcall %}{% call tbl::th("Time", "num", "hide-phone", "") %}{% endcall %}{% call tbl::th("Sent", "num", "hide-phone", "") %}{% endcall %}</tr></thead>
+        <tbody>{% for r in rows %}<tr><th scope="row" data-v="{{ r.id }}"><a href="/machines/jobs/{{ r.id }}">#{{ r.id }}</a></th><td class="jn"><a href="/machines/jobs/{{ r.id }}">{% if r.named %}{{ r.title }}{% else %}<span class="mono">{{ r.title }}</span>{% endif %}</a></td><td class="hide-phone">{{ r.project }}</td><td><span class="chip {{ r.chip }}">{{ r.label }}</span></td><td class="mono hide-phone" data-v="{{ r.created_at }}">{{ r.started }}</td><td class="mono hide-phone" data-v="{{ r.v.0 }}">{{ r.time }}</td><td class="mono hide-phone" data-v="{{ r.v.1 }}">{{ r.sent }}</td></tr>{% endfor %}</tbody>
       </table></div></div>
       <div class="card-foot">{% call ui::pager(pager) %}{% endcall %}</div>
       {% endif %}

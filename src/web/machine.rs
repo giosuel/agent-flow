@@ -318,8 +318,8 @@ pub async fn build_machines(state: &AppState, only: Option<&str>, today: i64) ->
             BuildMachine {
                 state: if online {
                     "online".to_owned()
-                } else if p.at > 0 {
-                    format!("offline · last seen {}", ago(p.at, now))
+                } else if p.seen > 0 {
+                    format!("offline · last seen {}", ago(p.seen, now))
                 } else {
                     "offline".to_owned()
                 },
@@ -334,7 +334,7 @@ pub async fn build_machines(state: &AppState, only: Option<&str>, today: i64) ->
                 version: hello.map(|h| h.0).unwrap_or_default(),
                 counts,
                 since: hub.since(&b.name),
-                seen: p.at,
+                seen: p.seen,
                 threads,
                 memory_gb,
                 gpu,
@@ -450,6 +450,8 @@ struct MachinePage {
     pager: Pager,
     /// What the history says when this filter lists nothing.
     empty: String,
+    /// Beside its title: "214 jobs", "6 failed of 214".
+    count: String,
     /// "This machine": (name, value, in code type).
     facts: Vec<(&'static str, String, bool)>,
     /// This page's address, for pausing to come back to.
@@ -507,11 +509,13 @@ fn machine_facts(m: &BuildMachine, tz: &crate::tz::Tz, now: i64) -> Vec<(&'stati
         (false, _) => f.push(("Connected", "not since AgentFlow started".into(), false)),
     }
     let b = &m.server;
-    f.push((
-        "Starts a job",
-        format!("while {} threads and {} GB are free", num(b.min_threads), num(b.min_memory_gb)),
-        false,
-    ));
+    let starts = match (b.min_threads > 0.0, b.min_memory_gb > 0.0) {
+        (true, true) => format!("while {} threads and {} GB are free", num(b.min_threads), num(b.min_memory_gb)),
+        (true, false) => format!("while {} threads are free", num(b.min_threads)),
+        (false, true) => format!("while {} GB are free", num(b.min_memory_gb)),
+        (false, false) => "whenever one waits".to_owned(),
+    };
+    f.push(("Starts a job", starts, false));
     f.push((
         "Per project",
         format!("{} job{} at once", b.slots.max(1), if b.slots.max(1) == 1 { "" } else { "s" }),
@@ -581,6 +585,15 @@ async fn machine_page(
         rows: jobs.iter().map(|j| hist_row(j, &tz, today)).collect(),
         here: address(show, pager.page),
         pager,
+        count: {
+            let all = m.counts.all;
+            let jobs = format!("{all} job{}", if all == 1 { "" } else { "s" });
+            match show {
+                remote::Show::All => jobs,
+                remote::Show::Failed => format!("{} failed of {all}", m.counts.failed),
+                remote::Show::Running => format!("{} running or waiting of {all}", m.counts.running),
+            }
+        },
         empty: match show {
             remote::Show::All => format!("No jobs yet: agents build here with flow remote --server {name}."),
             remote::Show::Failed => "No job failed here.".to_owned(),

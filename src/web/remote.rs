@@ -343,8 +343,10 @@ impl Meter {
     }
 }
 
+/// "7", "6.4", "32": one decimal below ten, none when it's whole ("7", not "7.0").
 pub fn num(v: f64) -> String {
-    if v >= 10.0 || v.fract() == 0.0 { format!("{v:.0}") } else { format!("{v:.1}") }
+    let r = (v * 10.0).round() / 10.0;
+    if r >= 10.0 || r.fract() == 0.0 { format!("{r:.0}") } else { format!("{r:.1}") }
 }
 
 pub struct JobRow {
@@ -677,8 +679,8 @@ pub async fn servers_card(state: &AppState, code: Option<&str>) -> anyhow::Resul
                     Some((v, ..)) => format!("online · builder {v}"),
                     None => "online".to_owned(),
                 }
-            } else if p.at > 0 {
-                format!("offline · last seen {}", ago(p.at, now))
+            } else if p.seen > 0 {
+                format!("offline · last seen {}", ago(p.seen, now))
             } else {
                 "not connected".to_owned()
             };
