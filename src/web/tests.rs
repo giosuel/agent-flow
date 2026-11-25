@@ -4862,7 +4862,7 @@ async fn the_ui_catalogue_shows_the_library() {
     // Link chips and the pager (T-210).
     assert!(page.contains(r##"<a class="chip link" href="#ui-chip">"##), "{page}");
     assert!(
-        page.contains(r#"<nav class="pager" aria-label="Pages of the example"><span class="sub pager-range">1–20 of 214</span><span class="sub mono">page 1 of 11</span><span class="ibtn off" aria-hidden="true">"#)
+        page.contains(r#"<nav class="pager links" aria-label="Pages of the example"><span class="sub pager-range">1–20 of 214</span><span class="sub mono">page 1 of 11</span><span class="ibtn off" aria-hidden="true">"#)
             && page.contains(r##"<a class="ibtn" href="/ui?page=2#ui-table" title="Older jobs" aria-label="Older jobs">"##),
         "{page}"
     );
