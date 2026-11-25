@@ -61,15 +61,15 @@ struct Panel {
     earlier: Vec<Row>,
 }
 
-async fn load(state: &AppState) -> anyhow::Result<(Vec<Row>, Vec<Row>)> {
-    let items = state.db.call(|c| crate::notifications::list(c, 100)).await?;
+async fn load(state: &AppState, person: i64) -> anyhow::Result<(Vec<Row>, Vec<Row>)> {
+    let items = state.db.call(move |c| crate::notifications::list(c, person, 100)).await?;
     Ok(rows(items).into_iter().partition(|r| r.unread))
 }
 
 /// The panel's content (the script fetches it, then marks everything read).
 async fn panel(State(state): State<AppState>, Extension(actor): Extension<Actor>) -> AppResult<Response> {
     actor.require_owner()?;
-    let (fresh, earlier) = load(&state).await?;
+    let (fresh, earlier) = load(&state, actor.person().unwrap_or(0)).await?;
     render(Panel { fresh, earlier })
 }
 
@@ -82,6 +82,7 @@ async fn page() -> Response {
 
 async fn read(State(state): State<AppState>, Extension(actor): Extension<Actor>) -> AppResult<Response> {
     actor.require_owner()?;
-    let n = state.db.call(|c| crate::notifications::mark_all_read(c)).await?;
+    let me = actor.person().unwrap_or(0);
+    let n = state.db.call(move |c| crate::notifications::mark_all_read(c, me)).await?;
     Ok(Json(serde_json::json!({"read": n})).into_response())
 }

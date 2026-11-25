@@ -102,6 +102,7 @@ async fn dashboard(
     let today = tz.long(crate::util::now_ms());
     let now = now_ms();
     let answered = q.answered.clone();
+    let me = actor.person();
     let data = state
         .db
         .call(move |c| {
@@ -109,6 +110,8 @@ async fn dashboard(
             let all_projects = projects::list(c)?;
             let names: std::collections::HashMap<String, String> =
                 all_projects.iter().map(|p| (p.slug.clone(), p.name.clone())).collect();
+            // People by name, "you" for yourself (D-272).
+            let people = crate::people::Names::load(c, me)?;
             let name = |slug: &str| names.get(slug).cloned().unwrap_or_else(|| slug.to_owned());
 
             let featured = match w.questions.first() {
@@ -285,11 +288,12 @@ async fn dashboard(
                 .take(12)
                 .map(|e| Activity {
                     time: tz.hm(e.at),
-                    who: match e.actor.as_str() {
-                        "owner" => "you".into(),
-                        a => names.get(a).cloned().unwrap_or_else(|| a.to_owned()),
+                    who: if people.is_person(&e.actor) {
+                        people.who(&e.actor)
+                    } else {
+                        names.get(e.actor.as_str()).cloned().unwrap_or_else(|| e.actor.clone())
                     },
-                    tone: if e.kind == "question.answered" || e.actor == "owner" {
+                    tone: if e.kind == "question.answered" || people.is_person(&e.actor) {
                         "accent"
                     } else if e.kind.contains("failed") {
                         "bad"

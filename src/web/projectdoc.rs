@@ -179,6 +179,7 @@ async fn save(
 ) -> AppResult<Response> {
     actor.require_owner()?;
     let s = slug.clone();
+    let by = actor.name();
     let mine = f.text.replace("\r\n", "\n");
     let mine2 = mine.clone();
     let res = state
@@ -205,7 +206,7 @@ async fn save(
                 w if w.is_empty() => "the whole document".to_owned(),
                 w => w,
             };
-            match projectdoc::set(c, p.id, &text, "owner", &format!("edited {what}")) {
+            match projectdoc::set(c, p.id, &text, &by, &format!("edited {what}")) {
                 Ok((_, true)) => Ok(Saved::Done("saved", what, taken.join(", "))),
                 Ok((_, false)) => Ok(Saved::Done("same", what, String::new())),
                 Err(e) if e.to_string().contains("KB") => Ok(Saved::Big(cur)),

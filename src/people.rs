@@ -134,6 +134,49 @@ pub fn counts(conn: &Connection, id: i64) -> anyhow::Result<(i64, i64)> {
     Ok((keys, browsers))
 }
 
+/// How authors read for the person looking (D-269, D-272): "you" for themselves, a person's
+/// username otherwise; "owner", written before there were people, is the admin.
+pub struct Names {
+    me: Option<String>,
+    admin: String,
+    icons: std::collections::HashMap<String, String>,
+}
+
+impl Names {
+    pub fn load(conn: &Connection, me: Option<i64>) -> anyhow::Result<Names> {
+        let everyone = list(conn)?;
+        let admin = everyone.iter().find(|p| p.admin).map(|p| p.name()).unwrap_or_else(|| "the admin".into());
+        let me = me.and_then(|id| everyone.iter().find(|p| p.id == id)).map(|p| p.name());
+        let mut icons: std::collections::HashMap<String, String> =
+            everyone.iter().map(|p| (p.name(), p.icon.clone())).collect();
+        if let Some(i) = icons.get(&admin).cloned() {
+            icons.insert("owner".into(), i);
+        }
+        Ok(Names { me, admin, icons })
+    }
+
+    /// The person an author names: "owner" is the admin.
+    fn person<'a>(&'a self, author: &'a str) -> &'a str {
+        if author == "owner" { &self.admin } else { author }
+    }
+
+    /// Whether the author is a person (not an agent or AgentFlow).
+    pub fn is_person(&self, author: &str) -> bool {
+        self.icons.contains_key(author) || author == "owner"
+    }
+
+    /// "you" for the person looking, their name for anyone else.
+    pub fn who(&self, author: &str) -> String {
+        let p = self.person(author);
+        if self.me.as_deref() == Some(p) { "you".into() } else { p.to_owned() }
+    }
+
+    /// A person's icon ("" for anyone else).
+    pub fn icon(&self, author: &str) -> String {
+        self.icons.get(author).cloned().unwrap_or_default()
+    }
+}
+
 /// Names a person can't take: words pages use for someone else.
 const RESERVED: &[&str] =
     &["owner", "you", "admin", "system", "github", "agentflow", "consultant", "anonymous", "root", "flow", "agent"];

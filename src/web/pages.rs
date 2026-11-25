@@ -225,7 +225,8 @@ pub async fn nav(state: &AppState, actor: &Actor, active: &str) -> Nav {
             n.me = me.map(|p| Me { name: p.name(), email: p.email, icon: p.icon });
         }
         n.waiting = state.db.call(|c| crate::waiting::count(c)).await.unwrap_or(0) as i64;
-        n.unread = state.db.call(|c| crate::notifications::unread(c)).await.unwrap_or(0);
+        let me = actor.person().unwrap_or(0);
+        n.unread = state.db.call(move |c| crate::notifications::unread(c, me)).await.unwrap_or(0);
         let now = crate::util::now_ms();
         n.projects = state
             .db

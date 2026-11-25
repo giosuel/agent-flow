@@ -987,7 +987,7 @@ async fn the_usage_page_shows_the_plan_and_the_cost() {
     // The week was past 80% with its first sample: one push, in the bell.
     let mut usage_pushes = 0;
     for _ in 0..50 {
-        let bell = s.db.call(|c| crate::notifications::list(c, 10)).await.unwrap();
+        let bell = s.db.call(|c| crate::notifications::list(c, 1, 10)).await.unwrap();
         usage_pushes = bell.iter().filter(|n| n.kind == "usage").count();
         if usage_pushes > 0 {
             break;
@@ -1798,7 +1798,7 @@ async fn a_build_goes_from_agent_to_owner_and_feedback_comes_back() {
     // part of it now (Q-6): its old links open Builds.
     let page = owner_page(&s, &cookie, "/p/imaginarium?tab=builds").await;
     assert!(page.contains("New in B-1") && page.contains("2 of 2 tried"), "{page}");
-    assert!(page.contains("blurry at 200 % (you, ") && page.contains("the border is cut off"), "{page}");
+    assert!(page.contains("blurry at 200 % (giosuel, ") && page.contains("the border is cut off"), "{page}");
     assert!(page.contains("Still to try") && page.contains("Undo a table edit"), "{page}");
     assert!(!page.contains(r#"class="tt-t">Tables</span>"#), "tested, off the list: {page}");
     assert!(page.contains("<pre class=\"cmd\">flow run imaginarium 1</pre>"), "{page}");

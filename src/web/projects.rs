@@ -1831,16 +1831,17 @@ struct NoteTpl {
     history: History,
 }
 
-/// Who wrote a record, said plainly (D-269): its project's agent, the owner, or another agent.
-fn byline(r: &Record, project: &Project) -> (bool, String) {
+/// Who wrote a record, said plainly (D-269): its project's agent, a person with their icon ("you"
+/// for yourself), or another agent.
+fn byline(r: &Record, project: &Project, names: &crate::people::Names) -> (bool, String, String) {
     if r.author == project.slug {
         let poss =
             if project.name.ends_with('s') { format!("{}'", project.name) } else { format!("{}'s", project.name) };
-        (true, format!("{poss} project agent"))
-    } else if r.author == "owner" {
-        (false, "you".to_owned())
+        (true, format!("{poss} project agent"), String::new())
+    } else if names.is_person(&r.author) {
+        (false, names.who(&r.author), names.icon(&r.author))
     } else {
-        (true, r.author.clone())
+        (true, r.author.clone(), String::new())
     }
 }
 
@@ -2092,9 +2093,11 @@ async fn load_record_page(
         buttons,
         (session_url, draft, draft_notice, to_test, time, timings, scope, path, note_place),
     ) = page;
+    let me = actor.person();
+    let names = state.db.call(move |c| crate::people::Names::load(c, me)).await?;
     let note = (r.kind == Kind::Note).then(|| {
         let mut n = super::notes::page(&state.config.data_dir(), &r);
-        n.by = byline(&r, &project);
+        n.by = byline(&r, &project, &names);
         n.added = tz.short(r.created_at);
         n.milestone = note_place;
         n
@@ -2289,7 +2292,7 @@ async fn load_record_page(
         time,
         timings,
         note,
-        history: history_view(&history, &r, &tz, now_ms()),
+        history: history_view(&history, &r, &tz, now_ms(), &names),
         error,
         buttons,
         pr_url: if r.kind == Kind::Pr { r.str("url").to_owned() } else { String::new() },
@@ -2391,11 +2394,11 @@ const QUIET: &[&str] = &[
     "ready_for_feedback",
 ];
 
-fn history_view(revs: &[records::Revision], r: &Record, tz: &Tz, now: i64) -> History {
+fn history_view(revs: &[records::Revision], r: &Record, tz: &Tz, now: i64, names: &crate::people::Names) -> History {
     let mut days: Vec<HistoryDay> = Vec::new();
     let today = tz.day_start(now);
     for h in revs {
-        let e = history_event(h, r, tz);
+        let e = history_event(h, r, tz, names);
         let start = tz.day_start(h.at);
         let label = if start == today {
             format!("Today, {}", tz.day(h.at))
@@ -2412,15 +2415,16 @@ fn history_view(revs: &[records::Revision], r: &Record, tz: &Tz, now: i64) -> Hi
     History { count: revs.len(), days }
 }
 
-fn history_event(h: &records::Revision, r: &Record, tz: &Tz) -> HistoryEvent {
+fn history_event(h: &records::Revision, r: &Record, tz: &Tz, names: &crate::people::Names) -> HistoryEvent {
+    let person = names.is_person(&h.author);
     let mut e = HistoryEvent {
         rev: h.rev,
         time: tz.hm(h.at),
-        who: if h.author == "owner" { "you".to_owned() } else { h.author.clone() },
+        who: if person { names.who(&h.author) } else { h.author.clone() },
         what: String::new(),
         chips: Vec::new(),
         replaced: None,
-        dot: if h.author == "owner" { "accent" } else { "quiet" },
+        dot: if person { "accent" } else { "quiet" },
     };
     if h.rev == 1 {
         e.what = format!("Created the {}", r.kind.label().to_lowercase());
@@ -2504,21 +2508,22 @@ async fn answer(
     if option.is_some() && !words.trim().is_empty() {
         return Ok(Redirect::to(&format!("/p/{slug}/{id}?error=both")).into_response());
     }
-    let (s, i) = (slug.clone(), id.clone());
+    let (s, i, by) = (slug.clone(), id.clone(), actor.name());
     let result = state
         .db
         .call(move |c| {
             let tx = c.transaction()?;
             let q = records::find_str(&tx, &format!("{s}/{i}"), None)?;
-            // The answer becomes a decision in the question's scope (the owner, 2026-11-12).
+            // The answer becomes a decision in the question's scope (the owner, 2026-11-12), with
+            // the name of whoever answered (D-272).
             let (q, _) = records::answer_and_decide(
                 &tx,
                 &q,
                 option,
                 &words,
-                "owner",
+                &by,
                 None,
-                &format!("owner, answering {} in AgentFlow", q.short_id()),
+                &format!("{by}, answering {} in AgentFlow", q.short_id()),
             )?;
             tx.commit()?;
             Ok(q)

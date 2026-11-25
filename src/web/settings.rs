@@ -226,7 +226,7 @@ fn notice_for(key: &str) -> Option<&'static str> {
         "profile-saved" => "Saved. This is how you show up from now on.",
         "link-withdrawn" | "link-withdrawn-device" => "Withdrawn: the link doesn't work any more.",
         "device-removed" => "That device won't get notifications any more.",
-        "test-sent" => "Test notification sent to every device that has notifications on.",
+        "test-sent" => "Test notification sent to your devices that have notifications on.",
         "test-none" => "No device has notifications on yet.",
         "notify-saved" => "Notification settings saved.",
         "revoked" => "Token revoked. Whatever used it can no longer reach AgentFlow.",
@@ -405,8 +405,10 @@ async fn render_page(
         .call(move |c| {
             let passkeys = passkey::list(c, me)?;
             let devices = push::devices(c, me)?;
-            let toggles =
-                Kind::ALL.iter().map(|&k| Ok((k, push::is_enabled(c, k)?))).collect::<anyhow::Result<Vec<_>>>()?;
+            let toggles = Kind::ALL
+                .iter()
+                .map(|&k| Ok((k, push::is_enabled(c, Some(me), k)?)))
+                .collect::<anyhow::Result<Vec<_>>>()?;
             let tokens = auth::list_tokens(c)?;
             let mut stmt = c.prepare(
                 "SELECT id, method, user_agent, last_seen_at FROM web_sessions
@@ -794,7 +796,7 @@ async fn push_test(State(state): State<AppState>, Extension(actor): Extension<Ac
         tag: Some("test".into()),
     };
     // A test goes out even if "urgent" is switched off: it's sent as its own kind of check.
-    let delivered = state.push.send_ignoring_settings(&n).await?;
+    let delivered = state.push.send_test(actor.person().unwrap_or(0), &n).await?;
     Ok(Redirect::to(if delivered > 0 { "/settings?done=test-sent" } else { "/settings?done=test-none" }))
 }
 
@@ -887,11 +889,12 @@ async fn notify_save(
             .collect::<Vec<_>>()
             .join(", ")
     );
+    let me = actor.person().unwrap_or(0);
     state
         .db
         .call(move |c| {
             for k in Kind::ALL {
-                push::set_enabled(c, k, on.contains(&k))?;
+                push::set_enabled(c, me, k, on.contains(&k))?;
             }
             Ok(())
         })

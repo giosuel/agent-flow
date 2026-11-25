@@ -20,6 +20,9 @@ pub enum Actor {
         admin: bool,
         /// Their username, email and icon are set (the first sign-in's step 2).
         ready: bool,
+        /// Their username (or a stand-in until they pick one): what they do is recorded with it
+        /// (D-272).
+        name: String,
     },
     /// One of the owner's machines: the CLI, flow run.
     Device {
@@ -62,7 +65,7 @@ impl Actor {
 
     pub fn name(&self) -> String {
         match self {
-            Actor::Owner { .. } => "owner".into(),
+            Actor::Owner { name, .. } => name.clone(),
             Actor::Device { name, .. } | Actor::Admin { name, .. } | Actor::Builder { name, .. } => name.clone(),
             Actor::Project { slug, .. } => slug.clone(),
             Actor::System(what) => (*what).into(),
@@ -421,7 +424,8 @@ pub fn session_actor(conn: &Connection, secret: &str, limits: &SessionLimits) ->
     let now = now_ms();
     let row = conn
         .query_row(
-            "SELECT s.id, s.method, s.last_seen_at, p.id, p.admin, p.username IS NOT NULL AND p.icon != ''
+            "SELECT s.id, s.method, s.last_seen_at, p.id, p.admin, p.username IS NOT NULL AND p.icon != '',
+                    COALESCE(p.username, CASE WHEN p.admin THEN 'the admin' ELSE 'person ' || p.id END)
              FROM web_sessions s
              JOIN people p ON p.id = s.person_id AND p.removed_at IS NULL
              WHERE s.hash = ?1 AND s.revoked_at IS NULL AND s.expires_at > ?2",
@@ -434,11 +438,12 @@ pub fn session_actor(conn: &Connection, secret: &str, limits: &SessionLimits) ->
                     r.get::<_, i64>(3)?,
                     r.get::<_, i64>(4)?,
                     r.get::<_, bool>(5)?,
+                    r.get::<_, String>(6)?,
                 ))
             },
         )
         .optional()?;
-    let Some((id, method, last_seen, person, admin, ready)) = row else { return Ok(None) };
+    let Some((id, method, last_seen, person, admin, ready, name)) = row else { return Ok(None) };
     if now - last_seen > limits.idle_ms {
         conn.execute("UPDATE web_sessions SET revoked_at = ?1 WHERE id = ?2", params![now, id])?;
         return Ok(None);
@@ -447,7 +452,7 @@ pub fn session_actor(conn: &Connection, secret: &str, limits: &SessionLimits) ->
     if now - last_seen > 60_000 {
         conn.execute("UPDATE web_sessions SET last_seen_at = ?1 WHERE id = ?2", params![now, id])?;
     }
-    Ok(Some(Actor::Owner { session_id: id, method, person, admin: admin != 0, ready }))
+    Ok(Some(Actor::Owner { session_id: id, method, person, admin: admin != 0, ready, name }))
 }
 
 pub fn end_session(conn: &Connection, session_id: i64) -> anyhow::Result<()> {
