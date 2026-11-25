@@ -459,10 +459,13 @@ struct JobPage {
     named: bool,
     /// The project it belongs to: (name, its page).
     project: (String, String),
-    /// "imaginarium's project agent"
-    by: String,
+    /// Who started it: an icon (robot for a project's agent, person for a person or a device) and
+    /// "Imaginarium's project agent".
+    by: (&'static str, String),
     started: String,
     facts: Vec<(String, String)>,
+    /// Its server's page, while the server is there.
+    server_page: Option<String>,
     /// (number, the line's class in the code view, the line)
     lines: Vec<(usize, &'static str, String)>,
     next: u64,
@@ -548,19 +551,25 @@ async fn job_page(
         facts.push(("GPU".into(), "waits for an idle GPU".into()));
     }
     use super::pages::PathPart;
+    // Under its machine (D-277): Machines / HEADQUARTERS / Job #12.
+    let server_page =
+        remote::servers(&state).iter().any(|b| b.name == job.server).then(|| format!("/machines/{}", job.server));
     let path = vec![
         PathPart::link("Machines", "/machines"),
-        PathPart::link("Build servers", "/machines#builds"),
+        PathPart::link(job.server.clone(), server_page.clone().unwrap_or_else(|| "/machines".into())),
         PathPart::here(format!("Job #{}", job.id)),
     ];
     let pid = job.project_id;
     let pname = state.db.call(move |c| crate::projects::get_by_id(c, pid).map(|p| p.name)).await.unwrap_or_default();
-    let by = if pname.is_empty() {
-        format!("the {} agent", job.project)
+    // Jobs come from projects' agents (their slug is the job's actor); anyone else is a person.
+    let by = if job.actor != job.project {
+        ("person", job.actor.clone())
+    } else if pname.is_empty() {
+        ("robot", format!("the {} agent", job.project))
     } else if pname.ends_with('s') {
-        format!("{pname}' project agent")
+        ("robot", format!("{pname}' project agent"))
     } else {
-        format!("{pname}'s project agent")
+        ("robot", format!("{pname}'s project agent"))
     };
     render(JobPage {
         nav: nav(&state, &actor, "/machines").await.up(&path),
@@ -572,6 +581,7 @@ async fn job_page(
         by,
         started: tz.short(job.created_at),
         facts,
+        server_page,
         lines: output.lines().enumerate().map(|(i, l)| (i + 1, cv_class(l), l.to_owned())).collect(),
         next,
         is_owner: actor.is_owner(),

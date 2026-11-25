@@ -3431,7 +3431,23 @@ async fn jobs_run_on_a_builder_and_bring_back_what_was_asked() {
         "{page}"
     );
     assert!(page.contains(r#"<span class="cv-t lv-warn">warning: careful</span>"#), "{page}");
-    assert!(page.contains(r#"<dt>Project</dt><dd><a href="/p/imaginarium">"#), "the project it belongs to: {page}");
+    // Under its machine (D-277); what points somewhere is a chip (D-279).
+    assert!(
+        page.contains(&format!(
+            r#"<li><a href="/machines" title="Machines">Machines</a></li><li><a href="/machines/{name}" title="{name}">{name}</a></li><li><span aria-current="page" title="Job #{id}">Job #{id}</span></li>"#
+        )),
+        "{page}"
+    );
+    assert!(
+        page.contains(r#"<dt>Project</dt><dd><a class="chip link" href="/p/imaginarium"><svg class="i""#),
+        "the project it belongs to: {page}"
+    );
+    assert!(page.contains(r#"<dt>Started by</dt><dd><span class="chip"><svg class="i""#), "{page}");
+    assert!(page.contains(r#"s project agent</span></span></dd>"#), "{page}");
+    assert!(
+        page.contains(&format!(r#"<dt>Server</dt><dd><a class="chip link" href="/machines/{name}"><svg class="i""#)),
+        "{page}"
+    );
     assert!(page.contains(r#"<span class="cv-n">1</span>"#), "{page}");
     // flow remote fetches what came back.
     let job = s.db.call(move |c| crate::remote::get(c, id)).await.unwrap().unwrap();
