@@ -328,6 +328,19 @@ pub struct NewRecord {
 
 /// Creates a record with revision 1 and an event. The caller decides who may.
 pub fn create(conn: &Connection, project_id: i64, author: &str, new: NewRecord) -> anyhow::Result<Record> {
+    if !conn.is_autocommit() {
+        return create_in(conn, project_id, author, new);
+    }
+    // Outside a transaction the next number and the insert would be two statements, and two
+    // records made at once in one project (an agent's screenshot and its subagent's) took the
+    // same number: the second failed on UNIQUE. One transaction, holding the write lock.
+    let tx = rusqlite::Transaction::new_unchecked(conn, rusqlite::TransactionBehavior::Immediate)?;
+    let record = create_in(&tx, project_id, author, new)?;
+    tx.commit()?;
+    Ok(record)
+}
+
+fn create_in(conn: &Connection, project_id: i64, author: &str, new: NewRecord) -> anyhow::Result<Record> {
     // Agents paste logs and commands; tokens in them are never stored.
     let mut new = new;
     new.title = crate::activity::redact(&new.title);
@@ -709,8 +722,11 @@ fn decision_from_answer(
     let title = match title.map(str::trim).filter(|t| !t.is_empty()) {
         Some(t) => t.to_owned(),
         None => {
-            let what = if option.is_empty() { words.chars().take(120).collect::<String>() } else { option };
-            format!("{}: {what}", q.title.trim().trim_end_matches('?'))
+            // Cut to fit the 300 characters a title may have: a long question (or option) must
+            // never cost the owner their answer. Their words are kept whole in owner_words.
+            let what = crate::activity::clip(if option.is_empty() { &words } else { &option }, 120);
+            let room = 300 - 2 - what.chars().count();
+            format!("{}: {what}", crate::activity::clip(q.title.trim().trim_end_matches('?'), room - 1))
         }
     };
     let mut data = Map::new();
@@ -1147,6 +1163,70 @@ mod tests {
             let evs = events_by_others(c, p, "nobody", 0, 100)?;
             assert!(evs.iter().any(|e| e.kind == "decision.updated" && e.summary.contains("now replaced")));
             assert_eq!(recent_events(c, None, 1)?[0].seq, evs.last().unwrap().seq);
+            Ok(())
+        })
+        .unwrap();
+    }
+
+    /// Records made at the same time in one project, outside a transaction, each get their own
+    /// number: max + 1 and the insert were two statements, and the slower one failed on UNIQUE.
+    #[test]
+    fn parallel_creates_take_their_own_numbers() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Db::open(&dir.path().join("flow.db")).unwrap();
+        let p = db.call_blocking(|c| Ok(setup(c))).unwrap();
+        let workers: Vec<_> = (0..4)
+            .map(|w| {
+                let db = db.clone();
+                std::thread::spawn(move || {
+                    db.call_blocking(|c| {
+                        for i in 0..50 {
+                            let new =
+                                NewRecord { kind: Some(Kind::Task), title: format!("{w}.{i}"), ..Default::default() };
+                            create(c, p, "v", new)?;
+                        }
+                        Ok(())
+                    })
+                })
+            })
+            .collect();
+        for w in workers {
+            w.join().unwrap().unwrap();
+        }
+        let n: i64 = db
+            .call_blocking(|c| {
+                Ok(c.query_row("SELECT count(DISTINCT number) FROM records WHERE project_id = ?1", [p], |r| r.get(0))?)
+            })
+            .unwrap();
+        assert_eq!(n, 200);
+    }
+
+    /// A long question still takes the owner's answer: the decision's title is cut to fit, and
+    /// their words are kept whole.
+    #[test]
+    fn long_questions_make_decisions_that_fit() {
+        let db = Db::open_memory();
+        db.call_blocking(|c| {
+            let p = setup(c);
+            let mut data = Map::new();
+            data.insert("options".into(), json!([{"title": "o".repeat(400)}]));
+            let question = |data| NewRecord {
+                kind: Some(Kind::Question),
+                title: format!("{}?", "x".repeat(290)),
+                data,
+                ..Default::default()
+            };
+            let q = create(c, p, "v", question(Map::new()))?;
+            let words = "y".repeat(150);
+            let (q, d) = answer_and_decide(c, &q, None, &words, "owner", None, "owner")?;
+            assert_eq!(q.state, "answered");
+            assert!(d.title.chars().count() <= 300 && d.title.starts_with("xxx"), "{}", d.title);
+            assert!(d.title.contains("…: yyy"), "{}", d.title);
+            assert_eq!(d.str("owner_words"), words);
+            // An option's title has no limit of its own.
+            let q = create(c, p, "v", question(data))?;
+            let (_, d) = answer_and_decide(c, &q, Some(1), "", "owner", None, "owner")?;
+            assert!(d.title.chars().count() <= 300 && d.title.contains("…: ooo"), "{}", d.title);
             Ok(())
         })
         .unwrap();

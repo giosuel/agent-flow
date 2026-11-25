@@ -84,6 +84,8 @@ struct TokenView {
     from: String,
     /// "…a1b2", the token's end.
     hint: String,
+    /// Rotate is offered only where it works (see `tokens::rotates_here`).
+    rotate: bool,
 }
 
 struct SessionView {
@@ -456,6 +458,10 @@ async fn render_page(
 
     let when = |t: Option<i64>| t.map(|t| ago(t, now)).unwrap_or_else(|| "never".into());
     let active = tokens.into_iter().filter(|t| t.revoked_at.is_none());
+    let machine_of = |slug: &Option<String>| {
+        let slug = slug.as_deref()?;
+        projects.iter().find(|p| p.slug == slug).map(|p| p.machine.clone())
+    };
     let (device_tokens, agent_tokens): (Vec<_>, Vec<_>) = active
         .map(|t| TokenView {
             id: t.id,
@@ -466,8 +472,13 @@ async fn render_page(
             can: match t.kind.as_str() {
                 "project" => "write own, read all",
                 "admin" => "admin",
+                "builder" => "builder: runs builds on its machine",
                 _ => "read, CLI and viber-run",
             },
+            rotate: t
+                .kind
+                .parse::<auth::TokenKind>()
+                .is_ok_and(|k| tokens::rotates_here(k, machine_of(&t.project).as_deref())),
             used: when(t.last_used_at),
             added: ago(t.created_at, now),
             from: t.last_used_from.clone().unwrap_or_default(),
@@ -953,7 +964,12 @@ async fn token_rotate(
 ) -> AppResult<Redirect> {
     actor.require_owner()?;
     let dir = state.config.token_dir();
-    let (new_id, path) = state.db.call(move |c| tokens::rotate(c, id, &dir)).await?;
+    // Refused for tokens that live on other machines: say why instead of a server error.
+    let (new_id, path) = state
+        .db
+        .call(move |c| tokens::rotate(c, id, &dir))
+        .await
+        .map_err(|e| AppError::BadRequest(format!("{e:#}")))?;
     log(&state, &actor, &ip, Action::Write, format!("token {id} rotated to {new_id}, written to {}", path.display()))
         .await;
     Ok(Redirect::to("/settings?done=rotated"))

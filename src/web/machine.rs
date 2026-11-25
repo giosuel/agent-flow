@@ -1,29 +1,36 @@
-//! The Machine page: this server's load, memory and disks now, CPU and memory by project over
-//! time (each agent with everything it started), and the ports projects claim. The owner,
-//! 2026-11-07: "agent flow will only ever run on one machine, so it can show diagnostics of the
-//! current machine like CPU / MEM history and how the agents use it".
+//! The Machines pages (D-277): an overview of AgentFlow's own server (its load, memory and disks
+//! now) and of every build machine, and a page per build machine with its jobs. The owner,
+//! 2026-11-25: "each machine should also get its own page with the build history. remove the
+//! overall build history and make the "machines" page purely an overview of all build machines
+//! and their stats as well as the agentflow server stats". The CPU and memory by project and the
+//! claimed ports went (D-283); the samples per project are still taken (the Dashboard's tile reads
+//! them). The pages swap their live parts in every 5 seconds (static/machine.js).
 
 use askama::Template;
-use axum::extract::{Query, State};
-use axum::response::{IntoResponse, Response};
+use axum::extract::{Path, Query, State};
+use axum::response::{Redirect, Response};
 use axum::routing::get;
 use axum::{Extension, Router};
-use serde::Deserialize;
 
-use super::charts::{self, Series};
-use super::pages::{Nav, nav, render};
-use super::{AppResult, AppState};
+use super::pages::{Nav, PathPart, nav, render};
+use super::remote::{Meter, bytes, job_row, num, took};
+use super::uilib::Pager;
+use super::{AppError, AppResult, AppState};
 use crate::auth::Actor;
+use crate::config::BuildServer;
 use crate::machine;
-use crate::util::now_ms;
+use crate::remote::{self, Job};
+use crate::util::{ago, now_ms};
 
 pub fn routes() -> Router<AppState> {
-    Router::new().route("/machine", get(page)).route("/machine/now", get(now))
-}
-
-#[derive(Deserialize)]
-struct MachineQuery {
-    range: Option<String>,
+    Router::new()
+        .route("/machines", get(overview))
+        .route("/machines/{name}", get(machine_page))
+        // The Machine page became Machines (D-277): its old addresses lead there (a page open since
+        // then asks for its parts at the old ones, and finds them in the new page).
+        .route("/machine", get(|| async { Redirect::to("/machines") }))
+        .route("/machine/now", get(|| async { Redirect::to("/machines") }))
+        .route("/machine/builds", get(|| async { Redirect::to("/machines") }))
 }
 
 struct Tile {
@@ -39,52 +46,8 @@ struct Tile {
     spark: String,
     warn: bool,
 }
-struct Legend {
-    name: String,
-    color: &'static str,
-}
 
-struct AgentRow {
-    name: String,
-    color: &'static str,
-    /// CPU-hours and peak memory today, to sort by.
-    v: (f64, i64),
-    cpu_hours: String,
-    peak: String,
-    now: String,
-}
-
-struct PortRow {
-    port: String,
-    project: String,
-}
-
-#[derive(Template)]
-#[template(path = "machine.html")]
-struct MachinePage {
-    nav: Nav,
-    host: String,
-    tiles: Vec<Tile>,
-    ranges: Vec<(&'static str, &'static str, bool)>,
-    legend: Vec<Legend>,
-    cpu: String,
-    cpu_max: String,
-    mem: String,
-    mem_max: String,
-    x_labels: Vec<String>,
-    agents: Vec<AgentRow>,
-    ports: Vec<PortRow>,
-    sampled: bool,
-    /// "Collecting since 05:20 (12 min so far)" while the samples don't cover the range yet.
-    collecting: Option<String>,
-    cores: usize,
-    mem_total: String,
-    /// The Build servers section, when there are any.
-    builds: String,
-}
-
-/// The figures at the top, now, each with its last hour. The page asks for the numbers again every
-/// 5 seconds (`/machine/now`) and for the cards every minute.
+/// AgentFlow's server now, each figure with its last hour.
 fn tiles(snap: &machine::Snapshot, now: &machine::Totals, hour: &[machine::Totals]) -> Vec<Tile> {
     let cores = snap.cores as f64;
     let mem_total = snap.mem_total_gb();
@@ -181,139 +144,467 @@ async fn hour_and_now(state: &AppState) -> (machine::Totals, Vec<machine::Totals
     (now, hour)
 }
 
-/// The tiles as JSON, for the page's live update.
-async fn now(State(state): State<AppState>, Extension(actor): Extension<Actor>) -> AppResult<Response> {
-    actor.require_owner()?;
-    let (now, hour) = hour_and_now(&state).await;
-    let tiles = tiles(&machine::snapshot(), &now, &hour);
-    let body = serde_json::json!({ "tiles": tiles.iter().map(|t| serde_json::json!({"big": t.big, "small": t.small, "warn": t.warn})).collect::<Vec<_>>() });
-    Ok(axum::Json(body).into_response())
-}
-
 fn gb(bytes: u64) -> f64 {
     bytes as f64 / 1e9
 }
 
-async fn page(
+// ---------------------------------------------------------------------------------------------
+// Build machines
+
+/// A job running or waiting on a build machine.
+pub struct NowJob {
+    pub id: i64,
+    /// Its name, or its command for a job from before names (then shown as code).
+    pub title: String,
+    pub named: bool,
+    pub project: String,
+    /// "imaginarium · 22 threads"
+    pub sub: String,
+    /// Its chip: tone and words ("running 4:12", "waiting for 16 free threads").
+    pub chip: &'static str,
+    pub label: String,
+}
+
+impl NowJob {
+    fn of(j: &Job) -> Self {
+        let (chip, label) = match j.state.as_str() {
+            "running" => ("accent", format!("running {}", took(j))),
+            "paused" if j.reason.is_empty() => ("warn", format!("paused {}", took(j))),
+            "paused" => ("warn", format!("paused · {}", j.reason)),
+            _ if j.reason.is_empty() => ("", "waiting".to_owned()),
+            _ => ("", j.reason.clone()),
+        };
+        let mut sub = j.project.clone();
+        if let Some(t) = j.threads.filter(|_| j.state != "queued") {
+            sub.push_str(&format!(" · {t} threads"));
+        }
+        NowJob { id: j.id, title: j.title(), named: !j.name.is_empty(), project: j.project.clone(), sub, chip, label }
+    }
+}
+
+/// A build machine as the Machines pages show it: what AgentFlow knows of it now.
+pub struct BuildMachine {
+    pub name: String,
+    pub online: bool,
+    /// The owner paused its builds: nothing starts, running jobs are frozen.
+    pub paused: bool,
+    /// "32 threads · 92 GB · RTX 5090"; empty before it was ever seen.
+    pub specs: String,
+    /// "online", "offline · last seen 2 days ago".
+    pub state: String,
+    pub meters: Vec<Meter>,
+    /// Running (or frozen) jobs, then the waiting ones, the oldest first.
+    pub running: Vec<NowJob>,
+    pub waiting: Vec<NowJob>,
+    /// Nothing running: "idle; the last job finished 12 min ago", "nothing" when offline.
+    pub idle: String,
+    /// The builder's version while it's connected.
+    pub version: String,
+    pub counts: remote::Counts,
+    /// Its limits and folders, from Settings.
+    pub server: BuildServer,
+    /// Connected since, or last seen (ms).
+    pub since: Option<i64>,
+    pub seen: i64,
+    pub threads: f64,
+    pub memory_gb: f64,
+    pub gpu: String,
+    /// Its work folders' sizes, as measured last ("3 projects, 96 GB (…)").
+    pub folders: String,
+}
+
+impl BuildMachine {
+    /// Beside its name: "online · 32 threads · 92 GB · RTX 5090".
+    pub fn facts(&self) -> String {
+        let mut f = vec![self.state.clone()];
+        if self.paused {
+            f.push("paused".into());
+        }
+        if !self.specs.is_empty() && self.online {
+            f.push(self.specs.clone());
+        }
+        f.join(" · ")
+    }
+
+    /// Nothing running, as a sentence: "Idle; the last job finished 12 min ago."
+    pub fn idle_sentence(&self) -> String {
+        let mut c = self.idle.chars();
+        c.next().map(|f| format!("{}{}.", f.to_uppercase(), c.as_str())).unwrap_or_default()
+    }
+
+    /// Its card's foot: "Today 9 jobs, 1 failed · builder 0.0.0-dev+g4be65a8".
+    pub fn foot(&self) -> String {
+        let c = &self.counts;
+        let mut f = match (c.today, c.today_failed) {
+            (0, _) => "No jobs today".to_owned(),
+            (n, 0) => format!("Today {n} job{}", if n == 1 { "" } else { "s" }),
+            (n, k) => format!("Today {n} job{}, {k} failed", if n == 1 { "" } else { "s" }),
+        };
+        if !self.version.is_empty() {
+            f.push_str(&format!(" · builder {}", self.version));
+        }
+        f
+    }
+}
+
+/// The build machines (or the one called `only`) as they are now. Asking keeps their probes going
+/// (see `remote::Live::watched_at`).
+pub async fn build_machines(state: &AppState, only: Option<&str>, today: i64) -> anyhow::Result<Vec<BuildMachine>> {
+    state.remote.lock().unwrap_or_else(|e| e.into_inner()).watched_at = now_ms();
+    let list: Vec<BuildServer> =
+        remote::servers(state).into_iter().filter(|b| only.is_none_or(|o| b.name == o)).collect();
+    let names: Vec<String> = list.iter().map(|b| b.name.clone()).collect();
+    let db: Vec<(Vec<Job>, remote::Counts)> = state
+        .db
+        .call(move |c| {
+            names
+                .iter()
+                .map(|n| Ok((remote::in_state(c, n, &["running", "paused", "queued"])?, remote::counts(c, n, today)?)))
+                .collect()
+        })
+        .await?;
+    let now = now_ms();
+    let hub = crate::builders::hub();
+    let live = state.remote.lock().unwrap_or_else(|e| e.into_inner());
+    Ok(list
+        .into_iter()
+        .zip(db)
+        .map(|(b, (jobs, counts))| {
+            let l = live.servers.get(&b.name);
+            let p = l.map(|l| l.probe.clone()).unwrap_or_default();
+            let online = hub.is_online(&b.name);
+            let hello = hub.hello(&b.name);
+            // The probe's figures, or what the builder said when it connected.
+            let (threads, memory_gb) = match (&hello, p.threads > 0.0) {
+                (_, true) => (p.threads, p.mem_total_gb),
+                (Some((_, t, m)), false) => (*t as f64, *m),
+                (None, false) => (0.0, 0.0),
+            };
+            let gpu = p.gpu_name.replace("NVIDIA GeForce ", "");
+            let mut specs = Vec::new();
+            if threads > 0.0 {
+                specs.push(format!("{} threads", num(threads)));
+                specs.push(format!("{memory_gb:.0} GB"));
+            }
+            if !gpu.is_empty() {
+                specs.push(gpu.clone());
+            }
+            let mut meters = Vec::new();
+            if online && p.online && p.threads > 0.0 {
+                meters.push(Meter {
+                    label: "CPU",
+                    you: p.yours(),
+                    builds: p.builds,
+                    total: p.threads,
+                    unit: "threads",
+                });
+                meters.push(Meter {
+                    label: "Memory",
+                    you: p.mem_yours_gb(),
+                    builds: p.mem_builds_gb,
+                    total: p.mem_total_gb,
+                    unit: "GB",
+                });
+                if !p.gpu_name.is_empty() {
+                    meters.push(Meter { label: "GPU", you: p.gpu_util, builds: 0.0, total: 100.0, unit: "%" });
+                }
+            }
+            let (running, waiting): (Vec<&Job>, Vec<&Job>) = jobs.iter().partition(|j| j.state != "queued");
+            let idle = match counts.last_finished {
+                _ if !online => "nothing".to_owned(),
+                Some(t) => format!("idle; the last job finished {}", ago(t, now)),
+                None => "idle".to_owned(),
+            };
+            BuildMachine {
+                state: if online {
+                    "online".to_owned()
+                } else if p.seen > 0 {
+                    format!("offline · last seen {}", ago(p.seen, now))
+                } else {
+                    "offline".to_owned()
+                },
+                name: b.name.clone(),
+                online,
+                paused: l.is_some_and(|l| l.paused),
+                specs: specs.join(" · "),
+                meters,
+                running: running.into_iter().map(NowJob::of).collect(),
+                waiting: waiting.into_iter().map(NowJob::of).collect(),
+                idle,
+                version: hello.map(|h| h.0).unwrap_or_default(),
+                counts,
+                since: hub.since(&b.name),
+                seen: p.seen,
+                threads,
+                memory_gb,
+                gpu,
+                folders: l.map(|l| super::remote::folders(&l.sizes)).unwrap_or_default(),
+                server: b,
+            }
+        })
+        .collect())
+}
+
+// ---------------------------------------------------------------------------------------------
+// The overview
+
+#[derive(Template)]
+#[template(path = "machines.html")]
+struct Overview {
+    nav: Nav,
+    /// "AgentFlow runs on giosuelio", "3 build machines, 2 online", "1 job running, 2 waiting".
+    status: Vec<String>,
+    host: String,
+    /// "AgentFlow's server · 8 cores · 23 GB"
+    host_sub: String,
+    tiles: Vec<Tile>,
+    machines: Vec<BuildMachine>,
+}
+
+/// The status line's parts.
+fn status(host: &str, machines: &[BuildMachine]) -> Vec<String> {
+    let mut s = vec![format!("AgentFlow runs on {host}")];
+    let online = machines.iter().filter(|m| m.online).count();
+    s.push(match machines.len() {
+        0 => "no build machines yet".to_owned(),
+        1 => format!("1 build machine, {}", if online == 1 { "online" } else { "offline" }),
+        n => format!("{n} build machines, {online} online"),
+    });
+    if !machines.is_empty() {
+        let running: usize = machines.iter().map(|m| m.running.len()).sum();
+        let waiting: usize = machines.iter().map(|m| m.waiting.len()).sum();
+        s.push(match (running, waiting) {
+            (0, 0) => "nothing running".to_owned(),
+            (0, w) => format!("nothing running, {w} waiting"),
+            (r, 0) => format!("{r} job{} running", if r == 1 { "" } else { "s" }),
+            (r, w) => format!("{r} job{} running, {w} waiting", if r == 1 { "" } else { "s" }),
+        });
+    }
+    s
+}
+
+async fn overview(
     State(state): State<AppState>,
     Extension(actor): Extension<Actor>,
-    Query(q): Query<MachineQuery>,
+    tz: crate::tz::Tz,
+) -> AppResult<Response> {
+    actor.require_owner()?;
+    let snap = machine::snapshot();
+    let (now_t, hour) = hour_and_now(&state).await;
+    let tiles = tiles(&snap, &now_t, &hour);
+    let host = machine::hostname();
+    let machines = build_machines(&state, None, tz.day_start(now_ms())).await?;
+    render(Overview {
+        nav: nav(&state, &actor, "/machines").await,
+        status: status(&host, &machines),
+        host_sub: format!("AgentFlow's server · {} cores · {:.0} GB", snap.cores, snap.mem_total_gb()),
+        host,
+        tiles,
+        machines,
+    })
+}
+
+// ---------------------------------------------------------------------------------------------
+// A build machine's page
+
+/// Jobs a page of the build history lists.
+const PER_PAGE: i64 = 20;
+
+#[derive(serde::Deserialize)]
+struct HistoryQuery {
+    #[serde(default)]
+    show: String,
+    /// From 1; anything else is the first.
+    #[serde(default)]
+    page: String,
+}
+
+/// A row of the build history.
+struct HistRow {
+    id: i64,
+    title: String,
+    named: bool,
+    project: String,
+    chip: &'static str,
+    label: String,
+    /// Why it failed or was cancelled ("exit code 101"), beside its state where there's room.
+    why: String,
+    /// "today 20:31", "24 Nov 18:02"
+    started: String,
+    created_at: i64,
+    time: String,
+    sent: String,
+    /// Seconds it ran and bytes sent, to sort by (-1: not yet).
+    v: (i64, i64),
+}
+
+#[derive(Template)]
+#[template(path = "build_machine.html")]
+struct MachinePage {
+    nav: Nav,
+    path: Vec<PathPart>,
+    m: BuildMachine,
+    /// "214 jobs since 17 Nov"
+    jobs_since: String,
+    /// The history's filters: (label, address, on).
+    shows: Vec<(&'static str, String, bool)>,
+    rows: Vec<HistRow>,
+    pager: Pager,
+    /// What the history says when this filter lists nothing.
+    empty: String,
+    /// Beside its title: "214 jobs", "6 failed of 214".
+    count: String,
+    /// "This machine": (name, value, in code type).
+    facts: Vec<(&'static str, String, bool)>,
+    /// This page's address, for pausing to come back to.
+    here: String,
+}
+
+/// When a job was asked for: "today 20:31", else its day and time.
+fn started(tz: &crate::tz::Tz, at: i64, today: i64) -> String {
+    if at >= today { format!("today {}", tz.hm(at)) } else { tz.short(at) }
+}
+
+/// A finished job's words in the history ("done", "failed · exit code 101"); one waiting is
+/// "waiting", whatever it waits for.
+fn hist_row(j: &Job, tz: &crate::tz::Tz, today: i64) -> HistRow {
+    let row = job_row(j);
+    let (label, why) = match j.state.as_str() {
+        "running" => ("running", ""),
+        "queued" => ("waiting", ""),
+        "paused" => ("paused", ""),
+        "done" => ("done", ""),
+        "cancelled" => ("cancelled", ""),
+        _ => ("failed", j.reason.as_str()),
+    };
+    HistRow {
+        id: j.id,
+        title: j.title(),
+        named: !j.name.is_empty(),
+        project: j.project.clone(),
+        chip: row.chip,
+        label: label.to_owned(),
+        why: why.to_owned(),
+        started: started(tz, j.created_at, today),
+        created_at: j.created_at,
+        time: row.time,
+        sent: bytes(j.sent_bytes),
+        v: row.v,
+    }
+}
+
+/// What the page knows of the machine, beside its jobs.
+fn machine_facts(m: &BuildMachine, tz: &crate::tz::Tz, now: i64) -> Vec<(&'static str, String, bool)> {
+    let mut f = Vec::new();
+    if m.threads > 0.0 {
+        f.push(("Threads", num(m.threads), false));
+        f.push(("Memory", format!("{:.0} GB", m.memory_gb), false));
+    }
+    if !m.gpu.is_empty() {
+        f.push(("GPU", m.gpu.clone(), false));
+    }
+    if !m.version.is_empty() {
+        f.push(("Builder", m.version.clone(), true));
+    }
+    match (m.online, m.since) {
+        (true, Some(t)) if t >= tz.day_start(now) => f.push(("Connected", format!("since {}", tz.hm(t)), false)),
+        (true, Some(t)) => f.push(("Connected", format!("since {}", tz.short(t)), false)),
+        (true, None) => f.push(("Connected", "yes".into(), false)),
+        (false, _) if m.seen > 0 => f.push(("Last seen", ago(m.seen, now), false)),
+        (false, _) => f.push(("Connected", "not since AgentFlow started".into(), false)),
+    }
+    let b = &m.server;
+    let starts = match (b.min_threads > 0.0, b.min_memory_gb > 0.0) {
+        (true, true) => format!("while {} threads and {} GB are free", num(b.min_threads), num(b.min_memory_gb)),
+        (true, false) => format!("while {} threads are free", num(b.min_threads)),
+        (false, true) => format!("while {} GB are free", num(b.min_memory_gb)),
+        (false, false) => "whenever one waits".to_owned(),
+    };
+    f.push(("Starts a job", starts, false));
+    f.push((
+        "Per project",
+        format!("{} job{} at once", b.slots.max(1), if b.slots.max(1) == 1 { "" } else { "s" }),
+        false,
+    ));
+    let keep = format!("unused ones go after {} day{}", b.keep_days, if b.keep_days == 1 { "" } else { "s" });
+    f.push((
+        "Work folders",
+        if m.folders.is_empty() {
+            format!("{}{}", keep[..1].to_uppercase(), &keep[1..])
+        } else {
+            format!("{}; {keep}", m.folders)
+        },
+        false,
+    ));
+    f
+}
+
+/// A build machine's page (D-277): what runs there now, its build history, what AgentFlow knows of
+/// it. An unknown name is a 404.
+async fn machine_page(
+    State(state): State<AppState>,
+    Extension(actor): Extension<Actor>,
+    Path(name): Path<String>,
+    Query(q): Query<HistoryQuery>,
     tz: crate::tz::Tz,
 ) -> AppResult<Response> {
     actor.require_owner()?;
     let now = now_ms();
-    let (range, span, step) = match q.range.as_deref() {
-        Some("6h") => ("6h", 6 * 3_600_000, 5 * 60_000),
-        Some("7d") => ("7d", 7 * 86_400_000, 2 * 3_600_000),
-        _ => ("24h", 86_400_000, 15 * 60_000),
-    };
-    let n = (span / step) as usize;
-    let from = now - span;
     let today = tz.day_start(now);
-    let (projects, history, summary, first) = state
-        .db
-        .call(move |c| {
-            let first: Option<i64> = c.query_row("SELECT min(at) FROM machine_samples", [], |r| r.get(0))?;
-            Ok((crate::projects::list(c)?, machine::history(c, from, step)?, machine::group_summary(c, today)?, first))
-        })
-        .await?;
-
-    let snap = machine::snapshot();
-    let (now_t, hour) = hour_and_now(&state).await;
-    let tiles = tiles(&snap, &now_t, &hour);
-
-    let slugs: Vec<String> = projects.iter().map(|p| p.slug.clone()).collect();
-    let colors = charts::colors(&slugs);
-    let mut groups: Vec<(String, String, &'static str)> =
-        projects.iter().zip(&colors).map(|(p, c)| (p.slug.clone(), p.name.clone(), *c)).collect();
-    groups.push(("other".into(), "Other".into(), charts::OTHER));
-    let series_of = |pick: &dyn Fn(f64, f64) -> f64| -> Vec<Series> {
-        groups
-            .iter()
-            .filter_map(|(g, name, color)| {
-                let mut values = vec![0.0; n];
-                for (b, grp, cores, mem) in &history {
-                    if grp == g
-                        && let Some(v) = values.get_mut(*b as usize)
-                    {
-                        *v = pick(*cores, *mem);
-                    }
-                }
-                values.iter().any(|v| *v > 0.0).then(|| Series { name: name.clone(), color, values })
-            })
-            .collect()
+    let m = build_machines(&state, Some(&name), today).await?.into_iter().next().ok_or(AppError::NotFound)?;
+    let show = remote::Show::parse(&q.show);
+    let address = |show: remote::Show, page: i64| {
+        let mut a = format!("/machines/{name}");
+        let mut sep = '?';
+        if !show.key().is_empty() {
+            a.push_str(&format!("{sep}show={}", show.key()));
+            sep = '&';
+        }
+        if page > 1 {
+            a.push_str(&format!("{sep}page={page}"));
+        }
+        a
     };
-    let cpu_series = series_of(&|cores, _| cores);
-    let mem_series = series_of(&|_, mem_kb| mem_kb / 1024.0 / 1024.0);
-    // Each point's time, for the hover layer: "14:05", or "Tue 10 14:00" over a week.
-    let point_labels: Vec<String> = (0..n as i64)
-        .map(|i| {
-            let t = from + i * step;
-            if range == "7d" { format!("{} {}", tz.day_label(t), tz.hm(t)) } else { tz.hm(t) }
+    let pager =
+        Pager::new("Pages of the build history", m.counts.of(show), q.page.parse().unwrap_or(1), PER_PAGE, |p| {
+            format!("{}#history", address(show, p))
         })
+        .labels("Newer jobs", "Older jobs");
+    let (n, offset) = (name.clone(), pager.offset(PER_PAGE));
+    let jobs = state.db.call(move |c| remote::history(c, &n, show, PER_PAGE, offset)).await?;
+    let path = vec![PathPart::link("Machines", "/machines"), PathPart::here(name.clone())];
+    let shows = [("All", remote::Show::All), ("Failed", remote::Show::Failed), ("Running", remote::Show::Running)]
+        .into_iter()
+        .map(|(label, s)| (label, format!("{}#history", address(s, 1)), s == show))
         .collect();
-    let cores_fmt = |v: f64| format!("{v:.1} cores");
-    let gb_fmt = |v: f64| format!("{v:.1} GB");
-    let (cpu, cpu_max) =
-        charts::stacked_areas("CPU by project, cores", &point_labels, &cpu_series, Some(snap.cores as f64), &cores_fmt);
-    let (mem, mem_max) =
-        charts::stacked_areas("Memory by project, GB", &point_labels, &mem_series, Some(snap.mem_total_gb()), &gb_fmt);
-    let legend = cpu_series.iter().map(|s| Legend { name: s.name.clone(), color: s.color }).collect();
-    let x_labels: Vec<String> = (0..5)
-        .map(|i| {
-            let t = from + span * i / 4;
-            if range == "7d" { tz.date(t).get(5..).unwrap_or("").to_owned() } else { tz.hm(t) }
-        })
-        .collect();
-
-    let agents = groups
-        .iter()
-        .filter_map(|(g, name, color)| {
-            let (_, cpu_h, peak, now_cores, top) = summary.iter().find(|s| &s.0 == g)?;
-            Some(AgentRow {
-                name: name.clone(),
-                color,
-                v: (*cpu_h, *peak),
-                cpu_hours: format!("{cpu_h:.1}"),
-                peak: format!("{:.1} GB", *peak as f64 / 1024.0 / 1024.0),
-                now: if *now_cores < 0.05 { "idle".into() } else { format!("{now_cores:.1} cores · {top}") },
-            })
-        })
-        .collect();
-    let ports = projects
-        .iter()
-        .flat_map(|p| p.ports.iter().map(move |port| PortRow { port: port.clone(), project: p.name.clone() }))
-        .collect();
-    let host = machine::hostname();
-    let builds = if crate::remote::servers(&state).is_empty() {
-        String::new()
-    } else {
-        use askama::Template as _;
-        super::remote::section_data(&state, &actor).await?.render().map_err(anyhow::Error::from)?
+    let jobs_since = match (m.counts.all, m.counts.first) {
+        (0, _) | (_, None) => "no jobs yet".to_owned(),
+        (1, Some(t)) => format!("1 job since {}", tz.day(t)),
+        (n, Some(t)) => format!("{n} jobs since {}", tz.day(t)),
     };
     render(MachinePage {
-        builds,
-        nav: nav(&state, &actor, "/machine").await,
-        host: format!("{host} · {} cores · {:.0} GB RAM", snap.cores, snap.mem_total_gb()),
-        tiles,
-        ranges: vec![("6h", "6 h", range == "6h"), ("24h", "24 h", range == "24h"), ("7d", "7 d", range == "7d")],
-        sampled: !history.is_empty(),
-        collecting: first.filter(|f| *f > from + step).map(|f| {
-            format!(
-                "Collecting since {} ({} so far); the chart fills in as it goes.",
-                tz.hm(f),
-                crate::util::ago(f, now).trim_end_matches(" ago")
-            )
-        }),
-        cores: snap.cores,
-        mem_total: format!("{:.0}", snap.mem_total_gb()),
-        legend,
-        cpu,
-        cpu_max: format!("{cpu_max:.0}"),
-        mem,
-        mem_max: format!("{mem_max:.0}"),
-        x_labels,
-        agents,
-        ports,
+        nav: nav(&state, &actor, "/machines").await.up(&path),
+        path,
+        jobs_since,
+        shows,
+        rows: jobs.iter().map(|j| hist_row(j, &tz, today)).collect(),
+        here: address(show, pager.page),
+        pager,
+        count: {
+            let all = m.counts.all;
+            let jobs = format!("{all} job{}", if all == 1 { "" } else { "s" });
+            match show {
+                remote::Show::All => jobs,
+                remote::Show::Failed => format!("{} failed of {all}", m.counts.failed),
+                remote::Show::Running => format!("{} running or waiting of {all}", m.counts.running),
+            }
+        },
+        empty: match show {
+            remote::Show::All => format!("No jobs yet: agents build here with flow remote --server {name}."),
+            remote::Show::Failed => "No job failed here.".to_owned(),
+            remote::Show::Running => "Nothing runs or waits here now.".to_owned(),
+        },
+        facts: machine_facts(&m, &tz, now),
+        m,
     })
 }

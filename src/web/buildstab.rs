@@ -7,7 +7,10 @@
 //! A build published for several platforms is several records with one commit: they show as one
 //! build with a platform each. The filters come from the address: `tq` (words), `tcat`
 //! (categories, `|` between them), `tfrom` (a build, e.g. B-66, or "none") and `tstate` (open by
-//! default; problem, tested, skipped, all). `ball` shows every earlier build.
+//! default; problem, tested, skipped, all). The earlier builds are
+//! all in the page, ten at a time (app.js pages them).
+
+use std::collections::HashMap;
 
 use rusqlite::Connection;
 use serde_json::Value;
@@ -24,12 +27,10 @@ pub struct Filter {
     pub cats: Vec<String>,
     pub from: String,
     pub state: String,
-    /// Every earlier build, not only the latest few.
-    pub all_builds: bool,
 }
 
 impl Filter {
-    pub fn new(q: Option<&str>, cats: Option<&str>, from: Option<&str>, state: Option<&str>, all: bool) -> Self {
+    pub fn new(q: Option<&str>, cats: Option<&str>, from: Option<&str>, state: Option<&str>) -> Self {
         let from = from.unwrap_or("").trim();
         let from = if from == "none"
             || (from.starts_with("B-") && from[2..].bytes().all(|b| b.is_ascii_digit()) && from.len() > 2)
@@ -43,7 +44,6 @@ impl Filter {
             cats: cats.unwrap_or("").split('|').map(str::trim).filter(|c| !c.is_empty()).map(str::to_owned).collect(),
             from,
             state: state.filter(|s| ["problem", "tested", "skipped", "all"].contains(s)).unwrap_or("").to_owned(),
-            all_builds: all,
         }
     }
 
@@ -61,9 +61,6 @@ impl Filter {
             if !v.is_empty() {
                 u += &format!("&{k}={v}");
             }
-        }
-        if self.all_builds {
-            u += "&ball=1";
         }
         u
     }
@@ -160,7 +157,6 @@ pub struct BuildsView {
     pub filtering: bool,
     pub earlier: Vec<Earlier>,
     pub earlier_total: usize,
-    pub earlier_all: Option<String>,
     pub none: bool,
 }
 
@@ -226,8 +222,16 @@ pub fn view(
     let groups = groups_of(&refs);
     let release = super::totest::latest_release(c, project_id)?;
     let newest_group = groups.first();
-    let newest_ids: Vec<String> = newest_group.map(|g| g.iter().map(|r| r.short_id()).collect()).unwrap_or_default();
     let newest_short = newest_group.map(|g| primary(g).short_id());
+    // An item of any record of a build (one commit, several platforms) counts as the build's,
+    // which goes by its primary record: in the menu, the filter, the table and the chips.
+    let primary_of: HashMap<String, String> = groups
+        .iter()
+        .flat_map(|g| {
+            let p = primary(g).short_id();
+            g.iter().map(move |r| (r.short_id(), p.clone()))
+        })
+        .collect();
     let mut items = records::query(
         c,
         &Query { project_id: Some(project_id), kinds: vec![Kind::Test], limit: 0, ..Default::default() },
@@ -238,13 +242,10 @@ pub fn view(
         newest: newest_short.as_deref(),
         release: release.as_deref(),
         release_page: false,
+        primary: Some(&primary_of),
         now,
     };
-    // An item of any record of the newest build counts as the newest build's.
-    let build_of = |r: &Record| {
-        crate::totest::build_of(r, &refs)
-            .map(|b| if newest_ids.contains(&b) { newest_short.clone().unwrap_or(b) } else { b })
-    };
+    let build_of = |r: &Record| crate::totest::build_of(r, &refs).map(|b| primary_of.get(&b).cloned().unwrap_or(b));
     let in_newest = |r: &Record| newest_short.is_some() && build_of(r) == newest_short;
 
     let newest = newest_group.map(|g| {
@@ -462,21 +463,12 @@ pub fn view(
         });
     }
     let earlier_total = earlier.len();
-    const SHOWN: usize = 6;
-    let earlier_all =
-        (!f.all_builds && earlier_total > SHOWN).then(|| f.with(|x| x.all_builds = true).href(slug) + "#earlier");
-    if !f.all_builds {
-        earlier.truncate(SHOWN);
-    }
 
     let mut keep = Vec::new();
     for (k, v) in [("tcat", f.cats.join("|")), ("tfrom", f.from.clone()), ("tstate", f.state.clone())] {
         if !v.is_empty() {
             keep.push((k, v));
         }
-    }
-    if f.all_builds {
-        keep.push(("ball", "1".into()));
     }
     let picked = |v: &Vec<Choice>| v.iter().find(|c| c.3).map(|c| c.0.clone());
     Ok(BuildsView {
@@ -521,20 +513,55 @@ pub fn view(
         filtering,
         earlier,
         earlier_total,
-        earlier_all,
     })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::records::NewRecord;
+    use serde_json::json;
+
+    #[test]
+    fn an_earlier_builds_items_count_whichever_platform_they_came_with() {
+        let db = crate::db::Db::open_memory();
+        db.call_blocking(|c| {
+            let p = crate::projects::create(c, "vinculum", "Vinculum", "test")?.id;
+            let add = |kind, title: &str, at: i64, data: Value| {
+                let data = data.as_object().cloned().unwrap_or_default();
+                let new = NewRecord {
+                    kind: Some(kind),
+                    title: title.into(),
+                    created_at: Some(at),
+                    data,
+                    ..Default::default()
+                };
+                records::create(c, p, "vinculum", new)
+            };
+            add(Kind::Test, "Tray icon", 50, json!({"category": "Tray"}))?;
+            // One commit for two platforms, Windows first (B-1, B-2), then a newer build (B-3).
+            add(Kind::Build, "One", 100, json!({"commit": "c1", "platform": "windows-x86_64"}))?;
+            add(Kind::Build, "One", 101, json!({"commit": "c1"}))?;
+            add(Kind::Build, "Two", 200, json!({"commit": "c2"}))?;
+            let v = view(c, "vinculum", p, &Filter::default(), true, false, 300, &Tz::default())?;
+            let from: Vec<(&str, &str)> = v.froms.iter().map(|x| (x.0.as_str(), x.1.as_str())).collect();
+            assert!(from.iter().any(|(label, n)| label.starts_with("B-2 ") && *n == "1"), "{from:?}");
+            let item = &v.groups[0].items[0];
+            assert_eq!(item.chip.as_ref().map(|x| x.1.as_str()), Some("in B-2"));
+            let picked = Filter::new(None, None, Some("B-2"), None);
+            let v = view(c, "vinculum", p, &picked, true, false, 300, &Tz::default())?;
+            assert_eq!(v.groups.iter().map(|g| g.items.len()).sum::<usize>(), 1);
+            Ok(())
+        })
+        .unwrap();
+    }
 
     #[test]
     fn filters_round_trip_through_the_address() {
-        let f = Filter::new(Some("hover"), Some("Agents|Paint"), Some("B-66"), Some("problem"), true);
-        assert_eq!(f.href("x"), "/p/x?tab=builds&tq=hover&tcat=Agents%7CPaint&tfrom=B-66&tstate=problem&ball=1");
-        assert_eq!(Filter::new(None, None, Some("../x"), Some("open"), false), Filter::default());
-        assert_eq!(Filter::new(None, None, Some("B-"), None, false).from, "");
-        assert_eq!(Filter::new(None, None, Some("none"), None, false).from, "none");
+        let f = Filter::new(Some("hover"), Some("Agents|Paint"), Some("B-66"), Some("problem"));
+        assert_eq!(f.href("x"), "/p/x?tab=builds&tq=hover&tcat=Agents%7CPaint&tfrom=B-66&tstate=problem");
+        assert_eq!(Filter::new(None, None, Some("../x"), Some("open")), Filter::default());
+        assert_eq!(Filter::new(None, None, Some("B-"), None).from, "");
+        assert_eq!(Filter::new(None, None, Some("none"), None).from, "none");
     }
 }

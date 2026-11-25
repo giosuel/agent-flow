@@ -21,7 +21,7 @@
     if (document.hidden || busy) return;
     busy = true;
     try {
-      const r = await fetch(`/machine/jobs/${id}/output?after=${next}`, { headers: { accept: "application/json" } });
+      const r = await fetch(`/machines/jobs/${id}/output?after=${next}`, { headers: { accept: "application/json" } });
       if (!r.ok) return;
       const j = await r.json();
       const atBottom = log.scrollTop + log.clientHeight >= log.scrollHeight - 30;

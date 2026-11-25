@@ -269,6 +269,11 @@ pub async fn start(data_dir: &Path, folder: &Path, resume: Option<&str>, has_his
     // In a scope of its own, so restarting AgentFlow's service doesn't end it (systemd stops
     // everything in a service's group); plain when there's no user manager.
     let tmux_args = |c: &mut tokio::process::Command| {
+        // tmux runs the command with $SHELL; a server user made before it had a shell has
+        // nologin there, which would end the session at once.
+        if std::env::var("SHELL").is_ok_and(|s| s.ends_with("/nologin") || s.ends_with("/false")) {
+            c.env("SHELL", "/bin/sh");
+        }
         c.arg("tmux")
             .arg("-S")
             .arg(tmux_socket(data_dir))

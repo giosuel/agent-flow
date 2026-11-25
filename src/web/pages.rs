@@ -32,7 +32,7 @@ pub fn routes() -> Router<AppState> {
 const NAV: &[(&str, &str)] = &[
     ("/", "Dashboard"),
     ("/projects", "Projects"),
-    ("/machine", "Machine"),
+    ("/machines", "Machines"),
     ("/usage", "Usage"),
     ("/conversations", "Conversations"),
     ("/handbook", "Handbook"),
@@ -51,7 +51,7 @@ impl NavItem {
         super::icons::icon(match self.href {
             "/" => "grid",
             "/projects" => "folder",
-            "/machine" => "machine",
+            "/machines" => "machine",
             "/usage" => "chart",
             "/conversations" => "message",
             "/handbook" => "book",
@@ -121,7 +121,7 @@ const TABS: &[(&str, &str, &str)] = &[
     ("/handbook", "Handbook", "book"),
 ];
 pub const MORE: &[(&str, &str, &str)] = &[
-    ("/machine", "Machine", "machine"),
+    ("/machines", "Machines", "machine"),
     ("/conversations", "Conversations", "message"),
     ("/log", "Log", "list"),
     ("/settings", "Settings", "gear"),
@@ -421,9 +421,9 @@ async fn link_confirm(Path(secret): Path<String>) -> AppResult<Response> {
     render(LoginPage::new(Some(secret), None))
 }
 
-async fn passkey_start(State(state): State<AppState>, Extension(ClientIp(ip)): Extension<ClientIp>) -> Response {
+async fn passkey_start(State(state): State<AppState>) -> Response {
     let pk = state.passkeys.clone();
-    match state.db.call(move |c| pk.start_login(c, &ip)).await {
+    match state.db.call(move |c| pk.start_login(c)).await {
         Ok(Some((id, options))) => Json(serde_json::json!({"id": id, "options": options})).into_response(),
         Ok(None) => json_error(StatusCode::BAD_REQUEST, "no passkey is enrolled yet"),
         Err(e) => json_error(StatusCode::BAD_REQUEST, format!("{e:#}")),
@@ -509,9 +509,11 @@ async fn link_use(
         })
         .await?;
     let Some((purpose, session)) = session else {
-        let e = Entry::new(&Actor::Anonymous, Via::Page, Action::Denied, "sign-in link unknown, used or expired")
-            .ip(Some(ip));
-        activity::write(&state.db, e).await;
+        if state.log_denial(&ip) {
+            let e = Entry::new(&Actor::Anonymous, Via::Page, Action::Denied, "sign-in link unknown, used or expired")
+                .ip(Some(ip));
+            activity::write(&state.db, e).await;
+        }
         let page = LoginPage::new(
             None,
             Some("This link has expired or was already used. Run `sudo flow server add-device` on the server for a new one.".into()),

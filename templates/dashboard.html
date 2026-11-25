@@ -4,7 +4,7 @@
 {% block content %}
 <div class="head">
   <h1>Dashboard</h1>
-  <p class="status-line"><span class="dot{% if online > 0 %} ok{% endif %}" aria-hidden="true"></span><span>{{ online }} of {{ agents }} agents online</span><span aria-hidden="true">·</span><a href="/machine">machine {{ machine }}</a>{% if warnings > 0 %}<span aria-hidden="true">·</span><a href="/log" class="warn-text">{{ warnings }} warning{% if warnings != 1 %}s{% endif %}</a>{% endif %}<span class="grow"></span><span>{{ today }}</span></p>
+  <p class="status-line"><span class="dot{% if online > 0 %} ok{% endif %}" aria-hidden="true"></span><span>{{ online }} of {{ agents }} agents online</span><span aria-hidden="true">·</span><a href="/machines">machine {{ machine }}</a>{% if warnings > 0 %}<span aria-hidden="true">·</span><a href="/log" class="warn-text">{{ warnings }} warning{% if warnings != 1 %}s{% endif %}</a>{% endif %}<span class="grow"></span><span>{{ today }}</span></p>
 </div>
 {% if let Some(n) = notice %}<p class="notice ok" role="status">{{ crate::web::icons::icon("check")|safe }}<span>{{ n }}. The agent gets your answer word for word.</span></p>{% endif %}
 
@@ -24,13 +24,13 @@
     <div class="ov-nums"><span><b>{{ overview.new_tokens }}</b> new tokens</span><span class="ov-desk"><b>{{ overview.calls }}</b> calls</span><span class="ov-desk"><b>{{ overview.cache_reads }}</b> cache reads</span></div>
     <div class="ovbars ov-desk">{% for p in overview.top %}<div class="ovbar"><span>{{ p.name }}</span><span class="meter"><i style="width: {{ p.width|fmt("{:.0}") }}%; --c: {{ p.tint }}"></i></span><span class="v">{{ p.usd }}</span></div>{% endfor %}</div>
   </a>
-  <a href="/machine" class="tile ov-machine">
-    <div class="th"><span class="ic itile sm accent">{{ crate::web::icons::icon("cpu")|safe }}</span><span class="label">Machine</span><span class="go ilink">Machine{{ crate::web::icons::icon("chevron")|safe }}</span></div>
+  <a href="/machines" class="tile ov-machine">
+    <div class="th"><span class="ic itile sm accent">{{ crate::web::icons::icon("cpu")|safe }}</span><span class="label">Machine</span><span class="go ilink">Machines{{ crate::web::icons::icon("chevron")|safe }}</span></div>
     <div class="ov-desk">{% for m in overview.machine %}<div class="mrow"><span class="sub">{{ m.label }}</span><div class="meter"><i class="{% if m.warn %}warn{% endif %}" style="width: {{ m.pct|fmt("{:.0}") }}%"></i></div><span class="v">{{ m.value }}</span></div>{% endfor %}</div>
     <div class="ov-phone"><span class="big t-num">{{ overview.cpu_short }}</span><span class="sub">{{ overview.mem_short }}</span></div>
   </a>
-  <a href="/machine" class="tile ov-agents">
-    <div class="th"><span class="ic itile sm accent">{{ crate::web::icons::icon("server")|safe }}</span><span class="label">Agents and builds</span><span class="go ilink">Machine{{ crate::web::icons::icon("chevron")|safe }}</span></div>
+  <a href="/machines" class="tile ov-agents">
+    <div class="th"><span class="ic itile sm accent">{{ crate::web::icons::icon("server")|safe }}</span><span class="label">Agents and builds</span><span class="go ilink">Machines{{ crate::web::icons::icon("chevron")|safe }}</span></div>
     <div class="row ov-bigrow"><span class="big t-num">{{ overview.online }}</span><span class="sub">of {{ overview.agents }} agents online</span></div>
     <div class="ov-desk stack-sm">
     {% for b in overview.builders %}<div class="srv"><span class="dot{% if b.online %} ok{% endif %}" aria-hidden="true"></span><b>{{ b.name }}</b><span class="sub">{{ b.job }}</span></div>{% endfor %}
