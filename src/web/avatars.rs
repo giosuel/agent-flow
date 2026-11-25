@@ -28,3 +28,13 @@ pub fn is_avatar(name: &str) -> bool {
 pub fn same(a: &str, chosen: &str) -> bool {
     a == chosen
 }
+
+/// A person's icon as HTML (ui::avatar uses it too): `size` is "", "sm" or "lg"; no icon yet, the
+/// person glyph.
+pub fn html(icon: &str, size: &str) -> String {
+    if is_avatar(icon) {
+        format!(r#"<img class="avatar {size}" src="/static/avatars/{icon}.svg" alt="" aria-hidden="true">"#)
+    } else {
+        format!(r#"<span class="avatar none {size}" aria-hidden="true">{}</span>"#, super::icons::icon("person"))
+    }
+}

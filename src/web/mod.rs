@@ -36,6 +36,7 @@ mod profile;
 mod projectdoc;
 mod projects;
 mod pwa;
+mod qr;
 mod settings;
 mod steps;
 mod tone;

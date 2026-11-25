@@ -127,6 +127,13 @@ pub const MORE: &[(&str, &str, &str)] = &[
     ("/settings", "Settings", "gear"),
 ];
 
+/// Who is signed in, for the avatar at the top right (D-270).
+pub struct Me {
+    pub name: String,
+    pub email: String,
+    pub icon: String,
+}
+
 pub struct Tab {
     pub href: &'static str,
     pub name: &'static str,
@@ -150,6 +157,8 @@ pub struct Nav {
     pub projects: Vec<NavProject>,
     /// The project the page is in, if any.
     pub here: Option<Here>,
+    /// Who is signed in (None on pages without a person).
+    pub me: Option<Me>,
 }
 
 /// The cookie that keeps the project last opened (the owner, 2026-11-23: "lets do cookie"): on
@@ -211,6 +220,10 @@ pub async fn keep_project(
 pub async fn nav(state: &AppState, actor: &Actor, active: &str) -> Nav {
     let mut n = Nav::new(active);
     if actor.is_owner() {
+        if let Some(id) = actor.person() {
+            let me = state.db.call(move |c| crate::people::get(c, id)).await.ok().flatten();
+            n.me = me.map(|p| Me { name: p.name(), email: p.email, icon: p.icon });
+        }
         n.waiting = state.db.call(|c| crate::waiting::count(c)).await.unwrap_or(0) as i64;
         n.unread = state.db.call(|c| crate::notifications::unread(c)).await.unwrap_or(0);
         let now = crate::util::now_ms();
@@ -255,6 +268,7 @@ impl Nav {
             unread: 0,
             projects: Vec::new(),
             here: None,
+            me: None,
         }
     }
 }

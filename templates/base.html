@@ -58,6 +58,21 @@
     <span class="vsep" aria-hidden="true"></span>
     <a class="ibtn flat icon-btn bell" href="/notifications" aria-label="Notifications{% if nav.unread > 0 %}, {{ nav.unread }} new{% endif %}" aria-haspopup="dialog" data-bell>{{ crate::web::icons::icon("bell")|safe }}{% if nav.unread > 0 %}<b class="badge bell-badge">{% if nav.unread > 99 %}99+{% else %}{{ nav.unread }}{% endif %}</b>{% endif %}</a>
     <a class="ibtn flat icon-btn" href="/settings" aria-label="Settings" data-settings aria-haspopup="dialog">{{ crate::web::icons::icon("gear")|safe }}</a>
+    {#- Who is signed in (the owner, 2026-11-25, D-270): their icon, a menu of their own settings
+        and Sign out; on the phone after the bell, the menu as a sheet. -#}
+    {% if let Some(me) = nav.me %}
+    <details class="me-menu" data-menu>
+      <summary class="me-btn" aria-label="You: {{ me.name }}" title="{{ me.name }}">{{ crate::web::avatars::html(me.icon, "")|safe }}</summary>
+      <div class="me-pop">
+        <div class="me-who">{{ crate::web::avatars::html(me.icon, "")|safe }}<div class="me-txt"><strong>{{ me.name }}</strong><span class="sub">{{ me.email }}</span></div></div>
+        <a class="me-item" href="/settings?s=profile" data-settings>{{ crate::web::icons::icon("person")|safe }}<span>Profile</span></a>
+        <a class="me-item" href="/settings?s=notifications" data-settings>{{ crate::web::icons::icon("bell")|safe }}<span>Notifications</span></a>
+        <a class="me-item" href="/settings?s=passkeys" data-settings>{{ crate::web::icons::icon("key")|safe }}<span>Passkeys and browsers</span></a>
+        <hr>
+        <form method="post" action="/logout"><button class="me-item" type="submit">{{ crate::web::icons::icon("back")|safe }}<span>Sign out</span></button></form>
+      </div>
+    </details>
+    {% endif %}
   </div>
 </header>
 {% if let Some((href, label)) = nav.back %}<a class="back-bar" href="{{ href }}" data-nav="back">{{ crate::web::icons::icon("back")|safe }}<span>{{ label }}</span></a>{% endif %}
@@ -67,6 +82,6 @@
 <nav class="tabbar" aria-label="Main">
   {% for t in nav.tabs %}<a href="{{ t.href }}"{% if t.active %} class="on" aria-current="page"{% endif %}>{{ t.icon|safe }}<span>{{ t.name }}</span>{% if t.href == "/" && nav.waiting > 0 %}<b class="badge warn" aria-label="{{ nav.waiting }} waiting">{{ nav.waiting }}</b>{% endif %}</a>{% endfor %}
 </nav>
-<footer class="foot"><span class="mono">AgentFlow {{ nav.version }}</span><form method="post" action="/logout"><button class="act subtle" type="submit">Sign out</button></form></footer>
+<footer class="foot"><span class="mono">AgentFlow {{ nav.version }}</span>{% if nav.me.is_none() %}<form method="post" action="/logout"><button class="act subtle" type="submit">Sign out</button></form>{% endif %}</footer>
 </body>
 </html>
