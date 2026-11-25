@@ -4428,6 +4428,31 @@ fn the_ui_library_replaced_the_old_buttons() {
             assert!(!roots.contains(&class), "app.css redefines the library's .{class}: {line}");
         }
     }
+    // Every card's header is the one bar (the owner, 2026-11-25, D-276): no card opens with a title
+    // inside its padding or an uppercase label instead.
+    for f in std::fs::read_dir("templates").unwrap() {
+        let path = f.unwrap().path();
+        let t = std::fs::read_to_string(&path).unwrap();
+        for open in ["<section class=\"card pad", "<div class=\"card pad", "<details class=\"card pad", "<form"] {
+            for (i, _) in t.match_indices(open) {
+                let tag_end = i + t[i..].find('>').unwrap() + 1;
+                if open == "<form" && !t[i..tag_end].contains("class=\"card pad") {
+                    continue;
+                }
+                let next = t[tag_end..].trim_start();
+                // A heading only screen readers see (class vh) isn't a header.
+                let bad =
+                    ["<div class=\"sec", "<h2", "<h3", "<summary class=\"label"].iter().any(|h| next.starts_with(h))
+                        && !next[..next.find('>').unwrap_or(0)].contains("class=\"vh\"");
+                assert!(
+                    !bad,
+                    "{}: a card with its own kind of header; use .card-head: {}",
+                    path.display(),
+                    &t[i..tag_end]
+                );
+            }
+        }
+    }
     let gone = [
         "ghost",
         "lsearch",

@@ -64,9 +64,11 @@
       </div>
     </section>
     {% if !stale.is_empty() %}
-    <section class="card pad stack warn-card" aria-labelledby="stale-h">
-      <h2 class="label" id="stale-h">May be stale</h2>
+    <section class="card warn-card" aria-labelledby="stale-h">
+      <div class="card-head"><h2 id="stale-h">May be stale</h2></div>
+      <div class="card-body stack">
       <ul class="rows">{% for r in stale %}<li class="item-row"><div class="ttl"><a href="{{ r.url }}">{{ r.short }} {{ r.title }}</a><span class="sub">depends on this, {{ r.sub }}, before this changed</span></div></li>{% endfor %}</ul>
+      </div>
     </section>
     {% endif %}
     {% if history.count > 0 %}{% call ui::history(history, short, false) %}{% endcall %}{% endif %}

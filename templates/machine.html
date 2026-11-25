@@ -13,10 +13,9 @@
 
 {{ builds|safe }}
 
-<section class="card pad stack" aria-labelledby="hist-h" id="hist">
-  <div class="sec wrap"><h2 id="hist-h">By project</h2>
-    <span class="seg" role="group" aria-label="Time range">{% for (k, label, on) in ranges %}<a{% if *on %} class="on"{% endif %} href="/machine?range={{ k }}"{% if *on %} aria-current="true"{% endif %}>{{ label }}</a>{% endfor %}</span>
-  </div>
+<section class="card" aria-labelledby="hist-h" id="hist">
+  <div class="card-head"><h2 id="hist-h">By project</h2><span class="grow"></span><span class="seg sm" role="group" aria-label="Time range">{% for (k, label, on) in ranges %}<a{% if *on %} class="on"{% endif %} href="/machine?range={{ k }}"{% if *on %} aria-current="true"{% endif %}>{{ label }}</a>{% endfor %}</span></div>
+  <div class="card-body stack">
   {% if !sampled %}<p class="sub">No samples yet; the first comes a minute or two after AgentFlow starts.</p>{% else %}
   {% if let Some(c) = collecting %}<p class="sub">{{ c }}</p>{% endif %}
   <ul class="legend" aria-label="Projects">{% for l in legend %}<li><span class="swatch" style="--c: {{ l.color }}"></span>{{ l.name }}</li>{% endfor %}<li><span class="swatch limit"></span>the machine: {{ cores }} cores, {{ mem_total }} GB</li></ul>
@@ -33,12 +32,15 @@
     {% if agents.is_empty() %}<tr><td colspan="4" class="sub">Nothing measured today yet.</td></tr>{% endif %}</tbody>
   </table></div>
   <p class="sub">Usage counts per agent session and everything it starts (builds, tests, dev servers), matched to a project by the directory the session runs in. Other is everything else: the system, services and other users. Agents on other machines show in the project list; this page only measures this one.</p>
+  </div>
 </section>
 
-<section class="card pad stack" aria-labelledby="ports-h">
-  <div class="sec"><h2 id="ports-h">Claimed ports</h2><span class="sub">from each project's details</span></div>
+<section class="card" aria-labelledby="ports-h">
+  <div class="card-head"><h2 id="ports-h">Claimed ports</h2><span class="sub">from each project's details</span></div>
+  <div class="card-body stack">
   {% if ports.is_empty() %}<p class="sub">No project lists its ports yet. Agents add them to their project's details when they claim one.</p>{% else %}
   <ul class="rows">{% for p in ports %}<li class="item-row"><span class="mono">{{ p.port }}</span><div class="ttl"><span class="sub">{{ p.project }}</span></div></li>{% endfor %}</ul>
   {% endif %}
+  </div>
 </section>
 {% endblock %}

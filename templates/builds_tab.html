@@ -19,7 +19,7 @@
     {% if !n.run.is_empty() %}<p class="sub">flow run fetches the build and starts it on any of your machines with flow; Download is the file itself, for a machine without it.</p>{% endif %}
   </div>
   <div class="bn-new">
-    <div class="card-head"><h2 class="label">New in {{ n.short }}</h2><span class="grow"></span><span class="sub">{{ bv.new_items.len() }} to try</span></div>
+    <div class="card-head"><h2>New in {{ n.short }}</h2><span class="grow"></span><span class="sub">{{ bv.new_items.len() }} to try</span></div>
     {% if bv.new_items.is_empty() %}<p class="empty-in">{% if bv.new_total == 0 %}Nothing new to try came with this build.{% else %}All {{ bv.new_total }} tried.{% endif %}</p>
     {% else %}<div class="rows flush">{% for i in bv.new_items %}{% include "tt_item.html" %}{% endfor %}</div>{% endif %}
     {% if bv.new_total > 0 %}<div class="bn-foot"><span class="sub">{{ bv.new_tried }} of {{ bv.new_total }} tried</span><span class="meter thin"><i class="ok" style="width: {{ bv.new_tried * 100 / bv.new_total }}%"></i></span></div>{% endif %}

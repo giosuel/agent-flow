@@ -235,7 +235,11 @@ input[type=checkbox]:disabled, input[type=radio]:disabled { background-color: va
 .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--r-lg); min-width: 0; }
 .card.pad { padding: var(--sp-6); }
 .card.list { overflow: hidden; }
-.card-head { display: flex; align-items: center; gap: var(--sp-2) var(--sp-3); flex-wrap: wrap; min-height: 56px; padding: var(--sp-3) var(--sp-5); border-bottom: 1px solid var(--line2); }
+/* Every card's header is this bar, one height everywhere (the owner, 2026-11-25: "please make sure
+   all card headers are standardized"): its title (h2, 16 px), a count or a few words beside it
+   (.sub), then on the right links (.act), small buttons (.btn.sm), icon buttons (.ibtn) or a small
+   switch (.seg.sm): nothing taller than 36 px, so the bar stays 60 px. */
+.card-head { display: flex; align-items: center; gap: var(--sp-2) var(--sp-3); flex-wrap: wrap; min-height: 60px; padding: var(--sp-2) var(--sp-5); border-bottom: 1px solid var(--line2); }
 .card-head h2, .card-head h3 { margin: 0; font-size: var(--fs-h3); font-weight: 600; color: var(--ink); letter-spacing: 0; text-transform: none; }
 .card-head.flat { border-bottom: 0; }
 summary.card-head { list-style: none; cursor: pointer; }

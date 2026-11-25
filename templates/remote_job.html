@@ -17,8 +17,11 @@
     {% endif %}
   </section>
   <aside class="split-side stack-lg">
-    <section class="card pad stack-sm" aria-labelledby="f-h"><h2 class="label" id="f-h">This job</h2>
+    <section class="card" aria-labelledby="f-h">
+      <div class="card-head"><h2 id="f-h">This job</h2></div>
+      <div class="card-body stack-sm">
       <dl class="kv">{% for (k, v) in facts %}<dt>{{ k }}</dt><dd>{{ v }}</dd>{% endfor %}</dl>
+      </div>
     </section>
   </aside>
 </div>
