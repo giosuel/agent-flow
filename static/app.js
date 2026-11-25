@@ -805,6 +805,16 @@ document.addEventListener("change", (e) => {
   }
 })();
 
+// "Done" in a page shown as a dialog closes it, as its ✕ does (an approval once answered). Without
+// scripts it's a link back to the page under it.
+document.addEventListener("click", (e) => {
+  const done = e.target.closest("[data-dlg-close]");
+  const box = done && done.closest(".dlg");
+  if (!box) return;
+  e.preventDefault();
+  box.querySelector(".dlg-x").click();
+});
+
 // The board on the phone: one column at a time, picked with the chips above it.
 document.addEventListener("click", (e) => {
   const chip = e.target.closest(".bchips button[data-col]");

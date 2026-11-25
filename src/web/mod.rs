@@ -198,6 +198,12 @@ fn dialog_parent(uri: &axum::http::Uri) -> Option<(String, &'static str)> {
     if path == "/projects/new" {
         return Some(("/projects".into(), "dlg"));
     }
+    // An approval asked for by a terminal opens over the Dashboard and goes away once answered
+    // (the owner, 2026-11-25: "this should be more like an overlay that goes away instead of a
+    // real page with navigation").
+    if path.strip_prefix("/approve/").is_some_and(|code| !code.is_empty() && !code.contains('/')) {
+        return Some(("/".into(), "dlg"));
+    }
     let parts: Vec<&str> = path.split('/').collect();
     let record = |s: &str| {
         s.split_once('-').is_some_and(|(k, n)| {
@@ -235,12 +241,25 @@ async fn dialogs_over_pages(req: axum::extract::Request, next: Next) -> Response
         return next.run(req).await;
     };
     let target = req.uri().path_and_query().map(|p| p.as_str().to_owned()).unwrap_or_default();
+    let target_path = req.uri().path().to_owned();
+    let html_wanted = wants_html(req.headers());
     let mut req = req;
     match parent.parse() {
         Ok(u) => *req.uri_mut() = u,
         Err(_) => return next.run(req).await,
     }
     let res = next.run(req).await;
+    // Signed out: sign-in leads back to the dialog's own address (an approval link opened on the
+    // phone), not to the page it opens over.
+    let to_login = res.status().is_redirection()
+        && res
+            .headers()
+            .get(header::LOCATION)
+            .and_then(|v| v.to_str().ok())
+            .is_some_and(|l| l == "/login" || l.starts_with("/login?"));
+    if to_login {
+        return unauthenticated(&target_path, html_wanted);
+    }
     let html = res
         .headers()
         .get(axum::http::header::CONTENT_TYPE)
