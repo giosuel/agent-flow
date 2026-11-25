@@ -1,58 +1,28 @@
-// The Machine page stays current while it's open: the figures at the top every 5 seconds, the
-// charts and the agent table every minute (a new sample is taken each minute). Paused while the
-// page is hidden, so a forgotten tab doesn't keep asking.
+// The Machines pages stay current while they're open (D-277): every 5 seconds the page asks for
+// itself again and swaps in its live parts, the elements with data-live and an id (AgentFlow's
+// figures, the build machines, a machine's jobs right now and its history). A part with the focus
+// in it waits for the next round, so a button about to be pressed stays put. Paused while the page
+// is hidden, so a forgotten tab doesn't keep asking.
 "use strict";
 (() => {
-  if (!document.getElementById("tiles")) return;
-  let lastCharts = Date.now();
+  const parts = () => [...document.querySelectorAll("[data-live][id]")];
+  if (!parts().length) return;
   let busy = false;
-
-  async function refreshTiles() {
-    const r = await fetch("/machine/now", { headers: { accept: "application/json" } });
-    if (!r.ok) return;
-    const { tiles: fresh } = await r.json();
-    document.querySelectorAll("#tiles .mtile").forEach((el, i) => {
-      const t = fresh[i];
-      if (!t) return;
-      el.querySelector(".mtile-v").textContent = t.big;
-      el.querySelector(".mtile-big small").textContent = t.small;
-      el.classList.toggle("warn-card", t.warn);
-    });
-  }
-
-  async function refreshCharts() {
-    const r = await fetch(location.href);
-    if (!r.ok) return;
-    const doc = new DOMParser().parseFromString(await r.text(), "text/html");
-    // The cards' last hour too.
-    const freshTiles = doc.getElementById("tiles");
-    const oldTiles = document.getElementById("tiles");
-    if (freshTiles && oldTiles) oldTiles.replaceWith(document.importNode(freshTiles, true));
-  }
-
-  // The Build servers section, when there is one.
-  async function refreshBuilds() {
-    const old = document.getElementById("builds");
-    if (!old) return;
-    const r = await fetch("/machine/builds");
-    if (!r.ok) return;
-    const doc = new DOMParser().parseFromString(await r.text(), "text/html");
-    const fresh = doc.getElementById("builds");
-    if (!fresh) return;
-    const node = document.importNode(fresh, true);
-    if (window.afKeepSort) window.afKeepSort(old, node);
-    old.replaceWith(node);
-  }
 
   async function tick() {
     if (document.hidden || busy) return;
     busy = true;
     try {
-      await refreshTiles();
-      await refreshBuilds();
-      if (Date.now() - lastCharts >= 60_000) {
-        lastCharts = Date.now();
-        await refreshCharts();
+      const r = await fetch(location.pathname + location.search, { headers: { accept: "text/html" } });
+      if (!r.ok || r.redirected) return;
+      const doc = new DOMParser().parseFromString(await r.text(), "text/html");
+      for (const old of parts()) {
+        const fresh = doc.getElementById(old.id);
+        if (!fresh || fresh.outerHTML === old.outerHTML) continue;
+        if (old.contains(document.activeElement)) continue;
+        const node = document.importNode(fresh, true);
+        if (window.afKeepSort) window.afKeepSort(old, node);
+        old.replaceWith(node);
       }
     } catch {
       // Offline for a moment: try again on the next tick.

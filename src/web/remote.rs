@@ -1,6 +1,6 @@
 //! Build servers over HTTP: agents start jobs (`flow remote`) and follow their output; the
-//! owner watches the Machine page's Build servers section and each job's page, and can pause builds
-//! or cancel a job. See `crate::remote`.
+//! owner watches each job's page (the Machines pages are in machine.rs), and can pause builds or
+//! cancel a job. See `crate::remote`.
 
 use askama::Template;
 use axum::extract::{Path, Query, State};
@@ -23,7 +23,6 @@ pub fn routes() -> Router<AppState> {
         .route("/api/remote/jobs", post(start))
         .route("/api/remote/jobs/{id}/output", get(output_api))
         .route("/api/remote/jobs/{id}/cancel", post(cancel_api))
-        .route("/machine/builds", get(section))
         .route("/machines/jobs/{id}", get(job_page))
         .route("/machines/jobs/{id}/output", get(output))
         .route("/machines/jobs/{id}/cancel", post(cancel_page))
@@ -302,8 +301,9 @@ async fn resume(
 }
 
 // ---------------------------------------------------------------------------------------------
-// The Machine page's section
+// What the Machines pages and a job's page share
 
+/// A build machine's CPU, memory or GPU now: what you use, what builds use, what's free.
 pub struct Meter {
     pub label: &'static str,
     pub you: f64,
@@ -322,21 +322,28 @@ impl Meter {
     pub fn builds_pct(&self) -> String {
         self.pct(self.builds)
     }
+    /// "4", or "12%" for the GPU.
     pub fn you_s(&self) -> String {
-        num(self.you)
+        self.with_unit(self.you)
     }
     pub fn builds_s(&self) -> String {
-        num(self.builds)
+        self.with_unit(self.builds)
     }
-    pub fn total_s(&self) -> String {
-        num(self.total)
+    /// "free 6 of 32 threads", "free 88%".
+    pub fn free_s(&self) -> String {
+        let free = (self.total - self.you - self.builds).max(0.0);
+        if self.unit == "%" {
+            format!("free {}%", num(free))
+        } else {
+            format!("free {} of {} {}", num(free), num(self.total), self.unit)
+        }
     }
-    pub fn free(&self) -> String {
-        num((self.total - self.you - self.builds).max(0.0))
+    fn with_unit(&self, v: f64) -> String {
+        if self.unit == "%" { format!("{}%", num(v)) } else { num(v) }
     }
 }
 
-fn num(v: f64) -> String {
+pub fn num(v: f64) -> String {
     if v >= 10.0 || v.fract() == 0.0 { format!("{v:.0}") } else { format!("{v:.1}") }
 }
 
@@ -352,28 +359,8 @@ pub struct JobRow {
     pub v: (i64, i64),
 }
 
-pub struct ServerView {
-    pub name: String,
-    pub online: bool,
-    pub paused: bool,
-    pub line: String,
-    pub meters: Vec<Meter>,
-    pub jobs: Vec<JobRow>,
-    pub min_threads: String,
-    pub min_memory: String,
-    /// "3 projects, 96 GB (imaginarium 48, vinculum 31) and the shared cache 22 GB"
-    pub folders: String,
-    pub keep_days: i64,
-}
-
-#[derive(Template)]
-#[template(path = "builds.html")]
-pub struct Section {
-    pub servers: Vec<ServerView>,
-    pub is_owner: bool,
-}
-
-fn took(j: &Job) -> String {
+/// How long it ran (or runs): "4:12", "1:02:09"; "–" before it starts.
+pub fn took(j: &Job) -> String {
     let Some(s) = j.started_at else { return "–".into() };
     let end = j.finished_at.unwrap_or_else(now_ms);
     let secs = (end - s) / 1000;
@@ -384,7 +371,7 @@ fn took(j: &Job) -> String {
     }
 }
 
-fn bytes(n: Option<i64>) -> String {
+pub fn bytes(n: Option<i64>) -> String {
     match n {
         None => "–".into(),
         Some(b) if b < 1024 => format!("{b} B"),
@@ -433,71 +420,9 @@ pub fn job_row(j: &Job) -> JobRow {
     }
 }
 
-pub async fn section_data(state: &AppState, actor: &Actor) -> anyhow::Result<Section> {
-    state.remote.lock().unwrap_or_else(|e| e.into_inner()).watched_at = now_ms();
-    let jobs = state.db.call(|c| remote::recent(c, None, 40)).await?;
-    let now = now_ms();
-    let list = remote::servers(state);
-    let live = state.remote.lock().unwrap_or_else(|e| e.into_inner());
-    let servers = list
-        .iter()
-        .map(|b| {
-            let l = live.servers.get(&b.name);
-            let p = l.map(|l| l.probe.clone()).unwrap_or_default();
-            let mut facts = Vec::new();
-            if !p.model.is_empty() {
-                facts.push(p.model.replace(" 16-Core Processor", ""));
-            }
-            if p.threads > 0.0 {
-                facts.push(format!("{} threads", p.threads));
-                facts.push(format!("{:.0} GB", p.mem_total_gb));
-            }
-            if !p.gpu_name.is_empty() {
-                facts.push(p.gpu_name.replace("NVIDIA GeForce ", ""));
-            }
-            facts.push(match (p.at, p.online) {
-                (0, _) => "not checked yet".into(),
-                (t, true) => format!("online, checked {}", ago(t, now)),
-                (t, false) => format!("offline (checked {}): {}", ago(t, now), p.error),
-            });
-            let mut meters = Vec::new();
-            if p.online && p.threads > 0.0 {
-                meters.push(Meter {
-                    label: "CPU · threads",
-                    you: p.yours(),
-                    builds: p.builds,
-                    total: p.threads,
-                    unit: "threads",
-                });
-                meters.push(Meter {
-                    label: "Memory · GB",
-                    you: p.mem_yours_gb(),
-                    builds: p.mem_builds_gb,
-                    total: p.mem_total_gb,
-                    unit: "GB",
-                });
-                if !p.gpu_name.is_empty() {
-                    meters.push(Meter { label: "GPU · %", you: p.gpu_util, builds: 0.0, total: 100.0, unit: "%" });
-                }
-            }
-            ServerView {
-                name: b.name.clone(),
-                online: crate::builders::hub().is_online(&b.name),
-                paused: l.is_some_and(|l| l.paused),
-                line: facts.join(" · "),
-                meters,
-                jobs: jobs.iter().filter(|j| j.server == b.name).take(12).map(job_row).collect(),
-                folders: l.map(|l| folders(&l.sizes)).unwrap_or_default(),
-                keep_days: b.keep_days,
-                min_threads: num(b.min_threads),
-                min_memory: num(b.min_memory_gb),
-            }
-        })
-        .collect();
-    Ok(Section { servers, is_owner: actor.is_owner() })
-}
-
-fn folders(sizes: &[(String, f64)]) -> String {
+/// A builder's work folders: "3 projects, 96 GB (imaginarium 48, vinculum 31); the shared
+/// compiler cache 22 GB".
+pub fn folders(sizes: &[(String, f64)]) -> String {
     let projects: Vec<&(String, f64)> = sizes.iter().filter(|(n, _)| n != ".sccache").collect();
     if projects.is_empty() {
         return String::new();
@@ -515,13 +440,6 @@ fn folders(sizes: &[(String, f64)]) -> String {
         num(total),
         cache.unwrap_or_default()
     )
-}
-
-/// The section alone, for the Machine page to refresh every few seconds.
-async fn section(State(state): State<AppState>, Extension(actor): Extension<Actor>) -> AppResult<Response> {
-    actor.require_owner()?;
-    let s = section_data(&state, &actor).await?;
-    Ok(axum::response::Html(s.render().map_err(anyhow::Error::from)?).into_response())
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -943,40 +861,6 @@ pub async fn remove_server(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// An online builder's meters are the build-server meter (.bmeter, its own stacked bar), and
-    /// their key is the library's legend with its swatches (PR 10: .key and the meter's old name
-    /// clashed with the library's .meter).
-    #[test]
-    fn an_online_builder_shows_its_meters_and_their_legend() {
-        let html = Section {
-            servers: vec![ServerView {
-                name: "headquarters".into(),
-                online: true,
-                paused: false,
-                line: "online".into(),
-                meters: vec![Meter { label: "CPU · threads", you: 4.0, builds: 8.0, total: 32.0, unit: "threads" }],
-                jobs: vec![],
-                min_threads: "8".into(),
-                min_memory: "16".into(),
-                folders: String::new(),
-                keep_days: 14,
-            }],
-            is_owner: true,
-        }
-        .render()
-        .unwrap();
-        assert!(
-            html.contains(r#"<div class="bmeters">"#)
-                && html.contains(r#"<div class="bmeter"><span class="label">CPU · threads</span>"#),
-            "{html}"
-        );
-        assert!(
-            html.contains(r#"<ul class="legend"><li><span class="swatch" style="--c: var(--bar-you)"></span>you"#),
-            "{html}"
-        );
-        assert!(!html.contains(r#"class="meter""#) && !html.contains(r#"class="key""#), "{html}");
-    }
 
     /// Build servers start folded, even a lone one (the owner, 2026-11-23).
     #[test]
