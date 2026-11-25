@@ -149,6 +149,7 @@ pre.wrap { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 40vh; ove
 .jrow:first-child { border-top: 0; }
 .jrow > span { min-width: 0; overflow-wrap: anywhere; }
 .mhead-actions { display: flex; gap: var(--sp-2); margin-left: auto; }
+.mmain { display: flex; flex-direction: column; gap: var(--sp-4); min-width: 0; }
 .nkv dd .chip { max-width: 100%; }
 .nkv dd .chip span { overflow: hidden; text-overflow: ellipsis; }
 .blog { font-family: var(--mono); font-size: var(--fs-sub); line-height: 1.55; background: var(--code); border: 1px solid var(--line); border-radius: 8px; padding: 8px 0; overflow: auto; color: var(--ink2); }

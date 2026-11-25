@@ -7,14 +7,15 @@
 //! them). The pages swap their live parts in every 5 seconds (static/machine.js).
 
 use askama::Template;
-use axum::extract::State;
+use axum::extract::{Path, Query, State};
 use axum::response::{Redirect, Response};
 use axum::routing::get;
 use axum::{Extension, Router};
 
-use super::pages::{Nav, nav, render};
-use super::remote::{Meter, num, took};
-use super::{AppResult, AppState};
+use super::pages::{Nav, PathPart, nav, render};
+use super::remote::{Meter, bytes, job_row, num, took};
+use super::uilib::Pager;
+use super::{AppError, AppResult, AppState};
 use crate::auth::Actor;
 use crate::config::BuildServer;
 use crate::machine;
@@ -24,6 +25,7 @@ use crate::util::{ago, now_ms};
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/machines", get(overview))
+        .route("/machines/{name}", get(machine_page))
         // The Machine page became Machines (D-277): its old addresses lead there (a page open since
         // then asks for its parts at the old ones, and finds them in the new page).
         .route("/machine", get(|| async { Redirect::to("/machines") }))
@@ -224,6 +226,12 @@ impl BuildMachine {
         f.join(" · ")
     }
 
+    /// Nothing running, as a sentence: "Idle; the last job finished 12 min ago."
+    pub fn idle_sentence(&self) -> String {
+        let mut c = self.idle.chars();
+        c.next().map(|f| format!("{}{}.", f.to_uppercase(), c.as_str())).unwrap_or_default()
+    }
+
     /// Its card's foot: "Today 9 jobs, 1 failed · builder 0.0.0-dev+g4be65a8".
     pub fn foot(&self) -> String {
         let c = &self.counts;
@@ -393,5 +401,192 @@ async fn overview(
         host,
         tiles,
         machines,
+    })
+}
+
+// ---------------------------------------------------------------------------------------------
+// A build machine's page
+
+/// Jobs a page of the build history lists.
+const PER_PAGE: i64 = 20;
+
+#[derive(serde::Deserialize)]
+struct HistoryQuery {
+    #[serde(default)]
+    show: String,
+    /// From 1; anything else is the first.
+    #[serde(default)]
+    page: String,
+}
+
+/// A row of the build history.
+struct HistRow {
+    id: i64,
+    title: String,
+    named: bool,
+    project: String,
+    chip: &'static str,
+    label: String,
+    /// "today 20:31", "24 Nov 18:02"
+    started: String,
+    created_at: i64,
+    time: String,
+    sent: String,
+    /// Seconds it ran and bytes sent, to sort by (-1: not yet).
+    v: (i64, i64),
+}
+
+#[derive(Template)]
+#[template(path = "build_machine.html")]
+struct MachinePage {
+    nav: Nav,
+    path: Vec<PathPart>,
+    m: BuildMachine,
+    /// "214 jobs since 17 Nov"
+    jobs_since: String,
+    /// The history's filters: (label, address, on).
+    shows: Vec<(&'static str, String, bool)>,
+    rows: Vec<HistRow>,
+    pager: Pager,
+    /// What the history says when this filter lists nothing.
+    empty: String,
+    /// "This machine": (name, value, in code type).
+    facts: Vec<(&'static str, String, bool)>,
+    /// This page's address, for pausing to come back to.
+    here: String,
+}
+
+/// When a job was asked for: "today 20:31", else its day and time.
+fn started(tz: &crate::tz::Tz, at: i64, today: i64) -> String {
+    if at >= today { format!("today {}", tz.hm(at)) } else { tz.short(at) }
+}
+
+/// A finished job's words in the history ("done", "failed · exit code 101"); one waiting is
+/// "waiting", whatever it waits for.
+fn hist_row(j: &Job, tz: &crate::tz::Tz, today: i64) -> HistRow {
+    let row = job_row(j);
+    let label = match j.state.as_str() {
+        "running" => "running".to_owned(),
+        "queued" => "waiting".to_owned(),
+        "paused" => "paused".to_owned(),
+        _ => row.label,
+    };
+    HistRow {
+        id: j.id,
+        title: j.title(),
+        named: !j.name.is_empty(),
+        project: j.project.clone(),
+        chip: row.chip,
+        label,
+        started: started(tz, j.created_at, today),
+        created_at: j.created_at,
+        time: row.time,
+        sent: bytes(j.sent_bytes),
+        v: row.v,
+    }
+}
+
+/// What the page knows of the machine, beside its jobs.
+fn machine_facts(m: &BuildMachine, tz: &crate::tz::Tz, now: i64) -> Vec<(&'static str, String, bool)> {
+    let mut f = Vec::new();
+    if m.threads > 0.0 {
+        f.push(("Threads", num(m.threads), false));
+        f.push(("Memory", format!("{:.0} GB", m.memory_gb), false));
+    }
+    if !m.gpu.is_empty() {
+        f.push(("GPU", m.gpu.clone(), false));
+    }
+    if !m.version.is_empty() {
+        f.push(("Builder", m.version.clone(), true));
+    }
+    match (m.online, m.since) {
+        (true, Some(t)) if t >= tz.day_start(now) => f.push(("Connected", format!("since {}", tz.hm(t)), false)),
+        (true, Some(t)) => f.push(("Connected", format!("since {}", tz.short(t)), false)),
+        (true, None) => f.push(("Connected", "yes".into(), false)),
+        (false, _) if m.seen > 0 => f.push(("Last seen", ago(m.seen, now), false)),
+        (false, _) => f.push(("Connected", "not since AgentFlow started".into(), false)),
+    }
+    let b = &m.server;
+    f.push((
+        "Starts a job",
+        format!("while {} threads and {} GB are free", num(b.min_threads), num(b.min_memory_gb)),
+        false,
+    ));
+    f.push((
+        "Per project",
+        format!("{} job{} at once", b.slots.max(1), if b.slots.max(1) == 1 { "" } else { "s" }),
+        false,
+    ));
+    let keep = format!("unused ones go after {} day{}", b.keep_days, if b.keep_days == 1 { "" } else { "s" });
+    f.push((
+        "Work folders",
+        if m.folders.is_empty() {
+            format!("{}{}", keep[..1].to_uppercase(), &keep[1..])
+        } else {
+            format!("{}; {keep}", m.folders)
+        },
+        false,
+    ));
+    f
+}
+
+/// A build machine's page (D-277): what runs there now, its build history, what AgentFlow knows of
+/// it. An unknown name is a 404.
+async fn machine_page(
+    State(state): State<AppState>,
+    Extension(actor): Extension<Actor>,
+    Path(name): Path<String>,
+    Query(q): Query<HistoryQuery>,
+    tz: crate::tz::Tz,
+) -> AppResult<Response> {
+    actor.require_owner()?;
+    let now = now_ms();
+    let today = tz.day_start(now);
+    let m = build_machines(&state, Some(&name), today).await?.into_iter().next().ok_or(AppError::NotFound)?;
+    let show = remote::Show::parse(&q.show);
+    let address = |show: remote::Show, page: i64| {
+        let mut a = format!("/machines/{name}");
+        let mut sep = '?';
+        if !show.key().is_empty() {
+            a.push_str(&format!("{sep}show={}", show.key()));
+            sep = '&';
+        }
+        if page > 1 {
+            a.push_str(&format!("{sep}page={page}"));
+        }
+        a
+    };
+    let pager =
+        Pager::new("Pages of the build history", m.counts.of(show), q.page.parse().unwrap_or(1), PER_PAGE, |p| {
+            format!("{}#history", address(show, p))
+        })
+        .labels("Newer jobs", "Older jobs");
+    let (n, offset) = (name.clone(), pager.offset(PER_PAGE));
+    let jobs = state.db.call(move |c| remote::history(c, &n, show, PER_PAGE, offset)).await?;
+    let path = vec![PathPart::link("Machines", "/machines"), PathPart::here(name.clone())];
+    let shows = [("All", remote::Show::All), ("Failed", remote::Show::Failed), ("Running", remote::Show::Running)]
+        .into_iter()
+        .map(|(label, s)| (label, format!("{}#history", address(s, 1)), s == show))
+        .collect();
+    let jobs_since = match (m.counts.all, m.counts.first) {
+        (0, _) | (_, None) => "no jobs yet".to_owned(),
+        (1, Some(t)) => format!("1 job since {}", tz.day(t)),
+        (n, Some(t)) => format!("{n} jobs since {}", tz.day(t)),
+    };
+    render(MachinePage {
+        nav: nav(&state, &actor, "/machines").await.up(&path),
+        path,
+        jobs_since,
+        shows,
+        rows: jobs.iter().map(|j| hist_row(j, &tz, today)).collect(),
+        here: address(show, pager.page),
+        pager,
+        empty: match show {
+            remote::Show::All => format!("No jobs yet: agents build here with flow remote --server {name}."),
+            remote::Show::Failed => "No job failed here.".to_owned(),
+            remote::Show::Running => "Nothing runs or waits here now.".to_owned(),
+        },
+        facts: machine_facts(&m, &tz, now),
+        m,
     })
 }
