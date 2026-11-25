@@ -612,6 +612,8 @@ async fn the_overview_puts_questions_first_and_folds_closed_milestones() {
         "{page}"
     );
     assert!(page.contains("data-qpage") && page.contains(r#"<div class="qpager" hidden>"#), "{page}");
+    // On the amber island the pager is warm, not the greys made for dark cards.
+    assert!(page.contains(r#"class="ibtn warn qp-prev""#) && !page.contains(r#"class="ibtn qp-"#), "{page}");
     assert!(page.contains("Opt one") && page.contains("Opt two") && page.contains("Opt five"), "{page}");
     assert!(
         !page.contains("Opt three") && !page.contains("Opt four") && page.contains("2 more, or your own"),
