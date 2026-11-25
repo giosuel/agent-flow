@@ -36,7 +36,7 @@
           {% for (k, v) in facts %}<dt>{{ k }}</dt><dd{% if k == "Command" || k == "Checkout" || k == "Runs in" %} class="mono job-fact"{% endif %}>{{ v }}</dd>{% endfor %}
         </dl>
         {% if is_owner && !job.is_finished() %}
-        <form method="post" action="/machine/jobs/{{ job.id }}/cancel" id="job-cancel"><button class="btn sm danger wide" type="submit" data-confirm="Cancel job #{{ job.id }}? It stops on {{ job.server }}; the agent hears it was cancelled.">Cancel the job</button></form>
+        <form method="post" action="/machines/jobs/{{ job.id }}/cancel" id="job-cancel"><button class="btn sm danger wide" type="submit" data-confirm="Cancel job #{{ job.id }}? It stops on {{ job.server }}; the agent hears it was cancelled.">Cancel the job</button></form>
         {% endif %}
       </div>
     </section>

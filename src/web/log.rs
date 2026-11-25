@@ -240,7 +240,7 @@ fn row(r: &LogRow, archived: bool, range: &str, tz: &Tz) -> Row {
             Some((id, lines))
         });
     if let Some((id, _)) = &job {
-        actions.push(("Open job page".into(), format!("/machine/jobs/{id}"), "out"));
+        actions.push(("Open job page".into(), super::remote::job_url(*id), "out"));
         actions.push(("Full output".into(), url("/log", &format!("target:job-{id}"), "all", None, None, None), "list"));
     }
     if let Some(u) = r.target.as_deref().and_then(record_url) {

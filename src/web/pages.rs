@@ -32,7 +32,7 @@ pub fn routes() -> Router<AppState> {
 const NAV: &[(&str, &str)] = &[
     ("/", "Dashboard"),
     ("/projects", "Projects"),
-    ("/machine", "Machine"),
+    ("/machines", "Machines"),
     ("/usage", "Usage"),
     ("/conversations", "Conversations"),
     ("/handbook", "Handbook"),
@@ -51,7 +51,7 @@ impl NavItem {
         super::icons::icon(match self.href {
             "/" => "grid",
             "/projects" => "folder",
-            "/machine" => "machine",
+            "/machines" => "machine",
             "/usage" => "chart",
             "/conversations" => "message",
             "/handbook" => "book",
@@ -97,7 +97,7 @@ const TABS: &[(&str, &str, &str)] = &[
     ("/handbook", "Handbook", "book"),
 ];
 pub const MORE: &[(&str, &str, &str)] = &[
-    ("/machine", "Machine", "machine"),
+    ("/machines", "Machines", "machine"),
     ("/conversations", "Conversations", "message"),
     ("/log", "Log", "list"),
     ("/settings", "Settings", "gear"),

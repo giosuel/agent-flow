@@ -14,7 +14,7 @@
 {{ builds|safe }}
 
 <section class="card" aria-labelledby="hist-h" id="hist">
-  <div class="card-head"><h2 id="hist-h">By project</h2><span class="grow"></span><span class="seg sm" role="group" aria-label="Time range">{% for (k, label, on) in ranges %}<a{% if *on %} class="on"{% endif %} href="/machine?range={{ k }}"{% if *on %} aria-current="true"{% endif %}>{{ label }}</a>{% endfor %}</span></div>
+  <div class="card-head"><h2 id="hist-h">By project</h2><span class="grow"></span><span class="seg sm" role="group" aria-label="Time range">{% for (k, label, on) in ranges %}<a{% if *on %} class="on"{% endif %} href="/machines?range={{ k }}"{% if *on %} aria-current="true"{% endif %}>{{ label }}</a>{% endfor %}</span></div>
   <div class="card-body stack">
   {% if !sampled %}<p class="sub">No samples yet; the first comes a minute or two after AgentFlow starts.</p>{% else %}
   {% if let Some(c) = collecting %}<p class="sub">{{ c }}</p>{% endif %}

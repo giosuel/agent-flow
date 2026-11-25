@@ -5,7 +5,7 @@
 
 use askama::Template;
 use axum::extract::{Query, State};
-use axum::response::{IntoResponse, Response};
+use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::get;
 use axum::{Extension, Router};
 use serde::Deserialize;
@@ -18,7 +18,11 @@ use crate::machine;
 use crate::util::now_ms;
 
 pub fn routes() -> Router<AppState> {
-    Router::new().route("/machine", get(page)).route("/machine/now", get(now))
+    Router::new()
+        .route("/machines", get(page))
+        .route("/machine/now", get(now))
+        // The Machine page became Machines (D-277): its old address leads there.
+        .route("/machine", get(|| async { Redirect::to("/machines") }))
 }
 
 #[derive(Deserialize)]
@@ -293,7 +297,7 @@ async fn page(
     };
     render(MachinePage {
         builds,
-        nav: nav(&state, &actor, "/machine").await,
+        nav: nav(&state, &actor, "/machines").await,
         host: format!("{host} · {} cores · {:.0} GB RAM", snap.cores, snap.mem_total_gb()),
         tiles,
         ranges: vec![("6h", "6 h", range == "6h"), ("24h", "24 h", range == "24h"), ("7d", "7 d", range == "7d")],

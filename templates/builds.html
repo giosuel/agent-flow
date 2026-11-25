@@ -5,7 +5,7 @@
   <div class="card-body stack">
   {% for s in servers %}
   <div class="bs-head"><span class="dot{% if s.online %} ok{% endif %}" aria-hidden="true"></span><h3>{{ s.name }}</h3><span class="sub">{{ s.line }}</span><span class="grow"></span>
-    {% if is_owner %}<form method="post" action="/machine/servers/{{ s.name }}/{% if s.paused %}resume{% else %}pause{% endif %}"><button class="btn sm secondary" type="submit">{% if s.paused %}Resume builds{% else %}Pause builds{% endif %}</button></form>{% endif %}
+    {% if is_owner %}<form method="post" action="/machines/{{ s.name }}/{% if s.paused %}resume{% else %}pause{% endif %}"><input type="hidden" name="next" value="/machines"><button class="btn sm secondary" type="submit">{% if s.paused %}Resume builds{% else %}Pause builds{% endif %}</button></form>{% endif %}
   </div>
   {% if s.paused %}<p class="notice warn" role="status">{{ crate::web::icons::icon("alert")|safe }}<span>Builds are paused: nothing starts, running jobs are frozen until you resume.</span></p>{% endif %}
   {% if !s.meters.is_empty() %}
@@ -22,7 +22,7 @@
   {% if s.jobs.is_empty() %}<p class="sub">No jobs yet.</p>{% else %}
   <div class="table-wrap"><table class="table jobs" data-sortable>
     <thead><tr>{% call tbl::th("Job", "num", "", "descending") %}{% endcall %}{% call tbl::th("Project", "text", "", "") %}{% endcall %}{% call tbl::th("Command", "text", "", "") %}{% endcall %}{% call tbl::th("State", "text", "", "") %}{% endcall %}{% call tbl::th("Time", "num", "hide-phone", "") %}{% endcall %}{% call tbl::th("Sent", "num", "hide-phone", "") %}{% endcall %}</tr></thead>
-    <tbody>{% for j in s.jobs %}<tr><th scope="row" data-v="{{ j.id }}"><a href="/machine/jobs/{{ j.id }}">#{{ j.id }}</a></th><td>{{ j.project }}</td><td class="jcmd">{{ j.command }}</td><td><span class="chip {{ j.chip }}">{{ j.label }}</span></td><td class="hide-phone mono" data-v="{{ j.v.0 }}">{{ j.time }}</td><td class="hide-phone mono" data-v="{{ j.v.1 }}">{{ j.sent }}</td></tr>{% endfor %}</tbody>
+    <tbody>{% for j in s.jobs %}<tr><th scope="row" data-v="{{ j.id }}"><a href="/machines/jobs/{{ j.id }}">#{{ j.id }}</a></th><td>{{ j.project }}</td><td class="jcmd">{{ j.command }}</td><td><span class="chip {{ j.chip }}">{{ j.label }}</span></td><td class="hide-phone mono" data-v="{{ j.v.0 }}">{{ j.time }}</td><td class="hide-phone mono" data-v="{{ j.v.1 }}">{{ j.sent }}</td></tr>{% endfor %}</tbody>
   </table></div>
   {% endif %}
   <p class="sub">{% if !s.folders.is_empty() %}Work folders on {{ s.name }}: {{ s.folders }}. {% endif %}A project's folder unused for {{ s.keep_days }} days is deleted.</p>

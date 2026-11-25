@@ -2121,7 +2121,7 @@ async fn usage_and_machine_pages_show_the_counts() {
     // The phone's More tab lists the sections that don't fit in the tab bar.
     let more = get("/more").await.text().await.unwrap();
     assert!(more.contains("Conversations") && more.contains("class=\"tabbar\""), "{more}");
-    let res = get("/machine?range=6h").await;
+    let res = get("/machines?range=6h").await;
     assert_eq!(res.status(), StatusCode::OK);
     assert!(res.text().await.unwrap().contains("GB free of"));
     // The live figures: one per tile, in the same order.
@@ -3425,7 +3425,7 @@ async fn jobs_run_on_a_builder_and_bring_back_what_was_asked() {
     // Its page (D-275): its name as the title, the command among its facts, the output numbered in
     // the code view a note's log uses, a warning in its tone.
     let cookie = s.owner_cookie().await;
-    let page = owner_page(&s, &cookie, &format!("/machine/jobs/{id}")).await;
+    let page = owner_page(&s, &cookie, &format!("/machines/jobs/{id}")).await;
     assert!(page.contains(r#"<h1 class="rec-title note-title">Snapshot check</h1>"#), "{page}");
     assert!(
         page.contains("<dt>Command</dt>") && page.contains(r#"<div class="codeview cv-scroll" id="job-log""#),

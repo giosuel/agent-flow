@@ -24,7 +24,14 @@ pub fn routes() -> Router<AppState> {
         .route("/api/remote/jobs/{id}/output", get(output_api))
         .route("/api/remote/jobs/{id}/cancel", post(cancel_api))
         .route("/machine/builds", get(section))
-        .route("/machine/jobs/{id}", get(job_page))
+        .route("/machines/jobs/{id}", get(job_page))
+        .route("/machines/jobs/{id}/output", get(output))
+        .route("/machines/jobs/{id}/cancel", post(cancel_page))
+        .route("/machines/{name}/pause", post(pause))
+        .route("/machines/{name}/resume", post(resume))
+        // The addresses from before Machines (D-277): agents' terminals and the Log hold job links,
+        // and a page open since then posts its forms there.
+        .route("/machine/jobs/{id}", get(|Path(id): Path<i64>| async move { Redirect::to(&job_url(id)) }))
         .route("/machine/jobs/{id}/output", get(output))
         .route("/machine/jobs/{id}/cancel", post(cancel_page))
         .route("/machine/servers/{name}/pause", post(pause))
@@ -32,6 +39,11 @@ pub fn routes() -> Router<AppState> {
         .route("/settings/build-servers/{name}/limits", post(save_limits))
         .route("/settings/build-servers/{name}/rename", post(rename_server))
         .route("/settings/build-servers/{name}/remove", post(remove_server))
+}
+
+/// A job's page.
+pub fn job_url(id: i64) -> String {
+    format!("/machines/jobs/{id}")
 }
 
 #[derive(Deserialize)]
@@ -140,7 +152,7 @@ async fn start(State(state): State<AppState>, Extension(actor): Extension<Actor>
     let e = Entry::new(&actor, Via::Build, Action::Run, format!("job #{id} queued on {}", server.name))
         .target(format!("job-{id}"));
     activity::write(&state.db, e).await;
-    let url = format!("{}/machine/jobs/{id}", state.config.public_url.trim_end_matches('/'));
+    let url = format!("{}{}", state.config.public_url.trim_end_matches('/'), job_url(id));
     Json(json!({"id": id, "url": url, "server": server.name})).into_response()
 }
 
@@ -240,10 +252,27 @@ async fn cancel_page(
         Entry::new(&actor, Via::Page, Action::Run, format!("cancelled job #{id}")).target(format!("job-{id}")),
     )
     .await;
-    Ok(Redirect::to(&format!("/machine/jobs/{id}")).into_response())
+    Ok(Redirect::to(&job_url(id)).into_response())
 }
 
-async fn set_paused(state: &AppState, actor: &Actor, name: &str, paused: bool) -> AppResult<Response> {
+/// The page a pause or resume came from, to go back to: one of the Machines pages.
+#[derive(Deserialize)]
+struct Back {
+    #[serde(default)]
+    next: String,
+}
+
+impl Back {
+    fn to(&self) -> &str {
+        let n = self.next.as_str();
+        let ok = (n == "/machines" || n.starts_with("/machines/") || n.starts_with("/machines?"))
+            && !n.contains("//")
+            && !n.chars().any(char::is_control);
+        if ok { n } else { "/machines" }
+    }
+}
+
+async fn set_paused(state: &AppState, actor: &Actor, name: &str, paused: bool, back: &Back) -> AppResult<Response> {
     actor.require_owner()?;
     if !remote::servers(state).iter().any(|b| b.name == name) {
         return Err(AppError::NotFound);
@@ -251,23 +280,25 @@ async fn set_paused(state: &AppState, actor: &Actor, name: &str, paused: bool) -
     state.remote.lock().unwrap_or_else(|e| e.into_inner()).servers.entry(name.to_owned()).or_default().paused = paused;
     let what = if paused { format!("paused builds on {name}") } else { format!("resumed builds on {name}") };
     activity::write(&state.db, Entry::new(actor, Via::Page, Action::Run, what)).await;
-    Ok(Redirect::to("/machine#builds").into_response())
+    Ok(Redirect::to(back.to()).into_response())
 }
 
 async fn pause(
     State(state): State<AppState>,
     Extension(actor): Extension<Actor>,
     Path(name): Path<String>,
+    axum::Form(back): axum::Form<Back>,
 ) -> AppResult<Response> {
-    set_paused(&state, &actor, &name, true).await
+    set_paused(&state, &actor, &name, true, &back).await
 }
 
 async fn resume(
     State(state): State<AppState>,
     Extension(actor): Extension<Actor>,
     Path(name): Path<String>,
+    axum::Form(back): axum::Form<Back>,
 ) -> AppResult<Response> {
-    set_paused(&state, &actor, &name, false).await
+    set_paused(&state, &actor, &name, false, &back).await
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -600,8 +631,8 @@ async fn job_page(
     }
     use super::pages::PathPart;
     let path = vec![
-        PathPart::link("Machine", "/machine"),
-        PathPart::link("Build servers", "/machine#builds"),
+        PathPart::link("Machines", "/machines"),
+        PathPart::link("Build servers", "/machines#builds"),
         PathPart::here(format!("Job #{}", job.id)),
     ];
     let pid = job.project_id;
@@ -614,7 +645,7 @@ async fn job_page(
         format!("{pname}'s project agent")
     };
     render(JobPage {
-        nav: nav(&state, &actor, "/machine").await.up(&path),
+        nav: nav(&state, &actor, "/machines").await.up(&path),
         path,
         row: job_row(&job),
         title: job.title(),
