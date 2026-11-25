@@ -93,7 +93,7 @@ enum Command {
     /// Draft a PR, issue, comment or new commits for someone else's repository (agents). The
     /// owner reads it in AgentFlow and sends it, as them; agents never post or push there.
     Contribute(cli::ContributeArgs),
-    /// Run a build or test on a build server (agents): `flow remote -- cargo build --release`.
+    /// Run a build or test on a build server (agents): `flow remote --name "Release build" -- cargo build --release`.
     /// Copies only what changed, prints the output as it comes, exits with the command's exit code
     /// (75: the server is offline, build here instead).
     Remote(cli::RemoteArgs),

@@ -515,6 +515,9 @@ a.item-row:hover { background: var(--hover-bg); }
 .lv-error { color: var(--bad-ink); }
 .lv-warn { color: var(--warn-ink); }
 .lv-info { color: var(--muted); }
+.cv-t.cv-dim { color: var(--muted); }
+/* Output that grows while you watch (a build job's): it scrolls in its own box. */
+.codeview.cv-scroll { max-height: 70vh; overflow-y: auto; align-content: start; }
 .codeview.cv-fold > :nth-child(n+81) { display: none; }
 .cv-all:checked + .codeview.cv-fold > :nth-child(n+81) { display: block; }
 .cv-when-open { display: none; }

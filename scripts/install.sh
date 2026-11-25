@@ -14,7 +14,7 @@ T=x86_64-unknown-linux-gnu
 rel=""
 if [ -z "${LOCAL:-}" ] && [ -n "${AGENTFLOW_TOKEN_FILE:-}" ] && command -v flow >/dev/null; then
   set +e
-  flow remote --fetch "target/$T/release/agentflow" --fetch "target/$T/release/flow" --fetch "target/$T/release/agentflow-builder" \
+  flow remote --name "AgentFlow for a live install" --fetch "target/$T/release/agentflow" --fetch "target/$T/release/flow" --fetch "target/$T/release/agentflow-builder" \
     -- cargo zigbuild --release --locked --features vendored-openssl --target "$T.2.35"
   code=$?
   set -e

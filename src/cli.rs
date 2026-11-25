@@ -714,6 +714,9 @@ pub struct ScreenshotArgs {
 pub struct RemoteArgs {
     #[command(flatten)]
     pub client: ClientArgs,
+    /// What the job is, in a few words, e.g. "Tests for PR #170": its title in AgentFlow.
+    #[arg(long, required_unless_present = "cancel")]
+    pub name: Option<String>,
     /// Which build server (the first one if left out).
     #[arg(long)]
     pub server: Option<String>,
@@ -936,7 +939,7 @@ pub fn remote(config_path: &Path, a: RemoteArgs) -> anyhow::Result<i32> {
         }
     };
     let body = serde_json::json!({
-        "dir": if a.setup { dir.clone() } else { top.clone() }, "command": a.command, "fetch": a.fetch, "gpu": a.gpu,
+        "name": a.name, "dir": if a.setup { dir.clone() } else { top.clone() }, "command": a.command, "fetch": a.fetch, "gpu": a.gpu,
         "server": a.server, "subdir": subdir, "setup": a.setup,
         "manifest": up.as_ref().map(|u| u.manifest.clone()).unwrap_or_default(),
         "bundle": up.as_ref().map(|u| u.bundle.clone()).unwrap_or_default(),

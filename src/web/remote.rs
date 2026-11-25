@@ -36,6 +36,9 @@ pub fn routes() -> Router<AppState> {
 
 #[derive(Deserialize)]
 struct StartJob {
+    /// What it is, in a few words ("Tests for PR #170"): its title (D-275). Required.
+    #[serde(default)]
+    name: String,
     /// The checkout (or a folder in it) the command runs in, on this machine.
     dir: String,
     command: Vec<String>,
@@ -79,7 +82,7 @@ async fn start(State(state): State<AppState>, Extension(actor): Extension<Actor>
         let why = match (&wanted, online.first()) {
             (Some(n), _) => format!("there's no build server called {n}"),
             (None, Some(first)) => format!(
-                "no build server is picked for this project (the owner picks one in its Settings); online now: {} (flow remote --server {first} -- …)",
+                "no build server is picked for this project (the owner picks one in its Settings); online now: {} (flow remote --server {first} --name \"…\" -- …)",
                 online.join(", ")
             ),
             (None, None) => "no build server is picked for this project and none is online; build here instead".into(),
@@ -115,6 +118,7 @@ async fn start(State(state): State<AppState>, Extension(actor): Extension<Actor>
             return json_error(StatusCode::BAD_REQUEST, "subdir is a folder inside the checkout");
         }
         NewJob {
+            name: s.name,
             server: server.name.clone(),
             project_id: *project_id,
             actor: slug.clone(),
@@ -492,21 +496,29 @@ async fn section(State(state): State<AppState>, Extension(actor): Extension<Acto
 // ---------------------------------------------------------------------------------------------
 // A job's page
 
+/// A job's page (D-275): the note page's layout, its name as the title, its output in the same
+/// numbered lines as a note's log, its facts beside it.
 #[derive(Template)]
 #[template(path = "remote_job.html")]
 struct JobPage {
     nav: Nav,
+    path: Vec<super::pages::PathPart>,
     job: Job,
     row: JobRow,
-    command: String,
+    /// Its name, or its command for a job from before names (then shown as code).
+    title: String,
+    named: bool,
+    /// "imaginarium's project agent"
+    by: String,
     started: String,
     facts: Vec<(String, String)>,
-    lines: Vec<(&'static str, String)>,
+    /// (number, the line's class in the code view, the line)
+    lines: Vec<(usize, &'static str, String)>,
     next: u64,
     is_owner: bool,
 }
 
-/// A line's class on the page: AgentFlow's own notes dimmed, errors and warnings marked.
+/// A line's class on the Log: AgentFlow's own notes dimmed, errors and warnings marked.
 pub fn line_class(line: &str) -> &'static str {
     if line.starts_with("· ") {
         "d"
@@ -516,6 +528,16 @@ pub fn line_class(line: &str) -> &'static str {
             "warn" => "w",
             _ => "",
         }
+    }
+}
+
+/// The same in the code view (a job's page, as a note's log): the library's tones.
+pub fn cv_class(line: &str) -> &'static str {
+    match line_class(line) {
+        "d" => "cv-dim",
+        "e" => "lv-error",
+        "w" => "lv-warn",
+        _ => "",
     }
 }
 
@@ -538,6 +560,9 @@ async fn job_page(
         output = format!("· … the start is in the Log\n{}", &output[i + 1..]);
     }
     let mut facts = vec![("Server".into(), job.server.clone()), ("Checkout".into(), job.dir.clone())];
+    if !job.name.is_empty() {
+        facts.insert(0, ("Command".into(), job.command_line()));
+    }
     if !job.subdir.is_empty() {
         facts.push(("Runs in".into(), job.subdir.clone()));
     }
@@ -555,21 +580,47 @@ async fn job_page(
     if let Some(t) = job.threads {
         facts.push(("Threads at the start".into(), t.to_string()));
     }
-    facts.push(("Output".into(), format!("{} lines, {} warnings, {} errors", job.lines, job.warnings, job.errors)));
+    let n = |k: i64, one: &str, many: &str| format!("{k} {}", if k == 1 { one } else { many });
+    facts.push((
+        "Output".into(),
+        format!(
+            "{}, {}, {}",
+            n(job.lines, "line", "lines"),
+            n(job.warnings, "warning", "warnings"),
+            n(job.errors, "error", "errors")
+        ),
+    ));
     if !job.fetch.is_empty() {
         facts.push(("Brings back".into(), job.fetch.join(", ")));
     }
     if job.gpu {
         facts.push(("GPU".into(), "waits for an idle GPU".into()));
     }
-    let started = format!("started by the {} agent {}", job.project, tz.full(job.created_at).get(..16).unwrap_or(""));
+    use super::pages::PathPart;
+    let path = vec![
+        PathPart::link("Machine", "/machine"),
+        PathPart::link("Build servers", "/machine#builds"),
+        PathPart::here(format!("Job #{}", job.id)),
+    ];
+    let pid = job.project_id;
+    let pname = state.db.call(move |c| crate::projects::get_by_id(c, pid).map(|p| p.name)).await.unwrap_or_default();
+    let by = if pname.is_empty() {
+        format!("the {} agent", job.project)
+    } else if pname.ends_with('s') {
+        format!("{pname}' project agent")
+    } else {
+        format!("{pname}'s project agent")
+    };
     render(JobPage {
-        nav: nav(&state, &actor, "/machine").await.back_to("/machine#builds", "Machine"),
+        nav: nav(&state, &actor, "/machine").await.up(&path),
+        path,
         row: job_row(&job),
-        command: job.command_line(),
-        started,
+        title: job.title(),
+        named: !job.name.is_empty(),
+        by,
+        started: tz.short(job.created_at),
         facts,
-        lines: output.lines().map(|l| (line_class(l), l.to_owned())).collect(),
+        lines: output.lines().enumerate().map(|(i, l)| (i + 1, cv_class(l), l.to_owned())).collect(),
         next,
         is_owner: actor.is_owner(),
         job,

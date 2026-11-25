@@ -134,13 +134,12 @@ pre.wrap { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 40vh; ove
 .bmeter .nums { display: flex; justify-content: space-between; gap: 8px; font-size: var(--fs-sub); color: var(--muted); }
 .jobs td, .jobs th { white-space: nowrap; }
 .jobs td.jcmd { white-space: normal; font-family: var(--mono); font-size: var(--fs-sub); }
-.joblog, .blog { font-family: var(--mono); font-size: var(--fs-sub); line-height: 1.55; background: var(--code); border: 1px solid var(--line); border-radius: 8px; padding: 8px 0; overflow: auto; color: var(--ink2); }
-.joblog { height: 60vh; min-height: 320px; }
-.joblog div, .blog div { white-space: pre-wrap; overflow-wrap: anywhere; padding: 0 12px; min-height: 1.55em; }
-.joblog .d, .blog .d { color: var(--muted); }
-.joblog .w, .blog .w { color: var(--warn); background: var(--warn-bg); }
-.joblog .e, .blog .e { color: var(--bad); background: var(--bad-bg); }
-@media (max-width: 700px) { .bmeters { grid-template-columns: 1fr; } .joblog { height: 70vh; } }
+.blog { font-family: var(--mono); font-size: var(--fs-sub); line-height: 1.55; background: var(--code); border: 1px solid var(--line); border-radius: 8px; padding: 8px 0; overflow: auto; color: var(--ink2); }
+.blog div { white-space: pre-wrap; overflow-wrap: anywhere; padding: 0 12px; min-height: 1.55em; }
+.blog .d { color: var(--muted); }
+.blog .w { color: var(--warn); background: var(--warn-bg); }
+.blog .e { color: var(--bad); background: var(--bad-bg); }
+@media (max-width: 700px) { .bmeters { grid-template-columns: 1fr; } }
 .bsrv { padding: 14px 0; border-top: 1px solid var(--line2); }
 .bsrv:first-of-type { border-top: 0; padding-top: 0; }
 .bs-add { border-top: 1px solid var(--line); padding-top: 16px; }
@@ -1567,6 +1566,7 @@ ol.lrows { padding: 0; margin: 0; list-style: none; gap: 0; }
 .ndoc-foot { justify-content: center; }
 .nkv { grid-template-columns: 112px minmax(0, 1fr); row-gap: var(--sp-3); }
 .nkv dd { margin: 0; color: var(--ink2); min-width: 0; overflow-wrap: anywhere; }
+.nkv dd.job-fact { font-size: var(--fs-sub); line-height: 1.55; }
 @media (max-width: 1100px) { .npage { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 700px) {
   .ndoc-head { flex-wrap: wrap; row-gap: var(--sp-2); padding-left: var(--sp-4); padding-right: var(--sp-3); }

@@ -3351,7 +3351,7 @@ async fn jobs_run_on_a_builder_and_bring_back_what_was_asked() {
             s.http
                 .post(s.url("/api/remote/jobs"))
                 .bearer_auth(token)
-                .json(&json!({"dir": top, "subdir": sub, "command": ["sh", "-c", cmd], "fetch": ["target/release/app"],
+                .json(&json!({"name": "Snapshot check", "dir": top, "subdir": sub, "command": ["sh", "-c", cmd], "fetch": ["target/release/app"],
                     "manifest": up.as_ref().map(|u| u.manifest.clone()).unwrap_or_default(),
                     "bundle": up.as_ref().map(|u| u.bundle.clone()).unwrap_or_default()}))
                 .send()
@@ -3374,6 +3374,17 @@ async fn jobs_run_on_a_builder_and_bring_back_what_was_asked() {
     })
     .await
     .unwrap();
+    // Every job needs a name, its title (the owner, 2026-11-25, D-275).
+    let unnamed = s
+        .http
+        .post(s.url("/api/remote/jobs"))
+        .bearer_auth(&agent)
+        .json(&json!({"dir": "/x", "command": ["true"], "setup": true}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(unnamed.status(), StatusCode::BAD_REQUEST);
+    assert!(unnamed.text().await.unwrap().contains("give the job a name"));
     let res = start(work.join("crate"), agent.clone()).await;
     assert_eq!(res.status(), StatusCode::OK, "{}", res.text().await.unwrap());
     let id = res.json::<Value>().await.unwrap()["id"].as_i64().unwrap();
@@ -3411,6 +3422,17 @@ async fn jobs_run_on_a_builder_and_bring_back_what_was_asked() {
     );
     assert!(text.contains("v0.1.0"), "tags went over:\n{text}");
     assert!(text.contains("No such file") || !text.contains("junk"), "ignored files stay here:\n{text}");
+    // Its page (D-275): its name as the title, the command among its facts, the output numbered in
+    // the code view a note's log uses, a warning in its tone.
+    let cookie = s.owner_cookie().await;
+    let page = owner_page(&s, &cookie, &format!("/machine/jobs/{id}")).await;
+    assert!(page.contains(r#"<h1 class="rec-title note-title">Snapshot check</h1>"#), "{page}");
+    assert!(
+        page.contains("<dt>Command</dt>") && page.contains(r#"<div class="codeview cv-scroll" id="job-log""#),
+        "{page}"
+    );
+    assert!(page.contains(r#"<span class="cv-t lv-warn">warning: careful</span>"#), "{page}");
+    assert!(page.contains(r#"<span class="cv-n">1</span>"#), "{page}");
     // flow remote fetches what came back.
     let job = s.db.call(move |c| crate::remote::get(c, id)).await.unwrap().unwrap();
     let (base, t2, w2) = (s.base.clone(), agent.clone(), work.clone());

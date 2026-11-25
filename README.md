@@ -181,8 +181,9 @@ presses Send and never shown or logged.
 
 ## Build servers
 
-Agents run builds and tests on a stronger machine with `flow remote -- cargo build --release`
-(`--fetch target/release/app` brings files back, `--gpu` waits for an idle GPU). A build server is
+Agents run builds and tests on a stronger machine with
+`flow remote --name "Release build" -- cargo build --release` (every job has a name, its title in
+AgentFlow; `--fetch target/release/app` brings files back, `--gpu` waits for an idle GPU). A build server is
 a builder that connects itself to AgentFlow (`agentflow-builder`, set up with `flow builder add` on
 that machine); SSH build servers are gone. Each project has one work folder there: `flow remote`
 sends a snapshot of the checkout, and only files the server and the builder don't have yet travel

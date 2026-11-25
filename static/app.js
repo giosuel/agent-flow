@@ -339,7 +339,9 @@ document.addEventListener("click", async (e) => {
   const btn = e.target.closest("[data-copy-from]");
   const src = btn && document.getElementById(btn.dataset.copyFrom);
   if (!src) return;
-  const ok = await copyText(src.value);
+  // A field holds the text; a code view (a job's output) has it in its lines.
+  const text = "value" in src ? src.value : [...src.querySelectorAll(".cv-t")].map((t) => t.textContent).join("\n");
+  const ok = await copyText(text);
   btn.innerHTML = ok ? DONE_ICON : COPY_ICON;
   btn.classList.toggle("done", ok);
   btn.setAttribute("aria-label", ok ? "Copied" : "Copy didn't work; download it instead");
