@@ -1565,3 +1565,28 @@ ol.lrows { padding: 0; margin: 0; list-style: none; gap: 0; }
   .tt-acts .btn { width: 100%; }
   .eb td.eb-what { min-width: 0; }
 }
+
+/* A note's page (D-264): the text like a file on the left, its facts beside it. */
+.note-title { overflow-wrap: anywhere; max-width: none; }
+.npage { display: grid; grid-template-columns: minmax(0, 1fr) 460px; gap: var(--sp-6); align-items: start; }
+.nside { display: flex; flex-direction: column; gap: var(--sp-4); min-width: 0; }
+.ndoc { min-width: 0; overflow: hidden; }
+.ndoc-head { flex-wrap: nowrap; }
+.ndoc-name { color: var(--ink); font-size: var(--fs-sm); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.ndoc-head .sub { white-space: nowrap; }
+.ndoc-wrap { min-height: 0; font-size: var(--fs-sub); white-space: nowrap; }
+.ndoc-body { margin: 0; padding: var(--sp-6) var(--sp-8) var(--sp-8); }
+.ndoc-body.prose { max-width: none; color: var(--ink); font-size: var(--fs-h3); line-height: 1.7; }
+.ndoc-body.prose > * { max-width: 100ch; }
+.ndoc:has(.cv-wrap:checked) .cv-t { white-space: pre-wrap; overflow-wrap: anywhere; }
+.ndoc-foot { justify-content: center; }
+.nkv { grid-template-columns: 112px minmax(0, 1fr); row-gap: var(--sp-3); }
+.nkv dd { margin: 0; color: var(--ink2); min-width: 0; overflow-wrap: anywhere; }
+@media (max-width: 1100px) { .npage { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 700px) {
+  .ndoc-head { flex-wrap: wrap; row-gap: var(--sp-2); padding-left: var(--sp-4); padding-right: var(--sp-3); }
+  .ndoc-wrap { display: none; }
+  .ndoc-head .ibtn.only-phone { display: inline-grid; }
+  .ndoc-body { padding: var(--sp-4); }
+  .ndoc-body.prose { font-size: var(--fs-body); }
+}

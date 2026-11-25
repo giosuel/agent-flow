@@ -333,6 +333,23 @@ async function copyText(what) {
 }
 window.afCopy = copyText;
 
+// "Copy the text" on a note's page: the text as it is (its Markdown, a log's lines), from the
+// hidden field the page keeps it in.
+document.addEventListener("click", async (e) => {
+  const btn = e.target.closest("[data-copy-from]");
+  const src = btn && document.getElementById(btn.dataset.copyFrom);
+  if (!src) return;
+  const ok = await copyText(src.value);
+  btn.innerHTML = ok ? DONE_ICON : COPY_ICON;
+  btn.classList.toggle("done", ok);
+  btn.setAttribute("aria-label", ok ? "Copied" : "Copy didn't work; download it instead");
+  setTimeout(() => {
+    btn.innerHTML = COPY_ICON;
+    btn.classList.remove("done");
+    btn.setAttribute("aria-label", "Copy the text");
+  }, 1600);
+});
+
 // Wired on load, and again for content that arrives later (a record in a dialog): `af:content`.
 const wireCopy = (root) => {
   for (const pre of root.querySelectorAll("pre.cmd")) {

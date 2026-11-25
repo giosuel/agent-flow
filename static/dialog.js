@@ -12,7 +12,9 @@
 // page as before.
 "use strict";
 (() => {
-  const SMALL = /^\/p\/[a-z0-9-]+\/((T|Q|D|ADR|PR|TT|S|F|N)-\d+|steps\/\d+)$/;
+  // Notes are pages of their own (the owner, 2026-11-25, D-264: "since notes are kind of a big
+  // thing with their own cards, we could make them into a page").
+  const SMALL = /^\/p\/[a-z0-9-]+\/((T|Q|D|ADR|PR|TT|S|F)-\d+|steps\/\d+)$/;
   let box = null;
   let list = [];
   let at = -1;

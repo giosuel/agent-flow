@@ -482,6 +482,46 @@ a.item-row:hover { background: var(--hover-bg); }
 .tl-day { display: flex; align-items: center; gap: var(--sp-2); padding: 10px 0 6px; font-size: var(--fs-label); color: var(--muted); }
 .tl-day::after { content: ""; flex: 1; border-top: 1px solid var(--line2); }
 
+/* History without a box (D-268): a section with a thin line on top, like the others in a dialog
+   or a page's side. .changes-fold shows only the newest change until "Show all" (a checkbox, so it
+   works without scripts) opens the rest. */
+.changes { display: flex; flex-direction: column; padding-top: var(--sp-4); border-top: 1px solid var(--line2); }
+.changes-head { display: flex; align-items: baseline; gap: var(--sp-3); margin-bottom: var(--sp-1); }
+.changes-head .label { margin: 0; }
+.changes .tl-day:first-of-type { padding-top: var(--sp-1); }
+.changes-fold .changes-more { display: none; }
+.changes-fold .changes-all:checked ~ .tl-day.changes-more { display: flex; }
+.changes-fold .changes-all:checked ~ .tl .changes-more { display: grid; }
+.changes-fold .changes-all:not(:checked) ~ .tl .ev:first-child .rail::before { bottom: calc(100% - 8px); }
+.changes-toggle { display: inline-flex; align-self: flex-start; align-items: center; gap: var(--sp-1_5); min-height: var(--h-sm); margin-left: 72px; color: var(--accent-ink); font-size: var(--fs-sm); cursor: pointer; }
+.changes-toggle .i { width: var(--ic-sm); height: var(--ic-sm); transition: transform .15s; }
+.changes-toggle:hover { color: var(--ink); }
+.changes-when-open { display: none; }
+.changes-all:checked ~ .changes-toggle .changes-when-open { display: inline; }
+.changes-all:checked ~ .changes-toggle .changes-when-folded { display: none; }
+.changes-all:checked ~ .changes-toggle .i { transform: rotate(180deg); }
+.changes-all:focus-visible ~ .changes-toggle { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--r-sm); }
+@media (prefers-reduced-motion: reduce) { .changes-toggle .i { transition: none; } }
+
+/* A text file's lines, numbered (a note's log or text): the number column, the line, a log level
+   in its tone. .cv-fold shows the first 40 until the checkbox before it (.cv-all) is ticked. */
+.codeview { display: grid; grid-template-columns: max-content minmax(0, 1fr); padding: var(--sp-3) 0; background: var(--sunken); font: var(--fs-sub)/1.7 var(--mono); overflow-x: auto; }
+.cv-n { padding: 0 var(--sp-3) 0 var(--sp-4); color: var(--dim); text-align: right; user-select: none; border-right: 1px solid var(--line2); }
+.cv-t { padding: 0 var(--sp-4); color: var(--ink2); white-space: pre; }
+.lv-error { color: var(--bad-ink); }
+.lv-warn { color: var(--warn-ink); }
+.lv-info { color: var(--muted); }
+.codeview.cv-fold > :nth-child(n+81) { display: none; }
+.cv-all:checked + .codeview.cv-fold > :nth-child(n+81) { display: block; }
+.cv-when-open { display: none; }
+.cv-all:checked ~ * .cv-when-open { display: inline; }
+.cv-all:checked ~ * .cv-when-folded { display: none; }
+.cv-all:focus-visible ~ * label[for="cv-all"] { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* Who wrote something (D-269): an icon (a robot for an agent) and the name. */
+.byline { display: inline-flex; align-items: center; gap: var(--sp-2); color: var(--ink); }
+.byline .sub { display: block; }
+
 /* ---------------------------------------------------------------- Icon tile: an icon on a tinted square
    .itile (36), .sm (28), .lg (44); muted on the chip by default, or a state tone (.accent, .ok,
    .warn, .bad, .info) or a tint (.t-violet …). (N-20 §5.4: seven icon containers in four sizes,

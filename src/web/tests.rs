@@ -1294,7 +1294,7 @@ async fn a_subagents_model_note_and_links_show() {
     assert!(res.status().is_success(), "{}", res.text().await.unwrap());
     let cookie = s.owner_cookie().await;
     let note = owner_page(&s, &cookie, "/p/vinculum/N-1").await;
-    assert!(note.contains("by a subagent · code-review · Fable 5.2"), "{note}");
+    assert!(note.contains("its subagent · code-review · Fable 5.2"), "{note}");
     assert!(note.contains("s subagent · "), "its History says who: {note}");
     let notes = owner_page(&s, &cookie, "/p/vinculum?tab=notes").await;
     assert!(notes.contains(r#"<span class="chip info""#), "{notes}");
@@ -2461,10 +2461,13 @@ async fn notes_are_files_or_text_and_come_back() {
     assert!(!call("update_note", json!({"id": "N-1", "text": "x"})).await.0, "files get a new version instead");
 
     let cookie = s.owner_cookie().await;
-    // Its History (the owner, 2026-11-18): folded, one short line per change, the file it replaced
-    // linked, no "changed the size" noise.
+    // Its History (the owner, 2026-11-18): one short line per change, the file it replaced linked,
+    // no "changed the size" noise; on the note's page it stands open, without a box (D-268).
     let n1 = owner_page(&s, &cookie, "/p/vinculum/N-1").await;
-    assert!(n1.contains(r#"<details class="rhist">"#) && n1.contains("<b>2 changes</b> · last: New version"), "{n1}");
+    assert!(
+        n1.contains(r#"<section class="changes" aria-labelledby="changes-h-N-1">"#) && n1.contains("2 changes"),
+        "{n1}"
+    );
     assert!(n1.contains(r#"href="/p/vinculum/N-1/file?v=1""#) && n1.contains("Created the note"), "{n1}");
     assert!(!n1.contains("changed the size") && !n1.contains(">size<") && !n1.contains("report.md)"), "{n1}");
     let tab =
@@ -2521,14 +2524,37 @@ async fn notes_are_files_or_text_and_come_back() {
     assert!(!t.contains("<script>alert") && t.contains("Nothing matches"), "{t}");
     let page = s.http.get(s.url("/p/vinculum/N-1")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
     assert!(page.contains("<li>T-5</li>") && page.contains("v1"), "the newest version rendered: {page}");
-    // Opened directly (a link in a notification, a reload), it's its project's page with the note
-    // in a dialog over it (the owner, 2026-11-17: "Notes are not consistent").
+    // A note is a page of its own (the owner, 2026-11-25, D-264): its file's head with its name,
+    // size and version (no version menu, D-265), who wrote it said plainly (D-269).
+    assert!(page.contains(r#"<span class="mono ndoc-name">report.md</span>"#), "{page}");
+    assert!(page.contains("<span class=\"sub\">version 2</span>") && !page.contains("of 2<"), "{page}");
+    assert!(page.contains("vinculum&#39;s project agent"), "{page}");
+    // Opened directly (a link in a notification, a reload), it's the note's own page, not a
+    // dialog over its project's.
     let direct = |path: &'static str| {
         s.http.get(s.url(path)).header(COOKIE, &cookie).header("sec-fetch-mode", "navigate").send()
     };
     let note = direct("/p/vinculum/N-1").await.unwrap().text().await.unwrap();
-    assert!(note.contains(r#"data-open-dlg="rec" data-open-url="/p/vinculum/N-1" data-open-from="/p/vinculum""#));
-    assert!(!note.contains("<title>N-1") && !note.contains("<li>T-5</li>"), "the project's page, not the note's");
+    assert!(!note.contains("data-open-dlg") && note.contains("<title>N-1") && note.contains("<li>T-5</li>"), "{note}");
+    // A text note is shown like a Markdown file (D-267): N-3.md, its text rendered, Download gives
+    // that file; resolved, it says so in About and doesn't come back.
+    let n3 = owner_page(&s, &cookie, "/p/vinculum/N-3").await;
+    assert!(n3.contains(r#"<span class="mono ndoc-name">N-3.md</span>"#), "{n3}");
+    assert!(n3.contains(r#"<div class="ndoc-body prose"><p>Check on every Loro update.</p>"#), "{n3}");
+    assert!(n3.contains(r#"<span class="chip ok">resolved</span>"#) && !n3.contains("<dt>Comes back</dt>"), "{n3}");
+    let f = s.http.get(s.url("/p/vinculum/N-3/file")).header(COOKIE, &cookie).send().await.unwrap();
+    assert!(f.headers()["content-disposition"].to_str().unwrap().contains("N-3.md"));
+    assert_eq!(f.text().await.unwrap(), "Check on every Loro update.");
+    // A log: its lines numbered, a level in its tone, Wrap and Copy.
+    assert!(
+        up("name=Dev%20log&category=test%20log&filename=dev.log", b"a INFO x\nb WARN y\n").await.status().is_success()
+    );
+    let log = owner_page(&s, &cookie, "/p/vinculum/N-6").await;
+    assert!(
+        log.contains(r#"<span class="cv-n">2</span><span class="cv-t">b <span class="lv-warn">WARN</span> y</span>"#),
+        "{log}"
+    );
+    assert!(log.contains(r#"class="cv-wrap""#) && log.contains(r#"data-copy-from="ndoc-raw""#), "{log}");
     let settings = direct("/settings?s=clients").await.unwrap().text().await.unwrap();
     assert!(settings.contains(r#"data-open-dlg="settings" data-open-url="/settings?s=clients" data-open-from="/""#));
     // The bell's panel and project settings are dialogs only (the owner, 2026-11-18).
