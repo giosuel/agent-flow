@@ -1584,3 +1584,11 @@ ol.lrows { padding: 0; margin: 0; list-style: none; gap: 0; }
   .ndoc-body { padding: var(--sp-4); }
   .ndoc-body.prose { font-size: var(--fs-body); }
 }
+
+/* A setup, invite or device link's steps (link.html): the passkey, then who you are. */
+.link-steps { display: flex; flex-wrap: wrap; gap: var(--sp-2); list-style: none; margin: var(--sp-2) 0 0; padding: 0; font-size: var(--fs-sm); color: var(--muted); }
+.link-steps li { display: inline-flex; align-items: center; gap: var(--sp-1_5); }
+.link-steps li + li::before { content: "›"; color: var(--dim); margin-right: var(--sp-1_5); }
+.link-steps .num { display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: var(--chip); font-size: var(--fs-label); }
+.link-steps li.on { color: var(--ink); }
+.link-steps li.on .num { background: var(--accent-chip); color: var(--accent-chip-ink); }

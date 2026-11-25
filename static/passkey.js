@@ -70,11 +70,27 @@ async function signIn(button, status) {
   }
 }
 
+// A name for a passkey made from a link's page: the kind of device it's on.
+function deviceName() {
+  const ua = navigator.userAgent;
+  if (/iPhone/.test(ua)) return "iPhone";
+  if (/iPad/.test(ua)) return "iPad";
+  if (/Android/.test(ua)) return "Android";
+  if (/Mac OS X/.test(ua)) return "Mac";
+  if (/Windows/.test(ua)) return "Windows";
+  if (/Linux/.test(ua)) return "Linux";
+  return "Passkey";
+}
+
 async function enrol(button, nameInput, status) {
   button.disabled = true;
   say(status, "Follow your device's prompt…");
   try {
-    const { id, options } = await postJson("/settings/passkeys/start");
+    // Settings enrols for the person signed in; a setup, invite or device link's page for its
+    // person (its button names its own addresses).
+    const start = button.dataset.start || "/settings/passkeys/start";
+    const finish = button.dataset.finish || "/settings/passkeys/finish";
+    const { id, options } = await postJson(start);
     const pk = options.publicKey;
     pk.challenge = b64u.decode(pk.challenge);
     pk.user.id = b64u.decode(pk.user.id);
@@ -92,8 +108,9 @@ async function enrol(button, nameInput, status) {
       },
       extensions: cred.getClientExtensionResults(),
     };
-    await postJson("/settings/passkeys/finish", { id, name: nameInput ? nameInput.value : "", credential });
-    window.location.reload();
+    const done = await postJson(finish, { id, name: nameInput ? nameInput.value : deviceName(), credential });
+    if (done.next && /^\/[A-Za-z0-9\/_.?=&#-]*$/.test(done.next) && !done.next.startsWith("//")) window.location.assign(done.next);
+    else window.location.reload();
   } catch (e) {
     if (e.name === "NotAllowedError") say(status, "Cancelled.");
     else if (e.name === "InvalidStateError") say(status, "This device already has a passkey here.", "warn");

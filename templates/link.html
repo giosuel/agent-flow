@@ -1,0 +1,39 @@
+{% extends "bare.html" %}
+{#- What a setup, invite or device link opens (the owner, 2026-11-25: D-273, D-274; mockup: canvas
+    page "People and profiles", UsersLinks). Opening it uses nothing up; Create a passkey does. -#}
+{% block title %}{% if kind == "setup" %}Set up AgentFlow{% else if kind == "invite" %}You're invited{% else %}Add this device{% endif %} · AgentFlow{% endblock %}
+{% block head %}<script src="/static/app.js?v={{ version }}" defer></script>
+<script src="/static/passkey.js?v={{ version }}" defer></script>{% endblock %}
+{% block content %}
+{% if !ok %}
+<h1>This link doesn't work any more</h1>
+<p class="notice bad" role="alert">{{ crate::web::icons::icon("alert")|safe }}<span>It has expired or was already used.</span></p>
+<p class="sub">{% if kind == "invite" %}Ask the admin for a new invite.{% else if kind == "device" %}Make a new one in Settings › Passkeys on a device that's signed in, or run <code>sudo flow server add-device</code> on the server.{% else %}Run <code>sudo flow server setup</code> on the server for a new one.{% endif %}</p>
+{% else %}
+{% if kind == "setup" %}
+<h1>Set up AgentFlow</h1>
+{% if person.is_empty() %}
+<p>You'll be this AgentFlow's admin: the one who invites the others.</p>
+{% else %}
+<p>This makes a new passkey for <strong>{{ person }}</strong>, the admin. When you create it, {{ person }}'s other passkeys are removed and their browsers signed out; projects, records and the other people stay.</p>
+{% endif %}
+{% else if kind == "invite" %}
+<h1>You're invited</h1>
+<p>{% if inviter.is_empty() %}The admin{% else %}<strong>{{ inviter }}</strong>{% endif %} invited you to their AgentFlow.</p>
+<p class="sub">Make a passkey to sign in with; then pick your name and icon.</p>
+{% else %}
+<h1>Add this device</h1>
+<p>This link adds a passkey for this device to <strong>{{ person }}</strong>'s account.</p>
+{% endif %}
+{% if passkeys %}
+<p class="sub">Your device asks for its fingerprint, face or PIN{% if kind == "device" %}. Afterwards it signs in on its own.{% else %} to make the passkey.{% endif %}</p>
+<button class="btn wide" id="passkey-add" type="button" data-start="/{{ kind }}/{{ secret }}/passkey/start" data-finish="/{{ kind }}/{{ secret }}/passkey/finish">Create a passkey</button>
+<p class="notice" id="passkey-status" role="status" hidden></p>
+{% else %}
+<p class="notice">{{ crate::web::icons::icon("info")|safe }}<span>Passkeys work only at AgentFlow's https address, not on this one. This link signs you in once instead; add a passkey at the https address later.</span></p>
+<form method="post" action="/{{ kind }}/{{ secret }}"><button class="btn wide" type="submit">Sign in with this link</button></form>
+{% endif %}
+<p class="sub">{% if kind == "invite" %}This invite works once, until {{ until }}.{% else if kind == "device" %}Not you? Close this page; the link stops working at {{ until }}.{% else %}This link works once, until {{ until }}.{% endif %}</p>
+<ol class="link-steps" aria-label="Steps"><li class="on"><span class="num">1</span>A passkey</li><li><span class="num">2</span>{% if kind == "device" %}The Dashboard{% else %}Who are you?{% endif %}</li></ol>
+{% endif %}
+{% endblock %}

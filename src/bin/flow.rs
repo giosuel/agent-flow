@@ -76,8 +76,8 @@ enum Command {
         #[command(flatten)]
         client: cli::ClientArgs,
     },
-    /// On the server itself: `sudo flow server add-passkey` makes a one-time link to add a passkey,
-    /// when you've lost yours or have none yet.
+    /// On the server itself, with sudo: `setup` makes the admin, `invite` someone new, `add-device` a
+    /// passkey for a new device (one-time links).
     Server {
         #[command(subcommand)]
         command: ServerCommand,
@@ -308,9 +308,29 @@ enum BuilderCommand {
 
 #[derive(Subcommand)]
 enum ServerCommand {
-    /// A one-time link to add a passkey (run as root, or as the server's user, on the server).
-    AddPasskey {
+    /// Make the admin, the first account (a one-time link); again if the admin lost every passkey.
+    /// Run it with sudo on the server.
+    Setup {
         /// The server's admin socket, if it isn't in the usual place.
+        #[arg(long)]
+        socket: Option<PathBuf>,
+    },
+    /// Invite someone (a link that works once, for 7 days). Only the admin invites; run it with
+    /// sudo on the server, or use Settings › People.
+    Invite {
+        #[arg(long)]
+        socket: Option<PathBuf>,
+    },
+    /// A link that adds a passkey for a new device: to the admin's account, or to `username`'s.
+    /// Run it with sudo on the server, or use Settings › Passkeys on a signed-in device.
+    AddDevice {
+        username: Option<String>,
+        #[arg(long)]
+        socket: Option<PathBuf>,
+    },
+    /// Renamed: `add-device` for a new device, `setup` when the admin lost every passkey.
+    #[command(hide = true)]
+    AddPasskey {
         #[arg(long)]
         socket: Option<PathBuf>,
     },
@@ -368,7 +388,14 @@ fn real_main() -> anyhow::Result<()> {
         },
         Command::Backup(client) => connect::backup(&config_path, &client),
         Command::ImportPrs { project, range, client } => connect::import_prs(&config_path, &client, &project, &range),
-        Command::Server { command: ServerCommand::AddPasskey { socket } } => connect::add_passkey(socket.as_deref()),
+        Command::Server { command: ServerCommand::Setup { socket } } => connect::server_setup(socket.as_deref()),
+        Command::Server { command: ServerCommand::Invite { socket } } => connect::server_invite(socket.as_deref()),
+        Command::Server { command: ServerCommand::AddDevice { username, socket } } => {
+            connect::server_add_device(socket.as_deref(), username.as_deref())
+        }
+        Command::Server { command: ServerCommand::AddPasskey { .. } } => anyhow::bail!(
+            "`flow server add-passkey` is now `sudo flow server add-device` (a new device) or `sudo flow server setup` (the admin lost every passkey)"
+        ),
         Command::Builder { command, client } => {
             use agentflow::builder_cmd as b;
             match command {

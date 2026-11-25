@@ -247,7 +247,8 @@ fn check_push_host(endpoint: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub fn save_subscription(conn: &Connection, sub: &Subscription, device: &str) -> anyhow::Result<()> {
+/// Keeps a browser's subscription for a person (a browser that moves to another person moves too).
+pub fn save_subscription(conn: &Connection, sub: &Subscription, device: &str, person: i64) -> anyhow::Result<()> {
     check_push_host(&sub.endpoint)?;
     // Validate the keys now rather than at the first push.
     let p256dh = B64.decode(sub.keys.p256dh.trim_end_matches('=')).context("p256dh isn't base64url")?;
@@ -257,9 +258,10 @@ pub fn save_subscription(conn: &Connection, sub: &Subscription, device: &str) ->
         bail!("auth must be 16 bytes");
     }
     conn.execute(
-        "INSERT INTO push_subscriptions (endpoint, p256dh, auth, device, created_at) VALUES (?1, ?2, ?3, ?4, ?5)
-         ON CONFLICT (endpoint) DO UPDATE SET p256dh = excluded.p256dh, auth = excluded.auth, device = excluded.device",
-        params![sub.endpoint, sub.keys.p256dh, sub.keys.auth, device, now_ms()],
+        "INSERT INTO push_subscriptions (endpoint, p256dh, auth, device, created_at, person_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+         ON CONFLICT (endpoint) DO UPDATE SET p256dh = excluded.p256dh, auth = excluded.auth, device = excluded.device,
+           person_id = excluded.person_id",
+        params![sub.endpoint, sub.keys.p256dh, sub.keys.auth, device, now_ms(), person],
     )?;
     Ok(())
 }
@@ -268,14 +270,17 @@ pub fn remove_subscription(conn: &Connection, endpoint: &str) -> anyhow::Result<
     Ok(conn.execute("DELETE FROM push_subscriptions WHERE endpoint = ?1", [endpoint])? > 0)
 }
 
-pub fn remove_device(conn: &Connection, id: i64) -> anyhow::Result<bool> {
-    Ok(conn.execute("DELETE FROM push_subscriptions WHERE id = ?1", [id])? > 0)
+/// Removes one of the person's own devices; another's is left alone.
+pub fn remove_device(conn: &Connection, id: i64, person: i64) -> anyhow::Result<bool> {
+    Ok(conn.execute("DELETE FROM push_subscriptions WHERE id = ?1 AND person_id = ?2", [id, person])? > 0)
 }
 
-pub fn devices(conn: &Connection) -> anyhow::Result<Vec<DeviceRow>> {
-    let mut stmt =
-        conn.prepare("SELECT id, device, created_at, last_ok_at, last_error FROM push_subscriptions ORDER BY id")?;
-    let rows = stmt.query_map([], |r| {
+/// A person's devices.
+pub fn devices(conn: &Connection, person: i64) -> anyhow::Result<Vec<DeviceRow>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, device, created_at, last_ok_at, last_error FROM push_subscriptions WHERE person_id = ?1 ORDER BY id",
+    )?;
+    let rows = stmt.query_map([person], |r| {
         Ok(DeviceRow {
             id: r.get(0)?,
             device: r.get(1)?,
@@ -532,22 +537,35 @@ mod tests {
             keys: SubscriptionKeys { p256dh: p256dh.into(), auth: auth.into() },
         };
         db.call_blocking(|c| {
+            let me = crate::people::create(c, true, None, webauthn_rs::prelude::Uuid::new_v4())?;
             assert!(
-                save_subscription(c, &sub("http://web.push.apple.com/1", ua, "BTBZMqHH6r4Tts7J_aSIgg"), "d").is_err()
-            );
-            assert!(save_subscription(c, &sub("https://127.0.0.1/1", ua, "BTBZMqHH6r4Tts7J_aSIgg"), "d").is_err());
-            assert!(
-                save_subscription(c, &sub("https://evil.push.apple.com.example/1", ua, "BTBZMqHH6r4Tts7J_aSIgg"), "d")
+                save_subscription(c, &sub("http://web.push.apple.com/1", ua, "BTBZMqHH6r4Tts7J_aSIgg"), "d", me)
                     .is_err()
             );
+            assert!(save_subscription(c, &sub("https://127.0.0.1/1", ua, "BTBZMqHH6r4Tts7J_aSIgg"), "d", me).is_err());
             assert!(
-                save_subscription(c, &sub("https://web.push.apple.com/1", "AAAA", "BTBZMqHH6r4Tts7J_aSIgg"), "d")
+                save_subscription(
+                    c,
+                    &sub("https://evil.push.apple.com.example/1", ua, "BTBZMqHH6r4Tts7J_aSIgg"),
+                    "d",
+                    me
+                )
+                .is_err()
+            );
+            assert!(
+                save_subscription(c, &sub("https://web.push.apple.com/1", "AAAA", "BTBZMqHH6r4Tts7J_aSIgg"), "d", me)
                     .is_err()
             );
-            assert!(save_subscription(c, &sub("https://web.push.apple.com/1", ua, "AAAA"), "d").is_err());
-            save_subscription(c, &sub("https://web.push.apple.com/1", ua, "BTBZMqHH6r4Tts7J_aSIgg"), "iPhone")?;
-            save_subscription(c, &sub("https://web.push.apple.com/1", ua, "BTBZMqHH6r4Tts7J_aSIgg"), "iPhone again")?;
-            assert_eq!(devices(c)?.len(), 1);
+            assert!(save_subscription(c, &sub("https://web.push.apple.com/1", ua, "AAAA"), "d", me).is_err());
+            save_subscription(c, &sub("https://web.push.apple.com/1", ua, "BTBZMqHH6r4Tts7J_aSIgg"), "iPhone", me)?;
+            save_subscription(
+                c,
+                &sub("https://web.push.apple.com/1", ua, "BTBZMqHH6r4Tts7J_aSIgg"),
+                "iPhone again",
+                me,
+            )?;
+            assert_eq!(devices(c, me)?.len(), 1);
+            assert_eq!(devices(c, me + 1)?.len(), 0, "another person's list is their own");
             assert!(is_enabled(c, Kind::Question)?);
             set_enabled(c, Kind::Question, false)?;
             assert!(!is_enabled(c, Kind::Question)?);
@@ -612,9 +630,10 @@ mod tests {
         let (p256dh, auth_b64) = (B64.encode(ua_key.public_key().to_sec1_bytes()), B64.encode(auth));
         // Inserted directly: real subscriptions must be https, the stand-in is plain http.
         db.call_blocking(|c| {
+            assert_eq!(crate::people::create(c, true, None, webauthn_rs::prelude::Uuid::new_v4())?, 1);
             for id in ["phone", "gone"] {
                 c.execute(
-                    "INSERT INTO push_subscriptions (endpoint, p256dh, auth, device, created_at) VALUES (?1, ?2, ?3, 'd', 0)",
+                    "INSERT INTO push_subscriptions (endpoint, p256dh, auth, device, created_at, person_id) VALUES (?1, ?2, ?3, 'd', 0, 1)",
                     params![format!("http://{addr}/push/{id}"), p256dh, auth_b64],
                 )?;
             }
@@ -637,7 +656,7 @@ mod tests {
             assert_eq!(json["url"], "/q/1");
         }
         // The device the push service no longer knows is forgotten.
-        assert_eq!(db.call_blocking(|c| devices(c)).unwrap().len(), 1);
+        assert_eq!(db.call_blocking(|c| devices(c, 1)).unwrap().len(), 1);
 
         // Switched off: nothing is sent.
         db.call_blocking(|c| set_enabled(c, Kind::Question, false)).unwrap();

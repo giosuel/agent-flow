@@ -1,15 +1,16 @@
-//! The owner's passkeys (WebAuthn, through webauthn-rs). There is one user, the owner; each
-//! passkey is a device or password manager they enrolled from Settings.
+//! Passkeys (WebAuthn, through webauthn-rs). Each belongs to a person (src/people.rs): a device or
+//! password manager they enrolled from Settings or from a setup, invite or device link. Signing in
+//! needs no username: the passkey says who it is.
 //!
 //! Browsers allow passkeys only on https (or http://localhost), on a real domain name. On the
 //! WireGuard address (http://10.0.8.1) they're unavailable and the page says so; the one-time
-//! link from `sudo flow server add-passkey` works everywhere.
+//! links from `sudo flow server setup` and `add-device` sign in once instead.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, bail};
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{Connection, params};
 use serde::Serialize;
 use webauthn_rs::prelude::{
     CreationChallengeResponse, Passkey, PasskeyAuthentication, PasskeyRegistration, PublicKeyCredential,
@@ -29,7 +30,8 @@ const MAX_PENDING: usize = 64;
 const MAX_PER_CLIENT: usize = 4;
 
 enum Pending {
-    Register(PasskeyRegistration),
+    /// An enrolment, with the WebAuthn user handle it's for (someone new has no row yet).
+    Register(PasskeyRegistration, Uuid),
     Login(PasskeyAuthentication),
 }
 
@@ -53,6 +55,7 @@ pub struct PasskeyRow {
     pub name: String,
     pub created_at: i64,
     pub last_used_at: Option<i64>,
+    pub person: Option<i64>,
 }
 
 impl Passkeys {
@@ -107,36 +110,47 @@ impl Passkeys {
         (c.expires > now_ms()).then_some(c.state)
     }
 
-    /// Starts enrolling a new passkey (the owner is signed in).
-    pub fn start_registration(&self, conn: &Connection) -> anyhow::Result<(String, CreationChallengeResponse)> {
-        let user = owner_uuid(conn)?;
-        let existing = load(conn)?.into_iter().map(|(_, p)| p.cred_id().clone()).collect::<Vec<_>>();
-        let (challenge, state) =
-            self.webauthn()?.start_passkey_registration(user, "owner", "AgentFlow owner", Some(existing))?;
-        Ok((Self::remember(&self.enrolments, "owner", Pending::Register(state)), challenge))
-    }
-
-    pub fn finish_registration(
+    /// Starts enrolling a passkey for a person, or for someone new (`person` None: a fresh user
+    /// handle, the row comes when it's finished). `client` keeps one caller from crowding out
+    /// another: the person's id, or a link's.
+    pub fn start_registration(
         &self,
         conn: &Connection,
+        person: Option<i64>,
+        label: &str,
+        client: &str,
+    ) -> anyhow::Result<(String, CreationChallengeResponse)> {
+        let (user, existing) = match person {
+            Some(p) => (
+                crate::people::webauthn_id(conn, p)?,
+                load(conn, Some(p))?.into_iter().map(|(_, k)| k.cred_id().clone()).collect::<Vec<_>>(),
+            ),
+            None => (Uuid::new_v4(), Vec::new()),
+        };
+        let label = if label.trim().is_empty() { "AgentFlow" } else { label.trim() };
+        let (challenge, state) = self.webauthn()?.start_passkey_registration(user, label, label, Some(existing))?;
+        Ok((Self::remember(&self.enrolments, client, Pending::Register(state, user)), challenge))
+    }
+
+    /// Checks an enrolment started by the same `client` (the person, or the link). Returns the
+    /// passkey and the user handle it was made for; `store` keeps it for the person.
+    pub fn finish_registration(
+        &self,
         id: &str,
-        name: &str,
+        client: &str,
         credential: &RegisterPublicKeyCredential,
-    ) -> anyhow::Result<i64> {
-        let Some(Pending::Register(state)) = Self::take(&self.enrolments, id) else {
+    ) -> anyhow::Result<(Passkey, Uuid)> {
+        let c = crate::util::lock(&self.enrolments).remove(id);
+        let Some(Ceremony { expires, client: started_by, state: Pending::Register(state, user) }) = c else {
             bail!("this enrolment expired; start again")
         };
-        let passkey = self.webauthn()?.finish_passkey_registration(credential, &state)?;
-        let name = match name.trim() {
-            "" => "Passkey".to_owned(),
-            n => n.chars().take(60).collect(),
-        };
-        let cred_id: &[u8] = passkey.cred_id().as_ref();
-        conn.execute(
-            "INSERT INTO passkeys (cred_id, name, passkey, created_at) VALUES (?1, ?2, ?3, ?4)",
-            params![cred_id, name, serde_json::to_string(&passkey)?, now_ms()],
-        )?;
-        Ok(conn.last_insert_rowid())
+        if expires <= now_ms() {
+            bail!("this enrolment expired; start again")
+        }
+        if started_by != client {
+            bail!("this enrolment was started somewhere else");
+        }
+        Ok((self.webauthn()?.finish_passkey_registration(credential, &state)?, user))
     }
 
     /// Starts a sign-in. None when no passkey is enrolled yet.
@@ -145,7 +159,7 @@ impl Passkeys {
         conn: &Connection,
         client: &str,
     ) -> anyhow::Result<Option<(String, RequestChallengeResponse)>> {
-        let keys: Vec<Passkey> = load(conn)?.into_iter().map(|(_, p)| p).collect();
+        let keys: Vec<Passkey> = load(conn, None)?.into_iter().map(|(_, p)| p).collect();
         if keys.is_empty() {
             return Ok(None);
         }
@@ -153,28 +167,47 @@ impl Passkeys {
         Ok(Some((Self::remember(&self.logins, client, Pending::Login(state)), challenge)))
     }
 
-    /// Checks a sign-in and updates the passkey's counter. Returns the passkey's name.
+    /// Checks a sign-in and updates the passkey's counter. Returns the passkey's name and its
+    /// person.
     pub fn finish_login(
         &self,
         conn: &Connection,
         id: &str,
         credential: &PublicKeyCredential,
-    ) -> anyhow::Result<String> {
+    ) -> anyhow::Result<(String, i64)> {
         let Some(Pending::Login(state)) = Self::take(&self.logins, id) else {
             bail!("this sign-in expired; try again")
         };
         let result = self.webauthn()?.finish_passkey_authentication(credential, &state)?;
-        let (row, mut passkey) = load(conn)?
+        let (row, mut passkey) = load(conn, None)?
             .into_iter()
             .find(|(_, p)| p.cred_id() == result.cred_id())
             .context("that passkey was removed")?;
+        let person = row.person.context("that passkey belongs to no one")?;
+        if crate::people::get(conn, person)?.is_none() {
+            bail!("that passkey's person was removed");
+        }
         passkey.update_credential(&result);
         conn.execute(
             "UPDATE passkeys SET passkey = ?1, last_used_at = ?2 WHERE id = ?3",
             params![serde_json::to_string(&passkey)?, now_ms(), row.id],
         )?;
-        Ok(row.name)
+        Ok((row.name, person))
     }
+}
+
+/// Keeps a checked passkey for a person. Returns its row id.
+pub fn store(conn: &Connection, person: i64, name: &str, passkey: &Passkey) -> anyhow::Result<i64> {
+    let name = match name.trim() {
+        "" => "Passkey".to_owned(),
+        n => n.chars().take(60).collect(),
+    };
+    let cred_id: &[u8] = passkey.cred_id().as_ref();
+    conn.execute(
+        "INSERT INTO passkeys (cred_id, name, passkey, created_at, person_id) VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![cred_id, name, serde_json::to_string(passkey)?, now_ms(), person],
+    )?;
+    Ok(conn.last_insert_rowid())
 }
 
 fn build_webauthn(config: &Config) -> anyhow::Result<Option<Webauthn>> {
@@ -188,23 +221,21 @@ fn build_webauthn(config: &Config) -> anyhow::Result<Option<Webauthn>> {
     Ok(Some(WebauthnBuilder::new(&host, &origin)?.rp_name("AgentFlow").build()?))
 }
 
-/// The owner's WebAuthn user handle, made once and kept in settings.
-fn owner_uuid(conn: &Connection) -> anyhow::Result<Uuid> {
-    let stored: Option<String> =
-        conn.query_row("SELECT value FROM settings WHERE key = 'owner.webauthn_id'", [], |r| r.get(0)).optional()?;
-    if let Some(s) = stored {
-        return Ok(Uuid::parse_str(&s)?);
-    }
-    let id = Uuid::new_v4();
-    conn.execute("INSERT INTO settings (key, value) VALUES ('owner.webauthn_id', ?1)", [id.to_string()])?;
-    Ok(id)
-}
-
-fn load(conn: &Connection) -> anyhow::Result<Vec<(PasskeyRow, Passkey)>> {
-    let mut stmt = conn.prepare("SELECT id, name, created_at, last_used_at, passkey FROM passkeys ORDER BY id")?;
-    let rows = stmt.query_map([], |r| {
+/// Everyone's passkeys, or one person's.
+fn load(conn: &Connection, person: Option<i64>) -> anyhow::Result<Vec<(PasskeyRow, Passkey)>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, name, created_at, last_used_at, passkey, person_id FROM passkeys
+         WHERE ?1 IS NULL OR person_id = ?1 ORDER BY id",
+    )?;
+    let rows = stmt.query_map([person], |r| {
         Ok((
-            PasskeyRow { id: r.get(0)?, name: r.get(1)?, created_at: r.get(2)?, last_used_at: r.get(3)? },
+            PasskeyRow {
+                id: r.get(0)?,
+                name: r.get(1)?,
+                created_at: r.get(2)?,
+                last_used_at: r.get(3)?,
+                person: r.get(5)?,
+            },
             r.get::<_, String>(4)?,
         ))
     })?;
@@ -216,16 +247,19 @@ fn load(conn: &Connection) -> anyhow::Result<Vec<(PasskeyRow, Passkey)>> {
     Ok(out)
 }
 
-pub fn list(conn: &Connection) -> anyhow::Result<Vec<PasskeyRow>> {
-    Ok(load(conn)?.into_iter().map(|(r, _)| r).collect())
+/// A person's passkeys.
+pub fn list(conn: &Connection, person: i64) -> anyhow::Result<Vec<PasskeyRow>> {
+    Ok(load(conn, Some(person))?.into_iter().map(|(r, _)| r).collect())
 }
 
+/// Everyone's, for the sign-in page (any passkey at all?).
 pub fn count(conn: &Connection) -> anyhow::Result<i64> {
     Ok(conn.query_row("SELECT count(*) FROM passkeys", [], |r| r.get(0))?)
 }
 
-pub fn remove(conn: &Connection, id: i64) -> anyhow::Result<bool> {
-    Ok(conn.execute("DELETE FROM passkeys WHERE id = ?1", [id])? > 0)
+/// Removes one of the person's own passkeys; another's is left alone.
+pub fn remove(conn: &Connection, id: i64, person: i64) -> anyhow::Result<bool> {
+    Ok(conn.execute("DELETE FROM passkeys WHERE id = ?1 AND person_id = ?2", [id, person])? > 0)
 }
 
 #[cfg(test)]
@@ -250,11 +284,13 @@ mod tests {
         let p = Passkeys::new(&config("https://flow.giosuel.io"));
         db.call_blocking(|c| {
             assert!(p.start_login(c, "x")?.is_none(), "no passkeys yet");
-            let (id, challenge) = p.start_registration(c)?;
+            let me = crate::people::create(c, true, None, Uuid::new_v4())?;
+            let (id, challenge) = p.start_registration(c, Some(me), "giosuel", "1")?;
             let json = serde_json::to_value(&challenge)?;
             assert_eq!(json["publicKey"]["rp"]["id"], "flow.giosuel.io");
-            // The same user handle every time.
-            assert_eq!(owner_uuid(c)?, owner_uuid(c)?);
+            // The person's own user handle.
+            let handle = crate::people::webauthn_id(c, me)?;
+            assert!(matches!(&p.enrolments.lock().unwrap()[&id].state, Pending::Register(_, u) if *u == handle));
             p.enrolments.lock().unwrap().get_mut(&id).unwrap().expires = 0;
             assert!(Passkeys::take(&p.enrolments, &id).is_none());
             Ok(())

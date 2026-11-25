@@ -23,6 +23,7 @@ mod decisions;
 mod editor;
 mod handbook;
 mod icons;
+mod links;
 mod log;
 mod machine;
 mod new_project;
@@ -142,6 +143,7 @@ pub fn router(state: AppState) -> Router {
     let mcp = crate::mcp::service(state.clone());
     let app = Router::new()
         .merge(pages::routes())
+        .merge(links::routes())
         .merge(settings::routes())
         .merge(projects::routes())
         .merge(api::routes())
@@ -488,6 +490,7 @@ async fn shutdown_signal() {
 fn is_public(path: &str) -> bool {
     path == "/login"
         || path.starts_with("/login/")
+        || links::is_public(path)
         || assets::is_asset(path)
         || pwa::is_public(path)
         || approvals::is_public(path)
