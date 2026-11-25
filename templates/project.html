@@ -1,13 +1,13 @@
 {% extends "base.html" %}
 {% import "ui.html" as ui %}
-{% block title %}{{ name }}{% endblock %}
+{% block title %}{% for (key, label) in tabs %}{% if tab == *key %}{{ label }} · {% endif %}{% endfor %}{{ name }}{% endblock %}
 {% block content %}
 <div class="head proj-head">
   <div class="crumb-row">{% include "path.html" %}{% if let Some(u) = session_url %}<a class="session-link" href="{{ u }}" target="_blank" rel="noopener" title="The project agent's Claude Code session on claude.ai">{{ crate::web::icons::icon("session")|safe }}<span class="hide-phone">Open the agent's session</span><span class="only-phone">Agent session</span>{{ crate::web::icons::icon("out")|safe }}</a>{% endif %}</div>
-  {# The page's title: the project on its overview, otherwise the tab, as Usage or the Log have theirs
-     (the owner, 2026-11-24: "maybe we should give titles to all these pages so they don't look so
-     empty"). #}
-  <h1>{% if tab == "overview" %}{{ name }}{% else %}{% for (key, label) in tabs %}{% if tab == *key %}{{ label }}{% endif %}{% endfor %}{% endif %}{% if status != "active" %} <span class="chip">{{ status }}</span>{% endif %}</h1>
+  {# The page's title is its tab, as Usage or the Log have theirs (the owner, 2026-11-24: "maybe we
+     should give titles to all these pages so they don't look so empty"), the overview's too: the
+     project's name is in the switcher and the path (2026-11-25, D-281). #}
+  <h1>{% for (key, label) in tabs %}{% if tab == *key %}{{ label }}{% endif %}{% endfor %}{% if status != "active" %} <span class="chip">{{ status }}</span>{% endif %}</h1>
   <p class="status-line"><span class="dot{% if agent.online %} ok{% endif %}" aria-hidden="true"></span>{% if !repo.is_empty() %}<a href="https://github.com/{{ repo }}">github.com/{{ repo }}</a> · {% endif %}<span>{{ headline }}</span></p>
 </div>
 <nav class="tabs proj-tabs" aria-label="Project">

@@ -802,8 +802,9 @@ async fn the_owner_answers_on_the_page_and_the_agent_reads_it() {
     assert!(none < decided && !tab.contains("Waiting on you"), "{tab}");
     // The tab is the page's title; the project's name is the overview's.
     assert!(tab.contains("<h1>Questions</h1>"), "{tab}");
+    // The overview's title is Overview too (D-281); the project's name is in the switcher and the path.
     let overview = owner_page(&s, &cookie, "/p/vinculum").await;
-    assert!(overview.contains("<h1>") && !overview.contains("<h1>Overview"), "{overview}");
+    assert!(overview.contains("<h1>Overview</h1>") && overview.contains("<title>Overview · "), "{overview}");
     // Answering twice goes back to the question with the reason.
     let res = s
         .http
