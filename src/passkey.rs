@@ -159,7 +159,15 @@ impl Passkeys {
         conn: &Connection,
         client: &str,
     ) -> anyhow::Result<Option<(String, RequestChallengeResponse)>> {
-        let keys: Vec<Passkey> = load(conn, None)?.into_iter().map(|(_, p)| p).collect();
+        // Only passkeys of people who are here (the security review): not removed, not orphaned.
+        let mut keys: Vec<Passkey> = Vec::new();
+        for (row, key) in load(conn, None)? {
+            if let Some(p) = row.person
+                && crate::people::get(conn, p)?.is_some()
+            {
+                keys.push(key);
+            }
+        }
         if keys.is_empty() {
             return Ok(None);
         }

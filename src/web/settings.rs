@@ -37,6 +37,7 @@ pub fn routes() -> Router<AppState> {
         .route("/settings/passkeys/link", post(device_link))
         .route("/settings/people/invite", post(invite))
         .route("/settings/people/{id}/link", post(person_link))
+        .route("/settings/people/{id}/remove", post(person_remove))
         .route("/settings/links/{id}/withdraw", post(link_withdraw))
 }
 
@@ -200,7 +201,7 @@ fn section_of_notice(done: &str) -> &'static str {
         "passkey-removed" | "link-withdrawn-device" => "passkeys",
         "session-ended" => "browsers",
         "profile-saved" => "profile",
-        "link-withdrawn" => "people",
+        "link-withdrawn" | "person-removed" => "people",
         "revoked" | "approved" | "denied" | "approve-failed" => "clients",
         "rotated" => "agents",
         "github-saved" | "github-removed" => "github",
@@ -225,6 +226,7 @@ fn notice_for(key: &str) -> Option<&'static str> {
         "passkey-removed" => "Passkey removed.",
         "profile-saved" => "Saved. This is how you show up from now on.",
         "link-withdrawn" | "link-withdrawn-device" => "Withdrawn: the link doesn't work any more.",
+        "person-removed" => "Removed: they're signed out everywhere and can't sign in again.",
         "device-removed" => "That device won't get notifications any more.",
         "test-sent" => "Test notification sent to your devices that have notifications on.",
         "test-none" => "No device has notifications on yet.",
@@ -348,6 +350,29 @@ async fn person_link(
     let link = make_link(&state, auth::purpose::DEVICE, Some(person.id), me, auth::LINK_MINUTES).await?;
     log(&state, &actor, &ip, Action::Write, format!("a sign-in link made for {}", person.name())).await;
     render_page(&state, &actor, None, None, Some("people"), Some(made("person", person.id, link))).await
+}
+
+/// Settings › People › Remove (the security review: nobody could be removed). Only the admin.
+async fn person_remove(
+    State(state): State<AppState>,
+    Extension(actor): Extension<Actor>,
+    Extension(ip): Extension<ClientIp>,
+    Path(id): Path<i64>,
+) -> AppResult<Redirect> {
+    actor.require_admin()?;
+    let name = state
+        .db
+        .call(move |c| {
+            let tx = c.transaction()?;
+            let name = crate::people::get(&tx, id)?.map(|p| p.name());
+            crate::people::remove(&tx, id)?;
+            tx.commit()?;
+            Ok(name)
+        })
+        .await
+        .map_err(|e| AppError::BadRequest(format!("{e:#}")))?;
+    log(&state, &actor, &ip, Action::Write, format!("removed {}", name.unwrap_or_default())).await;
+    Ok(Redirect::to("/settings?done=person-removed"))
 }
 
 /// Withdraws a link that isn't used yet: one you made, one for you, or (the admin) an invite.

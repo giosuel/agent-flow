@@ -111,16 +111,45 @@ pub fn webauthn_id(conn: &Connection, id: i64) -> anyhow::Result<Uuid> {
     Ok(u)
 }
 
-/// Setting AgentFlow up again when the admin lost their passkeys (D-274): the admin's passkeys go
-/// and their browsers are signed out; their profile, projects, records and the other people stay.
-/// Returns how many passkeys and browsers went.
+/// Setting AgentFlow up again when the admin lost their passkeys (D-274): the admin's passkeys go,
+/// their browsers are signed out, and whatever someone holding one of those browsers could have
+/// left behind goes too: their unused links (device links, invites) and their devices' push
+/// subscriptions (the security review). Their profile, projects, records and the other people
+/// stay. Returns how many passkeys and browsers went.
 pub fn reset_admin(conn: &Connection, admin_id: i64) -> anyhow::Result<(usize, usize)> {
     let keys = conn.execute("DELETE FROM passkeys WHERE person_id = ?1", [admin_id])?;
+    let browsers = cut_off(conn, admin_id)?;
+    Ok((keys, browsers))
+}
+
+/// Signs a person out everywhere and voids what could bring them back without a passkey: their
+/// sessions, their unused links (for them or made by them) and their push subscriptions.
+fn cut_off(conn: &Connection, id: i64) -> anyhow::Result<usize> {
+    let now = now_ms();
     let browsers = conn.execute(
         "UPDATE web_sessions SET revoked_at = ?1 WHERE person_id = ?2 AND revoked_at IS NULL",
-        params![now_ms(), admin_id],
+        params![now, id],
     )?;
-    Ok((keys, browsers))
+    conn.execute(
+        "UPDATE login_links SET used_at = ?1 WHERE used_at IS NULL AND (person_id = ?2 OR made_by = ?2)",
+        params![now, id],
+    )?;
+    conn.execute("DELETE FROM push_subscriptions WHERE person_id = ?1", [id])?;
+    Ok(browsers)
+}
+
+/// The admin removes someone (the security review: there was no way to): they can't sign in any
+/// more, everything that could let them back in goes, and their name stays on what they did (it
+/// isn't given to anyone else). The admin can't be removed; `setup` makes them anew instead.
+pub fn remove(conn: &Connection, id: i64) -> anyhow::Result<()> {
+    let p = get(conn, id)?.context("no such person")?;
+    if p.admin {
+        bail!("the admin can't be removed; `sudo flow server setup` makes the admin anew");
+    }
+    conn.execute("DELETE FROM passkeys WHERE person_id = ?1", [id])?;
+    cut_off(conn, id)?;
+    conn.execute("UPDATE people SET removed_at = ?1 WHERE id = ?2", params![now_ms(), id])?;
+    Ok(())
 }
 
 /// How many passkeys and signed-in browsers a person has, for the setup command's warning.
@@ -178,8 +207,25 @@ impl Names {
 }
 
 /// Names a person can't take: words pages use for someone else.
-const RESERVED: &[&str] =
-    &["owner", "you", "admin", "system", "github", "agentflow", "consultant", "anonymous", "root", "flow", "agent"];
+const RESERVED: &[&str] = &[
+    "owner",
+    "you",
+    "me",
+    "admin",
+    "the-admin",
+    "system",
+    "github",
+    "agentflow",
+    "consultant",
+    "anonymous",
+    "root",
+    "flow",
+    "agent",
+    "all",
+    "everyone",
+    "nobody",
+    "unknown",
+];
 
 /// A username as kept: lowercase letters, digits and dashes, 2 to 32 of them, starting and ending
 /// with a letter or digit.
@@ -194,7 +240,9 @@ pub fn check_username(raw: &str) -> anyhow::Result<String> {
     if u.starts_with('-') || u.ends_with('-') {
         bail!("a username starts and ends with a letter or digit");
     }
-    if RESERVED.contains(&u.as_str()) {
+    // "person-3" would read like the stand-in for someone without a name yet.
+    let stand_in = u.strip_prefix("person-").is_some_and(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()));
+    if RESERVED.contains(&u.as_str()) || stand_in {
         bail!("{u:?} is taken by AgentFlow itself; pick another");
     }
     Ok(u)

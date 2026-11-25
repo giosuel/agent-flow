@@ -201,6 +201,10 @@ pub fn create(conn: &Connection, slug: &str, name: &str, actor: &str) -> anyhow:
     if by_build_product(conn, slug)?.is_some() {
         bail!("another project publishes builds as {slug:?}; pick another slug");
     }
+    // An agent signs with its project's slug: one named like a person would be taken for them.
+    if crate::people::by_username(conn, slug)?.is_some() {
+        bail!("someone on this AgentFlow is called {slug:?}; pick another slug");
+    }
     let now = now_ms();
     conn.execute(
         "INSERT INTO projects (slug, name, created_at, updated_at) VALUES (?1, ?2, ?3, ?3)",

@@ -257,12 +257,17 @@ pub fn save_subscription(conn: &Connection, sub: &Subscription, device: &str, pe
     if auth.len() != 16 {
         bail!("auth must be 16 bytes");
     }
-    conn.execute(
+    // A browser's endpoint stays with the person who subscribed it: another can't take it over
+    // (the security review).
+    let n = conn.execute(
         "INSERT INTO push_subscriptions (endpoint, p256dh, auth, device, created_at, person_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-         ON CONFLICT (endpoint) DO UPDATE SET p256dh = excluded.p256dh, auth = excluded.auth, device = excluded.device,
-           person_id = excluded.person_id",
+         ON CONFLICT (endpoint) DO UPDATE SET p256dh = excluded.p256dh, auth = excluded.auth, device = excluded.device
+         WHERE push_subscriptions.person_id IS excluded.person_id",
         params![sub.endpoint, sub.keys.p256dh, sub.keys.auth, device, now_ms(), person],
     )?;
+    if n == 0 {
+        bail!("this browser gets someone else's notifications; they turn them off first");
+    }
     Ok(())
 }
 
@@ -372,10 +377,15 @@ impl Pusher {
                     tracing::warn!("keeping a notification: {e:#}");
                 }
                 let mut stmt = c.prepare(
-                    "SELECT endpoint, p256dh, auth, person_id FROM push_subscriptions WHERE ?1 IS NULL OR person_id = ?1",
+                    "SELECT s.endpoint, s.p256dh, s.auth, s.person_id FROM push_subscriptions s
+                     LEFT JOIN people p ON p.id = s.person_id
+                     WHERE (?1 IS NULL OR s.person_id = ?1) AND p.removed_at IS NULL",
                 )?;
                 let rows = stmt.query_map([only], |r| {
-                    Ok((Target { endpoint: r.get(0)?, p256dh: r.get(1)?, auth: r.get(2)? }, r.get::<_, Option<i64>>(3)?))
+                    Ok((
+                        Target { endpoint: r.get(0)?, p256dh: r.get(1)?, auth: r.get(2)? },
+                        r.get::<_, Option<i64>>(3)?,
+                    ))
                 })?;
                 let mut targets = Vec::new();
                 for row in rows {
@@ -577,6 +587,13 @@ mod tests {
                 "iPhone again",
                 me,
             )?;
+            assert_eq!(devices(c, me)?.len(), 1);
+            // The endpoint stays with its person: another can't take it over (the security review).
+            let other = crate::people::create(c, false, Some(me), webauthn_rs::prelude::Uuid::new_v4())?;
+            assert!(
+                save_subscription(c, &sub("https://web.push.apple.com/1", ua, "BTBZMqHH6r4Tts7J_aSIgg"), "x", other)
+                    .is_err()
+            );
             assert_eq!(devices(c, me)?.len(), 1);
             assert_eq!(devices(c, me + 1)?.len(), 0, "another person's list is their own");
             assert!(is_enabled(c, Some(me), Kind::Question)?);

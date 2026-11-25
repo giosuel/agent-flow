@@ -119,7 +119,8 @@ impl TestServer {
             .call(move |c| auth::create_login_link(c, auth::purpose::SIGNIN, Some(person), None, auth::LINK_MINUTES))
             .await
             .unwrap();
-        let res = self.http.post(self.url(&format!("/login/link/{link}"))).send().await.unwrap();
+        let res =
+            self.http.post(self.url(&format!("/login/link/{link}"))).header(ORIGIN, &self.base).send().await.unwrap();
         assert_eq!(res.status(), StatusCode::SEE_OTHER);
         let cookie = res.headers()[SET_COOKIE].to_str().unwrap();
         cookie.split(';').next().unwrap().to_owned()
@@ -182,7 +183,7 @@ async fn login_link_signs_in_once() {
     let page = s.http.get(s.url(&format!("/login/link/{link}"))).send().await.unwrap().text().await.unwrap();
     assert!(page.contains("Sign in on this device?"));
 
-    let res = s.http.post(s.url(&format!("/login/link/{link}"))).send().await.unwrap();
+    let res = s.http.post(s.url(&format!("/login/link/{link}"))).header(ORIGIN, &s.base).send().await.unwrap();
     assert_eq!(res.status(), StatusCode::SEE_OTHER);
     let set = res.headers()[SET_COOKIE].to_str().unwrap().to_owned();
     assert!(set.contains("HttpOnly") && set.contains("SameSite=Lax"));
@@ -192,7 +193,7 @@ async fn login_link_signs_in_once() {
     assert_eq!(page.status(), StatusCode::OK);
     assert!(page.text().await.unwrap().contains("Dashboard"));
 
-    let again = s.http.post(s.url(&format!("/login/link/{link}"))).send().await.unwrap();
+    let again = s.http.post(s.url(&format!("/login/link/{link}"))).header(ORIGIN, &s.base).send().await.unwrap();
     assert_eq!(again.status(), StatusCode::GONE);
 }
 
@@ -229,13 +230,13 @@ async fn people_get_in_with_setup_invite_and_device_links() {
     assert!(page.contains("Set up AgentFlow") && page.contains("You'll be this AgentFlow's admin"), "{page}");
     assert!(page.contains("Sign in with this link"), "no passkeys on plain http: {page}");
     // The link is for /setup/ only: the wrong page refuses it and leaves it unused.
-    let wrong = s.http.post(s.url(&format!("/device/{setup}"))).send().await.unwrap();
+    let wrong = s.http.post(s.url(&format!("/device/{setup}"))).header(ORIGIN, &s.base).send().await.unwrap();
     assert_eq!(wrong.status(), StatusCode::GONE);
-    let res = s.http.post(s.url(&format!("/setup/{setup}"))).send().await.unwrap();
+    let res = s.http.post(s.url(&format!("/setup/{setup}"))).header(ORIGIN, &s.base).send().await.unwrap();
     assert_eq!(res.status(), StatusCode::SEE_OTHER);
     let admin_cookie = cookie_of(&res);
     assert_eq!(whoami(admin_cookie.clone()).await, StatusCode::OK);
-    let again = s.http.post(s.url(&format!("/setup/{setup}"))).send().await.unwrap();
+    let again = s.http.post(s.url(&format!("/setup/{setup}"))).header(ORIGIN, &s.base).send().await.unwrap();
     assert_eq!(again.status(), StatusCode::GONE, "it works once");
     let admin = s.db.call(|c| crate::people::admin(c)).await.unwrap().unwrap();
     assert!(admin.admin && admin.username.is_none());
@@ -246,7 +247,7 @@ async fn people_get_in_with_setup_invite_and_device_links() {
     let invite = secret(&v);
     let page = s.http.get(s.url(&format!("/invite/{invite}"))).send().await.unwrap().text().await.unwrap();
     assert!(page.contains("You're invited") && page.contains("This invite works once, until"), "{page}");
-    let res = s.http.post(s.url(&format!("/invite/{invite}"))).send().await.unwrap();
+    let res = s.http.post(s.url(&format!("/invite/{invite}"))).header(ORIGIN, &s.base).send().await.unwrap();
     assert_eq!(res.status(), StatusCode::SEE_OTHER);
     assert_eq!(res.headers()["location"], "/welcome?next=/settings?add_passkey=1", "who are you first");
     let mira_cookie = cookie_of(&res);
@@ -261,7 +262,7 @@ async fn people_get_in_with_setup_invite_and_device_links() {
         .call(move |c| auth::create_login_link(c, auth::purpose::INVITE, None, Some(mira.id), auth::INVITE_MINUTES))
         .await
         .unwrap();
-    let res = s.http.post(s.url(&format!("/invite/{forged}"))).send().await.unwrap();
+    let res = s.http.post(s.url(&format!("/invite/{forged}"))).header(ORIGIN, &s.base).send().await.unwrap();
     assert_eq!(res.status(), StatusCode::BAD_REQUEST);
     assert_eq!(s.db.call(|c| crate::people::list(c)).await.unwrap().len(), 2, "nobody new");
 
@@ -299,7 +300,7 @@ async fn people_get_in_with_setup_invite_and_device_links() {
     assert_eq!(v["again"], true);
     let page = s.http.get(s.url(&format!("/setup/{}", secret(&v)))).send().await.unwrap().text().await.unwrap();
     assert!(page.contains("This makes a new passkey for <strong>the admin</strong>"), "{page}");
-    let res = s.http.post(s.url(&format!("/setup/{}", secret(&v)))).send().await.unwrap();
+    let res = s.http.post(s.url(&format!("/setup/{}", secret(&v)))).header(ORIGIN, &s.base).send().await.unwrap();
     assert_eq!(res.status(), StatusCode::SEE_OTHER);
     assert_ne!(whoami(admin_cookie).await, StatusCode::OK, "the admin's old browser is signed out");
     assert_eq!(whoami(cookie_of(&res)).await, StatusCode::OK);
@@ -451,6 +452,121 @@ async fn settings_for_you_and_the_people() {
     assert_eq!(post(w, vec![], cookie.clone()).await.status(), StatusCode::SEE_OTHER);
     let res = s.http.get(s.url(&format!("/invite/{secret}"))).send().await.unwrap();
     assert_eq!(res.status(), StatusCode::GONE);
+}
+
+/// What the security review of People found (2026-11-25), fixed: setup links bound to the state
+/// they were made for, setting up again voiding the admin's links and devices, login CSRF on the
+/// link pages, /login/link only for sign-in links, removing people, names that can't pass for
+/// someone else, and `next` kept on this site.
+#[tokio::test]
+async fn the_review_of_people_holds() {
+    let s = TestServer::start().await;
+    let ask = |req: serde_json::Value| {
+        let state = s.state.clone();
+        async move { crate::web::admin_socket::test_link(&state, req).await.unwrap() }
+    };
+    let secret = |v: &serde_json::Value| v["url"].as_str().unwrap().rsplit('/').next().unwrap().to_owned();
+    let post = |path: String, origin: &'static str| {
+        let s = &s;
+        async move {
+            let origin = if origin.is_empty() { s.base.clone() } else { origin.to_owned() };
+            s.http.post(s.url(&path)).header(ORIGIN, origin).send().await.unwrap()
+        }
+    };
+
+    // Two setup links before there's an admin: the first used makes the admin, the other stops.
+    let early = secret(&ask(json!({"request": "setup"})).await);
+    let first = secret(&ask(json!({"request": "setup"})).await);
+    assert_eq!(post(format!("/setup/{first}"), "").await.status(), StatusCode::SEE_OTHER);
+    assert_eq!(post(format!("/setup/{early}"), "").await.status(), StatusCode::GONE, "voided");
+    let admin = s.db.call(|c| crate::people::admin(c)).await.unwrap().unwrap().id;
+    s.db.call(move |c| crate::people::set_profile(c, admin, "giosuel", "me@giosuel.ch", "owl")).await.unwrap();
+
+    // A setup link made for the first setup doesn't reset the admin made since.
+    let stale =
+        s.db.call(|c| auth::create_login_link(c, auth::purpose::SETUP, None, None, auth::LINK_MINUTES)).await.unwrap();
+    assert_eq!(post(format!("/setup/{stale}"), "").await.status(), StatusCode::BAD_REQUEST);
+
+    // Setting up again voids the admin's own links and push devices.
+    let mine = secret(&ask(json!({"request": "add_device"})).await);
+    s.db.call(move |c| {
+        Ok(c.execute(
+            "INSERT INTO push_subscriptions (endpoint, p256dh, auth, device, created_at, person_id) VALUES ('https://web.push.apple.com/x', 'k', 'a', 'd', 0, ?1)",
+            [admin],
+        )?)
+    })
+    .await
+    .unwrap();
+    let again = secret(&ask(json!({"request": "setup", "confirm": "giosuel"})).await);
+    assert_eq!(post(format!("/setup/{again}"), "").await.status(), StatusCode::SEE_OTHER);
+    assert_eq!(post(format!("/device/{mine}"), "").await.status(), StatusCode::GONE, "the admin's device link went");
+    let devices = s.db.call(move |c| crate::push::devices(c, admin)).await.unwrap();
+    assert!(devices.is_empty(), "and their devices' notifications");
+
+    // Another site can't post a link for a browser (login CSRF); ours can.
+    let link = secret(&ask(json!({"request": "add_device"})).await);
+    assert_eq!(post(format!("/device/{link}"), "https://evil.example").await.status(), StatusCode::FORBIDDEN);
+    // /login/link takes only sign-in links: a device link is refused there and stays unused.
+    assert_eq!(post(format!("/login/link/{link}"), "").await.status(), StatusCode::GONE);
+    assert_eq!(post(format!("/device/{link}"), "").await.status(), StatusCode::SEE_OTHER);
+
+    // The admin removes someone: their browser is signed out, they can't come back.
+    let mira =
+        s.db.call(move |c| {
+            let m = crate::people::create(c, false, Some(admin), webauthn_rs::prelude::Uuid::new_v4())?;
+            crate::people::set_profile(c, m, "mira", "m@x.org", "frog")?;
+            Ok(m)
+        })
+        .await
+        .unwrap();
+    let mira_cookie = s.cookie_for(mira).await;
+    let admin_cookie = s.cookie_for(admin).await;
+    let res = s
+        .http
+        .post(s.url(&format!("/settings/people/{admin}/remove")))
+        .header(COOKIE, &admin_cookie)
+        .header(ORIGIN, &s.base)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST, "not the admin");
+    let res = s
+        .http
+        .post(s.url(&format!("/settings/people/{mira}/remove")))
+        .header(COOKIE, &admin_cookie)
+        .header(ORIGIN, &s.base)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::SEE_OTHER);
+    let res = s.http.get(s.url("/welcome")).header(COOKIE, &mira_cookie).send().await.unwrap();
+    assert_ne!(res.status(), StatusCode::OK, "signed out");
+    assert!(s.db.call(move |c| crate::people::get(c, mira)).await.unwrap().is_none());
+
+    // Names that would pass for someone else.
+    let (ok_stand_in, ok_project) =
+        s.db.call(move |c| {
+            let x = crate::people::create(c, false, Some(admin), webauthn_rs::prelude::Uuid::new_v4())?;
+            Ok((
+                crate::people::set_profile(c, x, "person-3", "x@x.org", "fox").is_err(),
+                crate::projects::create(c, "giosuel", "Giosuel", "owner").is_err(),
+            ))
+        })
+        .await
+        .unwrap();
+    assert!(ok_stand_in && ok_project);
+
+    // `next` stays on this site: a tab can't turn it into another site.
+    let res = s
+        .http
+        .post(s.url("/welcome"))
+        .header(COOKIE, &admin_cookie)
+        .header(ORIGIN, &s.base)
+        .form(&[("username", "giosuel"), ("email", "me@giosuel.ch"), ("icon", "owl"), ("next", "/\t/evil.example")])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.headers()["location"], "/");
 }
 
 #[tokio::test]

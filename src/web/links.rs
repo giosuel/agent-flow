@@ -68,13 +68,10 @@ struct LinkPage {
     until: String,
 }
 
-/// Whose account a link enrols a passkey for: an existing person, or None for someone new.
-fn registrant(c: &Connection, link: &auth::Link) -> anyhow::Result<Option<i64>> {
-    Ok(match link.purpose.as_str() {
-        purpose::SETUP => people::admin(c)?.map(|a| a.id),
-        purpose::INVITE => None,
-        _ => link.person,
-    })
+/// Whose account a link enrols a passkey for: the person it names (a device link, the admin set
+/// up again), or None for someone new (the first setup, an invite).
+fn registrant(link: &auth::Link) -> Option<i64> {
+    if link.purpose == purpose::INVITE { None } else { link.person }
 }
 
 async fn page(State(state): State<AppState>, uri: Uri, Path(secret): Path<String>) -> AppResult<Response> {
@@ -90,7 +87,7 @@ async fn page(State(state): State<AppState>, uri: Uri, Path(secret): Path<String
             let name = |id: Option<i64>| -> anyhow::Result<String> {
                 Ok(id.map(|i| people::get(c, i)).transpose()?.flatten().map(|p| p.name()).unwrap_or_default())
             };
-            let person = name(registrant(c, &link)?)?;
+            let person = name(registrant(&link))?;
             let inviter = name(link.made_by)?;
             Ok(Some((link.expires_at, person, inviter)))
         })
@@ -139,13 +136,25 @@ fn redeem(
     }
     let handle = key.map(|(_, u, _)| u).unwrap_or_else(Uuid::new_v4);
     let person = match kind {
-        purpose::SETUP => match people::admin(&tx)? {
-            Some(a) => {
-                people::reset_admin(&tx, a.id)?;
-                a.id
-            }
-            None => people::create(&tx, true, None, handle)?,
-        },
+        purpose::SETUP => {
+            // Only for the state it was made for (the security review): the first setup while
+            // there's no admin, or this admin anew. Any other setup link stops working.
+            let id = match (people::admin(&tx)?, link.person) {
+                (Some(a), Some(p)) if a.id == p => {
+                    people::reset_admin(&tx, a.id)?;
+                    a.id
+                }
+                (None, None) => people::create(&tx, true, None, handle)?,
+                _ => anyhow::bail!(
+                    "this setup link was made before the admin changed; run `sudo flow server setup` again for a new one"
+                ),
+            };
+            tx.execute(
+                "UPDATE login_links SET used_at = ?1 WHERE purpose = 'setup' AND used_at IS NULL",
+                [crate::util::now_ms()],
+            )?;
+            id
+        }
         purpose::INVITE => {
             // Only the admin invites (D-273), and only while they're still the admin.
             let maker = link.made_by.map(|m| people::get(&tx, m)).transpose()?.flatten();
@@ -185,7 +194,10 @@ fn next(with_passkey: bool, profile: bool) -> &'static str {
 
 async fn log_use(state: &AppState, kind: &str, person: Option<i64>, ip: &str, ok: bool, why: String) {
     let what = match (ok, person) {
-        (true, Some(p)) => format!("{kind} link used: person {p} signed in{why}"),
+        (true, Some(p)) => {
+            let name = state.db.call(move |c| people::get(c, p)).await.ok().flatten().map(|p| p.name());
+            format!("{kind} link used: {} signed in{why}", name.unwrap_or_else(|| format!("person {p}")))
+        }
         _ => format!("{kind} link refused{why}"),
     };
     let e = Entry::new(&Actor::Anonymous, Via::Page, if ok { Action::Login } else { Action::Denied }, what)
@@ -214,6 +226,11 @@ async fn sign_in(
     Path(secret): Path<String>,
 ) -> AppResult<Response> {
     let kind = kind_of(&uri);
+    // Where passkeys work a link ends in one (the security review): signing in with the link
+    // alone is only for addresses where browsers refuse passkeys.
+    if state.passkeys.available() {
+        return Err(AppError::BadRequest("Create a passkey on this page: this link signs in with one.".into()));
+    }
     let (limits, ua, ip2) = (state.limits(), user_agent(&headers), ip.clone());
     let got = state.db.call(move |c| redeem(c, &secret, kind, None, &limits, ua.as_deref(), &ip2)).await;
     match got {
@@ -248,7 +265,7 @@ async fn passkey_start(State(state): State<AppState>, uri: Uri, Path(secret): Pa
             if link.purpose != kind {
                 return Ok(None);
             }
-            let who = registrant(c, &link)?;
+            let who = registrant(&link);
             let label = who.map(|p| people::get(c, p)).transpose()?.flatten().map(|p| p.name()).unwrap_or_default();
             Ok(Some(pk.start_registration(c, who, &label, &client(&secret))?))
         })
