@@ -120,6 +120,8 @@ struct UiPage {
     buttons: &'static [(&'static str, &'static str, &'static str)],
     states: &'static [&'static str],
     choices: Vec<Choice>,
+    /// A question without options: the answer is a text box (D-287).
+    no_choices: Vec<Choice>,
     spacing: &'static [u32],
     radii: &'static [(&'static str, &'static str)],
     icons: &'static [&'static str],
@@ -141,6 +143,7 @@ async fn page(State(state): State<AppState>, Extension(actor): Extension<Actor>)
         type_roles: TYPE,
         buttons: BUTTONS,
         states: STATES,
+        no_choices: Vec::new(),
         choices: vec![
             Choice {
                 n: 1,

@@ -732,6 +732,37 @@ async fn the_usage_page_shows_the_plan_and_the_cost() {
 }
 
 #[tokio::test]
+async fn a_question_without_options_is_answered_in_a_text_box() {
+    // The owner, 2026-11-25 (D-287): "sometimes a question has no answers, so a text box there
+    // would be appropriate instead".
+    let s = TestServer::start().await;
+    let token = s.token(TokenKind::Project, Some("vinculum")).await;
+    let sess = mcp_session(&s, &token).await;
+    mcp_tool(&s, &token, &sess, "ask_question", json!({"title": "Which port?"})).await;
+    let cookie = s.owner_cookie().await;
+    let overview = owner_page(&s, &cookie, "/p/vinculum").await;
+    assert!(overview.contains(r#"<textarea id="qw-Q-1" name="words" rows="4""#), "{overview}");
+    assert!(!overview.contains("No options"), "{overview}");
+    let tab = owner_page(&s, &cookie, "/p/vinculum?tab=questions").await;
+    assert!(tab.contains(r#"<textarea id="dqw-Q-1" name="words""#), "{tab}");
+    let page = owner_page(&s, &cookie, "/p/vinculum/Q-1").await;
+    assert!(page.contains(r#"<textarea id="words" name="words""#), "{page}");
+    // The words are the answer.
+    let res = s
+        .http
+        .post(s.url("/p/vinculum/Q-1/answer"))
+        .header(COOKIE, &cookie)
+        .header(ORIGIN, &s.base)
+        .form(&[("words", "8990"), ("next", "/p/vinculum?answered=Q-1")])
+        .send()
+        .await
+        .unwrap();
+    assert!(res.status().is_redirection() || res.status().is_success(), "{}", res.status());
+    let q = owner_page(&s, &cookie, "/p/vinculum/Q-1").await;
+    assert!(q.contains("8990") && !q.contains(r#"name="words""#), "{q}");
+}
+
+#[tokio::test]
 async fn the_owner_answers_on_the_page_and_the_agent_reads_it() {
     let s = TestServer::start().await;
     let token = s.token(TokenKind::Project, Some("vinculum")).await;
