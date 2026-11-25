@@ -13,8 +13,11 @@ export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$HOME/.cache/agentflow-target}"
 T=x86_64-unknown-linux-gnu
 rel=""
 if [ -z "${LOCAL:-}" ] && [ -n "${AGENTFLOW_TOKEN_FILE:-}" ] && command -v flow >/dev/null; then
+  # Every job has a name (D-275); a flow from before names doesn't know --name yet.
+  name=()
+  if flow remote --help 2>/dev/null | grep -q -- '--name'; then name=(--name "AgentFlow for a live install"); fi
   set +e
-  flow remote --name "AgentFlow for a live install" --fetch "target/$T/release/agentflow" --fetch "target/$T/release/flow" --fetch "target/$T/release/agentflow-builder" \
+  flow remote "${name[@]}" --fetch "target/$T/release/agentflow" --fetch "target/$T/release/flow" --fetch "target/$T/release/agentflow-builder" \
     -- cargo zigbuild --release --locked --features vendored-openssl --target "$T.2.35"
   code=$?
   set -e
