@@ -1057,11 +1057,25 @@ async fn the_bar_shows_the_project_its_tabs_and_the_global_pages() {
         json!({"title": "A or B?", "options": [{"title": "A"}, {"title": "B"}]}),
     )
     .await;
+    s.token(TokenKind::Project, Some("lituus")).await;
     let cookie = s.owner_cookie().await;
     let page = owner_page(&s, &cookie, "/p/vinculum?tab=questions").await;
     let bar = &page[page.find("<header").unwrap()..page.find("</header>").unwrap()];
+    // Switching projects keeps the page (the owner, 2026-11-25, D-280): from Vinculum's Questions to
+    // Lituus's; from Plan to Plan; from Settings (a dialog) to the overview.
+    assert!(bar.contains(r#"href="/p/lituus?tab=questions""#), "{bar}");
+    for (from, to) in
+        [("/p/vinculum/plan", "/p/lituus/plan"), ("/p/vinculum/settings", "/p/lituus"), ("/p/vinculum", "/p/lituus")]
+    {
+        let page = owner_page(&s, &cookie, from).await;
+        let menu = &page[page.find("pswitch-menu").unwrap()..page.find("New project").unwrap()];
+        assert!(menu.contains(&format!(r#"href="{to}">"#)), "{from}: {menu}");
+    }
     assert!(bar.contains(r#"<summary class="pswitch-btn"><span>vinculum</span>"#), "{bar}");
-    assert!(bar.contains(r#"href="/p/vinculum" aria-current="page""#), "the project is checked in the switcher");
+    assert!(
+        bar.contains(r#"href="/p/vinculum?tab=questions" aria-current="page""#),
+        "the project is checked in the switcher"
+    );
     // Questions and Decisions are one tab, Questions (Q-6, D-250): it counts the open question.
     assert!(bar.contains(
         r#"<a href="/p/vinculum?tab=questions" class="on" aria-current="page">Questions<span class="count warn">1</span></a>"#
@@ -1092,6 +1106,10 @@ async fn the_bar_shows_the_project_its_tabs_and_the_global_pages() {
     let bar = &usage[usage.find("<header").unwrap()..usage.find("</header>").unwrap()];
     assert!(bar.contains(r#"<summary class="pswitch-btn"><span>vinculum</span>"#), "{bar}");
     assert!(bar.contains(r#"<a href="/p/vinculum">Overview</a>"#), "its tabs, none lit: {bar}");
+    assert!(
+        bar.contains(r#"href="/p/lituus">"#),
+        "from a page outside the projects, the switcher goes to the overview"
+    );
     assert!(bar.contains(r#"Questions<span class="count warn">1</span>"#), "with their counts");
     assert!(bar.contains(r#"<a href="/usage" class="on" aria-current="page">"#), "the page is still Usage");
     let unknown = owner_page(&s, &format!("{cookie}; af_project=nope"), "/usage").await;

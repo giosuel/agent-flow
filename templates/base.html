@@ -35,7 +35,7 @@
       <summary class="pswitch-btn{% if nav.here.is_none() && nav.on_projects() %} on{% endif %}">{% if let Some(h) = nav.here %}<span>{{ h.name }}</span>{% else %}<span>All projects</span>{% endif %}<span class="chev-d">{{ crate::web::icons::icon("chevron")|safe }}</span></summary>
       <div class="bmenu pswitch-menu">
         <div class="bmenu-h"><span class="label">Projects</span><a href="/projects">All projects</a></div>
-        {% for p in nav.projects %}<a class="bmi{% if let Some(h) = nav.here %}{% if h.slug == p.slug %} on{% endif %}{% endif %}" href="/p/{{ p.slug }}"{% if let Some(h) = nav.here %}{% if h.slug == p.slug %} aria-current="page"{% endif %}{% endif %}>{{ crate::web::icons::icon("folder")|safe }}<span>{{ p.name }}</span>{% if p.online %}<span class="dot ok" aria-label="agent online"></span>{% endif %}</a>{% endfor %}
+        {% for p in nav.projects %}<a class="bmi{% if let Some(h) = nav.here %}{% if h.slug == p.slug %} on{% endif %}{% endif %}" href="{% if let Some(h) = nav.here %}{{ h.switch_to(p.slug) }}{% else %}/p/{{ p.slug }}{% endif %}"{% if let Some(h) = nav.here %}{% if h.slug == p.slug %} aria-current="page"{% endif %}{% endif %}>{{ crate::web::icons::icon("folder")|safe }}<span>{{ p.name }}</span>{% if p.online %}<span class="dot ok" aria-label="agent online"></span>{% endif %}</a>{% endfor %}
         <hr><a class="bmi" href="/projects/new">{{ crate::web::icons::icon("plus")|safe }}<span>New project</span></a>
       </div>
     </details>
