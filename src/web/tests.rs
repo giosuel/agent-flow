@@ -732,6 +732,37 @@ async fn the_usage_page_shows_the_plan_and_the_cost() {
 }
 
 #[tokio::test]
+async fn a_question_without_options_is_answered_in_a_text_box() {
+    // The owner, 2026-11-25 (D-287): "sometimes a question has no answers, so a text box there
+    // would be appropriate instead".
+    let s = TestServer::start().await;
+    let token = s.token(TokenKind::Project, Some("vinculum")).await;
+    let sess = mcp_session(&s, &token).await;
+    mcp_tool(&s, &token, &sess, "ask_question", json!({"title": "Which port?"})).await;
+    let cookie = s.owner_cookie().await;
+    let overview = owner_page(&s, &cookie, "/p/vinculum").await;
+    assert!(overview.contains(r#"<textarea id="qw-Q-1" name="words" rows="4""#), "{overview}");
+    assert!(!overview.contains("No options"), "{overview}");
+    let tab = owner_page(&s, &cookie, "/p/vinculum?tab=questions").await;
+    assert!(tab.contains(r#"<textarea id="dqw-Q-1" name="words""#), "{tab}");
+    let page = owner_page(&s, &cookie, "/p/vinculum/Q-1").await;
+    assert!(page.contains(r#"<textarea id="words" name="words""#), "{page}");
+    // The words are the answer.
+    let res = s
+        .http
+        .post(s.url("/p/vinculum/Q-1/answer"))
+        .header(COOKIE, &cookie)
+        .header(ORIGIN, &s.base)
+        .form(&[("words", "8990"), ("next", "/p/vinculum?answered=Q-1")])
+        .send()
+        .await
+        .unwrap();
+    assert!(res.status().is_redirection() || res.status().is_success(), "{}", res.status());
+    let q = owner_page(&s, &cookie, "/p/vinculum/Q-1").await;
+    assert!(q.contains("8990") && !q.contains(r#"name="words""#), "{q}");
+}
+
+#[tokio::test]
 async fn the_owner_answers_on_the_page_and_the_agent_reads_it() {
     let s = TestServer::start().await;
     let token = s.token(TokenKind::Project, Some("vinculum")).await;
@@ -804,6 +835,11 @@ async fn the_owner_answers_on_the_page_and_the_agent_reads_it() {
     let tab = owner_page(&s, &cookie, "/p/vinculum?tab=questions").await;
     let (none, decided) = (tab.find("No open questions.").unwrap(), tab.find("A or B?").unwrap());
     assert!(none < decided && !tab.contains("Waiting on you"), "{tab}");
+    // The tab is the page's title; the project's name is the overview's.
+    assert!(tab.contains("<h1>Questions</h1>"), "{tab}");
+    // The overview's title is Overview too (D-281); the project's name is in the switcher and the path.
+    let overview = owner_page(&s, &cookie, "/p/vinculum").await;
+    assert!(overview.contains("<h1>Overview</h1>") && overview.contains("<title>Overview · "), "{overview}");
     // Answering twice goes back to the question with the reason.
     let res = s
         .http
@@ -1056,11 +1092,25 @@ async fn the_bar_shows_the_project_its_tabs_and_the_global_pages() {
         json!({"title": "A or B?", "options": [{"title": "A"}, {"title": "B"}]}),
     )
     .await;
+    s.token(TokenKind::Project, Some("lituus")).await;
     let cookie = s.owner_cookie().await;
     let page = owner_page(&s, &cookie, "/p/vinculum?tab=questions").await;
     let bar = &page[page.find("<header").unwrap()..page.find("</header>").unwrap()];
+    // Switching projects keeps the page (the owner, 2026-11-25, D-280): from Vinculum's Questions to
+    // Lituus's; from Plan to Plan; from Settings (a dialog) to the overview.
+    assert!(bar.contains(r#"href="/p/lituus?tab=questions""#), "{bar}");
+    for (from, to) in
+        [("/p/vinculum/plan", "/p/lituus/plan"), ("/p/vinculum/settings", "/p/lituus"), ("/p/vinculum", "/p/lituus")]
+    {
+        let page = owner_page(&s, &cookie, from).await;
+        let menu = &page[page.find("pswitch-menu").unwrap()..page.find("New project").unwrap()];
+        assert!(menu.contains(&format!(r#"href="{to}">"#)), "{from}: {menu}");
+    }
     assert!(bar.contains(r#"<summary class="pswitch-btn"><span>vinculum</span>"#), "{bar}");
-    assert!(bar.contains(r#"href="/p/vinculum" aria-current="page""#), "the project is checked in the switcher");
+    assert!(
+        bar.contains(r#"href="/p/vinculum?tab=questions" aria-current="page""#),
+        "the project is checked in the switcher"
+    );
     // Questions and Decisions are one tab, Questions (Q-6, D-250): it counts the open question.
     assert!(bar.contains(
         r#"<a href="/p/vinculum?tab=questions" class="on" aria-current="page">Questions<span class="count warn">1</span></a>"#
@@ -1091,6 +1141,10 @@ async fn the_bar_shows_the_project_its_tabs_and_the_global_pages() {
     let bar = &usage[usage.find("<header").unwrap()..usage.find("</header>").unwrap()];
     assert!(bar.contains(r#"<summary class="pswitch-btn"><span>vinculum</span>"#), "{bar}");
     assert!(bar.contains(r#"<a href="/p/vinculum">Overview</a>"#), "its tabs, none lit: {bar}");
+    assert!(
+        bar.contains(r#"href="/p/lituus">"#),
+        "from a page outside the projects, the switcher goes to the overview"
+    );
     assert!(bar.contains(r#"Questions<span class="count warn">1</span>"#), "with their counts");
     assert!(bar.contains(r#"<a href="/usage" class="on" aria-current="page">"#), "the page is still Usage");
     let unknown = owner_page(&s, &format!("{cookie}; af_project=nope"), "/usage").await;
@@ -4056,27 +4110,23 @@ async fn questions_and_decisions_have_scopes() {
     assert_eq!(t1["state"], "todo", "archiving unblocks: {t1}");
     let (ok, r) = call("update_question", json!({"id": "Q-4", "state": "open", "reason": "needed after all"})).await;
     assert!(ok && r["state"] == "open", "{r}");
-    // The owner moves an open question's scope on its page before answering.
+    // The agent moves a question to another scope, not the owner (2026-11-25, D-288): its page
+    // only says where the decision goes.
+    let (ok, r) = call("update_question", json!({"id": "Q-3", "scope": "M9", "reason": "about M9"})).await;
+    assert!(ok && r["scope"] == "M9", "{r}");
     let cookie = s.owner_cookie().await;
     let page = s.http.get(s.url("/p/vinculum/Q-3")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
-    assert!(page.contains("Its decision goes into") && page.contains("Project-wide"), "{page}");
-    let m9: i64 =
-        s.db.call(|c| {
-            let p = crate::projects::require(c, "vinculum")?;
-            Ok(crate::projects::find_milestone(c, p.id, "M9")?.id)
-        })
-        .await
-        .unwrap();
+    assert!(page.contains("Scope: M9 · ") && !page.contains(r#"name="scope""#), "{page}");
     let res = s
         .http
         .post(s.url("/p/vinculum/Q-3/scope"))
         .header(COOKIE, &cookie)
         .header(ORIGIN, &s.base)
-        .form(&[("scope", m9.to_string())])
+        .form(&[("scope", "project")])
         .send()
         .await
         .unwrap();
-    assert!(res.status().is_redirection());
+    assert!(!res.status().is_success() && !res.status().is_redirection(), "{}", res.status());
     let res = s
         .http
         .post(s.url("/p/vinculum/Q-3/answer"))

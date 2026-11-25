@@ -30,7 +30,6 @@ pub fn routes() -> Router<AppState> {
         .route("/p/{slug}/plan/{ms}", get(plan_of))
         .route("/p/{slug}/{id}", get(record))
         .route("/p/{slug}/{id}/answer", post(answer))
-        .route("/p/{slug}/{id}/scope", post(set_scope))
         .route("/p/{slug}/status", post(set_status))
         .route("/p/{slug}/setup-code", post(setup_code))
         .route("/p/{slug}/settings", get(settings_page).post(save_settings))
@@ -1786,7 +1785,6 @@ struct RecordPage {
     /// A question's or decision's scope ("M9 · Effects" or "Project-wide"); empty otherwise.
     scope: String,
     /// For an open question, the owner's choices: (value, label, current).
-    scope_choices: Vec<(String, String, bool)>,
     /// A question: the earlier decisions it touches.
     related: Vec<RecordRow>,
     extra: Vec<(String, String)>,
@@ -2070,23 +2068,6 @@ async fn load_record_page(
             } else {
                 String::new()
             };
-            let scope_choices: Vec<(String, String, bool)> = if is_owner
-                && r.kind == Kind::Question
-                && r.state == "open"
-            {
-                std::iter::once(("project".to_owned(), "Project-wide".to_owned(), r.milestone_id.is_none()))
-                    .chain(
-                        projects::milestones(c, r.project_id)?
-                            .into_iter()
-                            .filter(|m| m.parent_id.is_none() && (m.state != "closed" || r.milestone_id == Some(m.id)))
-                            .map(|m| {
-                                (m.id.to_string(), format!("{} · {}", m.name, m.title), r.milestone_id == Some(m.id))
-                            }),
-                    )
-                    .collect()
-            } else {
-                Vec::new()
-            };
             let path = record_path(c, &r, &project)?;
             let note_place = match (r.kind, r.milestone_id) {
                 (Kind::Note, Some(id)) => Some(plan_place(c, &project.slug, id)?),
@@ -2098,7 +2079,7 @@ async fn load_record_page(
                 links,
                 history,
                 buttons,
-                (session_url, draft, draft_notice, to_test, time, timings, scope, scope_choices, path, note_place),
+                (session_url, draft, draft_notice, to_test, time, timings, scope, path, note_place),
             )))
         })
         .await?
@@ -2109,7 +2090,7 @@ async fn load_record_page(
         links,
         history,
         buttons,
-        (session_url, draft, draft_notice, to_test, time, timings, scope, scope_choices, path, note_place),
+        (session_url, draft, draft_notice, to_test, time, timings, scope, path, note_place),
     ) = page;
     let note = (r.kind == Kind::Note).then(|| {
         let mut n = super::notes::page(&state.config.data_dir(), &r);
@@ -2285,7 +2266,6 @@ async fn load_record_page(
         answer_line,
         can_answer: is_owner && r.kind == Kind::Question && r.state == "open",
         scope,
-        scope_choices,
         related,
         going_ahead: (r.kind == Kind::Question && r.state == "open" && crate::waiting::is_going_ahead(&r)).then(|| {
             let n = r.data.get("recommended").and_then(Value::as_u64).unwrap_or(0) as usize;
@@ -2497,56 +2477,6 @@ fn history_event(h: &records::Revision, r: &Record, tz: &Tz) -> HistoryEvent {
         e.what = "Changed".into();
     }
     e
-}
-
-#[derive(Deserialize)]
-struct ScopeForm {
-    /// "project" or a milestone's id.
-    scope: String,
-}
-
-/// The owner moves an open question to another scope before answering: its decision lands there.
-async fn set_scope(
-    State(state): State<AppState>,
-    Extension(actor): Extension<Actor>,
-    Path((slug, id)): Path<(String, String)>,
-    Form(form): Form<ScopeForm>,
-) -> AppResult<Response> {
-    actor.require_owner()?;
-    let (s, i) = (slug.clone(), id.clone());
-    state
-        .db
-        .call(move |c| {
-            let tx = c.transaction()?;
-            let q = records::find_str(&tx, &format!("{s}/{i}"), None)?;
-            if q.kind != Kind::Question || q.state != "open" {
-                anyhow::bail!("only an open question's scope can be changed");
-            }
-            let to = match form.scope.trim() {
-                "project" => None,
-                v => {
-                    let m = projects::get_milestone(&tx, v.parse::<i64>()?)?;
-                    if m.project_id != q.project_id || m.parent_id.is_some() || m.archived_at.is_some() {
-                        anyhow::bail!("not a milestone of this project");
-                    }
-                    Some(m.id)
-                }
-            };
-            records::update(
-                &tx,
-                &q,
-                "owner",
-                records::Patch {
-                    milestone_id: Some(to),
-                    note: format!("scope set to {} by the owner", projects::scope_name(&tx, to)),
-                    ..Default::default()
-                },
-            )?;
-            tx.commit()?;
-            Ok(())
-        })
-        .await?;
-    Ok(Redirect::to(&format!("/p/{slug}/{id}")).into_response())
 }
 
 #[derive(Deserialize)]

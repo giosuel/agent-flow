@@ -1374,3 +1374,54 @@ document.addEventListener("click", (e) => {
     was.forEach((b, i) => { if (b.dataset.sortDir && now[i]) sort(now[i], +b.dataset.sortCol, b.dataset.sortDir); });
   };
 })();
+
+// A path folds its first parts into "…" only when it doesn't fit its line, and "…" shows them all
+// (the owner, 2026-11-25, D-282: "why is this always ".../" ? can we expand this?"). Measured with
+// its parts unshrunk, again when its width changes and when a dialog brings one.
+(() => {
+  const fit = (nav) => {
+    const ol = nav.querySelector("ol");
+    if (!ol || nav.classList.contains("unfolded")) return;
+    for (const li of ol.querySelectorAll("li.pfold")) li.remove();
+    const items = [...ol.children];
+    for (const li of items) li.hidden = false;
+    nav.classList.remove("folded");
+    nav.classList.add("pmeasure");
+    const fits = () => ol.scrollWidth <= ol.clientWidth + 1;
+    if (items.length > 1 && !fits()) {
+      const more = document.createElement("li");
+      more.className = "pfold";
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "pfold-btn";
+      b.textContent = "…";
+      b.title = "Show the whole path";
+      b.setAttribute("aria-label", "Show the whole path");
+      more.append(b);
+      ol.insertBefore(more, items[0]);
+      let i = 0;
+      while (i < items.length - 1 && !fits()) items[i++].hidden = true;
+      nav.classList.add("folded");
+    }
+    nav.classList.remove("pmeasure");
+  };
+  const seen = new WeakSet();
+  const ro = "ResizeObserver" in window ? new ResizeObserver((es) => { for (const e of es) fit(e.target); }) : null;
+  const all = () => {
+    for (const nav of document.querySelectorAll("nav.path")) {
+      if (!seen.has(nav)) { seen.add(nav); if (ro) ro.observe(nav); }
+      fit(nav);
+    }
+  };
+  document.addEventListener("click", (e) => {
+    const b = e.target.closest && e.target.closest(".pfold-btn");
+    if (!b) return;
+    const nav = b.closest("nav.path");
+    nav.classList.add("unfolded");
+    nav.classList.remove("folded");
+    b.parentElement.remove();
+    for (const li of nav.querySelectorAll("li[hidden]")) li.hidden = false;
+  });
+  document.addEventListener("af:content", () => requestAnimationFrame(all));
+  all();
+})();

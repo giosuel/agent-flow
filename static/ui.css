@@ -387,6 +387,8 @@ a.chip.link:hover { color: var(--ink); box-shadow: inset 0 0 0 1px var(--border)
 .choice.rec .num { background: var(--accent-chip); color: var(--accent-chip-ink); }
 .choice-own { display: flex; gap: var(--sp-2); justify-content: flex-end; }
 .choice-own input { flex: 1; min-width: 0; }
+.choice-own.alone { flex-direction: column; align-items: flex-end; }
+.choice-own.alone textarea { align-self: stretch; min-height: 96px; }
 
 /* Copy field: a command or token with the copy icon in its corner (app.js adds the button) */
 .cmd { display: block; margin: 0; padding: 10px 12px; background: var(--sunken); color: var(--ink); border: 1px solid var(--line); border-radius: var(--r-md); font: var(--fs-sub)/1.5 var(--mono); overflow-x: auto; white-space: pre; }

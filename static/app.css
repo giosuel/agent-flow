@@ -82,9 +82,20 @@ pre code { background: none; padding: 0; }
 .path a:hover { color: var(--hover); background: var(--soft); }
 .path [aria-current] { color: var(--ink); font-weight: 500; }
 /* In a dialog's header: the last three parts, the rest behind "…". */
-.rdlg .dlg-t .path ol { flex-wrap: nowrap; overflow: hidden; }
-.rdlg .dlg-t .path li:nth-last-child(n+4) { display: none; }
-.rdlg .dlg-t .path li:nth-last-child(3):not(:first-child)::before { content: "… /"; color: var(--muted); padding: 0 8px 0 0; }
+/* A path folds its first parts into "…" only when it doesn't fit its line, and "…" shows them
+   (the owner, 2026-11-25, D-282: "why is this always ".../" ? can we expand this?"); app.js
+   measures it with its parts unshrunk. */
+/* The path shares its row with the session link and the like: it shrinks, they don't, and it
+   folds when they don't fit together. */
+.crumb-row:has(> .path) { flex-wrap: nowrap; }
+.crumb-row > .path { flex: 0 1 auto; min-width: 0; }
+.crumb-row:has(> .path) > :not(.path) { flex: none; }
+.path.pmeasure ol, .path.folded ol { flex-wrap: nowrap; }
+.path.pmeasure li { flex-shrink: 0; }
+.path.folded ol { overflow: hidden; }
+.path li[hidden] { display: none; }
+.pfold-btn { border: 0; background: none; font: inherit; color: var(--ink2); cursor: pointer; border-radius: 6px; padding: 2px 4px; margin: -2px -4px; }
+.pfold-btn:hover { color: var(--hover); background: var(--soft); }
 .session-link {
   margin-left: auto; display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 0 12px;
   border: 1px solid var(--accent); border-radius: 18px; background: var(--soft);
@@ -665,8 +676,6 @@ a.ms:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 /* A mockup's state (the owner, 2026-11-12). */
 
 /* A question's scope picker: the select gives way on a phone so Move stays inside the card. */
-.scope-form .scope-pick { flex-wrap: nowrap; min-width: 0; max-width: 100%; }
-.scope-form .scope-pick select { flex: 1 1 auto; min-width: 0; }
 
 /* The Reload button under a page's heading; conversation groups in the list. */
 /* A page's title with its few controls on the right (Usage, Conversations). */
@@ -1146,9 +1155,7 @@ ol.lrows { padding: 0; margin: 0; list-style: none; gap: 0; }
   .qmini .of-chev { flex: none; }
   .qm-t { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
   .qmini { display: flex; align-items: center; gap: 10px; justify-content: space-between; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); text-decoration: none; font-size: var(--fs-sm); line-height: 1.4; }
-  /* The phone: the back bar goes up one level; the path shows its end. */
-  .crumb-row .path li:nth-last-child(n+3) { display: none; }
-  .crumb-row .path li:nth-last-child(2):not(:first-child)::before { content: "… /"; padding: 0 8px 0 0; }
+  /* The phone: the back bar goes up one level; the path folds when it doesn't fit (D-282). */
   .ml-row { grid-template-columns: 16px 44px minmax(0, 1fr) 16px; gap: 10px; padding: 8px 14px; }
   .ml-row .c { grid-column: 3; grid-row: 2; }
   .ml-row .pbar, .ml-row .tg { display: none; }
@@ -1417,8 +1424,10 @@ ol.lrows { padding: 0; margin: 0; list-style: none; gap: 0; }
   .gnav a.on .gbadge { position: static; }
   .gnav a[data-name]:hover::after, .gnav a[data-name]:focus-visible::after { content: attr(data-name); position: absolute; top: calc(100% + 6px); left: 50%; transform: translateX(-50%); z-index: 31; padding: 4px 9px; border-radius: 6px; background: var(--ink); color: var(--sunken); font-size: var(--fs-sub); font-weight: 500; white-space: nowrap; pointer-events: none; }
   .vsep { display: block; flex: none; width: 4px; }
-  /* In a project the bar names it and holds its tabs: the page's own title and tabs are the phone's. */
-  .proj-head { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  /* In a project the bar names it and holds its tabs: the page's own title and tabs are the phone's.
+     Its path stays, as on a record's page (the owner, 2026-11-24: "lets add this navigation to every
+     project page"), and so does its title (the tab's name). */
+  .proj-head > :not(.crumb-row, h1) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   .proj-tabs { display: none; }
 }
 
