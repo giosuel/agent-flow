@@ -21,6 +21,55 @@ pub struct Choice {
     pub recommended: bool,
 }
 
+/// A long table's pages, for the pager (templates/ui.html, `pager`): "1–20 of 214", page 1 of 11,
+/// and the addresses of the pages before and after it.
+pub struct Pager {
+    /// What it pages, for screen readers: "Pages of the build history".
+    pub label: String,
+    /// "1–20 of 214"
+    pub range: String,
+    pub page: i64,
+    pub pages: i64,
+    pub prev: Option<String>,
+    pub next: Option<String>,
+    /// What the links lead to: "Newer jobs", "Older jobs".
+    pub prev_label: String,
+    pub next_label: String,
+}
+
+impl Pager {
+    /// Page `page` (from 1, kept within the pages there are) of `total` rows, `per` a page; `href`
+    /// is a page's address.
+    pub fn new(label: &str, total: i64, page: i64, per: i64, href: impl Fn(i64) -> String) -> Self {
+        let per = per.max(1);
+        let pages = ((total + per - 1) / per).max(1);
+        let page = page.clamp(1, pages);
+        let first = (page - 1) * per + 1;
+        let last = (page * per).min(total);
+        Pager {
+            label: label.to_owned(),
+            range: if total == 0 { "none".to_owned() } else { format!("{first}–{last} of {total}") },
+            page,
+            pages,
+            prev: (page > 1).then(|| href(page - 1)),
+            next: (page < pages).then(|| href(page + 1)),
+            prev_label: "Previous page".to_owned(),
+            next_label: "Next page".to_owned(),
+        }
+    }
+
+    /// Names the pages before and after ("Newer jobs", "Older jobs").
+    pub fn labels(mut self, prev: &str, next: &str) -> Self {
+        (self.prev_label, self.next_label) = (prev.to_owned(), next.to_owned());
+        self
+    }
+
+    /// Where the rows of this page start, for the query's OFFSET.
+    pub fn offset(&self, per: i64) -> i64 {
+        (self.page - 1) * per.max(1)
+    }
+}
+
 pub fn routes() -> Router<AppState> {
     Router::new().route("/ui", get(page))
 }
@@ -123,6 +172,7 @@ struct UiPage {
     spacing: &'static [u32],
     radii: &'static [(&'static str, &'static str)],
     icons: &'static [&'static str],
+    pager: Pager,
 }
 
 impl UiPage {
@@ -153,5 +203,24 @@ async fn page(State(state): State<AppState>, Extension(actor): Extension<Actor>)
         spacing: &[2, 4, 6, 8, 12, 16, 20, 24, 32, 48],
         radii: &[("xs", "4"), ("sm", "6"), ("md", "8"), ("lg", "12"), ("xl", "16"), ("pill", "999")],
         icons: super::icons::ALL,
+        pager: Pager::new("Pages of the example", 214, 1, 20, |p| format!("/ui?page={p}#ui-table"))
+            .labels("Newer jobs", "Older jobs"),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Pager;
+
+    #[test]
+    fn a_pager_counts_its_rows_and_pages() {
+        let p = Pager::new("x", 214, 1, 20, |p| format!("?page={p}"));
+        assert_eq!((p.range.as_str(), p.page, p.pages), ("1–20 of 214", 1, 11));
+        assert_eq!((p.prev, p.next.as_deref()), (None, Some("?page=2")));
+        let p = Pager::new("x", 214, 99, 20, |p| format!("?page={p}"));
+        assert_eq!((p.range.as_str(), p.page, p.offset(20)), ("201–214 of 214", 11, 200));
+        assert_eq!((p.prev.as_deref(), p.next), (Some("?page=10"), None));
+        let p = Pager::new("x", 0, 0, 20, |p| format!("?page={p}"));
+        assert_eq!((p.range.as_str(), p.page, p.pages, p.offset(20)), ("none", 1, 1, 0));
+    }
 }
