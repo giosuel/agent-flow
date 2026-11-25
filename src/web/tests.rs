@@ -2121,7 +2121,7 @@ async fn usage_and_machine_pages_show_the_counts() {
     // The phone's More tab lists the sections that don't fit in the tab bar.
     let more = get("/more").await.text().await.unwrap();
     assert!(more.contains("Conversations") && more.contains("class=\"tabbar\""), "{more}");
-    let res = get("/machines?range=6h").await;
+    let res = get("/machines").await;
     assert_eq!(res.status(), StatusCode::OK);
     assert!(res.text().await.unwrap().contains("GB free of"));
     // The live figures: one per tile, in the same order.

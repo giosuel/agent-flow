@@ -309,12 +309,10 @@ ol.history { padding-left: 0; list-style: none; font-size: var(--fs-sm); color: 
 .chart-marks a:hover .hit { fill: rgba(255,255,255,.04); }
 .x-labels { display: flex; justify-content: space-between; font-size: var(--fs-micro); padding-top: 6px; }
 .x-labels span { flex: 1 1 0; text-align: center; min-width: 0; overflow: hidden; white-space: nowrap; }
-.duo-charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px; }
 .tasks-usage summary { cursor: pointer; }
 .sec.wrap { flex-wrap: wrap; gap: 10px; }
 .strip { display: inline-flex; align-items: flex-end; gap: 2px; height: 18px; width: 70px; vertical-align: middle; margin: 0 8px; }
 .strip span { flex: 1; background: var(--accent); border-radius: 2px 2px 0 0; min-height: 1px; opacity: .85; }
-.x-labels.edges span { flex: none; }
 /* New project */
 .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px 20px; }
 .form-grid .span-all { grid-column: 1 / -1; }

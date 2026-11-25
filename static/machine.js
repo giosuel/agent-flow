@@ -28,12 +28,6 @@
     const freshTiles = doc.getElementById("tiles");
     const oldTiles = document.getElementById("tiles");
     if (freshTiles && oldTiles) oldTiles.replaceWith(document.importNode(freshTiles, true));
-    const fresh = doc.getElementById("hist");
-    const old = document.getElementById("hist");
-    if (fresh && old) {
-      old.replaceWith(document.importNode(fresh, true));
-      document.dispatchEvent(new Event("af:charts"));
-    }
   }
 
   // The Build servers section, when there is one.
