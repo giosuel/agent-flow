@@ -23,6 +23,12 @@ pub const MAX_PENDING: i64 = 30;
 /// Requests waiting from one address (anonymous) or one connected machine.
 pub const MAX_PENDING_PER_IP: i64 = 5;
 
+/// A request's arguments are a few short fields; anyone may send a connect request.
+pub const MAX_ARGS_BYTES: usize = 2000;
+/// Decided and expired requests are kept this long (for the terminal that asked and the page),
+/// then deleted: the Log has what was asked and decided.
+const KEEP_MS: i64 = 86_400_000;
+
 /// What can be asked for.
 pub const ACTIONS: &[&str] = &[
     "connect",
@@ -50,6 +56,10 @@ pub struct Approval {
     pub error: Option<String>,
     pub created_at: i64,
     pub expires_at: i64,
+    /// For `token_revoke` and `token_rotate`: whose token it is, as the server knows it ("the
+    /// admin token "AgentFlow Consultant""), so the owner sees what they'd give away.
+    #[serde(default)]
+    pub whose: String,
 }
 
 /// A code people compare at a glance: six characters without look-alikes (no 0/O, 1/I/L).
@@ -73,6 +83,25 @@ pub fn check_machine(machine: &str) -> anyhow::Result<String> {
 /// Checks a request's arguments before anyone is asked, so the owner only sees things that can
 /// be done.
 pub fn check_args(c: &Connection, action: &str, args: &Value) -> anyhow::Result<()> {
+    // Only what the action reads: the page shows the arguments, so an extra one ("note": "your
+    // laptop's own token") would be the requester's words next to the server's.
+    let known: &[&str] = match action {
+        "token_create" => &["kind", "project", "name"],
+        "token_revoke" | "token_rotate" => &["id"],
+        "project_add" => &["slug", "name"],
+        "project_create" => &["name", "slug", "folder", "description", "repo"],
+        "builder_create" => &["name", "threads", "memory_gb", "user"],
+        "builder_remove" => &["name"],
+        "import_prs" => &["project", "from", "to"],
+        _ => &[],
+    };
+    let Some(given) = args.as_object() else { bail!("the arguments must be an object") };
+    if let Some(k) = given.keys().find(|k| !known.contains(&k.as_str())) {
+        bail!("{action} takes no argument {k:?}");
+    }
+    if args.to_string().len() > MAX_ARGS_BYTES {
+        bail!("the arguments are too long");
+    }
     let s = |k: &str| args.get(k).and_then(Value::as_str).unwrap_or("").trim().to_owned();
     let n = |k: &str| args.get(k).and_then(Value::as_i64);
     match action {
@@ -216,7 +245,34 @@ fn row(r: &rusqlite::Row) -> rusqlite::Result<Approval> {
         error: r.get(8)?,
         created_at: r.get(9)?,
         expires_at: r.get(10)?,
+        whose: String::new(),
     })
+}
+
+/// Looks up whose token a request revokes or replaces (revoked ones too: the page is shown
+/// again after the decision).
+fn with_whose(c: &Connection, mut a: Approval) -> anyhow::Result<Approval> {
+    if !matches!(a.action.as_str(), "token_revoke" | "token_rotate") {
+        return Ok(a);
+    }
+    let id = a.args.get("id").and_then(Value::as_i64).unwrap_or(0);
+    let found: Option<(String, String, Option<String>)> = c
+        .query_row(
+            "SELECT t.kind, t.name, p.slug FROM tokens t LEFT JOIN projects p ON p.id = t.project_id WHERE t.id = ?1",
+            [id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .optional()?;
+    a.whose = match found {
+        Some((kind, name, project)) => match (kind.as_str(), project) {
+            ("project", Some(slug)) => format!("the project {slug}'s token"),
+            ("device", _) => format!("the machine {name}'s token"),
+            ("builder", _) => format!("the builder {name}'s token"),
+            (kind, _) => format!("the {kind} token \"{name}\""),
+        },
+        None => String::new(),
+    };
+    Ok(a)
 }
 
 const COLUMNS: &str = "id, code, action, args, machine, requested_by, ip, state, error, created_at, expires_at";
@@ -230,13 +286,19 @@ pub fn expire(c: &Connection) -> anyhow::Result<()> {
         "UPDATE approvals SET result = NULL WHERE result IS NOT NULL AND coalesce(decided_at, expires_at) + ?2 <= ?1",
         params![now, MINUTES * 60_000],
     )?;
+    // Nothing else removes them, and anyone may ask to connect.
+    c.execute(
+        "DELETE FROM approvals WHERE state != 'pending' AND coalesce(decided_at, expires_at) + ?2 <= ?1",
+        params![now, KEEP_MS],
+    )?;
     Ok(())
 }
 
 pub fn by_code(c: &Connection, code: &str) -> anyhow::Result<Option<Approval>> {
     expire(c)?;
     let code = code.trim().to_uppercase();
-    Ok(c.query_row(&format!("SELECT {COLUMNS} FROM approvals WHERE code = ?1"), [code], row).optional()?)
+    let found = c.query_row(&format!("SELECT {COLUMNS} FROM approvals WHERE code = ?1"), [code], row).optional()?;
+    found.map(|a| with_whose(c, a)).transpose()
 }
 
 /// The requests waiting now, newest first (the owner's list).
@@ -244,7 +306,8 @@ pub fn pending(c: &Connection) -> anyhow::Result<Vec<Approval>> {
     expire(c)?;
     let mut st =
         c.prepare(&format!("SELECT {COLUMNS} FROM approvals WHERE state = 'pending' ORDER BY created_at DESC"))?;
-    Ok(st.query_map([], row)?.collect::<Result<_, _>>()?)
+    let all = st.query_map([], row)?.collect::<Result<Vec<_>, _>>()?;
+    all.into_iter().map(|a| with_whose(c, a)).collect()
 }
 
 /// The owner's answer. Only a pending request can be decided; the caller then does it (see
@@ -413,6 +476,12 @@ pub fn describe(a: &Approval) -> String {
         "connect" => format!("Connect {} to AgentFlow", a.machine),
         "token_create" if s("kind") == "project" => format!("Create a token for the project {}", s("project")),
         "token_create" => format!("Create a {} token \"{}\"", s("kind"), s("name")),
+        // Whose token, from the server's own records: the id alone doesn't say that it's the
+        // consultant's admin token, or that the new one goes to the machine that asks.
+        "token_revoke" if !a.whose.is_empty() => format!("Revoke {} (id {})", a.whose, n("id")),
+        "token_rotate" if !a.whose.is_empty() => {
+            format!("Replace {} (id {}); the new one goes to {}", a.whose, n("id"), a.machine)
+        }
         "token_revoke" => format!("Revoke token {}", n("id")),
         "token_rotate" => format!("Replace token {} with a new one", n("id")),
         "project_add" => format!("Add the project {} ({})", s("name"), s("slug")),
@@ -473,7 +542,7 @@ mod tests {
             decide(c, &code, false)?;
             assert_eq!(super::poll(c, &poll)?.unwrap()["state"], "denied");
             let (_, poll) = create(c, "connect", &json!({}), "viber@pc", "", None)?;
-            c.execute("UPDATE approvals SET expires_at = 0 WHERE state = 'pending'", [])?;
+            c.execute("UPDATE approvals SET expires_at = ?1 WHERE state = 'pending'", [now_ms() - 1])?;
             assert_eq!(super::poll(c, &poll)?.unwrap()["state"], "expired");
             for i in 0..MAX_PENDING_PER_IP {
                 create(c, "connect", &json!({}), &format!("m{i}"), "", Some("10.0.0.1"))?;
@@ -484,6 +553,67 @@ mod tests {
             }
             assert!(create(c, "connect", &json!({}), "m", "", Some("10.0.2.1")).is_err(), "a flood is cut off");
             assert!(create(c, "backup", &json!({}), "viber@pc", "pc", None).is_ok(), "the owner still gets through");
+            Ok(())
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn token_requests_say_whose_token_it_is() {
+        let db = Db::open_memory();
+        db.call_blocking(|c| {
+            let (adm, _) = auth::create_token(c, TokenKind::Admin, "AgentFlow Consultant", None)?;
+            let (code, _) = create(c, "token_rotate", &json!({"id": adm}), "viber@pc", "pc", None)?;
+            let what = describe(&by_code(c, &code)?.unwrap());
+            assert_eq!(
+                what,
+                format!("Replace the admin token \"AgentFlow Consultant\" (id {adm}); the new one goes to viber@pc")
+            );
+            let (dev, _) = auth::create_token(c, TokenKind::Device, "viber@mothman", None)?;
+            let (code, _) = create(c, "token_revoke", &json!({"id": dev}), "viber@pc", "pc", None)?;
+            assert_eq!(pending(c)?[0].code, code);
+            assert_eq!(describe(&pending(c)?[0]), format!("Revoke the machine viber@mothman's token (id {dev})"));
+            Ok(())
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn arguments_the_action_doesnt_know_are_refused() {
+        let db = Db::open_memory();
+        db.call_blocking(|c| {
+            let (adm, _) = auth::create_token(c, TokenKind::Admin, "x", None)?;
+            assert!(
+                create(c, "token_rotate", &json!({"id": adm, "note": "your laptop's token"}), "m", "d", None).is_err()
+            );
+            assert!(create(c, "connect", &json!({"note": "the owner's phone"}), "m", "", None).is_err());
+            assert!(create(c, "backup", &json!(["x"]), "m", "d", None).is_err(), "not an object");
+            // What flow sends still goes through.
+            let builder = json!({"name": "testbox", "threads": 16, "memory_gb": 64, "user": "builder"});
+            create(c, "builder_create", &builder, "m", "d", None)?;
+            let long = json!({"slug": "x", "name": "x".repeat(MAX_ARGS_BYTES)});
+            assert!(create(c, "project_add", &long, "m", "d", None).is_err(), "too long");
+            Ok(())
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn old_requests_are_deleted() {
+        let db = Db::open_memory();
+        db.call_blocking(|c| {
+            let left = |c: &Connection| c.query_row("SELECT count(*) FROM approvals", [], |r| r.get::<_, i64>(0));
+            let (_, poll) = create(c, "connect", &json!({}), "m", "", Some("1.2.3.4"))?;
+            let (code, _) = create(c, "connect", &json!({}), "m2", "", Some("1.2.3.4"))?;
+            decide(c, &code, false)?;
+            c.execute("UPDATE approvals SET expires_at = ?1 WHERE state = 'pending'", [now_ms() - 1])?;
+            // Expired or decided a moment ago: still there for the terminal that asked.
+            assert_eq!(super::poll(c, &poll)?.unwrap()["state"], "expired");
+            assert_eq!(left(c)?, 2);
+            // A day later they're gone.
+            c.execute("UPDATE approvals SET expires_at = ?1, decided_at = ?1", [now_ms() - KEEP_MS])?;
+            expire(c)?;
+            assert_eq!(left(c)?, 0, "kept for ever");
             Ok(())
         })
         .unwrap();

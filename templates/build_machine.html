@@ -34,7 +34,7 @@
         <thead><tr>{% call tbl::th("Job", "num", "", "descending") %}{% endcall %}{% call tbl::th("Name", "text", "", "") %}{% endcall %}{% call tbl::th("Project", "text", "hide-phone", "") %}{% endcall %}{% call tbl::th("State", "text", "", "") %}{% endcall %}{% call tbl::th("Started", "num", "hide-phone", "") %}{% endcall %}{% call tbl::th("Time", "num", "hide-phone", "") %}{% endcall %}{% call tbl::th("Sent", "num", "hide-phone", "") %}{% endcall %}</tr></thead>
         <tbody>{% for r in rows %}<tr><th scope="row" data-v="{{ r.id }}"><a href="/machines/jobs/{{ r.id }}">#{{ r.id }}</a></th><td class="jn"><a href="/machines/jobs/{{ r.id }}">{% if r.named %}{{ r.title }}{% else %}<span class="mono">{{ r.title }}</span>{% endif %}</a></td><td class="hide-phone">{{ r.project }}</td><td><span class="chip {{ r.chip }}">{{ r.label }}{% if !r.why.is_empty() %}<span class="hide-phone">· {{ r.why }}</span>{% endif %}</span></td><td class="mono hide-phone" data-v="{{ r.created_at }}">{{ r.started }}</td><td class="mono hide-phone" data-v="{{ r.v.0 }}">{{ r.time }}</td><td class="mono hide-phone" data-v="{{ r.v.1 }}">{{ r.sent }}</td></tr>{% endfor %}</tbody>
       </table></div></div>
-      <div class="card-foot">{% call ui::pager(pager) %}{% endcall %}</div>
+      <div class="card-foot">{% call ui::pager_links(pager) %}{% endcall %}</div>
       {% endif %}
     </section>
   </div>

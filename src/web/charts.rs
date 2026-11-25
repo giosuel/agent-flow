@@ -16,16 +16,34 @@ const KNOWN: &[(&str, &str)] = &[
     ("antimony", "#9085e9"),
     ("realer-xpad", "#d55181"),
 ];
+/// The colours other projects take: the rest of the validated eight (yellow, green, red), then
+/// the eight a step lighter (OKLCH L + 0.15), which on the dark surface sit as far from each
+/// other as the eight themselves do (worst ΔE 7.0 against their own 7.1).
+const MORE: &[&str] = &[
+    "#c98500", "#008300", "#e66767", "#3987e5", "#d95926", "#199e70", "#9085e9", "#d55181", "#81b8fe", "#ff946f",
+    "#59ce9d", "#fbb44e", "#fe8cb0", "#48b242", "#bfbbfe", "#feaaa6",
+];
 pub const OTHER: &str = "#6E6E7A";
 
-/// A project's colour: its own, or a free one of the five in project order, or grey.
-pub fn colors(slugs: &[String]) -> Vec<&'static str> {
-    let mut free: Vec<&'static str> =
-        KNOWN.iter().filter(|(s, _)| !slugs.iter().any(|x| x == s)).map(|(_, c)| *c).collect();
-    free.reverse();
-    slugs
+/// Each project's colour, given (id, slug): its own, else the next of `MORE` that no known
+/// project of these holds, by when the project was made (its id), so a new project never repaints
+/// an older one, nor does the order they're listed in (the newest agent first). Past the end they
+/// start over: a project never gets "Other"'s grey.
+pub fn colors<'a>(projects: impl IntoIterator<Item = (i64, &'a str)>) -> Vec<&'static str> {
+    let projects: Vec<(i64, &str)> = projects.into_iter().collect();
+    let known = |slug: &str| KNOWN.iter().find(|(k, _)| *k == slug).map(|(_, c)| *c);
+    let held: Vec<&str> = projects.iter().filter_map(|(_, s)| known(s)).collect();
+    let free: Vec<&'static str> = MORE.iter().copied().filter(|c| !held.contains(c)).collect();
+    let mut others: Vec<i64> = projects.iter().filter(|(_, s)| known(s).is_none()).map(|(id, _)| *id).collect();
+    others.sort();
+    projects
         .iter()
-        .map(|s| KNOWN.iter().find(|(k, _)| k == s).map(|(_, c)| *c).or_else(|| free.pop()).unwrap_or(OTHER))
+        .map(|(id, s)| {
+            known(s).unwrap_or_else(|| {
+                let rank = others.iter().position(|x| x == id).unwrap_or(0);
+                free[rank % free.len()]
+            })
+        })
         .collect()
 }
 
@@ -266,8 +284,30 @@ mod tests {
 
     #[test]
     fn colours_follow_the_project() {
-        let c = colors(&["vinculum".into(), "giosuelio".into(), "imaginarium".into()]);
-        assert_eq!(c, vec!["#d95926", "#199e70", "#3987e5"], "a new project takes a free colour");
+        let c = colors([(2, "vinculum"), (5, "giosuelio"), (1, "imaginarium")]);
+        assert_eq!(c, vec!["#d95926", "#c98500", "#3987e5"], "a new project takes a free colour");
+        // More projects than the five: each has its own, never Other's grey, and keeps it
+        // whichever agent was heard from last.
+        let all = [
+            (1, "imaginarium"),
+            (2, "vinculum"),
+            (3, "cold-trace"),
+            (4, "antimony"),
+            (5, "realer-xpad"),
+            (6, "speculum"),
+            (7, "af-setup-try"),
+            (8, "lumen-demo"),
+            (9, "agent-flow"),
+            (10, "lituus"),
+        ];
+        let c = colors(all);
+        assert!(!c.contains(&OTHER), "{c:?}");
+        assert!(c.iter().enumerate().all(|(i, x)| !c[..i].contains(x)), "{c:?}");
+        let mut by_recency = all;
+        by_recency.reverse();
+        let mut again = colors(by_recency);
+        again.reverse();
+        assert_eq!(again, c);
         assert_eq!(nice_max(7.3), 10.0);
         assert_eq!(nice_max(23.0), 25.0);
         assert_eq!(nice_max(1_300_000.0), 2_000_000.0);

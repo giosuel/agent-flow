@@ -65,6 +65,7 @@ listen = "127.0.0.1:8790"            # never a wildcard address; refused at star
 public_url = "https://flow.example"  # decides cookie flags, passkey domain and allowed hosts
 data_dir = "~/.local/state/agentflow"
 trusted_proxies = ["127.0.0.1", "::1"]  # may set X-Forwarded-For (a reverse proxy)
+proxy_secret = ""                    # if set, the proxy must also send it as X-AgentFlow-Proxy
 session_idle_days = 14
 session_max_days = 30
 token_dir = "~/.config/agentflow/tokens"   # project tokens for headersHelper
