@@ -2855,6 +2855,10 @@ async fn screenshots_are_uploaded_shown_and_linked() {
     assert!(!only.contains("Sidebar, variant A") && only.contains("/p/vinculum/S-2/image"), "{only}");
     let page = get("/p/vinculum/S-1".into()).await.text().await.unwrap();
     assert!(page.contains("1280 × 800") && page.contains("Tabs on the left"), "{page}");
+    // Its History, as in every record's dialog: no box, the newest change, Show all at the bottom
+    // (the owner, 2026-11-25, D-268).
+    assert!(page.contains(r#"<section class="changes changes-fold" aria-labelledby="changes-h-S-1">"#), "{page}");
+    assert!(page.contains(r#"<span class="changes-when-folded">Show all "#) && !page.contains("rhist"), "{page}");
     let task = get("/p/vinculum/T-1".into()).await.text().await.unwrap();
     assert!(task.contains("Screenshots") && task.contains("S-1"), "the task links to it: {task}");
     let img = get("/p/vinculum/S-1/image".into()).await;

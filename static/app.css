@@ -169,25 +169,11 @@ ul.plain, ol.plain { margin: 0; padding-left: 18px; display: flex; flex-directio
 .prose td { padding: 8px var(--sp-4) 8px 0; border-top: 1px solid var(--line2); vertical-align: top; }
 .opts-ro li.chosen { color: var(--ink); font-weight: 500; }
 ol.history { padding-left: 0; list-style: none; font-size: var(--fs-sm); color: var(--ink2); }
-/* A record's History: folded to one line, opened a timeline by day (the owner, 2026-11-18). */
-.rhist > summary { list-style: none; display: grid; grid-template-columns: auto minmax(0, 1fr) 18px; gap: 6px 14px; align-items: center; min-height: 50px; padding: 6px 16px; border: 1px solid var(--line); border-radius: 10px; background: var(--ground); cursor: pointer; }
-.rhist > summary::-webkit-details-marker { display: none; }
-.rhist > summary .label { margin: 0; }
-.rhist > summary .hs { font-size: var(--fs-sm); color: var(--muted); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.rhist > summary .hs b { color: var(--ink); font-weight: 600; }
-.rhist > summary .i { width: var(--ic); height: var(--ic); color: var(--chip-accent-ink); transition: transform .15s; }
-.rhist[open] > summary { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
-.rhist[open] > summary .i { transform: rotate(90deg); }
-.hist-body { border: 1px solid var(--line); border-top: 0; border-radius: 0 0 var(--r-md) var(--r-md); padding: 4px 16px 4px 8px; max-height: 560px; overflow: auto; }
+/* A record's History: its chips and the file a version replaced (the section is the library's .changes, D-268). */
 .hist-chip { display: inline-block; max-width: 100%; box-sizing: border-box; line-height: 1.45; padding: 1px 8px; border-radius: 6px; background: var(--chip); border: 1px solid var(--line); font-size: var(--fs-sub); color: var(--ink2); }
 .hist-chip b { font-weight: 500; color: var(--ink); }
 .hist-chip.acc { background: var(--soft); border-color: var(--accent-line); color: var(--chip-accent-ink); }
 .hist-v { font-size: var(--fs-sub); color: var(--chip-accent-ink); }
-@media (max-width: 700px) {
-  .rhist > summary { grid-template-columns: minmax(0, 1fr) 18px; padding: 8px 14px; }
-  .rhist > summary .hs { grid-column: 1; grid-row: 2; white-space: normal; }
-  .rhist > summary .i { grid-column: 2; grid-row: 1 / 3; }
-  .hist-body { padding: 4px 12px 4px 4px; max-height: none; }
 }
 .warn-card { border-color: var(--warn-line); }
 

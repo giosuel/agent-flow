@@ -1729,8 +1729,6 @@ pub struct TimeView {
 /// history by default?"): folded to one line, opened a timeline by day, a short line per change.
 struct History {
     count: usize,
-    /// "New version, imaginarium · 23:25".
-    last: String,
     days: Vec<HistoryDay>,
 }
 
@@ -2431,15 +2429,7 @@ fn history_view(revs: &[records::Revision], r: &Record, tz: &Tz, now: i64) -> Hi
             _ => days.push(HistoryDay { label, events: vec![e] }),
         }
     }
-    let last = revs
-        .first()
-        .map(|h| {
-            let e = history_event(h, r, tz);
-            let when = if tz.day_start(h.at) == today { e.time.clone() } else { tz.short(h.at) };
-            format!("{}, {} · {when}", e.what, e.who)
-        })
-        .unwrap_or_default();
-    History { count: revs.len(), last, days }
+    History { count: revs.len(), days }
 }
 
 fn history_event(h: &records::Revision, r: &Record, tz: &Tz) -> HistoryEvent {
