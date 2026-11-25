@@ -169,14 +169,18 @@
 {% endif %}
 
 {% if tab == "prs" %}
-<section class="card pad stack">
-  <div class="sec"><h2>Open pull requests</h2><span class="sub">in merge order · changes are on GitHub</span></div>
+<section class="card">
+  <div class="card-head"><h2>Open pull requests</h2><span class="sub">in merge order · changes are on GitHub</span></div>
+  <div class="card-body stack">
   {% if prs.is_empty() %}<p class="sub">No open pull requests.</p>{% else %}{% include "pr_list.html" %}{% endif %}
+  </div>
 </section>
 {% for rel in releases %}
-<section class="card pad stack" aria-label="Release {{ rel.tag }}">
-  <div class="sec"><h2><span class="mono">{{ rel.tag }}</span> · {{ rel.title }}</h2><span class="sub">{{ rel.waits }}{% for (n, u) in rel.open_prs %} <a class="mono" href="{{ u }}">{{ n }}</a>{% endfor %}</span></div>
+<section class="card" aria-label="Release {{ rel.tag }}">
+  <div class="card-head"><h2><span class="mono">{{ rel.tag }}</span> · {{ rel.title }}</h2><span class="sub">{{ rel.waits }}{% for (n, u) in rel.open_prs %} <a class="mono" href="{{ u }}">{{ n }}</a>{% endfor %}</span></div>
+  <div class="card-body stack">
   {% for b in rel.buttons %}{% include "button.html" %}{% endfor %}
+  </div>
 </section>
 {% endfor %}
 {% endif %}

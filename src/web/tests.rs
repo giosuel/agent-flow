@@ -812,7 +812,11 @@ async fn the_owner_answers_on_the_page_and_the_agent_reads_it() {
         .unwrap();
     assert_eq!(res.headers()[LOCATION], "/p/vinculum/Q-1?error=both", "an option or own words, not both");
     let page = s.http.get(s.url("/p/vinculum/Q-1?error=both")).header(COOKIE, &cookie).send().await.unwrap();
-    assert!(page.text().await.unwrap().contains("not both"));
+    let page = page.text().await.unwrap();
+    assert!(page.contains("not both"));
+    // Sent from the question's page (or its dialog), the answer goes back to the project, not the
+    // Dashboard (09-9).
+    assert!(page.contains(r#"name="next" value="/p/vinculum?answered=Q-1""#), "{page}");
     let res = s
         .http
         .post(s.url("/p/vinculum/Q-1/answer"))
@@ -1344,7 +1348,7 @@ async fn a_subagents_model_note_and_links_show() {
     assert!(res.status().is_success(), "{}", res.text().await.unwrap());
     let cookie = s.owner_cookie().await;
     let note = owner_page(&s, &cookie, "/p/vinculum/N-1").await;
-    assert!(note.contains("by a subagent · code-review · Fable 5.2"), "{note}");
+    assert!(note.contains("its subagent · code-review · Fable 5.2"), "{note}");
     assert!(note.contains("s subagent · "), "its History says who: {note}");
     let notes = owner_page(&s, &cookie, "/p/vinculum?tab=notes").await;
     assert!(notes.contains(r#"<span class="chip info""#), "{notes}");
@@ -2511,10 +2515,13 @@ async fn notes_are_files_or_text_and_come_back() {
     assert!(!call("update_note", json!({"id": "N-1", "text": "x"})).await.0, "files get a new version instead");
 
     let cookie = s.owner_cookie().await;
-    // Its History (the owner, 2026-11-18): folded, one short line per change, the file it replaced
-    // linked, no "changed the size" noise.
+    // Its History (the owner, 2026-11-18): one short line per change, the file it replaced linked,
+    // no "changed the size" noise; on the note's page it stands open, without a box (D-268).
     let n1 = owner_page(&s, &cookie, "/p/vinculum/N-1").await;
-    assert!(n1.contains(r#"<details class="rhist">"#) && n1.contains("<b>2 changes</b> · last: New version"), "{n1}");
+    assert!(
+        n1.contains(r#"<section class="changes" aria-labelledby="changes-h-N-1">"#) && n1.contains("2 changes"),
+        "{n1}"
+    );
     assert!(n1.contains(r#"href="/p/vinculum/N-1/file?v=1""#) && n1.contains("Created the note"), "{n1}");
     assert!(!n1.contains("changed the size") && !n1.contains(">size<") && !n1.contains("report.md)"), "{n1}");
     let tab =
@@ -2571,14 +2578,37 @@ async fn notes_are_files_or_text_and_come_back() {
     assert!(!t.contains("<script>alert") && t.contains("Nothing matches"), "{t}");
     let page = s.http.get(s.url("/p/vinculum/N-1")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
     assert!(page.contains("<li>T-5</li>") && page.contains("v1"), "the newest version rendered: {page}");
-    // Opened directly (a link in a notification, a reload), it's its project's page with the note
-    // in a dialog over it (the owner, 2026-11-17: "Notes are not consistent").
+    // A note is a page of its own (the owner, 2026-11-25, D-264): its file's head with its name,
+    // size and version (no version menu, D-265), who wrote it said plainly (D-269).
+    assert!(page.contains(r#"<span class="mono ndoc-name">report.md</span>"#), "{page}");
+    assert!(page.contains("<span class=\"sub\">version 2</span>") && !page.contains("of 2<"), "{page}");
+    assert!(page.contains("vinculum&#39;s project agent"), "{page}");
+    // Opened directly (a link in a notification, a reload), it's the note's own page, not a
+    // dialog over its project's.
     let direct = |path: &'static str| {
         s.http.get(s.url(path)).header(COOKIE, &cookie).header("sec-fetch-mode", "navigate").send()
     };
     let note = direct("/p/vinculum/N-1").await.unwrap().text().await.unwrap();
-    assert!(note.contains(r#"data-open-dlg="rec" data-open-url="/p/vinculum/N-1" data-open-from="/p/vinculum""#));
-    assert!(!note.contains("<title>N-1") && !note.contains("<li>T-5</li>"), "the project's page, not the note's");
+    assert!(!note.contains("data-open-dlg") && note.contains("<title>N-1") && note.contains("<li>T-5</li>"), "{note}");
+    // A text note is shown like a Markdown file (D-267): N-3.md, its text rendered, Download gives
+    // that file; resolved, it says so in About and doesn't come back.
+    let n3 = owner_page(&s, &cookie, "/p/vinculum/N-3").await;
+    assert!(n3.contains(r#"<span class="mono ndoc-name">N-3.md</span>"#), "{n3}");
+    assert!(n3.contains(r#"<div class="ndoc-body prose"><p>Check on every Loro update.</p>"#), "{n3}");
+    assert!(n3.contains(r#"<span class="chip ok">resolved</span>"#) && !n3.contains("<dt>Comes back</dt>"), "{n3}");
+    let f = s.http.get(s.url("/p/vinculum/N-3/file")).header(COOKIE, &cookie).send().await.unwrap();
+    assert!(f.headers()["content-disposition"].to_str().unwrap().contains("N-3.md"));
+    assert_eq!(f.text().await.unwrap(), "Check on every Loro update.");
+    // A log: its lines numbered, a level in its tone, Wrap and Copy.
+    assert!(
+        up("name=Dev%20log&category=test%20log&filename=dev.log", b"a INFO x\nb WARN y\n").await.status().is_success()
+    );
+    let log = owner_page(&s, &cookie, "/p/vinculum/N-6").await;
+    assert!(
+        log.contains(r#"<span class="cv-n">2</span><span class="cv-t">b <span class="lv-warn">WARN</span> y</span>"#),
+        "{log}"
+    );
+    assert!(log.contains(r#"class="cv-wrap""#) && log.contains(r#"data-copy-from="ndoc-raw""#), "{log}");
     let settings = direct("/settings?s=clients").await.unwrap().text().await.unwrap();
     assert!(settings.contains(r#"data-open-dlg="settings" data-open-url="/settings?s=clients" data-open-from="/""#));
     // The bell's panel and project settings are dialogs only (the owner, 2026-11-18).
@@ -2879,6 +2909,10 @@ async fn screenshots_are_uploaded_shown_and_linked() {
     assert!(!only.contains("Sidebar, variant A") && only.contains("/p/vinculum/S-2/image"), "{only}");
     let page = get("/p/vinculum/S-1".into()).await.text().await.unwrap();
     assert!(page.contains("1280 × 800") && page.contains("Tabs on the left"), "{page}");
+    // Its History, as in every record's dialog: no box, the newest change, Show all at the bottom
+    // (the owner, 2026-11-25, D-268).
+    assert!(page.contains(r#"<section class="changes changes-fold" aria-labelledby="changes-h-S-1">"#), "{page}");
+    assert!(page.contains(r#"<span class="changes-when-folded">Show all "#) && !page.contains("rhist"), "{page}");
     let task = get("/p/vinculum/T-1".into()).await.text().await.unwrap();
     assert!(task.contains("Screenshots") && task.contains("S-1"), "the task links to it: {task}");
     let img = get("/p/vinculum/S-1/image".into()).await;
@@ -3371,7 +3405,7 @@ async fn jobs_run_on_a_builder_and_bring_back_what_was_asked() {
             s.http
                 .post(s.url("/api/remote/jobs"))
                 .bearer_auth(token)
-                .json(&json!({"dir": top, "subdir": sub, "command": ["sh", "-c", cmd], "fetch": ["target/release/app"],
+                .json(&json!({"name": "Snapshot check", "dir": top, "subdir": sub, "command": ["sh", "-c", cmd], "fetch": ["target/release/app"],
                     "manifest": up.as_ref().map(|u| u.manifest.clone()).unwrap_or_default(),
                     "bundle": up.as_ref().map(|u| u.bundle.clone()).unwrap_or_default()}))
                 .send()
@@ -3394,6 +3428,17 @@ async fn jobs_run_on_a_builder_and_bring_back_what_was_asked() {
     })
     .await
     .unwrap();
+    // Every job needs a name, its title (the owner, 2026-11-25, D-275).
+    let unnamed = s
+        .http
+        .post(s.url("/api/remote/jobs"))
+        .bearer_auth(&agent)
+        .json(&json!({"dir": "/x", "command": ["true"], "setup": true}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(unnamed.status(), StatusCode::BAD_REQUEST);
+    assert!(unnamed.text().await.unwrap().contains("give the job a name"));
     let res = start(work.join("crate"), agent.clone()).await;
     assert_eq!(res.status(), StatusCode::OK, "{}", res.text().await.unwrap());
     let id = res.json::<Value>().await.unwrap()["id"].as_i64().unwrap();
@@ -3431,6 +3476,18 @@ async fn jobs_run_on_a_builder_and_bring_back_what_was_asked() {
     );
     assert!(text.contains("v0.1.0"), "tags went over:\n{text}");
     assert!(text.contains("No such file") || !text.contains("junk"), "ignored files stay here:\n{text}");
+    // Its page (D-275): its name as the title, the command among its facts, the output numbered in
+    // the code view a note's log uses, a warning in its tone.
+    let cookie = s.owner_cookie().await;
+    let page = owner_page(&s, &cookie, &format!("/machine/jobs/{id}")).await;
+    assert!(page.contains(r#"<h1 class="rec-title note-title">Snapshot check</h1>"#), "{page}");
+    assert!(
+        page.contains("<dt>Command</dt>") && page.contains(r#"<div class="codeview cv-scroll" id="job-log""#),
+        "{page}"
+    );
+    assert!(page.contains(r#"<span class="cv-t lv-warn">warning: careful</span>"#), "{page}");
+    assert!(page.contains(r#"<dt>Project</dt><dd><a href="/p/imaginarium">"#), "the project it belongs to: {page}");
+    assert!(page.contains(r#"<span class="cv-n">1</span>"#), "{page}");
     // flow remote fetches what came back.
     let job = s.db.call(move |c| crate::remote::get(c, id)).await.unwrap().unwrap();
     let (base, t2, w2) = (s.base.clone(), agent.clone(), work.clone());
@@ -4442,6 +4499,31 @@ fn the_ui_library_replaced_the_old_buttons() {
     for line in app.lines() {
         if let Some(class) = class_of(line) {
             assert!(!roots.contains(&class), "app.css redefines the library's .{class}: {line}");
+        }
+    }
+    // Every card's header is the one bar (the owner, 2026-11-25, D-276): no card opens with a title
+    // inside its padding or an uppercase label instead.
+    for f in std::fs::read_dir("templates").unwrap() {
+        let path = f.unwrap().path();
+        let t = std::fs::read_to_string(&path).unwrap();
+        for open in ["<section class=\"card pad", "<div class=\"card pad", "<details class=\"card pad", "<form"] {
+            for (i, _) in t.match_indices(open) {
+                let tag_end = i + t[i..].find('>').unwrap() + 1;
+                if open == "<form" && !t[i..tag_end].contains("class=\"card pad") {
+                    continue;
+                }
+                let next = t[tag_end..].trim_start();
+                // A heading only screen readers see (class vh) isn't a header.
+                let bad =
+                    ["<div class=\"sec", "<h2", "<h3", "<summary class=\"label"].iter().any(|h| next.starts_with(h))
+                        && !next[..next.find('>').unwrap_or(0)].contains("class=\"vh\"");
+                assert!(
+                    !bad,
+                    "{}: a card with its own kind of header; use .card-head: {}",
+                    path.display(),
+                    &t[i..tag_end]
+                );
+            }
         }
     }
     let gone = [

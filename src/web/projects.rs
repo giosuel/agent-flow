@@ -1728,8 +1728,6 @@ pub struct TimeView {
 /// history by default?"): folded to one line, opened a timeline by day, a short line per change.
 struct History {
     count: usize,
-    /// "New version, imaginarium · 23:25".
-    last: String,
     days: Vec<HistoryDay>,
 }
 
@@ -1815,6 +1813,47 @@ struct RecordPage {
     is_owner: bool,
 }
 
+/// A note's page (D-264): its text in a card like a file, About, Linked records and History beside
+/// it, instead of a dialog.
+#[derive(Template)]
+#[template(path = "note.html")]
+struct NoteTpl {
+    nav: Nav,
+    path: Vec<super::pages::PathPart>,
+    session_url: Option<String>,
+    project_name: String,
+    short: String,
+    title: String,
+    state: String,
+    note: super::notes::NotePage,
+    links: Vec<LinkGroup>,
+    stale: Vec<RecordRow>,
+    history: History,
+}
+
+/// Who wrote a record, said plainly (D-269): its project's agent, the owner, or another agent.
+fn byline(r: &Record, project: &Project) -> (bool, String) {
+    if r.author == project.slug {
+        let poss =
+            if project.name.ends_with('s') { format!("{}'", project.name) } else { format!("{}'s", project.name) };
+        (true, format!("{poss} project agent"))
+    } else if r.author == "owner" {
+        (false, "you".to_owned())
+    } else {
+        (true, r.author.clone())
+    }
+}
+
+/// A milestone's or step's place in Plan: (name, title, address).
+fn plan_place(c: &Connection, slug: &str, id: i64) -> anyhow::Result<(String, String, String)> {
+    let m = projects::get_milestone(c, id)?;
+    let href = match m.parent_id.map(|p| projects::get_milestone(c, p)).transpose()? {
+        Some(parent) => format!("/p/{slug}/plan/{}?step={}", parent.name, m.name),
+        None => format!("/p/{slug}/plan/{}", m.name),
+    };
+    Ok((m.name, m.title, href))
+}
+
 /// A build's page: how to start it and what to try.
 struct BuildView {
     run: String,
@@ -1858,6 +1897,21 @@ async fn record(
         _ => "That didn't work; nothing was saved. Try again.".to_owned(),
     });
     let mut page = load_record_page(&state, &actor, slug, id, error, q.draft.clone(), tz).await?;
+    if let Some(note) = page.note.take() {
+        return render(NoteTpl {
+            nav: page.nav,
+            path: page.path,
+            session_url: page.session_url,
+            project_name: page.project_name,
+            short: page.short,
+            title: page.title,
+            state: page.state,
+            note,
+            links: page.links,
+            stale: page.stale,
+            history: page.history,
+        });
+    }
     if let Some(b) = page.build.as_mut() {
         b.sent = q.sent == Some(1);
     }
@@ -2015,19 +2069,36 @@ async fn load_record_page(
                 String::new()
             };
             let path = record_path(c, &r, &project)?;
+            let note_place = match (r.kind, r.milestone_id) {
+                (Kind::Note, Some(id)) => Some(plan_place(c, &project.slug, id)?),
+                _ => None,
+            };
             Ok(Some((
                 r,
                 project,
                 links,
                 history,
                 buttons,
-                (session_url, draft, draft_notice, to_test, time, timings, scope, path),
+                (session_url, draft, draft_notice, to_test, time, timings, scope, path, note_place),
             )))
         })
         .await?
         .ok_or(AppError::NotFound)?;
-    let (r, project, links, history, buttons, (session_url, draft, draft_notice, to_test, time, timings, scope, path)) =
-        page;
+    let (
+        r,
+        project,
+        links,
+        history,
+        buttons,
+        (session_url, draft, draft_notice, to_test, time, timings, scope, path, note_place),
+    ) = page;
+    let note = (r.kind == Kind::Note).then(|| {
+        let mut n = super::notes::page(&state.config.data_dir(), &r);
+        n.by = byline(&r, &project);
+        n.added = tz.short(r.created_at);
+        n.milestone = note_place;
+        n
+    });
 
     let mut blocking = Vec::new();
     let mut waits_for = Vec::new();
@@ -2217,7 +2288,7 @@ async fn load_record_page(
         stale,
         time,
         timings,
-        note: if r.kind == Kind::Note { Some(super::notes::page(&state.config.data_dir(), &r)) } else { None },
+        note,
         history: history_view(&history, &r, &tz, now_ms()),
         error,
         buttons,
@@ -2338,15 +2409,7 @@ fn history_view(revs: &[records::Revision], r: &Record, tz: &Tz, now: i64) -> Hi
             _ => days.push(HistoryDay { label, events: vec![e] }),
         }
     }
-    let last = revs
-        .first()
-        .map(|h| {
-            let e = history_event(h, r, tz);
-            let when = if tz.day_start(h.at) == today { e.time.clone() } else { tz.short(h.at) };
-            format!("{}, {} · {when}", e.what, e.who)
-        })
-        .unwrap_or_default();
-    History { count: revs.len(), last, days }
+    History { count: revs.len(), days }
 }
 
 fn history_event(h: &records::Revision, r: &Record, tz: &Tz) -> HistoryEvent {

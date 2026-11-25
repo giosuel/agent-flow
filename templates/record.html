@@ -39,15 +39,6 @@
     {% endif %}
     {% endif %}
 
-    {% if let Some(nt) = note %}
-    <section class="stack-sm" aria-labelledby="note-h">
-      <div class="row wrap"><h2 class="label" id="note-h">{% if nt.download.is_empty() %}Note{% else %}File{% endif %}</h2>{% if !nt.category.is_empty() %}<span class="chip">{{ nt.category }}</span>{% endif %}{% if !nt.subagent.is_empty() %}<span class="chip info" title="A subagent of the project's agent wrote it">by a subagent · {{ nt.subagent }}</span>{% endif %}{% if !nt.size.is_empty() %}<span class="sub">{{ nt.filename }} · {{ nt.size }}</span>{% endif %}<span class="grow"></span>{% if !nt.download.is_empty() %}<a class="btn sm secondary" href="{{ nt.download }}" download>Download</a>{% endif %}</div>
-      {% if !nt.resurface.is_empty() %}<p class="sub">Comes back to the agent {{ nt.resurface }}.</p>{% endif %}
-      {% if !nt.text_html.is_empty() %}<div class="md-doc prose">{{ nt.text_html|safe }}</div>{% endif %}
-      {% if !nt.plain.is_empty() %}<pre class="md-doc mono note-plain">{{ nt.plain }}</pre>{% endif %}
-      {% if !nt.versions.is_empty() %}<p class="sub">Older versions: {% for (v, u) in nt.versions %}<a href="{{ u }}" download>v{{ v }}</a>{% if !loop.last %}, {% endif %}{% endfor %}</p>{% endif %}
-    </section>
-    {% endif %}
     {% if let Some(tv) = time %}
     <section class="stack-sm" aria-labelledby="time-h">
       <h2 class="label" id="time-h">Time</h2>
@@ -75,9 +66,11 @@
 
     {% if !pr_url.is_empty() %}<p><a href="{{ pr_url }}">Open on GitHub</a> · <a href="{{ pr_url }}/files">View changes on GitHub</a></p>{% endif %}
     {% if !buttons.is_empty() %}
-    <section class="card pad stack" aria-labelledby="btn-h">
-      <h2 class="label" id="btn-h">{% if kind == "release" %}Push the tag{% else %}Buttons{% endif %}</h2>
+    <section class="card" aria-labelledby="btn-h">
+      <div class="card-head"><h2 id="btn-h">{% if kind == "release" %}Push the tag{% else %}Buttons{% endif %}</h2></div>
+      <div class="card-body stack">
       {% for b in buttons %}{% include "button.html" %}{% endfor %}
+      </div>
     </section>
     {% endif %}
 
@@ -131,15 +124,17 @@
     {% endif %}
 
     {% if kind == "question" %}
-    <section class="card pad stack" aria-labelledby="answer-h">
-      <h2 id="answer-h">{% if can_answer %}Your answer{% else %}Answer{% endif %}</h2>
+    <section class="card" aria-labelledby="answer-h">
+      <div class="card-head"><h2 id="answer-h">{% if can_answer %}Your answer{% else %}Answer{% endif %}</h2></div>
+      <div class="card-body stack">
       {#- The agent moves a question to another scope, not the owner (2026-11-25, D-288). -#}
       {% if !scope.is_empty() %}<p class="sub">Scope: {{ scope }}</p>{% endif %}
       {% if !related.is_empty() %}<p class="sub">It touches {% for d in related %}<a href="{{ d.url }}">{{ d.short }} {{ d.title }}</a>{% if !loop.last %}, {% endif %}{% endfor %}.</p>{% endif %}
       {% if let Some(d) = going_ahead %}<p class="notice" role="status">{{ crate::web::icons::icon("info")|safe }}<span>The agent is going ahead with <strong>{{ d }}</strong> meanwhile, built so it's easy to change. Pick it to confirm, or another (or your own words) to change course.</span></p>{% endif %}
       {% if can_answer %}
-      {# Pick an option or write your own answer, never both; nothing is sent until Send answer. #}
-      {% call ui::choices("/p/{}/{}/answer"|format(project_slug, short), "", options.as_slice(), true, "words") %}{% endcall %}
+      {# Pick an option or write your own answer, never both; nothing is sent until Send answer. Sent,
+         it goes back to the project's page (its dialog sets the page it sits on), not the Dashboard. #}
+      {% call ui::choices("/p/{}/{}/answer"|format(project_slug, short), "/p/{}?answered={}"|format(project_slug, short), options.as_slice(), true, "words") %}{% endcall %}
       {% else %}
         {% if !options.is_empty() %}
         <ol class="plain opts-ro">{% for o in options %}<li class="{% if o.chosen %}chosen{% endif %}"><span class="mono">{{ o.n }}</span> {{ o.title }}{% if o.recommended %} <span class="chip">recommended</span>{% endif %}{% if o.chosen %} <span class="chip ok">chosen</span>{% endif %}</li>{% endfor %}</ol>
@@ -147,49 +142,56 @@
         {% if !answer.is_empty() %}<blockquote class="quote">“{{ answer }}”</blockquote>{% endif %}
         {% if !answer_line.is_empty() %}<p class="sub">{{ answer_line }}</p>{% if state == "answered" && is_owner %}<p class="sub">Changed your mind? An answer stays as sent, since the agent may have acted on it already. Tell it in a conversation or on the task it belongs to.</p>{% endif %}{% else %}<p class="sub">{% if state == "open" %}Waiting for the owner.{% else %}{{ state }}{% endif %}</p>{% endif %}
       {% endif %}
+      </div>
     </section>
     {% endif %}
 
-    {% if history.count > 0 %}
-    <details class="rhist">
-      <summary><h2 class="label">History</h2><span class="hs"><b>{{ history.count }} change{% if history.count != 1 %}s{% endif %}</b> · last: {{ history.last }}</span>{{ crate::web::icons::icon("chevron")|safe }}</summary>
-      <div class="hist-body">
-        {% for d in history.days %}<div class="tl-day">{{ d.label }}</div>
-        <ol class="tl">{% for e in d.events %}<li class="ev"><span class="tm">{{ e.time }}</span><span class="rail"><span class="dot {{ e.dot }}" aria-hidden="true"></span></span><span class="txt">{{ e.what }}{% for (k, v, acc) in e.chips %} <span class="hist-chip{% if *acc %} acc{% endif %}">{{ k }}{% if !v.is_empty() %} <b>{{ v }}</b>{% endif %}</span>{% endfor %}{% if let Some((label, url)) = e.replaced %} <a class="mono hist-v" href="{{ url }}" title="The file this version replaced">{{ label }}</a>{% endif %}<span class="ev-meta">{{ e.who }} · <span class="mono">r{{ e.rev }}</span></span></span></li>{% endfor %}</ol>
-        {% endfor %}
-      </div>
-    </details>
-    {% endif %}
+    {#- History without a box (D-268): the newest change, "Show all" at the bottom. -#}
+    {% if history.count > 0 %}{% call ui::history(history, short, true) %}{% endcall %}{% endif %}
   </div>
 
   <aside class="split-side stack-lg">
     {% if let Some(d) = draft %}
-    <section class="card pad stack-sm" aria-labelledby="draft-about-h">
-      <h2 class="label" id="draft-about-h">{{ d.heading }}</h2>
+    <section class="card" aria-labelledby="draft-about-h">
+      <div class="card-head"><h2 id="draft-about-h">{{ d.heading }}</h2></div>
+      <div class="card-body stack-sm">
       <p class="sub">{{ d.target }}<br>{{ d.drafted }}</p>
       {% if !d.why.is_empty() %}<p>{{ d.why }}</p>{% endif %}
       {% if let Some((t, u)) = d.task %}<dl class="kv"><dt>For</dt><dd><a href="{{ u }}">{{ t }}</a></dd></dl>{% endif %}
+      </div>
     </section>
     {% if let Some((name, text)) = d.template %}
-    <details class="card pad stack-sm"><summary class="label">Their PR template</summary><p class="sub mono">{{ name }}</p><pre class="cmd mono wrap">{{ text }}</pre></details>
+    <details class="card">
+      <summary class="card-head"><h2>Their PR template</h2><span class="grow"></span>{{ crate::web::icons::icon("caret")|safe }}</summary>
+      <div class="card-body stack-sm"><p class="sub mono">{{ name }}</p><pre class="cmd mono wrap">{{ text }}</pre>
+      </div>
+    </details>
     {% endif %}
     {% if let Some((name, text)) = d.contributing %}
-    <details class="card pad stack-sm"><summary class="label">Their contributing guide</summary><p class="sub mono">{{ name }}</p><pre class="cmd mono wrap">{{ text }}</pre></details>
+    <details class="card">
+      <summary class="card-head"><h2>Their contributing guide</h2><span class="grow"></span>{{ crate::web::icons::icon("caret")|safe }}</summary>
+      <div class="card-body stack-sm"><p class="sub mono">{{ name }}</p><pre class="cmd mono wrap">{{ text }}</pre>
+      </div>
+    </details>
     {% endif %}
     {% endif %}
-    <section class="card pad stack" aria-labelledby="links-h">
-      <h2 class="label" id="links-h">Linked records</h2>
+    <section class="card" aria-labelledby="links-h">
+      <div class="card-head"><h2 id="links-h">Linked records</h2></div>
+      <div class="card-body stack">
       {% if links.is_empty() %}<p class="sub">Nothing linked yet.</p>{% endif %}
       {% for g in links %}
       <div class="stack-sm"><span class="sub">{{ g.label }}</span>
         <ul class="rows">{% for (r, other) in g.items %}<li class="item-row"><span class="mono sub id-col">{% if *other %}{{ r.id }}{% else %}{{ r.short }}{% endif %}</span><div class="ttl"><a href="{{ r.url }}">{{ r.title }}</a></div><span class="chip">{{ r.state }}</span></li>{% endfor %}</ul>
       </div>
       {% endfor %}
+      </div>
     </section>
     {% if !stale.is_empty() %}
-    <section class="card pad stack warn-card" aria-labelledby="stale-h">
-      <h2 class="label" id="stale-h">May be stale</h2>
+    <section class="card warn-card" aria-labelledby="stale-h">
+      <div class="card-head"><h2 id="stale-h">May be stale</h2></div>
+      <div class="card-body stack">
       <ul class="rows">{% for r in stale %}<li class="item-row"><div class="ttl"><a href="{{ r.url }}">{{ r.short }} {{ r.title }}</a><span class="sub">depends on this, {{ r.sub }}, before this changed</span></div></li>{% endfor %}</ul>
+      </div>
     </section>
     {% endif %}
   </aside>

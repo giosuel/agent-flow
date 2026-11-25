@@ -33,15 +33,9 @@
   {% for t in tiles %}<div class="card pad tile"><span class="label">{{ t.label }}</span><strong class="tile-v t-num sm">{{ t.value }}</strong><span class="sub">{{ t.hint }}</span></div>{% endfor %}
 </div>
 
-<section class="card pad stack" aria-labelledby="chart-h">
-  <div class="sec wrap"><div class="stack-sm"><h2 id="chart-h">{{ chart_title }}</h2><span class="sub">{% if zoomed %}{{ chart_sub }}{% else %}<span class="hide-phone">Open a day for its hours</span><span class="only-phone">Tap a day for its hours</span>{% endif %}</span></div>
-    <span class="row wrap">
-      {% if zoomed %}<a class="sub ilink" href="/usage{% for (k, _, on) in metrics %}{% if *on && !k.is_empty() %}?metric={{ k }}{% endif %}{% endfor %}">{{ crate::web::icons::icon("back")|safe }}<span>Back to 14 days</span></a>{% endif %}
-      <span class="seg sm" role="group" aria-label="What to count">
-        {% for (k, name, on) in metrics %}<a{% if *on %} class="on"{% endif %} href="/usage?{{ day_q }}{{ keep_days }}{% if !k.is_empty() %}metric={{ k }}{% endif %}"{% if *on %} aria-current="true"{% endif %}>{{ name }}</a>{% endfor %}
-      </span>
-    </span>
-  </div>
+<section class="card" aria-labelledby="chart-h">
+  <div class="card-head"><h2 id="chart-h">{{ chart_title }}</h2><span class="sub">{% if zoomed %}{{ chart_sub }}{% else %}<span class="hide-phone">Open a day for its hours</span><span class="only-phone">Tap a day for its hours</span>{% endif %}</span><span class="grow"></span><span class="row wrap">{% if zoomed %}<a class="sub ilink" href="/usage{% for (k, _, on) in metrics %}{% if *on && !k.is_empty() %}?metric={{ k }}{% endif %}{% endfor %}">{{ crate::web::icons::icon("back")|safe }}<span>Back to 14 days</span></a>{% endif %}<span class="seg sm" role="group" aria-label="What to count">{% for (k, name, on) in metrics %}<a{% if *on %} class="on"{% endif %} href="/usage?{{ day_q }}{{ keep_days }}{% if !k.is_empty() %}metric={{ k }}{% endif %}"{% if *on %} aria-current="true"{% endif %}>{{ name }}</a>{% endfor %}</span></span></div>
+  <div class="card-body stack">
   {% if empty %}<p class="sub">No tokens counted in this window yet. The transcripts are read every five minutes.</p>{% else %}
   <ul class="legend" aria-label="Projects">{% for l in legend %}<li><span class="swatch" style="--c: {{ l.color }}"></span>{{ l.name }} <span class="sub mono">{{ l.total }}</span></li>{% endfor %}</ul>
   <div class="chart">
@@ -57,38 +51,39 @@
   </div>
   {% endif %}
   {% if unpriced > 0 %}<p class="sub">{{ unpriced }} call{% if unpriced != 1 %}s{% endif %} of models without a known price aren't in the cost.</p>{% endif %}
+  </div>
 </section>
 
 {% if !empty %}
-<section class="card pad stack" aria-labelledby="lines-h">
-  <div class="sec"><h2 id="lines-h">Model calls</h2><span class="sub">per {% if zoomed %}hour{% else %}day{% endif %}, one line per project's agent</span></div>
+<section class="card" aria-labelledby="lines-h">
+  <div class="card-head"><h2 id="lines-h">Model calls</h2><span class="sub">per {% if zoomed %}hour{% else %}day{% endif %}, one line per project's agent</span></div>
+  <div class="card-body stack">
   <ul class="legend" aria-label="Agents">{% for l in legend %}<li><span class="swatch line" style="--c: {{ l.color }}"></span>{{ l.name }}</li>{% endfor %}</ul>
   <div class="chart">
     <span class="y-max mono sub">{{ lines_max }}</span><span class="y-zero mono sub">0</span>
     {{ lines|safe }}
     <div class="x-labels mono sub" aria-hidden="true">{% for l in x_labels %}<span>{{ l }}</span>{% endfor %}</div>
   </div>
+  </div>
 </section>
 {% endif %}
 
-<section class="card pad stack" aria-labelledby="proj-h">
-  <div class="sec"><h2 id="proj-h">Per project</h2><span class="sub">{{ range }}</span></div>
+<section class="card" aria-labelledby="proj-h">
+  <div class="card-head"><h2 id="proj-h">Per project</h2><span class="sub">{{ range }}</span></div>
+  <div class="card-body stack">
   {% if projects.is_empty() %}<p class="sub">Nothing yet.</p>{% else %}
   <div class="table-wrap"><table class="table nums" data-sortable>
     <thead><tr>{% call tbl::th("Project", "text", "", "ascending") %}{% endcall %}{% call tbl::th("Sessions", "num", "hide-phone", "") %}{% endcall %}{% call tbl::th("Calls", "num", "hide-phone", "") %}{% endcall %}{% call tbl::th("Input", "num", "hide-phone", "") %}{% endcall %}{% call tbl::th("Cache write", "num", "hide-phone", "") %}{% endcall %}{% call tbl::th("Output", "num", "hide-phone", "") %}{% endcall %}{% call tbl::th("New tokens", "num", "", "") %}{% endcall %}{% call tbl::th("Cache reads", "num", "", "") %}{% endcall %}{% call tbl::th("Cost", "num", "", "") %}{% endcall %}</tr></thead>
     <tbody>{% for p in projects %}<tr><th scope="row"><span class="swatch" style="--c: {{ p.color }}"></span>{{ p.name }}</th><td class="hide-phone">{{ p.sessions }}</td><td class="hide-phone" data-v="{{ p.t.raw.calls }}">{{ p.t.calls }}</td><td class="hide-phone" data-v="{{ p.t.raw.input }}">{{ p.t.input }}</td><td class="hide-phone" data-v="{{ p.t.raw.cache_write }}">{{ p.t.cache_write }}</td><td class="hide-phone" data-v="{{ p.t.raw.output }}">{{ p.t.output }}</td><td data-v="{{ p.t.raw.new_tokens() }}"><strong>{{ p.t.new_tokens }}</strong></td><td data-v="{{ p.t.raw.cache_read }}">{{ p.t.cache_read }}</td><td data-v="{{ p.t.raw.cost_micro }}"><strong>{{ p.t.cost }}</strong></td></tr>{% endfor %}</tbody>
   </table></div>
   {% endif %}
+  </div>
 </section>
 
 <div class="usage-pair">
-<section class="card pad stack tk-card" aria-labelledby="tasks-h">
-  <div class="sec wrap"><div class="tk-title"><h2 id="tasks-h">Tasks by cost</h2><span class="sub">last {{ days }} days</span></div>
-    <span class="seg sm" role="group" aria-label="Window">
-      <a{% if days == 7 %} class="on"{% endif %} href="/usage?{{ keep_day_metric }}days=7#tasks-h"{% if days == 7 %} aria-current="true"{% endif %}>7 days</a>
-      <a{% if days == 14 %} class="on"{% endif %} href="/usage?{{ keep_day_metric }}days=14#tasks-h"{% if days == 14 %} aria-current="true"{% endif %}>14 days</a>
-    </span>
-  </div>
+<section class="card tk-card" aria-labelledby="tasks-h">
+  <div class="card-head"><h2 id="tasks-h">Tasks by cost</h2><span class="sub">last {{ days }} days</span><span class="grow"></span><span class="seg sm" role="group" aria-label="Window"><a{% if days == 7 %} class="on"{% endif %} href="/usage?{{ keep_day_metric }}days=7#tasks-h"{% if days == 7 %} aria-current="true"{% endif %}>7 days</a><a{% if days == 14 %} class="on"{% endif %} href="/usage?{{ keep_day_metric }}days=14#tasks-h"{% if days == 14 %} aria-current="true"{% endif %}>14 days</a></span></div>
+  <div class="card-body stack">
   {% if top_tasks.is_empty() %}
   <p class="sub">{% if not_in_task.is_empty() %}No tokens in the last {{ days }} days.{% else %}No tokens are counted against a task yet: they are once an agent creates or updates its tasks through AgentFlow while it works. Until then everything is under "Not in a task".{% endif %}</p>
   {% else %}
@@ -99,10 +94,12 @@
   {% endif %}
   <div class="tk-foot"><span class="sub">{% if tasks_more > 0 %}{{ tasks_more }} more task{% if tasks_more != 1 %}s{% endif %}{% if !not_in_task.is_empty() %} · {% endif %}{% endif %}{% if !not_in_task.is_empty() %}"Not in a task" {{ not_in_task }}{% endif %}</span>
     <a class="tk-all" href="/usage/tasks{% if days == 14 %}?days=14{% endif %}" data-dlg>{% if tasks_total > 1 %}All {{ tasks_total }} tasks{% else %}Show all{% endif %}{{ crate::web::icons::icon("chevron")|safe }}</a></div>
+  </div>
 </section>
 {% if !est_rows.is_empty() %}
-<section class="card pad stack" aria-labelledby="est-h">
-  <div class="sec"><h2 id="est-h">How big a window is</h2><span class="sub">finished 5-hour windows, newest first</span></div>
+<section class="card" aria-labelledby="est-h">
+  <div class="card-head"><h2 id="est-h">How big a window is</h2><span class="sub">finished 5-hour windows, newest first</span></div>
+  <div class="card-body stack">
   <div class="table-wrap"><table class="table nums" data-sortable>
     <thead><tr>{% call tbl::th("Window", "num", "", "descending") %}{% endcall %}{% call tbl::th("Used", "num", "", "") %}{% endcall %}{% call tbl::th("Cost", "num", "hide-phone", "") %}{% endcall %}{% call tbl::th("Per 1%", "num", "", "") %}{% endcall %}{% call tbl::th("New tokens per 1%", "num", "hide-phone", "") %}{% endcall %}</tr></thead>
     <tbody>{% for r in est_rows %}<tr><th scope="row" data-v="{{ r.v.0 }}">{{ r.day }} <span class="sub mono">{{ r.span }}</span></th><td data-v="{{ r.v.1 }}">{{ r.used }}{% if !r.limit.is_empty() %} <span class="bad-text">· {{ r.limit }}</span>{% endif %}</td><td class="hide-phone" data-v="{{ r.v.2 }}">{{ r.cost }}</td><td data-v="{{ r.v.3 }}"><strong>{{ r.per_pct }}</strong></td><td class="hide-phone" data-v="{{ r.v.4 }}">{{ r.tokens_per_pct }}</td></tr>{% endfor %}</tbody>
@@ -110,6 +107,7 @@
   </table></div>
   <p class="sub">A window's cost ÷ its %. The plan weighs tokens by what they cost, so the dollar figure stays steadier than the token one, which moves with how much is cached and which model runs. Windows under 10% don't count toward the median.</p>
   <p class="sub">Claude on your other devices (claude.ai, a laptop) uses the same plan but isn't counted here: while you use it, a window looks smaller than it is.</p>
+  </div>
 </section>
 {% endif %}
 </div>

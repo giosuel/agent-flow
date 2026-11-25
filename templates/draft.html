@@ -4,19 +4,23 @@
 {% if d.sending %}<p class="notice" role="status">{{ crate::web::icons::icon("info")|safe }}<span>Being sent right now.</span></p>{% endif %}
 <form method="post" action="/p/{{ project_slug }}/{{ short }}/send" class="stack-lg" id="draft-form">
   <input type="hidden" name="fp" value="{{ d.fp }}">
-  <section class="card pad stack" aria-labelledby="txt-h">
-    <div class="sec"><h2 id="txt-h">What gets posted</h2><span class="sub">{% if d.waiting %}you can edit it; your words are what's sent{% else %}as the agent drafted it{% endif %}</span></div>
+  <section class="card" aria-labelledby="txt-h">
+    <div class="card-head"><h2 id="txt-h">What gets posted</h2><span class="sub">{% if d.waiting %}you can edit it; your words are what's sent{% else %}as the agent drafted it{% endif %}</span></div>
+    <div class="card-body stack">
     {% if d.has_title %}<label class="field">Title<input name="title" value="{{ d.title }}" maxlength="256"{% if !d.waiting %} readonly{% endif %}></label>{% else %}<input type="hidden" name="title" value="">{% endif %}
     <label class="field">{% if d.kind == "commits" %}A note with the commits (optional; posted as a comment){% else if d.kind == "comment" %}The comment{% else %}Description{% endif %}<textarea name="body" rows="{% if d.kind == "comment" %}7{% else %}10{% endif %}" class="mono-text"{% if !d.waiting %} readonly{% endif %}>{{ d.body }}</textarea></label>
     <ul class="checks">{% for k in d.checks %}<li><span class="{% if k.ok %}y{% else %}n{% endif %}" aria-hidden="true">{% if k.ok %}{{ crate::web::icons::icon("check")|safe }}{% else %}{{ crate::web::icons::icon("alert")|safe }}{% endif %}</span><span>{{ k.text }}{% if let Some((t, u)) = k.link %} <a href="{{ u }}">{{ t }}</a>{% endif %}</span></li>{% endfor %}</ul>
+    </div>
   </section>
 
   {% if !d.commits.is_empty() %}
-  <section class="card pad stack" aria-labelledby="chg-h">
-    <div class="sec"><h2 id="chg-h">Changes</h2><span class="sub">{{ d.commits.len() }} commit{% if d.commits.len() != 1 %}s{% endif %} · {{ d.stat }}</span></div>
+  <section class="card" aria-labelledby="chg-h">
+    <div class="card-head"><h2 id="chg-h">Changes</h2><span class="sub">{{ d.commits.len() }} commit{% if d.commits.len() != 1 %}s{% endif %} · {{ d.stat }}</span></div>
+    <div class="card-body stack">
     <ul class="rows commits">{% for (sha, subject, author) in d.commits %}<li class="item-row"><span class="mono sub">{{ sha }}</span><div class="ttl"><span>{{ subject }}</span><span class="sub">{{ author }}</span></div></li>{% endfor %}</ul>
     <div class="diff" role="region" aria-label="The diff" tabindex="0">{% for (cls, line) in d.diff %}<div class="ln {{ cls }}">{{ line }}</div>{% endfor %}</div>
     {% if d.diff_more > 0 %}<p class="sub">{{ d.diff_more }} more lines: <a href="/p/{{ project_slug }}/{{ short }}/diff">the whole diff</a>.</p>{% else %}<p class="sub"><a href="/p/{{ project_slug }}/{{ short }}/diff">The diff as text</a></p>{% endif %}
+    </div>
   </section>
   {% endif %}
 

@@ -12,11 +12,15 @@
 // page as before.
 "use strict";
 (() => {
-  const SMALL = /^\/p\/[a-z0-9-]+\/((T|Q|D|ADR|PR|TT|S|F|N)-\d+|steps\/\d+)$/;
+  // Notes are pages of their own (the owner, 2026-11-25, D-264: "since notes are kind of a big
+  // thing with their own cards, we could make them into a page").
+  const SMALL = /^\/p\/[a-z0-9-]+\/((T|Q|D|ADR|PR|TT|S|F)-\d+|steps\/\d+)$/;
   let box = null;
   let list = [];
   let at = -1;
   let opener = null;
+  // The page under the dialog (its address before the record's).
+  let under = location.pathname + location.search;
 
   const record = (a) => {
     if (!a || a.target || a.hasAttribute("download")) return null;
@@ -31,7 +35,9 @@
   };
 
   // The dialog is the library's (app.js afDlg, md): its head holds the record's path, ‹ › and the
-  // close button; Esc, ✕, the scrim and a pull on the phone go Back, which closes it.
+  // close button; Esc, ✕, the scrim and a pull on the phone go Back, which closes it. An answer
+  // typed in it and not sent is asked about first (afDlg.leave), there and before ‹ › or a link
+  // shows another record in its place.
   function build() {
     box = window.afDlg.open({ size: "md", cls: "rdlg", opener, dismiss: () => close(), closed: () => { box = null; } });
     box.tools.innerHTML = `<span class="rdlg-nav"><button type="button" class="ibtn" data-step="-1" aria-label="Previous"><svg class="i" aria-hidden="true"><use href="#i-prev"/></svg></button><button type="button" class="ibtn" data-step="1" aria-label="Next"><svg class="i" aria-hidden="true"><use href="#i-chevron"/></svg></button></span>`;
@@ -72,6 +78,21 @@
     nav.hidden = list.length < 2;
     nav.querySelector("[data-step='-1']").disabled = at <= 0;
     nav.querySelector("[data-step='1']").disabled = at < 0 || at >= list.length - 1;
+    // An answer sent from here goes back to the page under the dialog when it's the record's
+    // project's (its tab), as the form's own `next` does for the project's page (09-9). Over
+    // the Dashboard it goes back there, to its "Sent to…" notice and the next question.
+    for (const n of body.querySelectorAll("form[data-answer] input[name=next]")) {
+      const u = new URL(under, location.origin);
+      const want = new URL(n.value, location.origin);
+      if (u.pathname === "/") {
+        const slug = want.pathname.split("/")[2] || "";
+        n.value = "/?answered=" + slug + "/" + (want.searchParams.get("answered") || "");
+        continue;
+      }
+      if (u.pathname !== want.pathname) continue;
+      u.searchParams.set("answered", want.searchParams.get("answered") || "");
+      n.value = u.pathname + u.search;
+    }
     body.scrollTop = 0;
     document.dispatchEvent(new CustomEvent("af:content", { detail: body }));
     return true;
@@ -79,14 +100,16 @@
 
   async function open(path, soft) {
     const was = !!box;
+    if (!was) under = location.pathname + location.search;
     if (!(await show(path, soft))) return;
     if (!was) history.pushState({ rdlg: path }, "", path);
     else history.replaceState({ rdlg: path }, "", path);
     if (!box.el.contains(document.activeElement)) box.el.querySelector(".dlg-x").focus({ preventScroll: true });
   }
 
-  function go(i) {
+  async function go(i) {
     if (i < 0 || i >= list.length) return;
+    if (box && !(await window.afDlg.leave(box))) return;
     at = i;
     open(list[i]);
   }
@@ -124,18 +147,22 @@
     const path = record(a);
     if (!path || path === location.pathname && !(box && box.el.contains(a))) return;
     e.preventDefault();
-    if (!(box && box.el.contains(a))) {
-      // The list it came from: links to such records in the same list or card.
-      const scope = a.closest("ul, ol, tbody, .card, section") || document;
-      list = [...new Set([...scope.querySelectorAll("a[href]")].map(record).filter(Boolean))];
-      opener = a;
-    }
-    at = list.indexOf(path);
-    if (at < 0) {
-      list = [path];
-      at = 0;
-    }
-    open(path);
+    const inside = !!box && box.el.contains(a);
+    (async () => {
+      if (inside && !(await window.afDlg.leave(box))) return;
+      if (!inside) {
+        // The list it came from: links to such records in the same list or card.
+        const scope = a.closest("ul, ol, tbody, .card, section") || document;
+        list = [...new Set([...scope.querySelectorAll("a[href]")].map(record).filter(Boolean))];
+        opener = a;
+      }
+      at = list.indexOf(path);
+      if (at < 0) {
+        list = [path];
+        at = 0;
+      }
+      open(path);
+    })();
   });
 
   // A direct link to a record: the server sent its project's page; the record opens over it, and

@@ -5,8 +5,9 @@
 <div data-dlg-content class="stack">
 <div class="head"><h1>{{ name }}: settings</h1></div>
 {% if let Some(n) = notice %}<p class="notice flash{% if notice_bad %} bad{% else %} ok{% endif %}" role="status">{% if notice_bad %}{{ crate::web::icons::icon("alert")|safe }}{% else %}{{ crate::web::icons::icon("check")|safe }}{% endif %}<span>{{ n }}</span></p>{% endif %}
-<form method="post" action="/p/{{ slug }}/settings" class="card pad stack" aria-labelledby="set-h">
-  <h2 id="set-h">Details</h2>
+<form method="post" action="/p/{{ slug }}/settings" class="card" aria-labelledby="set-h">
+  <div class="card-head"><h2 id="set-h">Details</h2></div>
+  <div class="card-body stack">
   <p class="sub">The same details the project's agent sets with <span class="mono">update_project</span>; it sees your changes the next time it checks. The project's id, <span class="mono">{{ slug }}</span>, stays as it is: every record and link uses it.</p>
   <div class="form-grid">
     <label class="field">Name<input name="name" required maxlength="60" value="{{ edit.name }}"></label>
@@ -28,9 +29,11 @@
     <label class="field span-all"><span>Ports <span class="optional">optional</span></span><textarea name="ports" rows="2" placeholder="One per line, e.g. 5173 vite">{{ edit.ports }}</textarea></label>
   </div>
   <div><button class="btn" type="submit">Save</button></div>
+  </div>
 </form>
-<section class="card pad stack-sm" aria-labelledby="arch-h">
-  <h2 id="arch-h">{% if status == "archived" %}Archived{% else %}Archive{% endif %}</h2>
+<section class="card" aria-labelledby="arch-h">
+  <div class="card-head"><h2 id="arch-h">{% if status == "archived" %}Archived{% else %}Archive{% endif %}</h2></div>
+  <div class="card-body stack-sm">
   {% if status == "archived" %}
   <p class="sub">It's out of the Dashboard, the waiting count and the project list. Its page and records stay.</p>
   <form method="post" action="/p/{{ slug }}/status"><input type="hidden" name="status" value="active"><button class="btn sm secondary" type="submit">Restore the project</button></form>
@@ -38,6 +41,7 @@
   <p class="sub">Done with it? Archiving takes it out of the Dashboard, the waiting count and the project list. Nothing is deleted, and you can restore it here.</p>
   <form method="post" action="/p/{{ slug }}/status"><input type="hidden" name="status" value="archived"><button class="btn sm secondary" type="submit" data-confirm="Archive {{ name }}? It leaves the Dashboard and the project list. Nothing is deleted, and you can restore it here.">Archive the project</button></form>
   {% endif %}
+  </div>
 </section>
 </div>
 {% endblock %}
