@@ -427,6 +427,8 @@ struct HistRow {
     project: String,
     chip: &'static str,
     label: String,
+    /// Why it failed or was cancelled ("exit code 101"), beside its state where there's room.
+    why: String,
     /// "today 20:31", "24 Nov 18:02"
     started: String,
     created_at: i64,
@@ -467,11 +469,13 @@ fn started(tz: &crate::tz::Tz, at: i64, today: i64) -> String {
 /// "waiting", whatever it waits for.
 fn hist_row(j: &Job, tz: &crate::tz::Tz, today: i64) -> HistRow {
     let row = job_row(j);
-    let label = match j.state.as_str() {
-        "running" => "running".to_owned(),
-        "queued" => "waiting".to_owned(),
-        "paused" => "paused".to_owned(),
-        _ => row.label,
+    let (label, why) = match j.state.as_str() {
+        "running" => ("running", ""),
+        "queued" => ("waiting", ""),
+        "paused" => ("paused", ""),
+        "done" => ("done", ""),
+        "cancelled" => ("cancelled", ""),
+        _ => ("failed", j.reason.as_str()),
     };
     HistRow {
         id: j.id,
@@ -479,7 +483,8 @@ fn hist_row(j: &Job, tz: &crate::tz::Tz, today: i64) -> HistRow {
         named: !j.name.is_empty(),
         project: j.project.clone(),
         chip: row.chip,
-        label,
+        label: label.to_owned(),
+        why: why.to_owned(),
         started: started(tz, j.created_at, today),
         created_at: j.created_at,
         time: row.time,

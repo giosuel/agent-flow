@@ -142,7 +142,7 @@ pre.wrap { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 40vh; ove
 .bmeter .builds { background: var(--accent); }
 .bmeter .nums { display: flex; justify-content: space-between; gap: 8px; font-size: var(--fs-sub); color: var(--muted); }
 .jobs td, .jobs th { white-space: nowrap; }
-.jobs td.jn { white-space: normal; min-width: 16ch; }
+.jobs td.jn { white-space: normal; min-width: 16ch; overflow-wrap: anywhere; }
 .jobs td.jn a, .jrow .jn { color: var(--ink); }
 .jobs td.jn a:hover, .jrow .jn:hover { color: var(--accent-ink); }
 .jrow { display: grid; grid-template-columns: 64px minmax(0, 1fr) auto; gap: var(--sp-3); align-items: baseline; padding: var(--sp-2) 0; border-top: 1px solid var(--line2); font-size: var(--fs-sm); }
