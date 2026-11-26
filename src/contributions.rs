@@ -60,6 +60,35 @@ pub fn track(
     if let Some(r) = existing {
         return Ok(r);
     }
+    // The draft of this PR or issue, when it was sent some other way (its Send failed and the
+    // agent opened it with the owner's go): it becomes the watched record instead of waiting on
+    // the owner for good next to a second one (imaginarium/C-2 and C-3, 2026-11-24).
+    if let Some(d) = unsent_draft(conn, project_id, repo, info)? {
+        let mut data = Map::new();
+        data.insert("number".into(), number.into());
+        data.insert("url".into(), info.url.clone().into());
+        data.insert("sent_title".into(), d.title.clone().into());
+        data.insert("sent_body".into(), d.body.clone().into());
+        data.insert("sent_at".into(), crate::util::now_ms().into());
+        data.insert("sent_by".into(), author.into());
+        data.insert("comments".into(), info.comments.into());
+        data.insert("reviews".into(), info.reviews.into());
+        data.insert("review_comments".into(), info.review_comments.into());
+        let state = finished_state(&info.state).unwrap_or(WATCHING);
+        let (r, _) = records::update(
+            conn,
+            &d,
+            author,
+            Patch {
+                title: Some(format!("{repo}#{number}: {}", info.title)),
+                state: Some(state.into()),
+                data,
+                note: format!("sent outside AgentFlow: {}", info.url),
+                ..Default::default()
+            },
+        )?;
+        return Ok(r);
+    }
     check_room(conn, project_id)?;
     let mut data = Map::new();
     data.insert("repo".into(), repo.into());
@@ -82,6 +111,29 @@ pub fn track(
             ..Default::default()
         },
     )
+}
+
+/// A draft PR or issue of the project, not sent yet, for the same repository with GitHub's title.
+fn unsent_draft(conn: &Connection, project_id: i64, repo: &str, info: &ItemInfo) -> anyhow::Result<Option<Record>> {
+    let kind = if info.is_pr { "pr" } else { "issue" };
+    let title = info.title.trim();
+    Ok(records::query(
+        conn,
+        &Query {
+            project_id: Some(project_id),
+            kinds: vec![Kind::Contribution],
+            states: vec!["draft".into(), "shown".into(), "approved".into()],
+            limit: 0,
+            ..Default::default()
+        },
+    )?
+    .into_iter()
+    .find(|r| {
+        r.str("repo").eq_ignore_ascii_case(repo)
+            && r.str("type") == kind
+            && r.data.get("number").is_none()
+            && r.title.trim().eq_ignore_ascii_case(title)
+    }))
 }
 
 /// Applies what GitHub says now; returns what to tell the agent, if anything changed.
@@ -179,6 +231,50 @@ mod tests {
             let (old, _) = records::update(c, &r, "t", Patch { data, quiet: true, ..Default::default() })?;
             assert_eq!(update(c, &old, &pr(2, 3))?, None);
             assert_eq!(records::get(c, r.id)?.data.get("reviews").and_then(Value::as_i64), Some(2));
+            Ok(())
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn a_draft_sent_another_way_becomes_the_watched_record() {
+        let db = Db::open_memory();
+        db.call_blocking(|c| {
+            let p = crate::projects::create(c, "imaginarium", "Imaginarium", "t")?;
+            let mut data = Map::new();
+            data.insert("repo".into(), "bjornharrtell/plantuml-rs".into());
+            data.insert("type".into(), "pr".into());
+            data.insert("branch".into(), "optional-graphviz".into());
+            let draft = records::create(
+                c,
+                p.id,
+                "imaginarium",
+                NewRecord {
+                    kind: Some(Kind::Contribution),
+                    title: "feat(core): optional graphviz feature".into(),
+                    body: "Two small changes".into(),
+                    state: Some("shown".into()),
+                    data,
+                    ..Default::default()
+                },
+            )?;
+            let pr = ItemInfo {
+                title: "feat(core): optional graphviz feature".into(),
+                url: "https://github.com/bjornharrtell/plantuml-rs/pull/5".into(),
+                is_pr: true,
+                state: "merged".into(),
+                ..Default::default()
+            };
+            let r = track(c, p.id, "bjornharrtell/plantuml-rs", 5, &pr, "imaginarium")?;
+            assert_eq!(r.id, draft.id, "the draft itself, not a second record");
+            assert_eq!(r.state, "merged");
+            assert_eq!(r.title, "bjornharrtell/plantuml-rs#5: feat(core): optional graphviz feature");
+            assert_eq!(r.data.get("number").and_then(Value::as_i64), Some(5));
+            assert_eq!(r.str("branch"), "optional-graphviz", "the draft's own data stays");
+            assert!(crate::outgoing::pending(&r).is_none(), "no longer waiting on the owner");
+            // Another PR to the same repository doesn't take a draft that isn't its own.
+            let other = ItemInfo { title: "fix: something else".into(), ..pr.clone() };
+            assert_ne!(track(c, p.id, "bjornharrtell/plantuml-rs", 6, &other, "imaginarium")?.id, draft.id);
             Ok(())
         })
         .unwrap();
