@@ -42,14 +42,17 @@ pub struct AddRelease {
     /// PRs that must be merged before tagging, e.g. ["PR-48", "PR-57"].
     #[serde(default)]
     pub waits_for: Vec<String>,
-    /// Release notes or what the tag closes, in Markdown.
+    /// Release notes, in Markdown: a first paragraph, then a short `- ` list. They're the tag's
+    /// message with the title (at most 32 lines and 1,500 characters in all, since the owner reads
+    /// the whole command), and a release workflow turns them into the GitHub release's notes.
     #[serde(default)]
     pub body: String,
     /// The milestone this tag closes, e.g. "M4".
     pub milestone: Option<String>,
-    /// Its "Push tag" button comes by itself (an annotated tag on origin/main, run in the
-    /// project's folder, unlocked once every PR it waits for is merged). false: you add your own
-    /// with add_button, e.g. to tag another branch.
+    /// Its "Push tag" button comes by itself: an annotated tag on main's newest commit, made
+    /// through GitHub's API (no project folder needed), with the title and notes as its message;
+    /// unlocked once every PR it waits for is merged. false: you add your own with add_button,
+    /// e.g. to tag another branch.
     pub tag_button: Option<bool>,
 }
 
@@ -234,6 +237,11 @@ impl FlowMcp {
                     Some(m) => Some(crate::projects::find_milestone(&tx, project.id, m)?.id),
                     None => None,
                 };
+                // The tag's message is the title and notes (D-254); the owner reads it in the command.
+                let message = crate::prs::tag_message(&p.title, &p.body);
+                if p.tag_button.unwrap_or(true) {
+                    crate::prs::check_tag_message(&message)?;
+                }
                 let mut data = Map::new();
                 data.insert("tag".into(), tag.into());
                 data.insert("waits_for".into(), waits.into());
@@ -254,7 +262,7 @@ impl FlowMcp {
                 // Everything still to test comes along (the owner, 2026-11-11).
                 let to_test = crate::totest::attach_to_release(&tx, &r, &a.name())?;
                 // Its Push tag button, so the agent doesn't write it by hand (Imaginarium's agent,
-                // 2026-11-12); it needs the project's folder.
+                // 2026-11-12); GitHub's API makes the tag, so no folder is needed.
                 let mut button = Value::Null;
                 if p.tag_button.unwrap_or(true) {
                     let proj = crate::projects::get_by_id(&tx, project.id)?;
@@ -263,7 +271,7 @@ impl FlowMcp {
                             "none: the project has no repository set (update_project repo); add it with add_button"
                                 .into();
                     } else {
-                        let command = crate::prs::tag_command(proj.repo.trim(), tag);
+                        let command = crate::prs::tag_command(proj.repo.trim(), tag, &message);
                         let requires: Vec<String> = p.waits_for.clone();
                         let id = crate::actions::add(
                             &tx,
@@ -317,8 +325,39 @@ impl FlowMcp {
                 }
                 let patch = records::Patch { title: p.title, body: p.body, note: p.note, ..Default::default() };
                 let (r, _) = records::update(&tx, &r, &a.name(), patch)?;
+                // Its Push tag button carries the title and notes (D-254): a waiting one is replaced
+                // by one with the new message, so what the owner reads is what gets tagged.
+                let mut button = Value::Null;
+                let tag = r.str("tag").to_owned();
+                for old in crate::actions::for_record(&tx, r.id)? {
+                    let ours = crate::prs::is_server_command(&old.command) && old.command.contains("/git/tags -f tag=");
+                    if !ours || old.state != "waiting" {
+                        continue;
+                    }
+                    let message = crate::prs::tag_message(&r.title, &r.body);
+                    crate::prs::check_tag_message(&message)?;
+                    let repo = crate::projects::get_by_id(&tx, r.project_id)?.repo.trim().to_owned();
+                    let command = crate::prs::tag_command(&repo, &tag, &message);
+                    if command == old.command {
+                        continue;
+                    }
+                    crate::actions::withdraw(&tx, old.id, &a.name())?;
+                    let id = crate::actions::add(
+                        &tx,
+                        &r,
+                        &crate::actions::NewButton {
+                            label: &old.label,
+                            kind: old.kind,
+                            command: &command,
+                            workdir: &old.workdir,
+                            requires: &old.requires,
+                        },
+                        &a.name(),
+                    )?;
+                    button = json!({"id": id, "command": command});
+                }
                 tx.commit()?;
-                Ok(Outcome::new(json!({"id": r.ref_id, "title": r.title}))
+                Ok(Outcome::new(json!({"id": r.ref_id, "title": r.title, "tag_button": button}))
                     .summary(format!("release {} updated", r.short_id()))
                     .project(r.project.clone())
                     .target(r.ref_id.clone()))

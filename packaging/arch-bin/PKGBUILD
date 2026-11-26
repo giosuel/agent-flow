@@ -1,0 +1,46 @@
+# Maintainer: giosuel <me@giosuel.ch>
+# AgentFlow's release programs for Arch Linux (AUR), as two packages like agentflow's: the server
+# (agentflow-bin) and the client (agentflow-client-bin, with flow and agentflow-builder). The
+# release workflow fills in pkgver and the checksum; the programs are the ones on GitHub Releases.
+pkgbase=agentflow-bin
+pkgname=(agentflow-bin agentflow-client-bin)
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Project management for Claude agents and their owner (release programs)"
+arch=('x86_64')
+url="https://github.com/giosuel/agent-flow"
+license=('AGPL-3.0-or-later')
+# Release programs: nothing to build, so no debug package.
+options=('!debug')
+source=("agentflow-$pkgver-linux-x86_64.tar.gz::$url/releases/download/v$pkgver/agentflow-$pkgver-linux-x86_64.tar.gz")
+sha256sums=('SKIP')
+
+package_agentflow-client-bin() {
+  pkgdesc="AgentFlow's command, flow, and its builder (agentflow-builder), release programs"
+  depends=('gcc-libs' 'glibc' 'openssl' 'zlib' 'zstd' 'git')
+  provides=("agentflow-client=$pkgver")
+  conflicts=('agentflow-client')
+  install=agentflow-client.install
+  cd "agentflow-$pkgver-linux-x86_64"
+  install -Dm755 flow "$pkgdir/usr/bin/flow"
+  install -Dm755 agentflow-builder "$pkgdir/usr/bin/agentflow-builder"
+  sed 's|@BIN@|/usr/bin/agentflow-builder|' system/agentflow-builder.service |
+    install -Dm644 /dev/stdin "$pkgdir/usr/lib/systemd/user/agentflow-builder.service"
+}
+
+package_agentflow-bin() {
+  depends=('gcc-libs' 'glibc' 'openssl' 'zlib' 'zstd' 'git' 'systemd' "agentflow-client=$pkgver")
+  optdepends=('github-cli: the merge and release buttons, pull request status'
+              'tmux: the consultant (with Claude Code for the agentflow user)')
+  provides=("agentflow=$pkgver")
+  conflicts=('agentflow')
+  install=agentflow.install
+  cd "agentflow-$pkgver-linux-x86_64"
+  install -Dm755 agentflow "$pkgdir/usr/bin/agentflow"
+  sed 's|@BIN@|/usr/bin/agentflow|' system/agentflow.service |
+    install -Dm644 /dev/stdin "$pkgdir/usr/lib/systemd/system/agentflow.service"
+  sed 's|@BIN@|/usr/bin/agentflow|' system/agentflow-hands.service |
+    install -Dm644 /dev/stdin "$pkgdir/usr/lib/systemd/user/agentflow-hands.service"
+  install -Dm644 system/agentflow.sysusers "$pkgdir/usr/lib/sysusers.d/agentflow.conf"
+  install -Dm644 README.md "$pkgdir/usr/share/doc/agentflow/README.md"
+}

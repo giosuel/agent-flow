@@ -2690,8 +2690,15 @@ async fn answers_make_scoped_decisions_and_releases_bring_their_tag_button() {
     assert!(b.get("doc").is_none() && b.get("milestones").is_none() && b.get("where").is_some(), "{b}");
     assert!(!call("add_release", json!({"tag": "v1; rm -rf ~", "title": "x"})).await.0);
     // Its text can be changed later; its tag can't, and other kinds aren't releases.
+    assert!(cmd.contains("msg=$(cat <<'AGENTFLOW_RELEASE_MESSAGE'\nM5\nAGENTFLOW_RELEASE_MESSAGE\n)"), "{cmd}");
     let (ok, u) = call("update_release", json!({"id": r["id"], "body": "Closes M5. Build B-63."})).await;
     assert!(ok, "{u}");
+    // The tag carries the title and notes (D-254): new notes, a new Push tag command with them.
+    let new_cmd = u["tag_button"]["command"].as_str().unwrap();
+    assert!(new_cmd.contains("\nM5\n\nCloses M5. Build B-63.\nAGENTFLOW_RELEASE_MESSAGE\n)"), "{new_cmd}");
+    assert!(crate::prs::is_server_command(new_cmd), "the server runs it with its own token");
+    let long = "- a line\n".repeat(40);
+    assert!(!call("update_release", json!({"id": r["id"], "body": long})).await.0, "the owner reads all of it");
     let (_, got) = call("get_record", json!({"id": r["id"]})).await;
     assert!(got.to_string().contains("Build B-63.") && got.to_string().contains("v0.0.6-m5"), "{got}");
     assert!(!call("update_release", json!({"id": r["id"]})).await.0);
