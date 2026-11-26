@@ -111,8 +111,10 @@ impl AppState {
         }
     }
 
-    /// At most 20 logged denials per address and minute; the rest only count as noise.
-    fn log_denial(&self, ip: &str) -> bool {
+    /// At most 20 logged denials per address and minute; the rest only count as noise. An
+    /// address's anonymous requests to the public paths (the sign-in page, setup codes, approval
+    /// polls) get the same allowance of their own, or a loop would fill the Log a row at a time.
+    pub(crate) fn log_denial(&self, ip: &str) -> bool {
         let minute = crate::util::now_ms() / 60_000;
         let mut map = crate::util::lock(&self.denied);
         if map.len() > 10_000 {
@@ -512,12 +514,23 @@ fn is_unlogged(path: &str) -> bool {
         || path == "/api/sync"
         // A job's output, asked for every second by each waiting `flow remote` and the job's page:
         // the job is in the Log already, with its outcome and lines (the owner, 2026-11-17).
-        || (path.ends_with("/output") && (path.starts_with("/api/remote/jobs/") || path.starts_with("/machine/jobs/")))
+        || (path.ends_with("/output")
+            && (path.starts_with("/api/remote/jobs/")
+                || path.starts_with("/machines/jobs/")
+                || path.starts_with("/machine/jobs/")))
 }
 
 fn client_ip(config: &Config, peer: Option<IpAddr>, headers: &HeaderMap) -> String {
     let Some(peer) = peer else { return "unknown".into() };
+    // The peer's address says only "this machine" when the proxy is local: with a secret set,
+    // the proxy has to show it too, or a local process could name any address it likes.
+    let vouched = config.proxy_secret.is_empty()
+        || headers
+            .get("x-agentflow-proxy")
+            .and_then(|v| v.to_str().ok())
+            .is_some_and(|v| crate::util::hash_secret(v) == crate::util::hash_secret(&config.proxy_secret));
     if config.trusted_proxies.contains(&peer)
+        && vouched
         && let Some(forwarded) = headers.get("x-forwarded-for").and_then(|v| v.to_str().ok())
         && let Some(last) = forwarded.rsplit(',').next()
     {
@@ -710,6 +723,10 @@ async fn log_requests(State(state): State<AppState>, req: Request, next: Next) -
     let status = res.status();
     // Strangers probing for pages that don't exist aren't worth a row each.
     if status == StatusCode::NOT_FOUND && matches!(actor, Actor::Anonymous) {
+        return res;
+    }
+    // Nor is a loop over the public paths: an address's first rows a minute say enough.
+    if matches!(actor, Actor::Anonymous) && !state.log_denial(&format!("anonymous {}", ip.as_deref().unwrap_or(""))) {
         return res;
     }
     let mut e = Entry::new(&actor, via, action, format!("{method} {path}"))

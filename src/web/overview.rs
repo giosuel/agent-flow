@@ -124,8 +124,7 @@ pub fn load(c: &Connection, now: i64, tz: &Tz, online: usize, agents: usize) -> 
     let projects = crate::projects::list(c)?;
     // Each project keeps its colour from Usage and Machine (charts::colors: by project, never by
     // rank; N-20 #5: it took its rank's colour here).
-    let slugs: Vec<String> = projects.iter().map(|p| p.slug.clone()).collect();
-    let colors = super::charts::colors(&slugs);
+    let colors = super::charts::colors(projects.iter().map(|p| (p.id, p.slug.as_str())));
     let mut per: Vec<(String, &'static str, f64)> = rows
         .iter()
         .filter_map(|(p, _, t)| {

@@ -1,4 +1,5 @@
 {% import "table.html" as tbl %}
+{% import "ui.html" as ui %}
 {# The Builds tab with To test merged in (the owner, 2026-11-23, Q-6, Q-8; S-40 to S-47): the
    newest build, what's new in it, everything else still to try under the filter band, and the
    earlier builds in the table component. src/web/buildstab.rs builds it. #}
@@ -58,13 +59,12 @@
 </section>
 
 {% if bv.earlier_total > 0 %}
-<section class="card" aria-labelledby="eb-h" id="earlier">
-  <div class="card-head"><h2 id="eb-h">Earlier builds</h2><span class="sub">{{ bv.earlier_total }}</span><span class="grow"></span><span class="sub hide-phone">click a header to sort</span></div>
+<section class="card" aria-labelledby="eb-h" id="earlier" data-pager="10">
+  <div class="card-head"><h2 id="eb-h">Earlier builds</h2><span class="sub">{{ bv.earlier_total }}</span><span class="grow"></span>{% call ui::pager("") %}{% endcall %}</div>
   <div class="table-wrap"><table class="table eb" data-sortable>
     <thead><tr>{% call tbl::th("Build", "num", "", "") %}{% endcall %}{% call tbl::th("What's in it", "text", "", "") %}{% endcall %}{% call tbl::th("Platforms", "text", "hide-phone", "") %}{% endcall %}{% call tbl::th("Published", "num", "hide-phone", "descending") %}{% endcall %}{% call tbl::th("Your feedback", "num", "hide-phone", "") %}{% endcall %}<th scope="col" class="eb-run"><span class="hide-phone">Run</span><span class="vh">Download</span></th></tr></thead>
     <tbody>{% for e in bv.earlier %}<tr><th scope="row" data-v="{{ e.number }}"><a class="mono" href="{{ e.url }}">{{ e.short }}</a></th><td class="eb-what"><a href="{{ e.url }}">{{ e.title }}</a><span class="mono sub">{{ e.name }}</span><span class="sub only-phone">{{ e.published }}{% if e.feedback.is_empty() %} · not tried{% endif %}{% for (_t, x) in e.feedback %} · {{ x }}{% endfor %}</span></td><td class="hide-phone">{{ e.platforms }}</td><td class="hide-phone" data-v="{{ e.published_at }}">{{ e.published }}</td><td class="hide-phone" data-v="{{ e.feedback_n }}">{% if e.feedback.is_empty() %}<span class="sub">not tried</span>{% else %}{% for (t, x) in e.feedback %}{% if !loop.first %} <span class="sub">·</span> {% endif %}<span class="{% if t.is_empty() %}sub{% else %}{{ t }}-text{% endif %}">{{ x }}</span>{% endfor %}{% endif %}</td><td class="eb-run"><div class="eb-acts">{% if !e.run.is_empty() %}<div class="hide-phone"><pre class="cmd">{{ e.run }}</pre></div>{% endif %}<a class="ibtn" href="{{ e.download }}" download aria-label="Download {{ e.short }}" title="Download">{{ crate::web::icons::icon("download")|safe }}</a></div></td></tr>{% endfor %}</tbody>
   </table></div>
-  {% if let Some(h) = bv.earlier_all %}<p class="sub nfoot">{{ bv.earlier_total - bv.earlier.len() }} more · <a href="{{ h }}">Show all</a></p>{% endif %}
 </section>
 {% endif %}
 {% endif %}

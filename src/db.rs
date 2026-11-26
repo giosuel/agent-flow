@@ -1,6 +1,6 @@
 //! SQLite access. A handful of connections in WAL mode, used from blocking threads so a slow query
-//! never stalls the async runtime. Writers queue on SQLite's own lock (busy timeout), which is
-//! plenty for about 15 agents and one owner.
+//! never stalls the async runtime. Writers queue on SQLite's own lock (busy timeout, transactions
+//! IMMEDIATE), which is plenty for about 15 agents and one owner.
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -140,7 +140,7 @@ impl Db {
 }
 
 fn open_connection(path: &Path) -> anyhow::Result<Connection> {
-    let conn = if path.to_string_lossy().starts_with("file:") {
+    let mut conn = if path.to_string_lossy().starts_with("file:") {
         Connection::open_with_flags(
             path,
             rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE
@@ -151,6 +151,11 @@ fn open_connection(path: &Path) -> anyhow::Result<Connection> {
         Connection::open(path).with_context(|| format!("opening {}", path.display()))?
     };
     conn.busy_timeout(std::time::Duration::from_secs(10))?;
+    // Every transaction takes the write lock when it begins, and so waits there for another
+    // writer. A deferred one starts as a reader and fails outright ("database is locked") when
+    // another write lands before its own: busy_timeout can't wait that out in WAL mode. Every
+    // transaction here writes; usage.rs found this first (2026-11-17).
+    conn.set_transaction_behavior(rusqlite::TransactionBehavior::Immediate);
     conn.execute_batch(
         "PRAGMA journal_mode = WAL;
          PRAGMA synchronous = NORMAL;
@@ -219,5 +224,31 @@ mod tests {
         let db = Db::open(&path).unwrap();
         let v: i64 = db.call_blocking(|c| Ok(c.query_row("PRAGMA user_version", [], |r| r.get(0))?)).unwrap();
         assert_eq!(v as usize, MIGRATIONS.len());
+    }
+
+    /// Two writers at once: a transaction that reads before it writes waits for the other one.
+    /// A deferred transaction failed with "database is locked" when another write landed between
+    /// its read and its write, and busy_timeout doesn't help there.
+    #[test]
+    fn a_transaction_that_reads_first_waits_for_another_writer() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("flow.db");
+        Db::open(&path).unwrap();
+        let (mut a, b) = (open_connection(&path).unwrap(), open_connection(&path).unwrap());
+        let (read, go) = std::sync::mpsc::channel();
+        let writer = std::thread::spawn(move || -> anyhow::Result<()> {
+            let tx = a.transaction()?;
+            tx.query_row("SELECT count(*) FROM projects", [], |r| r.get::<_, i64>(0))?;
+            read.send(()).unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(200));
+            tx.execute("INSERT INTO projects (slug, name, created_at) VALUES ('a', 'A', 0)", [])?;
+            tx.commit()?;
+            Ok(())
+        });
+        go.recv().unwrap();
+        b.execute("INSERT INTO projects (slug, name, created_at) VALUES ('b', 'B', 0)", []).unwrap();
+        writer.join().unwrap().unwrap();
+        let n: i64 = b.query_row("SELECT count(*) FROM projects", [], |r| r.get(0)).unwrap();
+        assert_eq!(n, 2);
     }
 }

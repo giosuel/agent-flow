@@ -130,12 +130,21 @@ details.ask > summary::-webkit-details-marker { display: none; }
 details.ask[open] { flex-basis: 100%; order: 3; }
 .ask-box { margin-top: 10px; }
 pre.wrap { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 40vh; overflow: auto; }
-/* Build servers: the Machine page's section, a job's page, build output in the Log. */
+/* Machines (D-277): AgentFlow's server and the build machines, a machine's page, a job's page,
+   build output in the Log. */
 :root { --bar-you: var(--cat-other); }
 .approve-icon { align-self: center; }
 .pbar-s { width: 48px; flex: none; }
-.bs-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; }
-.bs-head h3 { margin: 0; font-size: var(--fs-h3); }
+.msec { display: flex; align-items: baseline; gap: var(--sp-3); margin: var(--sp-2) 0 var(--sp-3); }
+.msec h2 { margin: 0; font-size: var(--fs-h2); }
+.mgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 600px), 1fr)); gap: var(--sp-4); }
+.mcard .card-head h2 a { color: var(--ink); text-decoration: none; }
+.mcard .card-head h2 a:hover { color: var(--accent-ink); }
+.mcard.off { opacity: .6; }
+.mnow { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-1) var(--sp-3); font-size: var(--fs-sm); }
+.mnow .label { margin: 0; }
+.mnow a { overflow-wrap: anywhere; }
+.mpause { display: contents; }
 .bmeters { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
 .bmeter { display: flex; flex-direction: column; gap: 6px; }
 .bmeter .bar3 { display: flex; height: 8px; border-radius: var(--r-pill); overflow: hidden; background: var(--chip); gap: 2px; }
@@ -144,13 +153,28 @@ pre.wrap { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 40vh; ove
 .bmeter .builds { background: var(--accent); }
 .bmeter .nums { display: flex; justify-content: space-between; gap: 8px; font-size: var(--fs-sub); color: var(--muted); }
 .jobs td, .jobs th { white-space: nowrap; }
-.jobs td.jcmd { white-space: normal; font-family: var(--mono); font-size: var(--fs-sub); }
+.jobs td.jn { white-space: normal; min-width: 16ch; overflow-wrap: anywhere; }
+.jobs td.jn a, .jrow .jn { color: var(--ink); }
+.jobs td.jn a:hover, .jrow .jn:hover { color: var(--accent-ink); }
+.jrow { display: grid; grid-template-columns: 64px minmax(0, 1fr) auto; gap: var(--sp-3); align-items: baseline; padding: var(--sp-2) 0; border-top: 1px solid var(--line2); font-size: var(--fs-sm); }
+.jrow:first-child { border-top: 0; }
+.jrow > span { min-width: 0; overflow-wrap: anywhere; }
+.mhead-actions { display: flex; gap: var(--sp-2); margin-left: auto; }
+.mmain { display: flex; flex-direction: column; gap: var(--sp-4); min-width: 0; }
+.nkv dd .chip { max-width: 100%; }
+.nkv dd .chip span { overflow: hidden; text-overflow: ellipsis; }
 .blog { font-family: var(--mono); font-size: var(--fs-sub); line-height: 1.55; background: var(--code); border: 1px solid var(--line); border-radius: 8px; padding: 8px 0; overflow: auto; color: var(--ink2); }
 .blog div { white-space: pre-wrap; overflow-wrap: anywhere; padding: 0 12px; min-height: 1.55em; }
 .blog .d { color: var(--muted); }
 .blog .w { color: var(--warn); background: var(--warn-bg); }
 .blog .e { color: var(--bad); background: var(--bad-bg); }
-@media (max-width: 700px) { .bmeters { grid-template-columns: 1fr; } }
+@media (max-width: 700px) {
+  .bmeters { grid-template-columns: 1fr; }
+  .msec { flex-wrap: wrap; }
+  /* A job right now: its state under its name, so a long reason doesn't squeeze the name. */
+  .jrow { grid-template-columns: 48px minmax(0, 1fr); row-gap: var(--sp-1_5); }
+  .jrow > .chip { grid-column: 2; justify-self: start; max-width: 100%; }
+}
 .bsrv { padding: 14px 0; border-top: 1px solid var(--line2); }
 .bsrv:first-of-type { border-top: 0; padding-top: 0; }
 .bs-add { border-top: 1px solid var(--line); padding-top: 16px; }
@@ -320,12 +344,10 @@ ol.history { padding-left: 0; list-style: none; font-size: var(--fs-sm); color: 
 .chart-marks a:hover .hit { fill: rgba(255,255,255,.04); }
 .x-labels { display: flex; justify-content: space-between; font-size: var(--fs-micro); padding-top: 6px; }
 .x-labels span { flex: 1 1 0; text-align: center; min-width: 0; overflow: hidden; white-space: nowrap; }
-.duo-charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px; }
 .tasks-usage summary { cursor: pointer; }
 .sec.wrap { flex-wrap: wrap; gap: 10px; }
 .strip { display: inline-flex; align-items: flex-end; gap: 2px; height: 18px; width: 70px; vertical-align: middle; margin: 0 8px; }
 .strip span { flex: 1; background: var(--accent); border-radius: 2px 2px 0 0; min-height: 1px; opacity: .85; }
-.x-labels.edges span { flex: none; }
 /* New project */
 .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px 20px; }
 .form-grid .span-all { grid-column: 1 / -1; }
@@ -1012,7 +1034,8 @@ ol.lrows { padding: 0; margin: 0; list-style: none; gap: 0; }
 .qmini { display: none; }
 /* Paging (D-234): one row a page on the desktop, five rows on the phone. */
 .qsec [hidden] { display: none !important; }
-.qpager { display: flex; align-items: center; gap: 8px; }
+/* The island's quiet text in its own tone, as its buttons (.ibtn.warn). */
+.qsec-h .sub, .qpager-p .qp-pos { color: var(--warn-ink); opacity: .75; }
 .qpager-p { display: flex; align-items: center; justify-content: space-between; margin-top: 12px; }
 .qpager-p .qp-pos { font-size: var(--fs-body); }
 @media (min-width: 701px) {
