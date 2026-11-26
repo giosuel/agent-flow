@@ -1,0 +1,13 @@
+---
+// A page's title with a mono eyebrow over it: the docs' section it's in.
+
+const route = Astro.locals.starlightRoute;
+type Entry = { type: string; label: string; isCurrent?: boolean; entries?: Entry[] };
+const holds = (e: Entry): boolean => (e.type === 'link' ? !!e.isCurrent : (e.entries ?? []).some(holds));
+const group = (route.sidebar as Entry[]).find((e) => e.type === 'group' && holds(e));
+---
+
+<div class="af-eyebrow" aria-hidden="true">
+  <i></i><span>Docs</span>{group && <span>{group.label}</span>}
+</div>
+<h1 id="_top">{route.entry.data.title}</h1>

@@ -1,0 +1,21 @@
+---
+// One of the app's own icons, read from src/web/icons.rs at build time, so the site and the app
+// draw the same ones.
+import source from '../../../src/web/icons.rs?raw';
+
+interface Props {
+  name: string;
+  class?: string;
+}
+
+const icons = new Map<string, string>();
+for (const m of source.matchAll(/"([a-z0-9-]+)"\s*=>\s*\{?\s*r#"(<svg[\s\S]*?<\/svg>)"#/g)) {
+  icons.set(m[1], m[2]);
+}
+const { name, class: extra = '' } = Astro.props;
+const svg = icons.get(name);
+if (!svg) throw new Error(`no icon "${name}" in src/web/icons.rs`);
+const html = extra ? svg.replace('class="i"', `class="i ${extra}"`) : svg;
+---
+
+<Fragment set:html={html} />

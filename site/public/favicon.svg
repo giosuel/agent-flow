@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="256" height="256" fill="none" stroke-linecap="round" stroke-linejoin="round">
+  <title>AgentFlow: a lead agent and its team</title>
+  <defs><linearGradient id="g23" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#C4B5FD"/><stop offset="1" stop-color="#6D4AE0"/></linearGradient><linearGradient id="s23" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#8B5CF6"/><stop offset="1" stop-color="#3B2A80"/></linearGradient><linearGradient id="v23" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#241A45"/><stop offset="1" stop-color="#120C24"/></linearGradient><radialGradient id="e23" cx="0.5" cy="0.5" r="0.5"><stop offset="0" stop-color="#EDE9FE"/><stop offset="1" stop-color="#A78BFA" stop-opacity="0"/></radialGradient></defs>
+  <circle cx="32" cy="33" r="26" stroke="#5B3FC4" stroke-width="1.6" stroke-dasharray="2 4" stroke-opacity=".9"/>
+  <path d="M21.35 24.06L15.60 19.24M42.65 24.06L48.40 19.24M32.00 44.50L32.00 52.00" stroke="#7C5CE0" stroke-width="2.2"/>
+  <rect x="3.07" y="8.52" width="15" height="13" rx="4.5" fill="url(#s23)"/><circle cx="7.82" cy="15.02" r="1.5" fill="#EDE9FE"/><circle cx="13.32" cy="15.02" r="1.5" fill="#EDE9FE"/><rect x="45.93" y="8.52" width="15" height="13" rx="4.5" fill="url(#s23)"/><circle cx="50.68" cy="15.02" r="1.5" fill="#EDE9FE"/><circle cx="56.18" cy="15.02" r="1.5" fill="#EDE9FE"/><rect x="24.50" y="50.51" width="15" height="13" rx="4.5" fill="url(#s23)"/><circle cx="29.25" cy="57.01" r="1.5" fill="#EDE9FE"/><circle cx="34.75" cy="57.01" r="1.5" fill="#EDE9FE"/>
+  <rect x="18" y="20" width="28" height="26" rx="9" fill="url(#g23)"/>
+  <rect x="22" y="27" width="20" height="11" rx="5.5" fill="url(#v23)"/>
+  <circle cx="27.5" cy="32.5" r="5.06" fill="url(#e23)"/><circle cx="36.5" cy="32.5" r="5.06" fill="url(#e23)"/><circle cx="27.5" cy="32.5" r="2.3" fill="#EDE9FE"/><circle cx="36.5" cy="32.5" r="2.3" fill="#EDE9FE"/>
+  <path d="M32 20V16" stroke="#C4B5FD" stroke-width="2"/><circle cx="32" cy="14.5" r="2" fill="#EDE9FE"/>
+</svg>
