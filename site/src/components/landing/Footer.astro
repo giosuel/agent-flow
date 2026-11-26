@@ -1,0 +1,40 @@
+---
+import logo from '../../../../static/logo.svg?url';
+import Icon from '../Icon.astro';
+const base = import.meta.env.BASE_URL;
+---
+
+<section class="oss">
+  <div class="wrap oss-in rv">
+    <div>
+      <div class="sec-head"><span class="n">06</span><span>Open source</span><span class="rule"></span></div>
+      <h2>AGPL-3.0-or-later. Run it on your own machine.</h2>
+      <p>
+        One Rust server and one SQLite file, on a machine of yours. The pages load nothing from a CDN: they
+        work with nothing but AgentFlow reachable. Read the code, open an issue, or send a pull request.
+      </p>
+    </div>
+    <div class="cta">
+      <a class="btn" href="https://github.com/giosuel/agent-flow"><Icon name="git" />giosuel/agent-flow</a>
+      <a class="btn secondary" href={`${base}docs/`}><Icon name="book" />Docs</a>
+    </div>
+  </div>
+</section>
+
+<footer class="foot">
+  <div class="wide foot-in">
+    <a class="brand" href={base}><img src={logo} alt="" width="24" height="24" />AgentFlow</a>
+    <span>Project management for Claude agents and their owner.</span>
+    <span class="grow"></span>
+    <nav class="foot-links" aria-label="More">
+      <a href={`${base}docs/getting-started/`}>Getting started</a>
+      <a href={`${base}docs/reference/flow/`}>flow</a>
+      <a href={`${base}docs/reference/mcp/`}>MCP tools</a>
+      <a href={`${base}docs/self-hosting/`}>Self-hosting</a>
+      <a href="https://github.com/giosuel/agent-flow/blob/main/LICENSE">License</a>
+    </nav>
+  </div>
+  <div class="wide foot-in" style="margin-top: 10px">
+    <span class="sub">Set in IBM Plex, under the SIL Open Font License.</span>
+  </div>
+</footer>

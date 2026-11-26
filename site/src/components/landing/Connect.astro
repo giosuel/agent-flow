@@ -1,0 +1,110 @@
+---
+import logo from '../../../../static/logo.svg?url';
+import Icon from '../Icon.astro';
+const base = import.meta.env.BASE_URL;
+---
+
+<section class="sec" id="connect">
+  <div class="wrap">
+    <div class="sec-top rv">
+      <div>
+        <div class="sec-head"><span class="n">03</span><span>How agents connect</span><span class="rule"></span></div>
+        <h2 class="sec-title">One server in the middle. Agents talk to it over MCP.</h2>
+      </div>
+      <p class="sec-lead">
+        AgentFlow is an MCP server over streamable HTTP, a web app for you, and an API for <code class="mono">flow</code>.
+        Each project's agent has a token that changes only its own project.
+        Build servers connect out to it, so nothing on them listens.
+      </p>
+    </div>
+
+    <div class="arch rv">
+      <div class="node agents-n">
+        <div class="node-k"><span class="itile t-violet"><Icon name="robot" /></span><span><b>Claude Code</b><span class="sub">one agent per project</span></span></div>
+        <ul>
+          <li><Icon name="check" class="xs" /><span><span class="mono">hello</span> at every session start</span></li>
+          <li><Icon name="check" class="xs" /><span>tools for the plan, questions, PRs, builds</span></li>
+          <li><Icon name="check" class="xs" /><span>the owner's news in every reply</span></li>
+        </ul>
+      </div>
+      <div class="wire w1"><span>MCP · /mcp</span><i></i><i class="d"></i></div>
+      <div class="node core">
+        <div class="core-head"><img src={logo} alt="" width="44" height="44" /><span><b>agentflow</b><span class="sub">one server, one SQLite database</span></span></div>
+        <div class="core-mods">
+          <div class="mod"><b>MCP</b><span>streamable HTTP, token per project</span></div>
+          <div class="mod"><b>Web app</b><span>passkeys, home-screen app, Web Push</span></div>
+          <div class="mod"><b>API</b><span>for flow: builds, notes, approvals</span></div>
+          <div class="mod"><b>Log</b><span>every request, never deleted</span></div>
+        </div>
+      </div>
+      <div class="wire w2 back"><span>HTTPS · push</span><i></i><i class="d"></i></div>
+      <div class="node you">
+        <div class="node-k"><span class="itile t-teal"><Icon name="person" /></span><span><b>You</b><span class="sub">a browser or the home-screen app</span></span></div>
+        <ul>
+          <li><Icon name="question" class="xs" /><span>Send answer</span></li>
+          <li><Icon name="merge" class="xs" /><span>Merge #a–#b</span></li>
+          <li><Icon name="tag" class="xs" /><span>Push tag</span></li>
+          <li><Icon name="play" class="xs" /><span>Works · Problem · Skip</span></li>
+        </ul>
+      </div>
+      <div class="wire v"><span>WebSocket, connects out</span><i></i><i class="d"></i></div>
+      <div class="node cli">
+        <div class="node-k"><span class="itile"><Icon name="code" /></span><span><b>flow</b><span class="sub">on every machine</span></span></div>
+        <ul>
+          <li><span class="mono">flow connect</span></li>
+          <li><span class="mono">flow run · flow publish</span></li>
+        </ul>
+      </div>
+      <div class="node builders">
+        <div class="node-k"><span class="itile t-orange"><Icon name="server" /></span><span><b>agentflow-builder</b><span class="sub">build servers</span></span></div>
+        <ul>
+          <li><span class="mono">flow remote -- cargo build --release</span></li>
+          <li><Icon name="check" class="xs" /><span>connects out over a WebSocket</span></li>
+          <li><Icon name="check" class="xs" /><span>only changed files travel</span></li>
+        </ul>
+      </div>
+      <div class="node gh">
+        <div class="node-k"><span class="itile"><Icon name="git" /></span><span><b>GitHub</b><span class="sub">through gh</span></span></div>
+        <ul>
+          <li><Icon name="refresh" class="xs" /><span>PRs read every 3 minutes</span></li>
+          <li><Icon name="merge" class="xs" /><span>your Merge and Push tag</span></li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="steps3">
+      <div class="step3 rv">
+        <span class="k">Step 1</span>
+        <h3>Connect the machine</h3>
+        <p>Installs <code class="mono">flow</code> and asks for your approval in the browser, with the same short code on both sides.</p>
+        <code class="cmd">curl -fsSL https://flow.example/install.sh | sh</code>
+      </div>
+      <div class="step3 rv">
+        <span class="k">Step 2</span>
+        <h3>Set up the project</h3>
+        <p>In the project's folder. It writes the MCP entry, the hooks and the token file, all kept out of git.</p>
+        <code class="cmd">cd ~/lumen && flow project setup</code>
+      </div>
+      <div class="step3 rv">
+        <span class="k">Step 3</span>
+        <h3>Start the agent</h3>
+        <p>Its hooks run <code class="mono">flow hello</code> at every start, <code class="mono">flow news</code> before your prompts, and <code class="mono">flow sync</code> after each reply.</p>
+        <code class="cmd">claude</code>
+      </div>
+    </div>
+
+    <div class="term json rv">
+      <div class="term-h"><i></i><i></i><i></i><span>~/lumen/.mcp.json, written by flow project setup</span></div>
+      <pre>&#123;
+  <span class="a">"mcpServers"</span>: &#123;
+    <span class="a">"agentflow"</span>: &#123;
+      <span class="a">"type"</span>: <span class="g">"http"</span>,
+      <span class="a">"url"</span>: <span class="g">"https://flow.example/mcp"</span>,
+      <span class="a">"headersHelper"</span>: <span class="g">"flow mcp-headers --token-file ~/.config/agentflow/tokens/lumen.token"</span>
+    &#125;
+  &#125;
+&#125;</pre>
+    </div>
+    <p class="sub rv" style="margin-top: 14px">The token is read from its file whenever Claude connects, so it never sits in a config. <a href={`${base}docs/reference/mcp/`}>The MCP tools</a></p>
+  </div>
+</section>
