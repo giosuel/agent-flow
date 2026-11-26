@@ -65,14 +65,14 @@
   </div>
 </section>
 
-<div class="ov-lay">
+<div class="ov-lay level">
   <div class="ov-main">
     {% include "milestone_list.html" %}
   </div>
 
   <aside class="ov-side" aria-label="About the project">
     {% for rel in releases %}
-    <details class="ov-fold" open>
+    <details class="card ov-fold" open>
       <summary class="card-head"><span class="ofi">{{ crate::web::icons::icon("tag")|safe }}</span><h2>Release</h2><span class="sub of-phone mono">{{ rel.tag }}</span><span class="grow"></span><a class="act of-desk" href="{{ rel.url }}">details</a><span class="of-chev">{{ crate::web::icons::icon("chevron")|safe }}</span></summary>
       <div class="of-body stack">
         <p><span class="mono">{{ rel.tag }}</span> · {{ rel.title }}</p>
@@ -82,7 +82,7 @@
       </div>
     </details>
     {% endfor %}
-    <details class="ov-fold" open>
+    <details class="card ov-fold" open>
       <summary class="card-head"><span class="ofi">{{ crate::web::icons::icon("decision")|safe }}</span><h2 id="dec-h">Latest decisions</h2><span class="sub of-phone mono">{% for d in decisions %}{% if loop.index <= 3 %}{% if !loop.first %}, {% endif %}{{ d.short }}{% endif %}{% endfor %}</span><span class="grow"></span><a class="act of-desk" href="/p/{{ slug }}?tab=questions">All</a><span class="of-chev">{{ crate::web::icons::icon("chevron")|safe }}</span></summary>
       <div class="of-body rows flush">
         {% if decisions.is_empty() %}<p class="empty-in">No decisions recorded yet.</p>{% endif %}
@@ -90,7 +90,7 @@
       </div>
     </details>
     {% if !external.is_empty() || !external_done.is_empty() %}
-    <details class="ov-fold" open>
+    <details class="card ov-fold" open>
       <summary class="card-head"><span class="ofi">{{ crate::web::icons::icon("pr")|safe }}</span><h2 id="ext-h">External PRs / issues</h2><span class="sub of-phone">{{ external.len() }} open</span><span class="grow"></span><span class="of-chev">{{ crate::web::icons::icon("chevron")|safe }}</span></summary>
       <div class="of-body stack">
       <ul class="rows">{% for e in external %}<li class="item-row ext-row"><span class="ext-ico ext-{{ e.icon }}">{{ crate::web::icons::icon(e.icon)|safe }}</span><div class="ttl"><a href="{{ e.url }}">{{ e.title }}</a><span class="sub">{{ e.sub }}</span></div>{% if let Some((cls, text)) = e.chip %}<span class="chip {{ cls }}">{{ text }}</span>{% endif %}{% if e.review %}<a class="btn sm secondary" href="{{ e.url }}">Review</a>{% endif %}</li>{% endfor %}</ul>
@@ -118,7 +118,7 @@
     {% if let Some(b) = board %}
     {% if loose_selected %}<div class="sec"><h2>{{ b.title }}</h2><span class="sub">{{ b.summary }}</span></div>{% endif %}
     {% if !b.note.is_empty() %}<p class="sub">{{ b.note }}</p>{% endif %}
-    <div class="plan-lay{% if b.rail.is_empty() %} norail{% endif %}">
+    <div class="plan-lay level{% if b.rail.is_empty() %} norail{% endif %}">
       {% if !b.rail.is_empty() %}
       <details class="srail" open data-srail>
         <summary>{% for s in b.rail %}{% if s.on %}<span class="srail-i {{ s.class }}" aria-hidden="true"></span><span class="mono k">{{ s.name }}</span><span class="t">{{ s.title }}</span>{% endif %}{% endfor %}<span class="sub">{{ b.steps }} steps</span>{{ crate::web::icons::icon("chevron")|safe }}</summary>
@@ -131,7 +131,7 @@
         {% endif %}
         {% if b.empty %}<div class="card empty-state"><span class="itile lg">{{ crate::web::icons::icon("task")|safe }}</span><h3 class="t">Nothing on the board yet</h3><p>It has no steps and no tasks. When the agent starts it, its steps show here as a rail and its tasks on the board.</p></div>{% else %}
         <div class="bchips fchips" role="tablist" aria-label="Columns">{% for col in b.columns %}<button type="button" role="tab" data-col="{{ loop.index0 }}" class="fchip{% if loop.index0 == b.first_col %} on{% endif %}"{% if loop.index0 == b.first_col %} aria-selected="true"{% endif %}>{{ col.title }} <span class="n">{{ col.count }}</span></button>{% endfor %}</div>
-        <div class="board fixed" data-show="{{ b.first_col }}">
+        <div class="board fixed grows" data-show="{{ b.first_col }}">
           {% for col in b.columns %}
           <div class="col{% if loop.index0 == b.first_col %} on{% endif %}"><div class="col-h"><span class="label">{{ col.title }}</span><span class="mono sub">{{ col.count }}</span></div>
             <div class="col-b">

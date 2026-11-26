@@ -80,7 +80,7 @@
   </div>
 </section>
 
-<div class="usage-pair">
+<div class="usage-pair level">
 <section class="card tk-card" aria-labelledby="tasks-h">
   <div class="card-head"><h2 id="tasks-h">Tasks by cost</h2><span class="sub">last {{ days }} days</span><span class="grow"></span><span class="seg sm" role="group" aria-label="Window"><a{% if days == 7 %} class="on"{% endif %} href="/usage?{{ keep_day_metric }}days=7#tasks-h"{% if days == 7 %} aria-current="true"{% endif %}>7 days</a><a{% if days == 14 %} class="on"{% endif %} href="/usage?{{ keep_day_metric }}days=14#tasks-h"{% if days == 14 %} aria-current="true"{% endif %}>14 days</a></span></div>
   <div class="card-body stack">
@@ -92,9 +92,9 @@
     <tbody>{% for r in top_tasks %}<tr><th scope="row" data-v="{{ r.title }}"><a href="{{ r.url }}"><span class="mono sub">{{ r.id }}</span> {{ r.title }}</a></th><td class="sub hide-phone tk-l" data-v="{{ r.last_at }}">{{ r.worked }}</td><td class="hide-phone" data-v="{{ r.t.raw.new_tokens() }}">{{ r.t.new_tokens }}</td><td data-v="{{ r.t.raw.cost_micro }}"><span class="tk-cost"><strong>{{ r.t.cost }}</strong><span class="meter thin cbar" aria-hidden="true"><i style="width: {{ r.bar }}%; --c: {{ r.color }}"></i></span></span></td></tr>{% endfor %}</tbody>
   </table></div>
   {% endif %}
-  <div class="tk-foot"><span class="sub">{% if tasks_more > 0 %}{{ tasks_more }} more task{% if tasks_more != 1 %}s{% endif %}{% if !not_in_task.is_empty() %} · {% endif %}{% endif %}{% if !not_in_task.is_empty() %}"Not in a task" {{ not_in_task }}{% endif %}</span>
-    <a class="tk-all" href="/usage/tasks{% if days == 14 %}?days=14{% endif %}" data-dlg>{% if tasks_total > 1 %}All {{ tasks_total }} tasks{% else %}Show all{% endif %}{{ crate::web::icons::icon("chevron")|safe }}</a></div>
   </div>
+  <div class="card-foot tk-foot"><span class="sub">{% if tasks_more > 0 %}{{ tasks_more }} more task{% if tasks_more != 1 %}s{% endif %}{% if !not_in_task.is_empty() %} · {% endif %}{% endif %}{% if !not_in_task.is_empty() %}"Not in a task" {{ not_in_task }}{% endif %}</span>
+    <a class="tk-all" href="/usage/tasks{% if days == 14 %}?days=14{% endif %}" data-dlg>{% if tasks_total > 1 %}All {{ tasks_total }} tasks{% else %}Show all{% endif %}{{ crate::web::icons::icon("chevron")|safe }}</a></div>
 </section>
 {% if !est_rows.is_empty() %}
 <section class="card" aria-labelledby="est-h">

@@ -7,7 +7,7 @@
   <div class="crumb-row">{% include "path.html" %}{% if let Some(u) = session_url %}<a class="session-link" href="{{ u }}" target="_blank" rel="noopener" title="The project agent's Claude Code session on claude.ai">{{ crate::web::icons::icon("session")|safe }}<span class="hide-phone">Open the agent's session</span><span class="only-phone">Agent session</span>{{ crate::web::icons::icon("out")|safe }}</a>{% endif %}</div>
   <h1 class="rec-title note-title">{{ title }}</h1>
 </div>
-<div class="npage">
+<div class="npage level">
   <section class="card ndoc" aria-label="{{ note.filename }}">
     <div class="card-head ndoc-head">
       <span class="itile sm t-{{ note.tint }} hide-phone" aria-hidden="true">{{ crate::web::icons::icon(note.icon)|safe }}</span>

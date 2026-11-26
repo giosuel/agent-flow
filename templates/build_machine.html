@@ -12,7 +12,7 @@
   <h1 class="rec-title note-title">{{ m.name }}</h1>
   <p class="status-line" id="mstatus" data-live><span class="dot{% if m.online %} ok{% endif %}" aria-hidden="true"></span><span>{{ m.state }}</span>{% if m.paused %}<span aria-hidden="true">·</span><span class="warn-text">builds paused</span>{% endif %}{% if !m.specs.is_empty() %}<span aria-hidden="true">·</span><span>{{ m.specs }}</span>{% endif %}<span aria-hidden="true">·</span><span>{{ jobs_since }}</span></p>
 </div>
-<div class="npage">
+<div class="npage level">
   <div class="mmain">
     <section class="card" aria-labelledby="now-h" id="mnow" data-live>
       <div class="card-head"><h2 id="now-h">Right now</h2><span class="sub">{% if !m.online %}offline{% if !m.waiting.is_empty() %} · {{ m.waiting.len() }} waiting{% endif %}{% else if m.running.is_empty() && m.waiting.is_empty() %}nothing running{% else %}{{ m.running.len() }} running, {{ m.waiting.len() }} waiting{% endif %}</span></div>

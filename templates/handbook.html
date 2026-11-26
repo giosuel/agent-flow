@@ -8,7 +8,7 @@
 {% if files.is_empty() %}
 <section class="card empty-state"><span class="itile lg">{{ crate::web::icons::icon("book")|safe }}</span><h2 class="t">No files yet</h2><p>The handbook's files come in once from the ai-handbook folder at the next start, or the consultant adds them with <span class="mono">handbook_edit</span>.</p></section>
 {% else %}
-<div class="split guides hb{% if picked %} picked{% endif %}">
+<div class="split guides hb level{% if picked %} picked{% endif %}">
   <nav class="split-side stack" aria-label="Handbook">
     <div class="card list navlist rows flush">
       {% for f in files %}

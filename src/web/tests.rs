@@ -5377,6 +5377,38 @@ fn the_ui_library_replaced_the_old_buttons() {
     }
 }
 
+#[test]
+fn two_column_pages_end_level() {
+    // The owner, 2026-11-26 (D-293): on every two-column page both columns end level, the shorter
+    // one's last card growing down; a record shown as a page puts its side beside the first card.
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let ui = std::fs::read_to_string(root.join("static/ui.css")).unwrap();
+    assert!(ui.contains(".level > * { align-self: stretch; }"), "the library's .level");
+    assert!(ui.contains(".card > .card-foot { margin-top: auto; }"), "a grown card's foot at its bottom");
+    let app = std::fs::read_to_string(root.join("static/app.css")).unwrap();
+    assert!(app.contains(".page > .split.rec-lay { display: grid;"), "record pages in rows");
+    let mut seen = std::collections::BTreeSet::new();
+    for f in std::fs::read_dir(root.join("templates")).unwrap() {
+        let path = f.unwrap().path();
+        let name = path.file_name().unwrap().to_string_lossy().into_owned();
+        let t = std::fs::read_to_string(&path).unwrap();
+        for (i, _) in t.match_indices("class=\"") {
+            let class = &t[i + 7..i + 7 + t[i + 7..].find('"').unwrap()];
+            let first = class.split([' ', '{']).next().unwrap_or("");
+            // The dashboard's side holds no cards and the conversations fill the window already.
+            let two_columns = matches!(first, "ov-lay" | "plan-lay" | "npage" | "usage-pair")
+                || (first == "split" && !class.starts_with("split conv") && name != "dashboard.html");
+            if two_columns {
+                assert!(class.split([' ', '{']).any(|c| c == "level"), "{name}: class=\"{class}\" ends level");
+                seen.insert(first.to_owned());
+            }
+        }
+    }
+    assert_eq!(seen.into_iter().collect::<Vec<_>>(), ["npage", "ov-lay", "plan-lay", "split", "usage-pair"]);
+    let record = std::fs::read_to_string(root.join("templates/record.html")).unwrap();
+    assert!(record.contains(r#"<div class="split rec-lay level">"#));
+}
+
 /// The library's catalogue: the owner's, every component drawn with ui.css itself.
 #[tokio::test]
 async fn the_ui_catalogue_shows_the_library() {
@@ -5396,6 +5428,7 @@ async fn the_ui_catalogue_shows_the_library() {
     for id in ["ui-card", "ui-nav", "ui-table", "ui-msg"] {
         assert!(page.contains(&format!(r#"id="{id}""#)), "{id}: {page}");
     }
+    assert!(page.contains(r#"<div class="ui-cols level ui-wide">"#), "columns that end level: {page}");
     assert!(
         page.contains(r#"<div class="dlg sm ui-dlg" role="presentation">"#)
             && page.contains(r#"<p class="notice bad">"#),
