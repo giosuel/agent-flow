@@ -21,3 +21,6 @@
 {#- A question without options is answered in a text box (the owner, 2026-11-25, D-287). -#}
 <div class="choice-own{% if items.is_empty() %} alone{% endif %}">{% if own || items.is_empty() %}<label class="vh" for="{{ own_id }}">Answer in your own words</label>{% if items.is_empty() %}<textarea id="{{ own_id }}" name="words" rows="4" placeholder="Your answer, in your own words"></textarea>{% else %}<input id="{{ own_id }}" name="words" autocomplete="off" placeholder="Or answer in your own words">{% endif %}{% endif %}<button class="btn" type="submit">Send answer</button></div>
 </form>{% endmacro %}
+{# Pager (static/ui.css .pager): "1–10 of 69 · page 1 of 7" and ‹ ›, hidden until app.js pages the
+   list. tone: "" or "warn" (on the questions island). #}
+{% macro pager(tone) %}<div class="pager" hidden><span class="mono sub pg-range" aria-live="polite"></span><button type="button" class="ibtn{% if !tone.is_empty() %} {{ tone }}{% endif %} pg-prev" aria-label="Previous page">{{ crate::web::icons::icon("prev")|safe }}</button><button type="button" class="ibtn{% if !tone.is_empty() %} {{ tone }}{% endif %} pg-next" aria-label="Next page">{{ crate::web::icons::icon("chevron")|safe }}</button></div>{% endmacro %}

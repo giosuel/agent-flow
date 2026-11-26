@@ -287,8 +287,7 @@ async fn page(
         .await?;
     let (projects, buckets, per_project, today_total, fortnight, newest, week, plan) = data;
 
-    let slugs: Vec<String> = projects.iter().map(|p| p.slug.clone()).collect();
-    let colors = charts::colors(&slugs);
+    let colors = charts::colors(projects.iter().map(|p| (p.id, p.slug.as_str())));
     let name_of = |id: Option<i64>| -> (String, &'static str) {
         match id.and_then(|id| projects.iter().position(|p| p.id == id)) {
             Some(i) => (projects[i].name.clone(), colors[i]),
@@ -499,8 +498,7 @@ async fn task_rows(state: &AppState, tz: &Tz, now: i64, days: i64) -> AppResult<
             Ok((projects, tasks, records))
         })
         .await?;
-    let slugs: Vec<String> = projects.iter().map(|p| p.slug.clone()).collect();
-    let colors = charts::colors(&slugs);
+    let colors = charts::colors(projects.iter().map(|p| (p.id, p.slug.as_str())));
     let mut rows: Vec<TaskRow> = tasks
         .iter()
         .zip(&records)

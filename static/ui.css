@@ -22,6 +22,8 @@
   /* The soft violet light at the top of a page, as on the website's landing page (the owner,
      2026-11-24, D-257). */
   --glow-a: rgba(167, 139, 250, 0.16); --glow-b: rgba(76, 61, 138, 0.2);
+  /* The ground's fine blueprint grid, as on the website's docs (the owner, 2026-11-24, D-260). */
+  --grid-line: rgba(255, 255, 255, 0.028); --grid-size: 32px;
   --accent: #A78BFA; --accent-ink: #C4B5FD; --on-accent: #1A0F3A; --accent-bg: #1C1530; --accent-chip: #251B40; --accent-chip-ink: #D2C4FF; --accent-deep: #4C3D8A;
   /* Status: fill, text, background, border per tone */
   --ok: #4ADE80; --ok-ink: #86EFAC; --ok-bg: #0F2A1A; --ok-line: #1E4D30;
@@ -60,7 +62,7 @@
 /* ---------------------------------------------------------------- Base */
 * { box-sizing: border-box; }
 html { -webkit-text-size-adjust: 100%; }
-body { margin: 0; background: var(--ground); color: var(--ink); font: var(--fs-body)/1.5 var(--sans); min-height: 100vh; display: flex; flex-direction: column; }
+body { margin: 0; background-color: var(--ground); background-image: linear-gradient(to right, var(--grid-line) 1px, transparent 1px), linear-gradient(to bottom, var(--grid-line) 1px, transparent 1px); background-size: var(--grid-size) var(--grid-size); color: var(--ink); font: var(--fs-body)/1.5 var(--sans); min-height: 100vh; display: flex; flex-direction: column; }
 a { color: var(--accent); }
 a:hover { color: var(--accent-ink); }
 h1, h2, h3 { margin: 0; font-weight: 600; }
@@ -143,6 +145,15 @@ code, pre, .mono { font-family: var(--mono); }
 .ibtn[disabled], .ibtn.off { color: var(--dim); border-color: var(--line2); background: transparent; cursor: default; pointer-events: none; }
 .ibtn.flat[disabled], .ibtn.flat.off { border-color: transparent; }
 .ibtn[disabled] .i { opacity: .6; }
+/* On a warn surface (the questions island): its own warm tones, not the neutral greys made for
+   dark cards (the owner, 2026-11-24: "some of these colors still seem off"). */
+.ibtn.warn { color: var(--warn-ink); border-color: var(--warn-line); }
+.ibtn.warn:hover { color: var(--warn-ink); background: var(--warn-line); border-color: var(--warn-line); }
+.ibtn.warn[disabled], .ibtn.warn.off { color: var(--warn-ink); border-color: var(--warn-line); background: transparent; opacity: .35; }
+/* Pager: a list a page at a time, "1–10 of 69 · page 1 of 7" and ‹ › (templates/ui.html pager;
+   app.js fills it in). The questions island and Earlier builds. */
+.pager { display: flex; align-items: center; gap: var(--sp-2); }
+.pager[hidden] { display: none; }
 .ibtn.busy .i { animation: spin 1.2s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
@@ -415,10 +426,16 @@ summary.card-head::-webkit-details-marker { display: none; }
 .th-sort { appearance: none; background: none; border: 0; padding: 0; margin: 0; font: inherit; color: inherit; letter-spacing: inherit; text-transform: inherit; display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
 .th-sort:hover, [aria-sort] > .th-sort { color: var(--ink); }
 .th-sort:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--r-xs); }
-.sort-i { font-size: var(--fs-sub); letter-spacing: 0; opacity: .45; min-width: 1ch; }
-.sort-i::before { content: "\2195"; }
-[aria-sort=ascending] > .th-sort .sort-i::before { content: "\2191"; }
-[aria-sort=descending] > .th-sort .sort-i::before { content: "\2193"; }
+/* Two small carets drawn in CSS, not the arrow characters: IBM Plex has ↑ and ↓ but not ↕, so the
+   browser drew it from another font, larger and unlike the others (the owner, 2026-11-24: "why is
+   the table header weird here?"). Sorted, only the caret of its direction stays. */
+.sort-i { position: relative; display: inline-block; width: 7px; height: 11px; flex: none; opacity: .45; }
+.sort-i::before, .sort-i::after { content: ""; position: absolute; left: 0; border-left: 3.5px solid transparent; border-right: 3.5px solid transparent; }
+.sort-i::before { top: 0; border-bottom: 4px solid currentColor; }
+.sort-i::after { bottom: 0; border-top: 4px solid currentColor; }
+[aria-sort=ascending] > .th-sort .sort-i::after, [aria-sort=descending] > .th-sort .sort-i::before { display: none; }
+[aria-sort=ascending] > .th-sort .sort-i::before { top: 3px; }
+[aria-sort=descending] > .th-sort .sort-i::after { bottom: 3px; }
 [aria-sort] > .th-sort .sort-i { opacity: 1; color: var(--accent-ink); }
 .th-sort:hover .sort-i { opacity: .9; }
 

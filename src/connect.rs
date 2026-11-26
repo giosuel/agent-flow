@@ -207,17 +207,34 @@ pub fn update(config_path: &Path, args: &ClientArgs) -> anyhow::Result<()> {
         let _ = std::fs::remove_file(&tmp);
         bail!("the download doesn't match its checksum; nothing was changed");
     }
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755))?;
-    let new = std::process::Command::new(&tmp).arg("--version").output()?;
-    std::fs::rename(&tmp, &me)?;
-    println!(
-        "Updated {}: {} → {}",
-        me.display(),
-        env!("APP_VERSION"),
-        String::from_utf8_lossy(&new.stdout).trim().trim_start_matches("flow ")
-    );
+    let version = install(&tmp, &me)?;
+    println!("Updated {}: {} → {version}", me.display(), env!("APP_VERSION"));
     Ok(())
+}
+
+/// Puts the downloaded `flow` at `me` once it has run here, and returns its version. One that
+/// doesn't start (built against a newer glibc than this machine's, say) is thrown away: it would
+/// leave no working `flow`, and so no `flow update` to undo it with.
+fn install(tmp: &Path, me: &Path) -> anyhow::Result<String> {
+    use std::os::unix::fs::PermissionsExt;
+    let tried = std::fs::set_permissions(tmp, std::fs::Permissions::from_mode(0o755))
+        .and_then(|_| std::process::Command::new(tmp).arg("--version").output());
+    let version = match &tried {
+        Ok(out) if out.status.success() => {
+            String::from_utf8_lossy(&out.stdout).trim().strip_prefix("flow ").map(str::to_owned)
+        }
+        _ => None,
+    };
+    let Some(version) = version else {
+        let _ = std::fs::remove_file(tmp);
+        let why = match tried {
+            Ok(out) => String::from_utf8_lossy(&out.stderr).trim().to_owned(),
+            Err(e) => e.to_string(),
+        };
+        bail!("the server's flow doesn't run on this machine, so this one stays: {why}");
+    };
+    std::fs::rename(tmp, me)?;
+    Ok(version)
 }
 
 fn client_text(client: &Client, path: &str) -> anyhow::Result<String> {
@@ -717,6 +734,22 @@ mod tests {
         assert_eq!(name("/x/flow hello --no-doc --session 'Cold Trace' --token-file t").as_deref(), Some("Cold Trace"));
         assert_eq!(name(r"/x/flow hello --no-doc --session 'it'\''s' --token-file t").as_deref(), Some("it's"));
         assert_eq!(session_name_in(&json!({})), None);
+    }
+
+    #[test]
+    fn an_update_that_doesnt_start_here_keeps_the_old_flow() {
+        let dir = tempfile::tempdir().unwrap();
+        let (me, tmp) = (dir.path().join("flow"), dir.path().join(".flow.update"));
+        std::fs::write(&me, "the old flow").unwrap();
+        std::fs::write(&tmp, "#!/bin/sh\necho 'flow: version GLIBC_2.44 not found' >&2\nexit 1\n").unwrap();
+        let err = install(&tmp, &me).unwrap_err().to_string();
+        assert!(err.contains("GLIBC_2.44"), "{err}");
+        assert_eq!(std::fs::read_to_string(&me).unwrap(), "the old flow");
+        assert!(!tmp.exists(), "the download is thrown away");
+        // One that runs takes its place.
+        std::fs::write(&tmp, "#!/bin/sh\necho 'flow 0.9.1'\n").unwrap();
+        assert_eq!(install(&tmp, &me).unwrap(), "0.9.1");
+        assert!(std::fs::read_to_string(&me).unwrap().contains("flow 0.9.1") && !tmp.exists());
     }
 
     #[test]
