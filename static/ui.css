@@ -357,6 +357,10 @@ summary.card-head::-webkit-details-marker { display: none; }
 .chip.info { background: var(--info-bg); color: var(--info-ink); }
 .chip.quiet { background: transparent; box-shadow: inset 0 0 0 1px var(--line); color: var(--muted); }
 .chip .i { width: var(--ic-2xs); height: var(--ic-2xs); stroke-width: 2.2; }
+/* A chip that goes somewhere: a job's project and its server (D-279). No underline; the pointer
+   brings the ink and a ring: <a class="chip link" href="…">(icon)<span>name</span></a> */
+a.chip.link { text-decoration: none; }
+a.chip.link:hover { color: var(--ink); box-shadow: inset 0 0 0 1px var(--border); }
 
 /* Tag: small metadata (scope, milestone, model, platform); .line bordered, .dashed for the unsure */
 .tag { display: inline-flex; align-items: center; height: 20px; padding: 0 7px; border-radius: var(--r-sm); font: 500 var(--fs-micro) var(--mono); background: var(--chip); color: var(--ink2); white-space: nowrap; vertical-align: middle; }
@@ -437,6 +441,10 @@ summary.card-head::-webkit-details-marker { display: none; }
 [aria-sort=ascending] > .th-sort .sort-i::before { top: 3px; }
 [aria-sort=descending] > .th-sort .sort-i::after { bottom: 3px; }
 [aria-sort] > .th-sort .sort-i { opacity: 1; color: var(--accent-ink); }
+/* Pager: a long table's pages, in its card's foot (ui::pager): which rows, which page, and the
+   pages before and after as icon links ("1–20 of 214 · page 1 of 11 ‹ ›"). */
+.pager.links { flex: 1 1 auto; flex-wrap: wrap; min-width: 0; }
+.pager-range { margin-right: auto; }
 .th-sort:hover .sort-i { opacity: .9; }
 
 /* ---------------------------------------------------------------- List row: one row for every list

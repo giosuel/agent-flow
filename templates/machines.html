@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% import "machine_parts.html" as parts %}
+{% block title %}Machines{% endblock %}
+{% block scripts %}<script src="/static/machine.js?v={{ nav.version }}" defer></script>{% endblock %}
+{% block content %}
+{#- Machines (D-277): AgentFlow's own server, then a card per build machine with its stats now and
+    no job tables; each machine's page has its builds. machine.js swaps the [data-live] parts in
+    every 5 seconds. -#}
+<div class="head">
+  <h1>Machines</h1>
+  <p class="status-line" id="mstatus" data-live>{% for s in status %}{% if !loop.first %}<span aria-hidden="true">·</span>{% endif %}<span>{{ s }}</span>{% endfor %}</p>
+</div>
+<div class="msec"><h2>{{ host }}</h2><span class="sub">{{ host_sub }}</span></div>
+<div class="mtiles" id="tiles" data-live aria-live="off">
+  {% for t in tiles %}<div class="card pad mtile{% if t.warn %} warn-card{% endif %}"><div class="mtile-top"><span class="itile mtile-ico {% if t.warn %}warn{% else %}accent{% endif %}">{{ crate::web::icons::icon(t.icon)|safe }}</span><span class="label">{{ t.label }}</span></div><div class="mtile-big"><span class="mtile-v t-num">{{ t.big }}</span> <small>{{ t.small }}</small></div><span class="mtile-trend">{{ t.trend }}</span>{{ t.spark|safe }}</div>{% endfor %}
+</div>
+<div class="msec" id="builds"><h2>Build machines</h2><span class="sub">agents run builds and tests there with <span class="mono">flow remote</span>; each machine's page has its builds</span></div>
+<div id="mgrid" data-live>
+{% if machines.is_empty() %}
+<div class="card empty-state"><span class="itile lg">{{ crate::web::icons::icon("server")|safe }}</span><h3 class="t">No build machines yet</h3><p>Run <span class="mono">flow builder add</span> on a stronger machine: agents then run their builds and tests there with <span class="mono">flow remote</span>.</p></div>
+{% else %}
+<div class="mgrid">
+{% for m in machines %}
+<section class="card mcard{% if !m.online %} off{% endif %}" aria-labelledby="mh-{{ loop.index }}">
+  <div class="card-head"><span class="dot{% if m.online %} ok{% endif %}" aria-hidden="true"></span><h2 id="mh-{{ loop.index }}"><a href="/machines/{{ m.name }}">{{ m.name }}</a></h2><span class="sub">{{ m.facts() }}</span><span class="grow"></span><a class="act ilink" href="/machines/{{ m.name }}"><span>Its builds</span>{{ crate::web::icons::icon("chevron")|safe }}</a></div>
+  <div class="card-body stack">
+    {% if m.paused %}{% call parts::paused() %}{% endcall %}{% endif %}
+    {% if !m.meters.is_empty() %}{% call parts::meters(m.meters) %}{% endcall %}{% else if m.online %}<p class="sub">Its figures come with its next check, in a few seconds.</p>{% else %}<p class="sub">Offline: it shows its stats again once it connects.</p>{% endif %}
+    <div class="mnow"><span class="label">Now</span>{% if let Some(j) = m.running.first() %}<a href="/machines/jobs/{{ j.id }}"><span class="mono">#{{ j.id }}</span> {% if j.named %}{{ j.title }}{% else %}<span class="mono">{{ j.title }}</span>{% endif %}</a><span class="sub">{{ j.project }} · {{ j.label }}</span>{% if m.running.len() > 1 %}<span class="sub">· {{ m.running.len() - 1 }} more running</span>{% endif %}{% else %}<span class="sub">{{ m.idle }}</span>{% endif %}{% if !m.waiting.is_empty() %}<span class="sub">· {{ m.waiting.len() }} waiting</span>{% endif %}</div>
+  </div>
+  <div class="card-foot"><span class="sub">{{ m.foot() }}</span><span class="grow"></span>{% if m.online || m.paused %}{% call parts::pause(m.name, m.paused, "/machines") %}{% endcall %}{% endif %}</div>
+</section>
+{% endfor %}
+</div>
+{% endif %}
+</div>
+{% endblock %}

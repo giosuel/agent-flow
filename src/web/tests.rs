@@ -2181,14 +2181,13 @@ async fn usage_and_machine_pages_show_the_counts() {
     // The phone's More tab lists the sections that don't fit in the tab bar.
     let more = get("/more").await.text().await.unwrap();
     assert!(more.contains("Conversations") && more.contains("class=\"tabbar\""), "{more}");
-    let res = get("/machine?range=6h").await;
+    let res = get("/machines").await;
     assert_eq!(res.status(), StatusCode::OK);
-    assert!(res.text().await.unwrap().contains("GB free of"));
-    // The live figures: one per tile, in the same order.
-    let now: serde_json::Value = get("/machine/now").await.json().await.unwrap();
-    assert_eq!(now["tiles"].as_array().unwrap().len(), 5);
-    assert!(now["tiles"][0]["small"].as_str().unwrap().contains(" cores"));
-    let res = s.http.get(s.url("/machine/now")).bearer_auth(&token).send().await.unwrap();
+    let html = res.text().await.unwrap();
+    // AgentFlow's figures, live (machine.js swaps the parts marked data-live in).
+    assert!(html.contains("GB free of") && html.matches(r#"<div class="card pad mtile"#).count() == 5, "{html}");
+    assert!(html.contains(r#"<div class="mtiles" id="tiles" data-live"#), "{html}");
+    let res = s.http.get(s.url("/machines")).bearer_auth(&token).send().await.unwrap();
     assert_eq!(res.status(), StatusCode::FORBIDDEN);
     let html = get("/p/imaginarium").await.text().await.unwrap();
     assert!(html.contains("Tokens, 7 days") && html.contains("1.2 M"));
@@ -3485,14 +3484,30 @@ async fn jobs_run_on_a_builder_and_bring_back_what_was_asked() {
     // Its page (D-275): its name as the title, the command among its facts, the output numbered in
     // the code view a note's log uses, a warning in its tone.
     let cookie = s.owner_cookie().await;
-    let page = owner_page(&s, &cookie, &format!("/machine/jobs/{id}")).await;
+    let page = owner_page(&s, &cookie, &format!("/machines/jobs/{id}")).await;
     assert!(page.contains(r#"<h1 class="rec-title note-title">Snapshot check</h1>"#), "{page}");
     assert!(
         page.contains("<dt>Command</dt>") && page.contains(r#"<div class="codeview cv-scroll" id="job-log""#),
         "{page}"
     );
     assert!(page.contains(r#"<span class="cv-t lv-warn">warning: careful</span>"#), "{page}");
-    assert!(page.contains(r#"<dt>Project</dt><dd><a href="/p/imaginarium">"#), "the project it belongs to: {page}");
+    // Under its machine (D-277); what points somewhere is a chip (D-279).
+    assert!(
+        page.contains(&format!(
+            r#"<li><a href="/machines" title="Machines">Machines</a></li><li><a href="/machines/{name}" title="{name}">{name}</a></li><li><span aria-current="page" title="Job #{id}">Job #{id}</span></li>"#
+        )),
+        "{page}"
+    );
+    assert!(
+        page.contains(r#"<dt>Project</dt><dd><a class="chip link" href="/p/imaginarium"><svg class="i""#),
+        "the project it belongs to: {page}"
+    );
+    assert!(page.contains(r#"<dt>Started by</dt><dd><span class="chip"><svg class="i""#), "{page}");
+    assert!(page.contains(r#"s project agent</span></span></dd>"#), "{page}");
+    assert!(
+        page.contains(&format!(r#"<dt>Server</dt><dd><a class="chip link" href="/machines/{name}"><svg class="i""#)),
+        "{page}"
+    );
     assert!(page.contains(r#"<span class="cv-n">1</span>"#), "{page}");
     // flow remote fetches what came back.
     let job = s.db.call(move |c| crate::remote::get(c, id)).await.unwrap().unwrap();
@@ -3570,6 +3585,181 @@ async fn jobs_run_on_a_builder_and_bring_back_what_was_asked() {
     }
     let res = start(work.clone(), agent.clone()).await;
     assert_eq!(res.status(), StatusCode::SERVICE_UNAVAILABLE);
+}
+
+/// Machines (D-277): an overview without job tables, a card per build machine; a page per
+/// machine with its history, filtered and paged; jobs under /machines; the old addresses lead
+/// there; pausing is an icon button that comes back to the page it was pressed on (D-278).
+#[tokio::test]
+async fn machines_are_an_overview_and_a_page_each() {
+    let s = TestServer::start().await;
+    let cookie = s.owner_cookie().await;
+    s.token(TokenKind::Project, Some("vinculum")).await;
+    // The jobs go back 29 minutes: just after midnight some would be yesterday's, and the overview
+    // counts today's. Start them half an hour into the day at the earliest.
+    let now = crate::util::now_ms().max(crate::tz::Tz::default().day_start(crate::util::now_ms()) + 31 * 60_000);
+    s.db.call(move |c| {
+        for name in ["hq", "box-2"] {
+            crate::remote::add_daemon(c, &crate::config::BuildServer { name: name.into(), ..Default::default() })?;
+        }
+        let pid = crate::projects::get(c, "vinculum")?.unwrap().id;
+        // 25 jobs on hq, the oldest first: every fifth failed, the newest still waiting.
+        for i in 1..=25i64 {
+            let state = if i == 25 {
+                "queued"
+            } else if i % 5 == 0 {
+                "failed"
+            } else {
+                "done"
+            };
+            c.execute(
+                "INSERT INTO remote_jobs (server, project_id, actor, dir, command, state, reason, created_at, started_at, finished_at, name)
+                 VALUES ('hq', ?1, 'vinculum', '/w', '[\"cargo\",\"test\"]', ?2, ?3, ?4, ?4, ?5, ?6)",
+                rusqlite::params![
+                    pid,
+                    state,
+                    if state == "failed" { "exit code 101" } else { "" },
+                    now - (30 - i) * 60_000,
+                    if state == "queued" { None } else { Some(now - (30 - i) * 60_000 + 30_000) },
+                    format!("Job number {i}")
+                ],
+            )?;
+        }
+        Ok(())
+    })
+    .await
+    .unwrap();
+    crate::remote::reload(&s.state).await;
+    let ids: Vec<i64> =
+        s.db.call(|c| {
+            let mut st = c.prepare("SELECT id FROM remote_jobs ORDER BY id")?;
+            let r = st.query_map([], |r| r.get(0))?.collect::<Result<_, _>>()?;
+            Ok(r)
+        })
+        .await
+        .unwrap();
+    let get = |path: &str| {
+        let (http, url, cookie) = (s.http.clone(), s.url(path), cookie.clone());
+        async move { http.get(url).header(COOKIE, cookie).send().await.unwrap() }
+    };
+
+    // The overview: AgentFlow's figures and a card per build machine, no job tables.
+    let html = get("/machines").await.text().await.unwrap();
+    assert!(html.contains("<h1>Machines</h1>") && html.contains("AgentFlow runs on "), "{html}");
+    assert!(html.contains("2 build machines, 0 online") && html.contains("nothing running, 1 waiting"), "{html}");
+    assert_eq!(html.matches(r#"<section class="card mcard off""#).count(), 2, "dimmed while offline: {html}");
+    assert!(html.contains(r#""><a href="/machines/hq">hq</a></h2><span class="sub">offline</span>"#), "{html}");
+    assert!(html.contains(r#"<a class="act ilink" href="/machines/box-2"><span>Its builds</span>"#), "{html}");
+    assert!(html.contains("Today 25 jobs, 4 failed") && html.contains("No jobs today"), "{html}");
+    assert!(!html.contains("<table") && !html.contains("data-sortable"), "no job tables: {html}");
+    assert!(!html.contains("By project") && !html.contains("Claimed ports"), "D-283: {html}");
+    // The nav says Machines, lit here.
+    assert!(
+        html.contains(r#"<a href="/machines" class="on" aria-current="page">"#)
+            && html.contains("<span>Machines</span>"),
+        "{html}"
+    );
+    let dash = get("/").await.text().await.unwrap();
+    assert!(dash.contains(r#"<a href="/machines" aria-label="Machines" data-name="Machines">"#), "{dash}");
+    assert!(!dash.contains(r#"href="/machine""#), "{dash}");
+    assert!(get("/more").await.text().await.unwrap().contains(r#"<a href="/machines">"#));
+
+    // Pausing: an icon button, back to the page it was pressed on (only a Machines page).
+    let post = |path: &str, next: &str| {
+        let (http, url, cookie, base) = (s.http.clone(), s.url(path), cookie.clone(), s.base.clone());
+        let form = vec![("next", next.to_owned())];
+        async move {
+            let res = http.post(url).header(COOKIE, cookie).header(ORIGIN, base).form(&form).send().await.unwrap();
+            assert_eq!(res.status(), StatusCode::SEE_OTHER);
+            res.headers()[LOCATION].to_str().unwrap().to_owned()
+        }
+    };
+    assert_eq!(post("/machines/hq/pause", "/machines/hq?show=failed").await, "/machines/hq?show=failed");
+    let html = get("/machines").await.text().await.unwrap();
+    assert!(
+        html.contains(
+            r#"<button class="ibtn" type="submit" title="Resume builds on hq" aria-label="Resume builds on hq">"#
+        ) && html.contains("Builds are paused"),
+        "{html}"
+    );
+    assert_eq!(post("/machines/hq/resume", "https://evil.example/").await, "/machines", "no open redirects");
+    // A page open from before posts to the old address.
+    assert_eq!(post("/machine/servers/hq/pause", "").await, "/machines");
+    assert_eq!(post("/machine/servers/hq/resume", "").await, "/machines");
+    assert_eq!(get("/machines/nowhere/pause").await.status(), StatusCode::METHOD_NOT_ALLOWED);
+
+    // A machine's page: its path, its history 20 a page, newest first, with the pager.
+    let html = get("/machines/hq").await.text().await.unwrap();
+    assert!(
+        html.contains(r#"<li><a href="/machines" title="Machines">Machines</a></li><li><span aria-current="page" title="hq">hq</span></li>"#)
+            && html.contains(r#"<h1 class="rec-title note-title">hq</h1>"#),
+        "{html}"
+    );
+    assert!(
+        html.contains("25 jobs since ")
+            && html.contains(r#"<h2 id="hist-h">Build history</h2><span class="sub">25 jobs</span>"#),
+        "{html}"
+    );
+    assert!(html.contains(r#"<table class="table jobs" data-sortable>"#), "the table component: {html}");
+    assert_eq!(html.matches(r#"<tr><th scope="row" data-v=""#).count(), 20, "{html}");
+    assert!(html.contains(&format!(r#"<a href="/machines/jobs/{}">#{}</a>"#, ids[24], ids[24])), "the newest: {html}");
+    assert!(!html.contains(&format!(r#"<a href="/machines/jobs/{}">#{}</a></th>"#, ids[4], ids[4])), "{html}");
+    assert!(
+        html.contains(r#"<span class="sub pager-range">1–20 of 25</span><span class="sub mono">page 1 of 2</span>"#)
+            && html.contains(
+                r##"<a class="ibtn" href="/machines/hq?page=2#history" title="Older jobs" aria-label="Older jobs">"##
+            ),
+        "{html}"
+    );
+    // Right now: the waiting job.
+    assert!(html.contains("offline · 1 waiting") && html.contains("Job number 25"), "{html}");
+    assert!(html.contains(r#"<dt>Starts a job</dt><dd>while 8 threads and 16 GB are free</dd>"#), "{html}");
+    assert!(html.contains(r#"href="/settings?s=builders" data-settings"#), "{html}");
+    let html = get("/machines/hq?page=2").await.text().await.unwrap();
+    assert_eq!(html.matches(r#"<tr><th scope="row" data-v=""#).count(), 5, "{html}");
+    assert!(
+        html.contains("21–25 of 25") && html.contains(r##"href="/machines/hq#history" title="Newer jobs""##),
+        "{html}"
+    );
+    // Filters: failed, then running or waiting; a page past the end is the last one.
+    let html = get("/machines/hq?show=failed&page=9").await.text().await.unwrap();
+    assert_eq!(html.matches(r#"<tr><th scope="row" data-v=""#).count(), 4, "{html}");
+    assert!(
+        html.contains("4 failed of 25") && html.contains(r#"<span class="sub pager-range">1–4 of 4</span></nav>"#),
+        "{html}"
+    );
+    assert!(
+        html.contains(r##"<a class="on" aria-current="true" href="/machines/hq?show=failed#history">Failed</a>"##),
+        "{html}"
+    );
+    let html = get("/machines/hq?show=running&page=x").await.text().await.unwrap();
+    assert_eq!(html.matches(r#"<tr><th scope="row" data-v=""#).count(), 1, "{html}");
+    assert!(html.contains(r#"<span class="chip ">waiting</span>"#), "{html}");
+    let html = get("/machines/box-2").await.text().await.unwrap();
+    assert!(html.contains("No jobs yet: agents build here with flow remote --server box-2."), "{html}");
+    assert_eq!(get("/machines/nowhere").await.status(), StatusCode::NOT_FOUND);
+
+    // The old addresses lead to the new ones.
+    for (old, new) in [
+        ("/machine", "/machines".to_owned()),
+        ("/machine/now", "/machines".to_owned()),
+        ("/machine/builds", "/machines".to_owned()),
+        (&*format!("/machine/jobs/{}", ids[0]), format!("/machines/jobs/{}", ids[0])),
+    ] {
+        let res = get(old).await;
+        assert!(res.status().is_redirection(), "{old}");
+        assert_eq!(res.headers()[LOCATION], new.as_str(), "{old}");
+    }
+    let page = get(&format!("/machines/jobs/{}", ids[0])).await.text().await.unwrap();
+    assert!(page.contains(r#"<li><a href="/machines/hq" title="hq">hq</a></li>"#), "{page}");
+    // Its output answers at both addresses (a page open from before follows it there).
+    for path in [format!("/machines/jobs/{}/output", ids[0]), format!("/machine/jobs/{}/output", ids[0])] {
+        assert_eq!(get(&path).await.status(), StatusCode::OK, "{path}");
+    }
+    // Agents don't see the pages.
+    let token = s.token(TokenKind::Project, Some("vinculum")).await;
+    let res = s.http.get(s.url("/machines/hq")).bearer_auth(&token).send().await.unwrap();
+    assert_eq!(res.status(), StatusCode::FORBIDDEN);
 }
 
 #[tokio::test]
@@ -4669,6 +4859,13 @@ async fn the_ui_catalogue_shows_the_library() {
     // The owner's words, and a menu's group head (M16.1).
     assert!(
         page.contains(r#"<blockquote class="quote sm">"#) && page.contains(r#"<p class="dd-group label">"#),
+        "{page}"
+    );
+    // Link chips and the pager (T-210).
+    assert!(page.contains(r##"<a class="chip link" href="#ui-chip">"##), "{page}");
+    assert!(
+        page.contains(r#"<nav class="pager links" aria-label="Pages of the example"><span class="sub pager-range">1–20 of 214</span><span class="sub mono">page 1 of 11</span><span class="ibtn off" aria-hidden="true">"#)
+            && page.contains(r##"<a class="ibtn" href="/ui?page=2#ui-table" title="Older jobs" aria-label="Older jobs">"##),
         "{page}"
     );
     let res = s.http.get(s.url("/ui")).send().await.unwrap();

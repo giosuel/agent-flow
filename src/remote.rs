@@ -70,7 +70,10 @@ pub fn sh_quote(s: &str) -> String {
 /// The server as last seen.
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct Probe {
+    /// When it was probed last, whether it answered or not.
     pub at: i64,
+    /// When it last answered: an offline builder's "last seen" (0: not since AgentFlow started).
+    pub seen: i64,
     pub online: bool,
     pub error: String,
     pub model: String,
@@ -121,7 +124,7 @@ pub struct Counters {
 
 /// Reads the probe script's output; CPU use is the difference to `prev`.
 pub fn parse_probe(text: &str, prev: Option<Counters>, at: i64) -> (Probe, Counters) {
-    let mut p = Probe { at, online: true, ..Default::default() };
+    let mut p = Probe { at, seen: at, online: true, ..Default::default() };
     let mut c = Counters { at, ..Default::default() };
     for line in text.lines() {
         let (key, rest) = line.split_once(' ').unwrap_or((line, ""));
@@ -338,6 +341,98 @@ pub fn in_state(conn: &Connection, server: &str, states: &[&str]) -> anyhow::Res
          WHERE j.server = ?1 AND j.state IN (SELECT value FROM json_each(?2)) ORDER BY j.id"
     ))?;
     let rows = stmt.query_map(params![server, serde_json::to_string(states)?], job_from_row)?;
+    Ok(rows.collect::<Result<_, _>>()?)
+}
+
+/// Which of a build server's jobs its page lists (D-277).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Show {
+    All,
+    Failed,
+    /// Not over yet: running, paused or waiting.
+    Running,
+}
+
+impl Show {
+    pub fn parse(s: &str) -> Self {
+        match s {
+            "failed" => Show::Failed,
+            "running" => Show::Running,
+            _ => Show::All,
+        }
+    }
+
+    /// Its value in the page's address (`?show=`), "" for all.
+    pub fn key(self) -> &'static str {
+        match self {
+            Show::All => "",
+            Show::Failed => "failed",
+            Show::Running => "running",
+        }
+    }
+
+    fn sql(self) -> &'static str {
+        match self {
+            Show::All => "1",
+            Show::Failed => "j.state = 'failed'",
+            Show::Running => "j.state IN ('running', 'paused', 'queued')",
+        }
+    }
+}
+
+/// A build server's jobs, counted: in all, failed and not over yet (the page's filters), the
+/// first one's time, those since `today` and how many of them failed, and when the last finished.
+#[derive(Debug, Clone, Default)]
+pub struct Counts {
+    pub all: i64,
+    pub failed: i64,
+    pub running: i64,
+    pub first: Option<i64>,
+    pub today: i64,
+    pub today_failed: i64,
+    pub last_finished: Option<i64>,
+}
+
+impl Counts {
+    /// How many jobs `show` lists.
+    pub fn of(&self, show: Show) -> i64 {
+        match show {
+            Show::All => self.all,
+            Show::Failed => self.failed,
+            Show::Running => self.running,
+        }
+    }
+}
+
+pub fn counts(conn: &Connection, server: &str, today: i64) -> anyhow::Result<Counts> {
+    Ok(conn.query_row(
+        "SELECT count(*), coalesce(sum(state = 'failed'), 0), coalesce(sum(state IN ('running', 'paused', 'queued')), 0),
+                min(created_at), coalesce(sum(created_at >= ?2), 0), coalesce(sum(created_at >= ?2 AND state = 'failed'), 0),
+                max(finished_at)
+         FROM remote_jobs WHERE server = ?1",
+        params![server, today],
+        |r| {
+            Ok(Counts {
+                all: r.get(0)?,
+                failed: r.get(1)?,
+                running: r.get(2)?,
+                first: r.get(3)?,
+                today: r.get(4)?,
+                today_failed: r.get(5)?,
+                last_finished: r.get(6)?,
+            })
+        },
+    )?)
+}
+
+/// One page of a build server's jobs, the newest first: `limit` of those `show` lists, from `offset`.
+pub fn history(conn: &Connection, server: &str, show: Show, limit: i64, offset: i64) -> anyhow::Result<Vec<Job>> {
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {JOB_COLUMNS} FROM remote_jobs j JOIN projects p ON p.id = j.project_id
+         WHERE j.server = ?1 AND {} ORDER BY j.id DESC LIMIT ?2 OFFSET ?3",
+        show.sql()
+    ))?;
+    let rows = stmt.query_map(params![server, limit, offset], job_from_row)?;
     Ok(rows.collect::<Result<_, _>>()?)
 }
 
