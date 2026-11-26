@@ -257,6 +257,17 @@ summary.card-head { list-style: none; cursor: pointer; }
 summary.card-head::-webkit-details-marker { display: none; }
 .card-body { padding: var(--sp-4) var(--sp-5); }
 .card-foot { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; min-height: 52px; padding: var(--sp-3) var(--sp-5); border-top: 1px solid var(--line2); }
+/* A card taller than its content (one that grows in a .level column) keeps its foot at the bottom. */
+.card:has(> .card-foot) { display: flex; flex-direction: column; }
+.card > .card-foot { margin-top: auto; }
+/* Columns that end level (the owner, 2026-11-26, D-293): on a two-column layout with .level, both
+   columns reach the taller one's bottom, and in a column that holds cards, its last card grows down
+   to it, so no card hangs short beside a longer one (.grows marks another part to grow instead,
+   such as a board of cards). A column that is a card grows by itself. One column (the phone) stays
+   as it is.
+   <div class="npage level"><section class="card">…</section><aside class="nside"><section class="card">…</section></aside></div> */
+.level > * { align-self: stretch; }
+.level > :not(.card):not(:has(> .grows)) > .card:not(:has(~ .card)), .level > :not(.card) > .grows { flex-grow: 1; }
 /* ---------------------------------------------------------------- Tabs: underline, one "on"
    The project's tabs in the bar, the Log's categories, a project's tabs on the phone (one line
    that scrolls). .flush when the band they sit in draws the rule. Counts: .count. */

@@ -5396,6 +5396,7 @@ async fn the_ui_catalogue_shows_the_library() {
     for id in ["ui-card", "ui-nav", "ui-table", "ui-msg"] {
         assert!(page.contains(&format!(r#"id="{id}""#)), "{id}: {page}");
     }
+    assert!(page.contains(r#"<div class="ui-cols level ui-wide">"#), "columns that end level: {page}");
     assert!(
         page.contains(r#"<div class="dlg sm ui-dlg" role="presentation">"#)
             && page.contains(r#"<p class="notice bad">"#),

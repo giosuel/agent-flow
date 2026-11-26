@@ -1493,6 +1493,7 @@ ol.lrows { padding: 0; margin: 0; list-style: none; gap: 0; }
 .radius-box { display: block; width: 52px; height: 40px; border: 1.5px solid var(--accent); background: var(--accent-bg); }
 .ui-w { width: 280px; }
 .ui-wide { width: 100%; }
+.ui-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--sp-4); }
 .ui-menu-open { align-items: flex-start; }
 .ui-dlg { transform: none; width: 100%; max-width: 440px; }
 .ui-menu-open .dd-menu { position: static; width: 280px; }
