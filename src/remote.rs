@@ -208,10 +208,16 @@ pub struct Live {
 /// held the builder's memory). Longer than `flow remote` waits out an AgentFlow restart (2 min).
 pub const ORPHANED_AFTER_MS: i64 = 10 * 60_000;
 
-/// Jobs among `active` nobody has followed for ORPHANED_AFTER_MS. A job seen for the first time
-/// (new, or after a restart) starts its clock now; jobs no longer active are forgotten.
+/// Clocks of jobs that ended are dropped after this long.
+const FORGET_FOLLOWED_MS: i64 = 24 * 3600 * 1000;
+
+/// Jobs among `active` (one server's) nobody has followed for ORPHANED_AFTER_MS. A job seen for
+/// the first time (new, or after a restart) starts its clock now. `followed` holds every server's
+/// jobs, so another server's clocks stay: only those untouched for a day go. (Dropping all that
+/// weren't this server's reset the other servers' clocks every round: with two builders no job was
+/// ever an orphan, and on 2026-11-26 a job lost in a builder restart held Imaginarium's slot.)
 pub fn orphans(followed: &mut HashMap<i64, i64>, active: &[i64], now: i64) -> Vec<i64> {
-    followed.retain(|id, _| active.contains(id));
+    followed.retain(|id, at| active.contains(id) || now - *at < FORGET_FOLLOWED_MS);
     active.iter().filter(|id| now - *followed.entry(**id).or_insert(now) > ORPHANED_AFTER_MS).copied().collect()
 }
 
@@ -1327,6 +1333,41 @@ async fn resume_job(state: crate::web::AppState, server: BuildServer, job: Job, 
     finish_run(state, server, job, code, out).await;
 }
 
+/// How long a builder that connected anew gets to send what it kept (the same process does: the
+/// job's lines, its end) before it's asked whether it still has the job.
+const RECONNECT_GRACE: Duration = Duration::from_secs(30);
+
+/// A job's unit on a builder that connected anew.
+#[derive(Debug, PartialEq, Eq)]
+enum Reconnected {
+    /// Its unit runs and the builder still streams it: the same builder process, back.
+    Streaming,
+    /// Its unit runs, but nothing streams it: the builder restarted and lost the job's output.
+    Orphaned,
+    /// Its unit is gone: it ended while the builder was away, and its end was lost with it.
+    Gone,
+}
+
+impl Reconnected {
+    /// What the builder runs to tell: the unit's state, and whether the `systemd-run` that streams
+    /// it (`run_job`'s script) is still there.
+    fn script(id: i64) -> String {
+        format!(
+            "if systemctl --user is-active --quiet af-job-{id}.service; then\n\
+             \x20 if pgrep -f -- '--unit=af-job-{id} ' >/dev/null; then echo streaming; else echo orphaned; fi\n\
+             else echo gone; fi\n"
+        )
+    }
+
+    fn from_answer(text: &str) -> Self {
+        match text.trim() {
+            "orphaned" => Reconnected::Orphaned,
+            "gone" => Reconnected::Gone,
+            _ => Reconnected::Streaming,
+        }
+    }
+}
+
 /// The job's lines into its output until it ends.
 async fn follow(
     state: &crate::web::AppState,
@@ -1341,6 +1382,10 @@ async fn follow(
     let mut tick = tokio::time::interval(Duration::from_secs(1));
     // A builder gone for good (restarted, removed) never reports: give up after 10 minutes offline.
     let mut offline_since: Option<std::time::Instant> = None;
+    // A builder back after a restart never reports either: which connection the job runs on, and
+    // when a new one was seen (see RECONNECT_GRACE).
+    let mut conn = crate::builders::hub().since(&server.name);
+    let mut back_at: Option<std::time::Instant> = None;
     let code = loop {
         tokio::select! {
             ev = events.recv() => match ev {
@@ -1354,8 +1399,34 @@ async fn follow(
             },
             _ = tick.tick() => {
                 flush(state, job, out).await;
-                if crate::builders::hub().is_online(&server.name) {
+                let hub = crate::builders::hub();
+                if hub.is_online(&server.name) {
                     offline_since = None;
+                    let now_conn = hub.since(&server.name);
+                    if now_conn.is_some() && now_conn != conn
+                        && back_at.get_or_insert_with(std::time::Instant::now).elapsed() > RECONNECT_GRACE
+                    {
+                        back_at = None;
+                        let check = run_script(&state.config.data_dir(), server, &Reconnected::script(job.id), Duration::from_secs(15)).await;
+                        // Not answered: ask again after another grace.
+                        if let Ok(text) = check {
+                            conn = now_conn;
+                            let lost = match Reconnected::from_answer(&text) {
+                                Reconnected::Streaming => None,
+                                Reconnected::Orphaned => {
+                                    let stop = format!("systemctl --user stop af-job-{}.service\n", job.id);
+                                    let _ = run_script(&state.config.data_dir(), server, &stop, Duration::from_secs(30)).await;
+                                    Some("its builder restarted and lost the job's output; stopped it there")
+                                }
+                                Reconnected::Gone => Some("its builder restarted, and the job ended while it was away"),
+                            };
+                            if let Some(why) = lost {
+                                tracing::info!("job #{}: {} came back without it: {why}", job.id, server.name);
+                                out.line(&note(&format!("{} came back without this job: {why}; giving up", server.name))).await;
+                                break None;
+                            }
+                        }
+                    }
                 } else if offline_since.get_or_insert_with(std::time::Instant::now).elapsed() > Duration::from_secs(600) {
                     out.line(&note(&format!("{} has been offline for 10 minutes; giving up on this job", server.name))).await;
                     break None;
@@ -1624,9 +1695,40 @@ mod tests {
         assert!(orphans(&mut f, &[1, 2], 0).is_empty());
         f.insert(2, 9 * 60_000);
         assert_eq!(orphans(&mut f, &[1, 2], ORPHANED_AFTER_MS + 1), [1]);
-        // Finished jobs are forgotten.
+        // Finished jobs are forgotten, after a day.
         orphans(&mut f, &[2], ORPHANED_AFTER_MS + 2);
+        assert!(f.contains_key(&1));
+        orphans(&mut f, &[2], FORGET_FOLLOWED_MS + 1);
         assert!(!f.contains_key(&1));
+    }
+
+    #[test]
+    fn another_servers_round_keeps_a_jobs_clock() {
+        // Two builders, rounds in turn: job 7 runs on the first, the second has none. Nobody
+        // follows job 7, so it's an orphan 10 minutes on, whatever the second's rounds did.
+        let mut f = HashMap::new();
+        let mut now = 0;
+        let mut found = Vec::new();
+        while now <= ORPHANED_AFTER_MS + 3_000 {
+            found = orphans(&mut f, &[7], now);
+            if !found.is_empty() {
+                break;
+            }
+            assert!(orphans(&mut f, &[], now + 1_500).is_empty());
+            now += 3_000;
+        }
+        assert_eq!(found, [7], "job 7 never became an orphan");
+    }
+
+    #[test]
+    fn a_builder_back_without_the_job_gives_up() {
+        assert_eq!(Reconnected::from_answer("streaming\n"), Reconnected::Streaming);
+        assert_eq!(Reconnected::from_answer("orphaned\n"), Reconnected::Orphaned);
+        assert_eq!(Reconnected::from_answer("gone\n"), Reconnected::Gone);
+        // An answer it doesn't know: keep following (a wrong give-up loses a running job).
+        assert_eq!(Reconnected::from_answer("odd"), Reconnected::Streaming);
+        let script = Reconnected::script(42);
+        assert!(script.contains("af-job-42.service") && script.contains("'--unit=af-job-42 '"), "{script}");
     }
 
     #[test]
