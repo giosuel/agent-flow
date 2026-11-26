@@ -1,0 +1,36 @@
+---
+// The docs' title: the logo, the name, and a mono "docs" tag; it leads back to the landing page.
+import logo from '../../../../static/logo.svg?url';
+const home = import.meta.env.BASE_URL;
+---
+
+<a href={home} class="af-title">
+  <img src={logo} alt="" width="30" height="30" />
+  <span class="name">AgentFlow</span>
+  <span class="tag">docs</span>
+</a>
+
+<style>
+  .af-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    color: var(--ink);
+    text-decoration: none;
+    white-space: nowrap;
+    min-width: 0;
+  }
+  img { width: 30px; height: 30px; flex: none; }
+  .name { font-weight: 600; font-size: 17px; letter-spacing: -0.01em; }
+  .tag {
+    font: 500 11px/1 var(--mono);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--accent-chip-ink);
+    background: var(--accent-chip);
+    border: 1px solid var(--accent-line);
+    padding: 4px 7px;
+    border-radius: 6px;
+  }
+  .af-title:hover .name { color: var(--accent-ink); }
+</style>
