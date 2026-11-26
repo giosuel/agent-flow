@@ -26,6 +26,11 @@ pub struct Config {
     pub data_dir: String,
     /// Requests from these peers may set X-Forwarded-For (Caddy on the same machine).
     pub trusted_proxies: Vec<std::net::IpAddr>,
+    /// When set, X-Forwarded-For is believed only on requests that also carry this value in
+    /// `X-AgentFlow-Proxy` (Caddy: `header_up X-AgentFlow-Proxy <secret>` in `reverse_proxy`).
+    /// A proxy on 127.0.0.1 is otherwise indistinguishable from any local process, which could
+    /// then give itself any address. Empty: the peer's address alone is trusted, as before.
+    pub proxy_secret: String,
     /// Where project and consultant tokens are written for Claude Code's headersHelper.
     pub token_dir: String,
     /// The old ai-handbook checkout: the handbook's files are brought in from it once, while the
@@ -121,6 +126,7 @@ impl Default for Config {
             git_author: "giosuel <me@giosuel.ch>".into(),
             github_writes: true,
             trusted_proxies: vec!["127.0.0.1".parse().unwrap(), "::1".parse().unwrap()],
+            proxy_secret: String::new(),
             session_idle_days: 14,
             session_max_days: 30,
             build_free_gb: 10,

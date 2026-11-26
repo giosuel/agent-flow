@@ -386,9 +386,9 @@ async fn link_confirm(Path(secret): Path<String>) -> AppResult<Response> {
     render(LoginPage::new(Some(secret), None))
 }
 
-async fn passkey_start(State(state): State<AppState>, Extension(ClientIp(ip)): Extension<ClientIp>) -> Response {
+async fn passkey_start(State(state): State<AppState>) -> Response {
     let pk = state.passkeys.clone();
-    match state.db.call(move |c| pk.start_login(c, &ip)).await {
+    match state.db.call(move |c| pk.start_login(c)).await {
         Ok(Some((id, options))) => Json(serde_json::json!({"id": id, "options": options})).into_response(),
         Ok(None) => json_error(StatusCode::BAD_REQUEST, "no passkey is enrolled yet"),
         Err(e) => json_error(StatusCode::BAD_REQUEST, format!("{e:#}")),
@@ -465,9 +465,11 @@ async fn link_use(
         })
         .await?;
     let Some((purpose, session)) = session else {
-        let e = Entry::new(&Actor::Anonymous, Via::Page, Action::Denied, "sign-in link unknown, used or expired")
-            .ip(Some(ip));
-        activity::write(&state.db, e).await;
+        if state.log_denial(&ip) {
+            let e = Entry::new(&Actor::Anonymous, Via::Page, Action::Denied, "sign-in link unknown, used or expired")
+                .ip(Some(ip));
+            activity::write(&state.db, e).await;
+        }
         let page = LoginPage::new(
             None,
             Some("This link has expired or was already used. Run `sudo flow server add-passkey` on the server for a new one.".into()),

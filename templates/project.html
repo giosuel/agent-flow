@@ -24,7 +24,7 @@
 {# One row of questions a page, ‹ › to step (the owner, 2026-11-23, D-234); app.js pages them and
    keeps the page in ?q=. Without scripts every question shows. #}
 <section class="qsec" aria-labelledby="q-h" data-qpage>
-  <div class="qsec-h"><span class="qsec-ico">{{ crate::web::icons::icon("question")|safe }}</span><h2 id="q-h">Waiting on you</h2><span class="chip warn">{{ qcards.len() }} question{% if qcards.len() != 1 %}s{% endif %}</span><span class="grow"></span><div class="qpager" hidden><span class="mono sub qp-range" aria-live="polite"></span><button type="button" class="ibtn warn qp-prev" aria-label="Earlier questions">{{ crate::web::icons::icon("prev")|safe }}</button><button type="button" class="ibtn warn qp-next" aria-label="Later questions">{{ crate::web::icons::icon("chevron")|safe }}</button></div><a class="sub" href="/p/{{ slug }}?tab=questions">All questions</a></div>
+  <div class="qsec-h"><span class="qsec-ico">{{ crate::web::icons::icon("question")|safe }}</span><h2 id="q-h">Waiting on you</h2><span class="chip warn">{{ qcards.len() }} question{% if qcards.len() != 1 %}s{% endif %}</span><span class="grow"></span>{% call ui::pager("warn") %}{% endcall %}<a class="sub" href="/p/{{ slug }}?tab=questions">All questions</a></div>
   <div class="qgrid">
   {% for q in qcards %}
   <article class="qc{% if !loop.first %} qc-more{% endif %}" aria-labelledby="qt-{{ q.short }}">
@@ -118,7 +118,7 @@
     <div class="plan-lay{% if b.rail.is_empty() %} norail{% endif %}">
       {% if !b.rail.is_empty() %}
       <details class="srail" open data-srail>
-        <summary>{% for s in b.rail %}{% if s.on %}<span class="srail-i {{ s.class }}" aria-hidden="true"></span><span class="mono k">{{ s.name }}</span><span class="t">{{ s.title }}</span>{% endif %}{% endfor %}<span class="sub">{{ b.rail.len() }} steps</span>{{ crate::web::icons::icon("chevron")|safe }}</summary>
+        <summary>{% for s in b.rail %}{% if s.on %}<span class="srail-i {{ s.class }}" aria-hidden="true"></span><span class="mono k">{{ s.name }}</span><span class="t">{{ s.title }}</span>{% endif %}{% endfor %}<span class="sub">{{ b.steps }} steps</span>{{ crate::web::icons::icon("chevron")|safe }}</summary>
         <nav class="navlist" aria-label="Steps">{% for s in b.rail %}<a class="srail-row {{ s.class }}{% if s.on %} on{% endif %}" href="{{ s.href }}" data-ms{% if s.on %} aria-current="true"{% endif %}><span class="srail-i {{ s.class }}" aria-hidden="true"></span><span class="mono k" title="{{ s.name }}">{{ s.name }}</span><span class="t">{{ s.title }}</span><span class="mono sub n">{{ s.count }}</span></a>{% endfor %}</nav>
       </details>
       {% endif %}

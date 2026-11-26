@@ -13,6 +13,7 @@ listen = "127.0.0.1:8790"              # never a wildcard address: refused at st
 public_url = "https://flow.example"    # cookies, the passkey domain, allowed hosts
 data_dir = "~/.local/state/agentflow"  # database, keys, builds, backups, log archive
 trusted_proxies = ["127.0.0.1", "::1"] # may set X-Forwarded-For (your reverse proxy)
+proxy_secret = ""                      # if set, the proxy must also send it as X-AgentFlow-Proxy
 session_idle_days = 14                 # the owner's session ends after this long idle
 session_max_days = 30                  # and after this long in any case
 token_dir = "~/.config/agentflow/tokens"  # token files for Claude Code's headersHelper

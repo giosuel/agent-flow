@@ -222,8 +222,7 @@ async fn page(
     let (now_t, hour) = hour_and_now(&state).await;
     let tiles = tiles(&snap, &now_t, &hour);
 
-    let slugs: Vec<String> = projects.iter().map(|p| p.slug.clone()).collect();
-    let colors = charts::colors(&slugs);
+    let colors = charts::colors(projects.iter().map(|p| (p.id, p.slug.as_str())));
     let mut groups: Vec<(String, String, &'static str)> =
         projects.iter().zip(&colors).map(|(p, c)| (p.slug.clone(), p.name.clone(), *c)).collect();
     groups.push(("other".into(), "Other".into(), charts::OTHER));

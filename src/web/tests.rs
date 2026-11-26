@@ -611,9 +611,10 @@ async fn the_overview_puts_questions_first_and_folds_closed_milestones() {
         page.contains("Waiting on you") && page.contains("Take A") && page.contains(r#"class="choice rec""#),
         "{page}"
     );
-    assert!(page.contains("data-qpage") && page.contains(r#"<div class="qpager" hidden>"#), "{page}");
+    assert!(page.contains("data-qpage") && page.contains(r#"<div class="pager" hidden>"#), "{page}");
     // On the amber island the pager is warm, not the greys made for dark cards.
-    assert!(page.contains(r#"class="ibtn warn qp-prev""#) && !page.contains(r#"class="ibtn qp-"#), "{page}");
+    assert!(page.contains(r#"class="ibtn warn pg-prev""#) && page.contains(r#"class="ibtn warn qp-prev""#), "{page}");
+    assert!(!page.contains(r#"class="ibtn qp-"#) && !page.contains(r#"class="ibtn pg-"#), "{page}");
     assert!(page.contains("Opt one") && page.contains("Opt two") && page.contains("Opt five"), "{page}");
     assert!(
         !page.contains("Opt three") && !page.contains("Opt four") && page.contains("2 more, or your own"),
@@ -1558,6 +1559,9 @@ async fn a_build_goes_from_agent_to_owner_and_feedback_comes_back() {
         "{earlier}"
     );
     assert!(earlier.contains(r#"href="/p/imaginarium/B-1/download""#), "{earlier}");
+    // Every earlier build is in the page, ten at a time with the pager component (no "Show all").
+    assert!(earlier.contains(r#"data-pager="10""#) && earlier.contains(r#"<div class="pager" hidden>"#), "{earlier}");
+    assert!(!earlier.contains("Show all") && !earlier.contains("ball=1"), "{earlier}");
     let linux = s.http.get(s.url("/p/imaginarium/B-1/download")).header(COOKIE, &cookie).send().await.unwrap();
     assert_eq!(linux.status(), StatusCode::OK);
 }
@@ -4537,4 +4541,131 @@ async fn the_ui_catalogue_shows_the_library() {
     );
     let res = s.http.get(s.url("/ui")).send().await.unwrap();
     assert_ne!(res.status(), reqwest::StatusCode::OK, "not without signing in");
+}
+
+#[tokio::test]
+async fn tasks_on_a_milestone_with_steps_show_on_plan() {
+    let s = TestServer::start().await;
+    let token = s.token(TokenKind::Project, Some("vinculum")).await;
+    let sess = mcp_session(&s, &token).await;
+    for (name, args) in [
+        ("add_milestone", json!({"name": "M4", "title": "Keybinds"})),
+        ("add_milestone", json!({"name": "K1", "title": "Read binds", "step_of": "M4"})),
+        ("add_task", json!({"milestone": "K1", "title": "Parse binds", "estimate": "1 h"})),
+        ("add_task", json!({"milestone": "M4", "title": "Document binds", "estimate": "1 h"})),
+    ] {
+        let (ok, r) = mcp_tool(&s, &token, &sess, name, args).await;
+        assert!(ok, "{name}: {r}");
+    }
+    let cookie = s.owner_cookie().await;
+    // The step's board, and the milestone's own task one entry further down the rail.
+    let board = owner_page(&s, &cookie, "/p/vinculum/plan/M4").await;
+    assert!(board.contains("Parse binds"), "{board}");
+    assert!(board.contains(r#"href="/p/vinculum/plan/M4?step=none""#) && board.contains("Not in a step"), "{board}");
+    let own = owner_page(&s, &cookie, "/p/vinculum/plan/M4?step=none").await;
+    assert!(own.contains("Document binds"), "{own}");
+    // Its page's path opens Plan there.
+    let page = owner_page(&s, &cookie, "/p/vinculum/T-2").await;
+    assert!(page.contains(r#"href="/p/vinculum/plan/M4?step=none""#), "{page}");
+}
+
+#[tokio::test]
+async fn with_a_proxy_secret_a_local_process_cant_name_its_address() {
+    let s = TestServer::start_with(|c, _| c.proxy_secret = "caddy-only".into()).await;
+    let ask = |secret: Option<&'static str>| {
+        let mut req = s.http.post(s.url("/api/approvals")).header("x-forwarded-for", "10.0.8.2");
+        if let Some(secret) = secret {
+            req = req.header("x-agentflow-proxy", secret);
+        }
+        req.json(&json!({"action": "connect", "machine": "viber@mothman"})).send()
+    };
+    let from = || {
+        s.db.call(|c| {
+            Ok(c.query_row("SELECT ip FROM approvals ORDER BY id DESC LIMIT 1", [], |r| r.get::<_, String>(0))?)
+        })
+    };
+    // Any local process reaches the listener like the proxy does; without the secret its
+    // X-Forwarded-For isn't believed.
+    assert_eq!(ask(None).await.unwrap().status(), StatusCode::OK);
+    assert_eq!(from().await.unwrap(), "127.0.0.1");
+    assert_eq!(ask(Some("guess")).await.unwrap().status(), StatusCode::OK);
+    assert_eq!(from().await.unwrap(), "127.0.0.1");
+    assert_eq!(ask(Some("caddy-only")).await.unwrap().status(), StatusCode::OK);
+    assert_eq!(from().await.unwrap(), "10.0.8.2");
+}
+
+#[tokio::test]
+async fn anonymous_requests_dont_fill_the_log_or_the_database() {
+    let s = TestServer::start().await;
+    for _ in 0..60 {
+        s.http.get(s.url("/login")).send().await.unwrap();
+        s.http.post(s.url("/api/setup/redeem")).json(&json!({"code": "nope", "machine": "m"})).send().await.unwrap();
+    }
+    // 20 a minute for the requests and 20 for the refused codes (twice, if the minute turned).
+    let rows: i64 = s.db.call(|c| Ok(c.query_row("SELECT count(*) FROM log", [], |r| r.get(0))?)).await.unwrap();
+    assert!((1..=80).contains(&rows), "{rows} rows from one anonymous address in a minute");
+
+    // A connect request carries no arguments, and nothing near the 2 MB a JSON body may have.
+    let ask = |args: Value| {
+        s.http.post(s.url("/api/approvals")).json(&json!({"action": "connect", "machine": "m", "args": args})).send()
+    };
+    assert_eq!(ask(json!({"p": "x"})).await.unwrap().status(), StatusCode::BAD_REQUEST);
+    assert_eq!(ask(json!({"p": "x".repeat(100_000)})).await.unwrap().status(), StatusCode::PAYLOAD_TOO_LARGE);
+    let kept: i64 = s.db.call(|c| Ok(c.query_row("SELECT count(*) FROM approvals", [], |r| r.get(0))?)).await.unwrap();
+    assert_eq!(kept, 0);
+}
+
+#[tokio::test]
+async fn rotate_is_offered_only_where_the_token_file_is() {
+    let s = TestServer::start().await;
+    let cookie = s.owner_cookie().await;
+    s.token(TokenKind::Project, Some("herelocal")).await;
+    s.token(TokenKind::Project, Some("faraway")).await;
+    let builder =
+        s.db.call(|c| {
+            c.execute("UPDATE projects SET machine = 'not-this-host' WHERE slug = 'faraway'", [])?;
+            Ok(auth::create_token(c, TokenKind::Builder, "bigbox", None)?.0)
+        })
+        .await
+        .unwrap();
+    let page =
+        s.http.get(s.url("/settings?s=agents")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
+    assert!(page.contains("herelocal") && page.contains("faraway") && page.contains("bigbox"), "{page}");
+    assert_eq!(page.matches("/rotate\"").count(), 1, "only the local project's token has Rotate");
+    // And the endpoint refuses the others.
+    let res = s
+        .http
+        .post(s.url(&format!("/settings/tokens/{builder}/rotate")))
+        .header(COOKIE, &cookie)
+        .header("origin", &s.base)
+        .send()
+        .await
+        .unwrap();
+    assert!(!res.status().is_redirection() && !res.status().is_success(), "{}", res.status());
+}
+
+/// Withdrawing a question gives back the tasks it blocked, as answering or archiving it does:
+/// they stayed blocked by nothing, and the step couldn't be concluded.
+#[tokio::test]
+async fn withdrawing_a_question_unblocks_its_tasks() {
+    let s = TestServer::start().await;
+    let token = s.token(TokenKind::Project, Some("vinculum")).await;
+    let sess = mcp_session(&s, &token).await;
+    let call = |name: &'static str, args: Value| {
+        let (s, token, sess) = (&s, token.clone(), sess.clone());
+        async move { mcp_tool(s, &token, &sess, name, args).await }
+    };
+    assert!(call("add_milestone", json!({"name": "M1", "title": "Keybinds"})).await.0);
+    assert!(call("add_milestone", json!({"name": "K1", "title": "Read binds", "step_of": "M1"})).await.0);
+    let (ok, r) = call("add_tasks", json!({"milestone": "K1", "tasks": [{"title": "Parse", "estimate": "1 h"}]})).await;
+    assert!(ok, "{r}");
+    let (ok, q) = call("ask_question", json!({"title": "Wide or narrow?", "blocks": ["T-1"]})).await;
+    assert!(ok, "{q}");
+    let (ok, w) = call("withdraw_question", json!({"id": "Q-1", "reason": "found it in the docs"})).await;
+    assert!(ok, "{w}");
+    let (_, t1) = call("get_record", json!({"id": "T-1"})).await;
+    assert_eq!(t1["state"], "todo", "{t1}");
+    assert!(call("update_task", json!({"id": "T-1", "state": "done"})).await.0);
+    let (ok, c) = call("conclude_step", json!({"step": "K1", "summary": "Binds are read."})).await;
+    assert!(ok, "{c}");
 }

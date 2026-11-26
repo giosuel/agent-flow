@@ -67,11 +67,14 @@ pub struct Context<'a> {
     pub release: Option<&'a str>,
     /// On a release's page its own items say "new in …".
     pub release_page: bool,
+    /// On the Builds tab, a build of several platforms (one commit) goes by one record, its
+    /// primary: each record's short id to that one's.
+    pub primary: Option<&'a HashMap<String, String>>,
     pub now: i64,
 }
 
 pub fn item(r: &Record, cx: &Context<'_>) -> Item {
-    let build = crate::totest::build_of(r, cx.builds);
+    let build = crate::totest::build_of(r, cx.builds).map(|b| cx.primary.and_then(|p| p.get(&b)).cloned().unwrap_or(b));
     let first = r.str("first_release");
     let chip = if !first.is_empty() && Some(first) != cx.release {
         Some((super::tone::tone("waiting"), format!("from {first}")))
@@ -172,6 +175,7 @@ pub fn view(
         newest: None,
         release: current.as_deref(),
         release_page: matches!(place, Place::Release(_)),
+        primary: None,
         now,
     };
     let older = items
