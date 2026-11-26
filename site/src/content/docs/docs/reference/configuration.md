@@ -24,7 +24,7 @@ local_transcripts = false              # also read every transcript on this mach
 external_token_file = ""               # GitHub token for other people's repositories
 git_host = "https://github.com"        # where drafts' repositories are fetched and pushed
 flow_bin = ""                          # the flow handed out; empty: the one next to the server
-admin_socket = ""                      # for `flow server add-passkey`; empty: the default
+admin_socket = ""                      # for `flow server setup`, `invite`, `add-device`; empty: the default
 
 # When AgentFlow runs as its own user (agentflow setup writes these):
 agents_home = "/home/agents"           # where ~/ points: the agents' home

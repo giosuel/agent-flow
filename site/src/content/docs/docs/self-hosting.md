@@ -69,10 +69,12 @@ calls from an agent.
 Every request is authenticated. Only the sign-in page, asking to connect a machine, the install
 script and the `flow` download are public.
 
-- **The owner** signs in with a passkey, enrolled in Settings. On a new device, or with every
-  passkey lost, `sudo flow server add-passkey` on the server prints a one-time link (15 minutes)
-  that leads straight to adding one. It goes through a socket only root may use; every link is
-  logged and pushed.
+- **People** sign in with a passkey. The first account is the admin: `sudo flow server setup` on
+  the server prints a one-time link (15 minutes) that makes it and its passkey. Only the admin
+  invites others (Settings › People, or `sudo flow server invite`, a link for 7 days). A new
+  device gets a link from Settings › Passkeys or `sudo flow server add-device [username]`; an
+  admin who lost every passkey runs `setup` again. The commands go through a socket only root
+  may use; every link is logged and pushed.
 - **Machines** connect with `flow connect` (or the install script): the owner approves in the
   browser, and the machine gets a read-only token of its own.
 - **The owner's admin jobs** from a connected machine (tokens, projects, backups, importing PRs)

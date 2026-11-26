@@ -248,7 +248,7 @@ pub fn setup(a: SetupArgs) -> anyhow::Result<()> {
     }
     println!(
         "\nNow, as {agents} (fish works too):\n  systemctl --user daemon-reload; systemctl --user enable --now agentflow-hands\n\
-         Then add your first passkey with the link it prints (valid 15 minutes):\n  sudo flow server add-passkey"
+         Then make the admin account and its passkey with the link it prints (valid 15 minutes):\n  sudo flow server setup"
     );
     Ok(())
 }

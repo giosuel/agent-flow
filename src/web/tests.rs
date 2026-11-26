@@ -88,8 +88,37 @@ impl TestServer {
     }
 
     /// Signs in through a one-time link and returns the session cookie.
+    /// The admin, with a profile, made the first time it's asked for.
+    pub async fn admin(&self) -> i64 {
+        self.db
+            .call(|c| {
+                if let Some(a) = crate::people::admin(c)? {
+                    return Ok(a.id);
+                }
+                let id = crate::people::create(c, true, None, webauthn_rs::prelude::Uuid::new_v4())?;
+                c.execute(
+                    "UPDATE people SET username = 'giosuel', email = 'me@giosuel.ch', icon = 'orbit' WHERE id = ?1",
+                    [id],
+                )?;
+                Ok(id)
+            })
+            .await
+            .unwrap()
+    }
+
+    /// Signs the admin in through a one-time link and returns the session cookie.
     pub async fn owner_cookie(&self) -> String {
-        let link = self.db.call(|c| auth::create_login_link(c, "signin")).await.unwrap();
+        let admin = self.admin().await;
+        self.cookie_for(admin).await
+    }
+
+    /// Signs a person in through a one-time link and returns the session cookie.
+    pub async fn cookie_for(&self, person: i64) -> String {
+        let link = self
+            .db
+            .call(move |c| auth::create_login_link(c, auth::purpose::SIGNIN, Some(person), None, auth::LINK_MINUTES))
+            .await
+            .unwrap();
         let res = self.http.post(self.url(&format!("/login/link/{link}"))).send().await.unwrap();
         assert_eq!(res.status(), StatusCode::SEE_OTHER);
         let cookie = res.headers()[SET_COOKIE].to_str().unwrap();
@@ -144,7 +173,11 @@ async fn tokens_identify_and_are_logged() {
 #[tokio::test]
 async fn login_link_signs_in_once() {
     let s = TestServer::start().await;
-    let link = s.db.call(|c| auth::create_login_link(c, "signin")).await.unwrap();
+    let admin = s.admin().await;
+    let link =
+        s.db.call(move |c| auth::create_login_link(c, auth::purpose::SIGNIN, Some(admin), None, auth::LINK_MINUTES))
+            .await
+            .unwrap();
     // Opening the link only shows a confirmation; a link preview can't use it up.
     let page = s.http.get(s.url(&format!("/login/link/{link}"))).send().await.unwrap().text().await.unwrap();
     assert!(page.contains("Sign in on this device?"));
@@ -163,28 +196,126 @@ async fn login_link_signs_in_once() {
     assert_eq!(again.status(), StatusCode::GONE);
 }
 
-/// `sudo flow server add-passkey` (and the first start) hand out a link that leads straight to
-/// adding a passkey, logged and announced.
+/// The way in (the owner, 2026-11-25: D-273, D-274): `sudo flow server setup` makes the admin,
+/// `invite` someone new, `add-device` a link for a new device; setup again makes the admin anew.
+/// Each link page only shows itself; using the link signs in (here with the link itself: the test
+/// server's plain http can't do passkeys).
 #[tokio::test]
-async fn a_passkey_link_leads_to_adding_a_passkey() {
+async fn people_get_in_with_setup_invite_and_device_links() {
     let s = TestServer::start().await;
-    let url = crate::web::admin_socket::passkey_link(&s.state, "root").await.unwrap();
-    let link = url.rsplit('/').next().unwrap().to_owned();
-    let res = s.http.post(s.url(&format!("/login/link/{link}"))).send().await.unwrap();
-    assert_eq!(res.headers()["location"], "/settings?add_passkey=1#passkeys");
-    let cookie = res.headers()[SET_COOKIE].to_str().unwrap().split(';').next().unwrap().to_owned();
-    let page = s
-        .http
-        .get(s.url("/settings?add_passkey=1"))
-        .header(COOKIE, &cookie)
-        .send()
-        .await
-        .unwrap()
-        .text()
+    let ask = |req: serde_json::Value| {
+        let state = s.state.clone();
+        async move { crate::web::admin_socket::test_link(&state, req).await }
+    };
+    let secret = |v: &serde_json::Value| v["url"].as_str().unwrap().rsplit('/').next().unwrap().to_owned();
+    let cookie_of =
+        |res: &reqwest::Response| res.headers()[SET_COOKIE].to_str().unwrap().split(';').next().unwrap().to_owned();
+    let whoami = |cookie: String| {
+        let s = &s;
+        async move {
+            let res = s.http.get(s.url("/settings")).header(COOKIE, &cookie).send().await.unwrap();
+            res.status()
+        }
+    };
+    assert!(ask(json!({"request": "invite"})).await.is_err(), "nobody to invite from yet");
+    assert!(ask(json!({"request": "add_passkey"})).await.unwrap_err().to_string().contains("add-device"));
+
+    // Setup makes the admin.
+    let v = ask(json!({"request": "setup"})).await.unwrap();
+    assert!(v["url"].as_str().unwrap().contains("/setup/af_lnk_") && v["again"] == false, "{v}");
+    let setup = secret(&v);
+    let page = s.http.get(s.url(&format!("/setup/{setup}"))).send().await.unwrap().text().await.unwrap();
+    assert!(page.contains("Set up AgentFlow") && page.contains("You'll be this AgentFlow's admin"), "{page}");
+    assert!(page.contains("Sign in with this link"), "no passkeys on plain http: {page}");
+    // The link is for /setup/ only: the wrong page refuses it and leaves it unused.
+    let wrong = s.http.post(s.url(&format!("/device/{setup}"))).send().await.unwrap();
+    assert_eq!(wrong.status(), StatusCode::GONE);
+    let res = s.http.post(s.url(&format!("/setup/{setup}"))).send().await.unwrap();
+    assert_eq!(res.status(), StatusCode::SEE_OTHER);
+    let admin_cookie = cookie_of(&res);
+    assert_eq!(whoami(admin_cookie.clone()).await, StatusCode::OK);
+    let again = s.http.post(s.url(&format!("/setup/{setup}"))).send().await.unwrap();
+    assert_eq!(again.status(), StatusCode::GONE, "it works once");
+    let admin = s.db.call(|c| crate::people::admin(c)).await.unwrap().unwrap();
+    assert!(admin.admin && admin.username.is_none());
+
+    // An invite makes someone new, who isn't the admin.
+    let v = ask(json!({"request": "invite"})).await.unwrap();
+    assert!(v["url"].as_str().unwrap().contains("/invite/"), "{v}");
+    let invite = secret(&v);
+    let page = s.http.get(s.url(&format!("/invite/{invite}"))).send().await.unwrap().text().await.unwrap();
+    assert!(page.contains("You're invited") && page.contains("This invite works once, until"), "{page}");
+    let res = s.http.post(s.url(&format!("/invite/{invite}"))).send().await.unwrap();
+    assert_eq!(res.status(), StatusCode::SEE_OTHER);
+    let mira_cookie = cookie_of(&res);
+    let everyone = s.db.call(|c| crate::people::list(c)).await.unwrap();
+    assert_eq!(everyone.len(), 2);
+    let mira = everyone.iter().find(|p| !p.admin).unwrap().clone();
+    assert_eq!(mira.invited_by, Some(admin.id));
+
+    // Only the admin's invites work: one made by someone else is refused and stays unused.
+    let forged = s
+        .db
+        .call(move |c| auth::create_login_link(c, auth::purpose::INVITE, None, Some(mira.id), auth::INVITE_MINUTES))
         .await
         .unwrap();
-    assert!(page.contains("Add a passkey for this device"), "{page}");
-    assert!(s.log_summaries().await.iter().any(|l| l.contains("passkey link made on the server, as root")));
+    let res = s.http.post(s.url(&format!("/invite/{forged}"))).send().await.unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(s.db.call(|c| crate::people::list(c)).await.unwrap().len(), 2, "nobody new");
+
+    // A device link for someone named signs in as them; an unknown name is refused.
+    s.db.call(move |c| Ok(c.execute("UPDATE people SET username = 'mira' WHERE id = ?1", [mira.id])?)).await.unwrap();
+    assert!(ask(json!({"request": "add_device", "username": "nobody"})).await.is_err());
+    let v = ask(json!({"request": "add_device", "username": "Mira"})).await.unwrap();
+    assert_eq!(v["person"], "mira");
+    let device = secret(&v);
+    let page = s.http.get(s.url(&format!("/device/{device}"))).send().await.unwrap().text().await.unwrap();
+    assert!(page.contains("Add this device") && page.contains("<strong>mira</strong>"), "{page}");
+
+    // People can't touch each other's browsers.
+    let admin_sessions: Vec<i64> =
+        s.db.call(move |c| {
+            let mut st = c.prepare("SELECT id FROM web_sessions WHERE person_id = ?1")?;
+            Ok(st.query_map([admin.id], |r| r.get(0))?.collect::<Result<_, _>>()?)
+        })
+        .await
+        .unwrap();
+    let res = s
+        .http
+        .post(s.url(&format!("/settings/sessions/{}/end", admin_sessions[0])))
+        .header(COOKIE, &mira_cookie)
+        .header(ORIGIN, &s.base)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::NOT_FOUND, "not mira's browser");
+    assert_eq!(whoami(admin_cookie.clone()).await, StatusCode::OK);
+
+    // Setup again needs the admin typed back, and signs out the admin's browsers when it's used.
+    assert!(ask(json!({"request": "setup", "confirm": "mira"})).await.is_err());
+    let v = ask(json!({"request": "setup", "confirm": "yes"})).await.unwrap();
+    assert_eq!(v["again"], true);
+    let page = s.http.get(s.url(&format!("/setup/{}", secret(&v)))).send().await.unwrap().text().await.unwrap();
+    assert!(page.contains("This makes a new passkey for <strong>the admin</strong>"), "{page}");
+    let res = s.http.post(s.url(&format!("/setup/{}", secret(&v)))).send().await.unwrap();
+    assert_eq!(res.status(), StatusCode::SEE_OTHER);
+    assert_ne!(whoami(admin_cookie).await, StatusCode::OK, "the admin's old browser is signed out");
+    assert_eq!(whoami(cookie_of(&res)).await, StatusCode::OK);
+    assert_eq!(whoami(mira_cookie).await, StatusCode::OK, "the others stay");
+    assert_eq!(s.db.call(|c| crate::people::list(c)).await.unwrap().len(), 2, "still the same admin");
+
+    // An expired link shows that it expired.
+    let old =
+        s.db.call(move |c| auth::create_login_link(c, auth::purpose::DEVICE, Some(mira.id), None, auth::LINK_MINUTES))
+            .await
+            .unwrap();
+    s.db.call(|c| Ok(c.execute("UPDATE login_links SET expires_at = 0 WHERE used_at IS NULL", [])?)).await.unwrap();
+    let res = s.http.get(s.url(&format!("/device/{old}"))).send().await.unwrap();
+    assert_eq!(res.status(), StatusCode::GONE);
+    assert!(res.text().await.unwrap().contains("doesn't work any more"));
+    let log = s.log_summaries().await;
+    assert!(log.iter().any(|l| l.contains("An invite was made on the server, as root")), "{log:?}");
+    assert!(log.iter().any(|l| l.contains("invite link refused")), "{log:?}");
 }
 
 #[tokio::test]

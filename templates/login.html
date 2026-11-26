@@ -5,7 +5,7 @@
 {% block content %}
 {% if let Some(link) = link %}
 <h1>Sign in on this device?</h1>
-<p class="sub">This one-time link signs this browser in as the owner. It works once and expires 15 minutes after it was made.</p>
+<p class="sub">This one-time link signs this browser in. It works once and expires 15 minutes after it was made.</p>
 <form method="post" action="/login/link/{{ link }}"><button class="btn wide" type="submit">Sign in</button></form>
 {% else %}
 <h1>Sign in</h1>
@@ -13,11 +13,11 @@
 {% if passkeys %}
 <button class="btn wide" id="passkey-signin" type="button">Sign in with a passkey</button>
 <p class="notice" id="passkey-status" role="status" hidden></p>
-<p class="sub">Lost every passkey? Run <code>sudo flow server add-passkey</code> on the server and open the link it prints.</p>
+<p class="sub">New device, or lost every passkey? Sign in on a device you have and make a link in Settings › Passkeys, or ask the admin; on the server, <code>sudo flow server add-device</code> prints one.</p>
 {% else %}
 {% if passkey_elsewhere %}<p class="notice">{{ crate::web::icons::icon("info")|safe }}<span>Passkeys work only at AgentFlow's https address, not on this one.</span></p>{% endif %}
 <p class="sub">To sign in on a new device, run this on the server and open the link it prints:</p>
-<pre class="cmd mono">sudo flow server add-passkey</pre>
+<pre class="cmd mono">sudo flow server add-device</pre>
 {% endif %}
 {% endif %}
 {% endblock %}

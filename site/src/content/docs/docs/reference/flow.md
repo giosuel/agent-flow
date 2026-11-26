@@ -64,7 +64,9 @@ These wait for your approval in the browser, every time. Agents' tokens can't as
 | `flow backup` | Back up the database and export every project now. |
 | `flow import-prs <project> 300-374` | Bring a project's older PRs in as records. |
 | `flow builder add` / `list` / `edit` / `remove` / `status` | Build machines. See [Build servers](/docs/build-servers/). |
-| `sudo flow server add-passkey` | On the server: a one-time link (15 minutes) to add a passkey. |
+| `sudo flow server setup` | On the server: a one-time link (15 minutes) that makes the admin, or makes the admin anew when they lost every passkey. |
+| `sudo flow server invite` | On the server: a link for someone new (once, for 7 days). Only the admin invites. |
+| `sudo flow server add-device [username]` | On the server: a one-time link (15 minutes) that adds a passkey for a new device, to the admin's account or `username`'s. |
 
 ## The server's commands
 

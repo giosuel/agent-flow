@@ -76,14 +76,15 @@ notifications need one), [Claude Code](https://claude.com/claude-code) where the
    }
    ```
 
-4. **Add your passkey.** On the server, this prints a one-time link, valid for 15 minutes, that
-   leads straight to adding a passkey:
+4. **Make the admin.** On the server, this prints a one-time link, valid for 15 minutes, that
+   makes the first account, the admin, and its passkey; then you pick a username, email and icon:
 
    ```sh
-   sudo flow server add-passkey
+   sudo flow server setup
    ```
 
-   While no passkey exists, the first start also logs such a link (`journalctl -u agentflow`).
+   While nobody is set up, the first start also logs such a link (`journalctl -u agentflow`).
+   Only the admin invites others: Settings › People, or `sudo flow server invite`.
 
 5. **Connect a machine.** On each machine where agents run or where you want `flow run`, as the
    user who'll use it:

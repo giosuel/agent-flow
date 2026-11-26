@@ -435,19 +435,15 @@ async fn passkey_finish(
     let result = state
         .db
         .call(move |c| {
-            let name = pk.finish_login(c, &body.id, &body.credential)?;
-            Ok((name, auth::create_session(c, "passkey", &limits, ua.as_deref(), Some(&ip2))?))
+            let (name, person) = pk.finish_login(c, &body.id, &body.credential)?;
+            Ok((name, auth::create_session(c, person, "passkey", &limits, ua.as_deref(), Some(&ip2))?))
         })
         .await;
     match result {
         Ok((name, session)) => {
-            let e = Entry::new(
-                &Actor::Anonymous,
-                Via::Page,
-                Action::Login,
-                format!("owner signed in with passkey \"{name}\""),
-            )
-            .ip(Some(ip));
+            let e =
+                Entry::new(&Actor::Anonymous, Via::Page, Action::Login, format!("signed in with passkey \"{name}\""))
+                    .ip(Some(ip));
             activity::write(&state.db, e).await;
             let jar = jar.add(session_cookie(&state, session));
             (jar, Json(serde_json::json!({"ok": true}))).into_response()
@@ -462,7 +458,7 @@ async fn passkey_finish(
     }
 }
 
-fn user_agent(headers: &HeaderMap) -> Option<String> {
+pub(super) fn user_agent(headers: &HeaderMap) -> Option<String> {
     headers.get(header::USER_AGENT).and_then(|v| v.to_str().ok()).map(|s| s.chars().take(300).collect::<String>())
 }
 
@@ -480,8 +476,15 @@ async fn link_use(
     let session = state
         .db
         .call(move |c| {
-            let Some(purpose) = auth::consume_login_link(c, &secret)? else { return Ok(None) };
-            Ok(Some((purpose, auth::create_session(c, "link", &limits, ua.as_deref(), Some(&ip2))?)))
+            // A sign-in link names its person; setup, invite and device links have pages of their
+            // own (links.rs).
+            let tx = c.transaction()?;
+            let Some(link) = auth::consume_login_link(&tx, &secret)? else { return Ok(None) };
+            let person = link.person.map(|p| crate::people::get(&tx, p)).transpose()?.flatten();
+            let Some(person) = person else { return Ok(None) };
+            let session = auth::create_session(&tx, person.id, "link", &limits, ua.as_deref(), Some(&ip2))?;
+            tx.commit()?;
+            Ok(Some((link.purpose, session)))
         })
         .await?;
     let Some((purpose, session)) = session else {
@@ -492,20 +495,19 @@ async fn link_use(
         }
         let page = LoginPage::new(
             None,
-            Some("This link has expired or was already used. Run `sudo flow server add-passkey` on the server for a new one.".into()),
+            Some("This link has expired or was already used. Run `sudo flow server add-device` on the server for a new one.".into()),
         );
         return Ok((StatusCode::GONE, Html(page.render()?)).into_response());
     };
-    let e =
-        Entry::new(&Actor::Anonymous, Via::Page, Action::Login, "owner signed in with a one-time link").ip(Some(ip));
+    let e = Entry::new(&Actor::Anonymous, Via::Page, Action::Login, "signed in with a one-time link").ip(Some(ip));
     activity::write(&state.db, e).await;
     let jar = jar.add(session_cookie(&state, session));
-    // A link from `flow server add-passkey` (or the first start) leads straight to adding one.
-    let to = if purpose == super::admin_socket::PURPOSE { "/settings?add_passkey=1#passkeys" } else { "/" };
+    // A link from before people (`flow server add-passkey`) led straight to adding a passkey.
+    let to = if purpose == "add-passkey" { "/settings?add_passkey=1#passkeys" } else { "/" };
     Ok((jar, Redirect::to(to)).into_response())
 }
 
-fn session_cookie(state: &AppState, value: String) -> Cookie<'static> {
+pub(super) fn session_cookie(state: &AppState, value: String) -> Cookie<'static> {
     Cookie::build((state.session_cookie_name(), value))
         .path("/")
         .http_only(true)

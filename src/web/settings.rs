@@ -178,7 +178,7 @@ struct PageQuery {
     done: Option<String>,
     /// What happened on the Build servers card.
     bs: Option<String>,
-    /// Signed in with a link from `flow server add-passkey`: add one now.
+    /// Signed in with a setup or device link where passkeys work later: add one now.
     add_passkey: Option<String>,
 }
 
@@ -237,21 +237,23 @@ async fn render_page(
         Actor::Owner { session_id, .. } => *session_id,
         _ => 0,
     };
+    // Passkeys, browsers and devices are the person's own (D-270).
+    let me = actor.person().unwrap_or(0);
     let now = now_ms();
     let (passkeys, devices, toggles, tokens, sessions, projects) = state
         .db
         .call(move |c| {
-            let passkeys = passkey::list(c)?;
-            let devices = push::devices(c)?;
+            let passkeys = passkey::list(c, me)?;
+            let devices = push::devices(c, me)?;
             let toggles =
                 Kind::ALL.iter().map(|&k| Ok((k, push::is_enabled(c, k)?))).collect::<anyhow::Result<Vec<_>>>()?;
             let tokens = auth::list_tokens(c)?;
             let mut stmt = c.prepare(
                 "SELECT id, method, user_agent, last_seen_at FROM web_sessions
-                 WHERE revoked_at IS NULL AND expires_at > ?1 ORDER BY last_seen_at DESC",
+                 WHERE revoked_at IS NULL AND expires_at > ?1 AND person_id = ?2 ORDER BY last_seen_at DESC",
             )?;
             let sessions = stmt
-                .query_map([now], |r| {
+                .query_map([now, me], |r| {
                     Ok((
                         r.get::<_, i64>(0)?,
                         r.get::<_, String>(1)?,
@@ -465,7 +467,15 @@ async fn passkey_start(State(state): State<AppState>, Extension(actor): Extensio
         return r;
     }
     let pk = state.passkeys.clone();
-    match state.db.call(move |c| pk.start_registration(c)).await {
+    let Some(me) = actor.person() else { return json_error(StatusCode::FORBIDDEN, "sign in first") };
+    match state
+        .db
+        .call(move |c| {
+            let label = crate::people::get(c, me)?.map(|p| p.name()).unwrap_or_default();
+            pk.start_registration(c, Some(me), &label, &format!("person-{me}"))
+        })
+        .await
+    {
         Ok((id, options)) => Json(json!({"id": id, "options": options})).into_response(),
         Err(e) => json_error(StatusCode::BAD_REQUEST, format!("{e:#}")),
     }
@@ -489,7 +499,18 @@ async fn passkey_finish(
     }
     let pk = state.passkeys.clone();
     let name = body.name.clone();
-    match state.db.call(move |c| pk.finish_registration(c, &body.id, &body.name, &body.credential)).await {
+    let Some(me) = actor.person() else { return json_error(StatusCode::FORBIDDEN, "sign in first") };
+    match state
+        .db
+        .call(move |c| {
+            let (key, user) = pk.finish_registration(&body.id, &format!("person-{me}"), &body.credential)?;
+            if user != crate::people::webauthn_id(c, me)? {
+                anyhow::bail!("this enrolment was started for someone else");
+            }
+            crate::passkey::store(c, me, &body.name, &key)
+        })
+        .await
+    {
         Ok(id) => {
             log(&state, &actor, &ip, Action::Write, format!("passkey {id} added: {name}")).await;
             Json(json!({"ok": true})).into_response()
@@ -505,7 +526,8 @@ async fn passkey_remove(
     Path(id): Path<i64>,
 ) -> AppResult<Redirect> {
     actor.require_owner()?;
-    if !state.db.call(move |c| passkey::remove(c, id)).await? {
+    let me = actor.person().unwrap_or(0);
+    if !state.db.call(move |c| passkey::remove(c, id, me)).await? {
         return Err(AppError::NotFound);
     }
     log(&state, &actor, &ip, Action::Write, format!("passkey {id} removed")).await;
@@ -533,7 +555,8 @@ async fn push_subscribe(
     let device: String = body.device.trim().chars().take(60).collect();
     let device = if device.is_empty() { "Browser".to_owned() } else { device };
     let name = device.clone();
-    match state.db.call(move |c| push::save_subscription(c, &body.subscription, &device)).await {
+    let Some(me) = actor.person() else { return json_error(StatusCode::FORBIDDEN, "sign in first") };
+    match state.db.call(move |c| push::save_subscription(c, &body.subscription, &device, me)).await {
         Ok(()) => {
             log(&state, &actor, &ip, Action::Write, format!("notifications turned on for {name}")).await;
             Json(json!({"ok": true})).into_response()
@@ -549,7 +572,8 @@ async fn push_remove(
     Path(id): Path<i64>,
 ) -> AppResult<Redirect> {
     actor.require_owner()?;
-    if !state.db.call(move |c| push::remove_device(c, id)).await? {
+    let me = actor.person().unwrap_or(0);
+    if !state.db.call(move |c| push::remove_device(c, id, me)).await? {
         return Err(AppError::NotFound);
     }
     log(&state, &actor, &ip, Action::Write, format!("notifications turned off for device {id}")).await;
@@ -714,16 +738,20 @@ async fn session_end(
     Path(id): Path<i64>,
 ) -> AppResult<Redirect> {
     actor.require_owner()?;
-    state
+    let me = actor.person().unwrap_or(0);
+    // Only the person's own browsers.
+    let n = state
         .db
         .call(move |c| {
-            c.execute(
-                "UPDATE web_sessions SET revoked_at = ?1 WHERE id = ?2 AND revoked_at IS NULL",
-                params![now_ms(), id],
-            )?;
-            Ok(())
+            Ok(c.execute(
+                "UPDATE web_sessions SET revoked_at = ?1 WHERE id = ?2 AND person_id = ?3 AND revoked_at IS NULL",
+                params![now_ms(), id, me],
+            )?)
         })
         .await?;
+    if n == 0 {
+        return Err(AppError::NotFound);
+    }
     log(&state, &actor, &ip, Action::Login, format!("browser session {id} signed out")).await;
     Ok(Redirect::to("/settings?done=session-ended"))
 }

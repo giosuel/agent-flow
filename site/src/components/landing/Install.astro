@@ -86,7 +86,7 @@ const base = import.meta.env.BASE_URL;
         <span class="label">Then, on the server</span>
         <ol>
           <li><span>Make it a service, running as its own user.</span><code class="cmd">sudo agentflow setup --public-url https://flow.example --agents-user you</code></li>
-          <li><span>Put https in front (Caddy, nginx) and add your passkey.</span><code class="cmd">sudo flow server add-passkey</code></li>
+          <li><span>Put https in front (Caddy, nginx) and make the admin, with a passkey.</span><code class="cmd">sudo flow server setup</code></li>
           <li><span>Connect machines and set up projects.</span><code class="cmd">flow connect https://flow.example</code></li>
         </ol>
         <a class="act" href={`${base}docs/getting-started/`}>The whole walk-through →</a>
