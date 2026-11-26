@@ -1292,6 +1292,36 @@ async fn an_agent_waits_for_the_owners_answer() {
     assert_eq!(res.status(), StatusCode::FORBIDDEN);
 }
 
+/// The owner, 2026-11-25: "this overflows". The featured question's chip names what it blocks by
+/// id, the first three, with the titles on hover; whole titles ran out of the card.
+#[tokio::test]
+async fn the_featured_questions_blocks_chip_stays_short() {
+    let s = TestServer::start().await;
+    let token = s.token(TokenKind::Project, Some("vinculum")).await;
+    let sess = mcp_session(&s, &token).await;
+    let long = "R1-1: lines across swimlanes route through the structure's own obstacles";
+    let tasks: Vec<Value> = (0..5).map(|i| json!({"title": format!("{long} ({i})"), "estimate": "1h"})).collect();
+    for (tool, args) in [
+        ("add_milestone", json!({"name": "M4", "title": "Keybinds"})),
+        ("add_milestone", json!({"name": "K1", "title": "Read binds", "step_of": "M4"})),
+    ] {
+        assert!(mcp_tool(&s, &token, &sess, tool, args).await.0);
+    }
+    let (ok, r) = mcp_tool(&s, &token, &sess, "add_tasks", json!({"milestone": "K1", "tasks": tasks})).await;
+    assert!(ok, "{r}");
+    let blocks = ["T-1", "T-2", "T-3", "T-4", "T-5"];
+    let (ok, r) =
+        mcp_tool(&s, &token, &sess, "ask_question", json!({"title": "Which fixes now?", "blocks": blocks})).await;
+    assert!(ok, "{r}");
+    let cookie = s.owner_cookie().await;
+    let html = s.http.get(s.url("/")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
+    let chip = &html[html.find(r#"<span class="chip bad">Blocks<span>"#).expect("the chip")..];
+    let chip = &chip[..chip.find("</span></span>").unwrap()];
+    assert!(chip.contains(r#"<a href="/p/vinculum/T-1" title="R1-1: lines across"#), "{chip}");
+    assert!(chip.contains(">T-1</a>, <a") && chip.contains(">T-3</a> +2 more"), "{chip}");
+    assert!(!chip.contains(">R1-1") && !chip.contains("T-4"), "{chip}");
+}
+
 #[tokio::test]
 async fn the_dashboard_features_a_question_and_answers_on_send() {
     let s = TestServer::start().await;

@@ -144,14 +144,14 @@ fn blocking_ids(conn: &Connection) -> anyhow::Result<Vec<i64>> {
 
 /// What a question blocks, by name and page, for "Blocks: Sidebar layout".
 pub fn blocks(conn: &Connection, q: &Record) -> anyhow::Result<Vec<(String, String)>> {
+    Ok(blocked(conn, q)?.into_iter().map(|r| (r.title.clone(), r.url())).collect())
+}
+
+/// The records the question holds, in the order they were linked.
+pub fn blocked(conn: &Connection, q: &Record) -> anyhow::Result<Vec<Record>> {
     let mut stmt = conn.prepare("SELECT to_id FROM links WHERE from_id = ?1 AND relation = 'blocks' ORDER BY id")?;
     let ids: Vec<i64> = stmt.query_map([q.id], |r| r.get(0))?.collect::<Result<_, _>>()?;
-    let mut out = Vec::new();
-    for id in ids {
-        let r = records::get(conn, id)?;
-        out.push((r.title.clone(), r.url()));
-    }
-    Ok(out)
+    ids.into_iter().map(|id| records::get(conn, id)).collect()
 }
 
 // ---------------------------------------------------------------------------------------------

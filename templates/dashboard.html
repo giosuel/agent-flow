@@ -45,7 +45,7 @@
 
     {% if let Some(f) = featured %}
     <article class="card pad stack featured">
-      <div class="row wrap"><span class="sub">{{ f.project }} · {{ f.when }}</span><span class="grow"></span>{% if !f.blocks.is_empty() %}<span class="chip bad">Blocks: {% for (t, u) in f.blocks %}{% if !loop.first %}, {% endif %}<a href="{{ u }}">{{ t }}</a>{% endfor %}</span>{% endif %}</div>
+      <div class="row wrap"><span class="sub">{{ f.project }} · {{ f.when }}</span><span class="grow"></span>{% if !f.blocks.is_empty() %}<span class="chip bad">Blocks<span>{% for (s, t, u) in f.blocks.iter().take(3) %}{% if !loop.first %}, {% endif %}<a href="{{ u }}" title="{{ t }}">{{ s }}</a>{% endfor %}{% if f.blocks.len() > 3 %} +{{ f.blocks.len() - 3 }} more{% endif %}</span></span>{% endif %}</div>
       <h3 class="ftitle"><a href="{{ f.url }}">{{ f.title }}</a></h3>
       {% if !f.body_html.is_empty() %}<div class="prose clamp">{{ f.body_html|safe }}</div>{% endif %}
       {# One Answer button per option, or your own words (the UI library's answer control). #}
