@@ -1448,7 +1448,7 @@ ol.lrows { padding: 0; margin: 0; list-style: none; gap: 0; }
 .tk-table.table.nums th.tk-l, .tk-table.table.nums td.tk-l { text-align: left; }
 .tk-cost { display: inline-flex; align-items: center; justify-content: flex-end; gap: 10px; }
 .cbar { width: 56px; flex: none; }
-.tk-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding-top: 12px; border-top: 1px solid var(--line2); }
+.tk-foot { justify-content: space-between; }
 .tk-all { display: inline-flex; align-items: center; gap: 2px; color: var(--accent); font-weight: 600; text-decoration: none; min-height: 32px; }
 .tk-all .i { width: var(--ic); height: var(--ic); }
 .tk-all:hover { text-decoration: underline; }
