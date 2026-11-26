@@ -3726,7 +3726,9 @@ async fn machines_are_an_overview_and_a_page_each() {
     let s = TestServer::start().await;
     let cookie = s.owner_cookie().await;
     s.token(TokenKind::Project, Some("vinculum")).await;
-    let now = crate::util::now_ms();
+    // The jobs go back 29 minutes: just after midnight some would be yesterday's, and the overview
+    // counts today's. Start them half an hour into the day at the earliest.
+    let now = crate::util::now_ms().max(crate::tz::Tz::default().day_start(crate::util::now_ms()) + 31 * 60_000);
     s.db.call(move |c| {
         for name in ["hq", "box-2"] {
             crate::remote::add_daemon(c, &crate::config::BuildServer { name: name.into(), ..Default::default() })?;
