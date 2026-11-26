@@ -540,6 +540,15 @@ body { box-sizing: border-box; min-height: 100vh; min-height: 100dvh; }
 .rdlg-nav { display: flex; gap: 6px; }
 .rdlg .dlg-body > .head { margin-bottom: 16px; }
 .rdlg .dlg-body .split { grid-template-columns: 1fr; }
+/* A record shown as a page (D-293): its side column sits beside the first card, and what follows runs
+   the whole width, so a short side doesn't stand beside a long list. In a dialog it stays one column. */
+@media (min-width: 1056px) {
+  .page > .split.rec-lay { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: var(--sp-6) 28px; }
+  .page > .split.rec-lay > .split-main { display: contents; }
+  .page > .split.rec-lay > .split-main > * { grid-column: 1 / -1; }
+  .page > .split.rec-lay > .split-main > :first-child { grid-column: 1; grid-row: 1; }
+  .page > .split.rec-lay > .split-side { grid-column: 2; grid-row: 1; }
+}
 /* In a dialog, text uses the dialog's whole width: it is narrow enough to read (the owner,
    2026-11-18: "the file dialog's content isn't full width"). */
 .rdlg .dlg-body .prose, .pdlg .dlg-body .prose { max-width: none; }
@@ -1053,7 +1062,7 @@ ol.lrows { padding: 0; margin: 0; list-style: none; gap: 0; }
 }
 .ov-lay { display: grid; grid-template-columns: minmax(0, 1fr) 400px; gap: 22px; align-items: start; }
 .ov-main, .ov-side { display: flex; flex-direction: column; gap: 22px; min-width: 0; }
-.ovp, .ov-fold { border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--panel); overflow: hidden; }
+.ovp, .ov-fold { overflow: hidden; }
 /* The milestone list (the owner, 2026-11-19, D-226): one component, in the milestones' own order. */
 .ml-scroll { position: relative; }
 .ml-row { display: grid; grid-template-columns: 18px 64px minmax(0, 1fr) minmax(0, 260px) 150px 96px 16px; gap: 12px; align-items: center; min-height: 46px; padding: 0 18px; border-top: 1px solid var(--line2); color: var(--ink); text-decoration: none; font-size: var(--fs-sm); }

@@ -20,7 +20,7 @@
 {% endif %}
 {% if let Some((ok, text)) = draft_notice %}<p class="notice{% if *ok %} ok{% else %} bad{% endif %}" role="status">{% if *ok %}{{ crate::web::icons::icon("check")|safe }}{% else %}{{ crate::web::icons::icon("alert")|safe }}{% endif %}<span>{{ text }}</span></p>{% endif %}
 
-<div class="split">
+<div class="split rec-lay level">
   <div class="split-main stack-lg">
     {% if let Some(d) = draft %}{% include "draft.html" %}{% endif %}
     {% if kind == "release" %}{% if let Some(tt) = to_test %}{% include "to_test.html" %}{% endif %}{% endif %}

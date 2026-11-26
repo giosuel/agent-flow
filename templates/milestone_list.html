@@ -2,7 +2,7 @@
    the milestones' own order: the done ones (folded on the overview and the phone), those under
    way, the planned ones, then the tasks without a milestone. On Plan it scrolls in a box, scrolled
    to the picked milestone, which is lit and open in its place. #}
-<section class="ovp ms-panel ml{% if tab == "plan" %} ml-plan{% endif %}" aria-labelledby="ms-h">
+<section class="card ovp ms-panel ml{% if tab == "plan" %} ml-plan{% endif %}" aria-labelledby="ms-h">
   <div class="card-head"><h2 id="ms-h">Milestones</h2><span class="sub">{{ ms_counts }}</span></div>
   {% if ms_done.is_empty() && ms_list.is_empty() && loose_count == 0 %}<p class="empty-in">The agent hasn't set milestones yet.</p>{% endif %}
   <div class="ml-scroll" data-ml>
