@@ -85,6 +85,30 @@ pub struct Here {
     pub slug: String,
     pub name: String,
     pub tabs: Vec<BarTab>,
+    /// The tab the page is under ("" on a page outside the project).
+    pub tab: String,
+}
+
+impl Here {
+    /// Where the switcher takes you in the project `slug`: the page you're on here, in that
+    /// project (the owner, 2026-11-25, D-280: "when I am looking at imaginarium's notes and then
+    /// switch to lituus, i want to immediately be on the lituus notes page"). From Settings (a
+    /// dialog) and from pages outside a project, its overview.
+    pub fn switch_to(&self, slug: &str) -> String {
+        match self.tab.as_str() {
+            "settings" => tab_href(slug, "overview"),
+            tab => tab_href(slug, tab),
+        }
+    }
+}
+
+/// The address of the project `slug`'s tab `key` (a key of the project page's tabs).
+pub fn tab_href(slug: &str, key: &str) -> String {
+    match key {
+        "" | "overview" => format!("/p/{slug}"),
+        "plan" | "settings" => format!("/p/{slug}/{key}"),
+        _ => format!("/p/{slug}?tab={key}"),
+    }
 }
 
 /// On the phone a tab bar at the bottom, as in iOS apps and the owner's viber console (the owner,
@@ -306,11 +330,7 @@ impl Nav {
                 };
                 BarTab {
                     label,
-                    href: match key {
-                        "overview" => format!("/p/{slug}"),
-                        "plan" | "settings" => format!("/p/{slug}/{key}"),
-                        _ => format!("/p/{slug}?tab={key}"),
-                    },
+                    href: tab_href(slug, key),
                     count: if count > 0 { count.to_string() } else { String::new() },
                     warn,
                     on: key == tab,
@@ -318,7 +338,7 @@ impl Nav {
                 }
             })
             .collect();
-        self.here = Some(Here { slug: slug.to_owned(), name, tabs });
+        self.here = Some(Here { slug: slug.to_owned(), name, tabs, tab: tab.to_owned() });
         self
     }
 

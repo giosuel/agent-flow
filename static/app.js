@@ -68,13 +68,36 @@ document.addEventListener("af:content", (e) => wireAnswers(e.detail));
 // it, and the page behind doesn't scroll.
 // afDlg.open({ size, title, label, cls, pop, anchor, opener, role, dismiss, closed }) gives { el, head,
 // title, tools, body, close, dismiss }. `dismiss` is what Esc, the close button, the scrim and a
-// pull do: by default close(); a dialog can ask first or go Back instead.
+// pull do: by default close(); a dialog can ask first or go Back instead. Either way, what the owner
+// typed or picked in it and hasn't sent is never dropped without asking (afDlg.leave).
 window.afDlg = (() => {
   const stack = [];
   const FOCUS = "a[href], button:not([disabled]), input:not([disabled]):not([type=hidden]), select:not([disabled]), textarea:not([disabled]), summary, [tabindex]:not([tabindex='-1'])";
   const phone = matchMedia("(max-width: 700px)");
   let n = 0;
   const top = () => stack[stack.length - 1];
+  // A field of a form that posts, changed from what the page came with: a written answer, a pasted
+  // token, a project's settings. Unnamed fields are the page's own (filters, finds) and aren't sent.
+  const edited = (x) => {
+    if (!x.name || x.disabled) return false;
+    if (x.type === "checkbox" || x.type === "radio") return x.checked !== x.defaultChecked;
+    if (x.tagName === "SELECT") {
+      const o = [...x.options];
+      if (x.multiple) return o.some((y) => y.selected !== y.defaultSelected);
+      return x.selectedIndex !== Math.max(0, o.map((y) => y.defaultSelected).lastIndexOf(true));
+    }
+    if (x.tagName === "TEXTAREA" || (x.tagName === "INPUT" && !/^(hidden|submit|button|reset|image)$/.test(x.type))) return x.value !== x.defaultValue;
+    return false;
+  };
+  const changed = (root) => [...root.querySelectorAll("form")]
+    .some((f) => (f.getAttribute("method") || "").toLowerCase() === "post" && [...f.elements].some(edited));
+  // Before a dialog closes or shows something else: true when nothing would be lost, else a promise
+  // of the owner's choice in the app's own dialog (the project document asks in its own words).
+  const leave = (d) => {
+    if (!changed(d.body)) return true;
+    if (d.el.querySelector("form[data-md-editor]") && window.afDocGuard) return window.afDocGuard();
+    return window.afDialog({ title: "Drop what you entered?", text: "It isn't saved or sent yet.", ok: "Drop it", cancel: "Keep editing", danger: true });
+  };
   const lock = () => document.documentElement.classList.toggle("dlg-on", stack.some((d) => !d.pop));
   document.addEventListener("keydown", (e) => {
     const d = top();
@@ -129,7 +152,16 @@ window.afDlg = (() => {
       setTimeout(() => back.remove(), 260);
       if (closed) closed(d);
     };
-    d.dismiss = () => (dismiss ? dismiss(d) : d.close());
+    // Asked once at a time: a second Esc or tap while it asks is the question's own.
+    let asking = false;
+    d.dismiss = () => {
+      const go = () => { if (stack.includes(d)) (dismiss ? dismiss(d) : d.close()); };
+      const ok = leave(d);
+      if (ok === true) return go();
+      if (asking) return;
+      asking = true;
+      ok.then((yes) => { asking = false; if (yes) go(); });
+    };
     el.querySelector(".dlg-x").addEventListener("click", () => d.dismiss());
     // The scrim: a press that starts and ends on it (not a text selection that ends there).
     let down = false;
@@ -164,7 +196,7 @@ window.afDlg = (() => {
     if (!pop) d.el.querySelector(".dlg-x").focus({ preventScroll: true });
     return d;
   };
-  return { open, top, closePop: () => { const d = top(); if (d && d.pop) d.close(); } };
+  return { open, top, leave: async (d) => leave(d), closePop: () => { const d = top(); if (d && d.pop) d.close(); } };
 })();
 
 // Confirms and messages in that dialog, never the browser's (the owner, 2026-11-17: "remove all
@@ -194,6 +226,18 @@ window.afDialog = ({ title, text = "", ok = "OK", cancel = null, danger = false 
     d.el.append(foot);
     foot.querySelector(cancel ? '[data-v="0"]' : '[data-v="1"]').focus();
   });
+
+// A form posted from a dialog that didn't come back as the page it shows (refused, a server error,
+// AgentFlow restarting or out of reach): the dialog and what was typed in it stay, and the reason
+// from the error page is said, never a blank page instead (04-6, 04-7).
+window.afRefused = (html, status) => {
+  const doc = html ? new DOMParser().parseFromString(html, "text/html") : null;
+  const why = doc && doc.querySelector(".bare-in h1 + .sub");
+  const text = why && why.textContent.trim()
+    ? why.textContent.trim()
+    : status ? `AgentFlow answered ${status}. What you entered is still here; try again.` : "AgentFlow didn't answer. What you entered is still here; try again.";
+  return window.afDialog({ title: "Couldn't save", text });
+};
 
 // Buttons with data-confirm ask first (no inline handlers: the CSP forbids them). The question's
 // first sentence is the title, the rest the text; the button's own label confirms, red when the
@@ -288,6 +332,25 @@ async function copyText(what) {
   return ok;
 }
 window.afCopy = copyText;
+
+// "Copy the text" on a note's page: the text as it is (its Markdown, a log's lines), from the
+// hidden field the page keeps it in.
+document.addEventListener("click", async (e) => {
+  const btn = e.target.closest("[data-copy-from]");
+  const src = btn && document.getElementById(btn.dataset.copyFrom);
+  if (!src) return;
+  // A field holds the text; a code view (a job's output) has it in its lines.
+  const text = "value" in src ? src.value : [...src.querySelectorAll(".cv-t")].map((t) => t.textContent).join("\n");
+  const ok = await copyText(text);
+  btn.innerHTML = ok ? DONE_ICON : COPY_ICON;
+  btn.classList.toggle("done", ok);
+  btn.setAttribute("aria-label", ok ? "Copied" : "Copy didn't work; download it instead");
+  setTimeout(() => {
+    btn.innerHTML = COPY_ICON;
+    btn.classList.remove("done");
+    btn.setAttribute("aria-label", "Copy the text");
+  }, 1600);
+});
 
 // Wired on load, and again for content that arrives later (a record in a dialog): `af:content`.
 const wireCopy = (root) => {
@@ -685,14 +748,26 @@ document.addEventListener("change", (e) => {
     if (!d.el.contains(document.activeElement)) d.el.querySelector(".dlg-x").focus({ preventScroll: true });
     document.dispatchEvent(new CustomEvent("af:content", { detail: shell }));
   };
+  // A form that comes back without the settings (a token GitHub refused, an error, no answer)
+  // keeps the dialog and its fields and says why: its address only takes a POST, so going there
+  // would be a blank 405 page.
   const load = async (url, init, soft) => {
     const box = d;
+    const post = !!init && init.method === "POST";
     box.el.classList.add("busy");
     try {
-      const res = await fetch(url, { credentials: "same-origin", ...init });
-      const shell = shellOf(await res.text());
-      if (!shell) throw new Error("no settings in the answer");
-      if (d === box) show(shell);
+      let res;
+      try {
+        res = await fetch(url, { credentials: "same-origin", ...init });
+      } catch (e) {
+        if (post) { window.afRefused(); return; }
+        throw e;
+      }
+      const html = await res.text();
+      const shell = shellOf(html);
+      if (shell) { if (d === box) show(shell); return; }
+      if (post) { window.afRefused(html, res.status); return; }
+      throw new Error("no settings in the answer");
     } catch (_) {
       if (soft) box.close(); else location.href = typeof url === "string" ? url : "/settings";
     } finally {
@@ -707,7 +782,10 @@ document.addEventListener("change", (e) => {
       const a = e.target.closest("a[href]");
       if (!a || e.defaultPrevented || e.metaKey || e.ctrlKey) return;
       const u = new URL(a.href, location.href);
-      if (u.origin === location.origin && u.pathname === "/settings") { e.preventDefault(); load(u.pathname + u.search); }
+      if (u.origin === location.origin && u.pathname === "/settings") {
+        e.preventDefault();
+        window.afDlg.leave(d).then((yes) => { if (yes) load(u.pathname + u.search); });
+      }
       else if (u.origin === location.origin && !a.target) d.close();
     });
     d.el.addEventListener("submit", (e) => {
@@ -744,24 +822,37 @@ document.addEventListener("change", (e) => {
 (() => {
   let d = null;
   const SIZES = ["sm", "md", "lg", "xl"];
-  // Closing: an editor with unsaved edits asks first (the project document).
-  const dismiss = async (box) => {
-    if (window.afDocGuard && box.el.querySelector("form[data-md-editor]") && !(await window.afDocGuard())) return;
-    const ed = box.el.querySelector("form[data-md-editor] textarea[name=text]");
-    if (ed) ed.defaultValue = ed.value;
+  // Closing: afDlg has asked already when something typed in it isn't saved (the project document
+  // in its own words); the editor's edits are then dropped, so leaving the page doesn't ask again.
+  const saved = (box) => {
+    for (const ed of box ? box.el.querySelectorAll("form[data-md-editor] textarea[name=text]") : []) ed.defaultValue = ed.value;
+  };
+  const dismiss = (box) => {
+    saved(box);
     box.close();
   };
+  // A form whose answer is neither such a page nor a success (refused, an error, no answer) stays
+  // where it is with what was typed in it, and the reason is said (04-7: the document's edits were
+  // lost on a save that failed).
   const show = async (url, init, soft) => {
-    let res;
+    const post = !!init && init.method === "POST";
+    let res, html;
     try {
       res = await fetch(url, { credentials: "same-origin", ...init });
+      html = await res.text();
     } catch (_) {
+      if (post) { window.afRefused(); return; }
       if (!soft) location.href = url;
       return;
     }
-    const doc = new DOMParser().parseFromString(await res.text(), "text/html");
+    const doc = new DOMParser().parseFromString(html, "text/html");
     const content = doc.querySelector("[data-dlg-content]");
-    if (!content) { if (!soft) location.href = res.url; return; }
+    if (!content) {
+      if (post && !res.ok) { window.afRefused(html, res.status); return; }
+      if (post) saved(d);
+      if (!soft) location.href = res.url;
+      return;
+    }
     const h1 = content.querySelector(".head h1");
     const title = h1 ? h1.textContent : document.title;
     if (h1) h1.remove();
@@ -769,12 +860,14 @@ document.addEventListener("change", (e) => {
     const size = SIZES.includes(content.dataset.dlgSize) ? content.dataset.dlgSize : "md";
     if (!d) {
       d = window.afDlg.open({ size, cls: "pdlg", dismiss, closed: () => { d = null; } });
+      // Before the form's own listeners (capture), so the editor sees the submit is the dialog's
+      // and keeps its edits marked unsaved until the answer comes back.
       d.el.addEventListener("submit", (e) => {
         const form = e.target;
         if ((form.getAttribute("method") || "").toLowerCase() !== "post") return;
         e.preventDefault();
         show(form.action, { method: "POST", body: new URLSearchParams(new FormData(form, e.submitter)), headers: { "Content-Type": "application/x-www-form-urlencoded" } });
-      });
+      }, true);
     } else {
       d.el.classList.remove(...SIZES);
       d.el.classList.add(size);
@@ -980,7 +1073,9 @@ document.addEventListener("click", (e) => {
     ta.addEventListener("keydown", (e) => {
       if ((e.ctrlKey || e.metaKey) && (e.key === "s" || e.key === "Enter")) { e.preventDefault(); form.requestSubmit(); }
     });
-    form.addEventListener("submit", () => { ta.defaultValue = ta.value; });
+    // Saved once the form posts as a page (leaving it doesn't ask); a dialog that posts it in the
+    // script (prevented here) keeps the edits unsaved until its answer comes back.
+    form.addEventListener("submit", (e) => { if (!e.defaultPrevented) ta.defaultValue = ta.value; });
     // Formatting buttons wrap the selection or start a line.
     form.addEventListener("click", (e) => {
       const b = e.target.closest("button[data-md]");
@@ -1049,6 +1144,8 @@ document.addEventListener("click", (e) => {
   const go = (sel) => { const a = document.querySelector(sel); if (a) location.href = a.href; };
   document.addEventListener("keydown", (e) => {
     if (!document.querySelector(".cv-pager") || e.altKey || e.ctrlKey || e.metaKey) return;
+    // A dialog over the page (a record, Settings, the bell) has the keys: ← → step its records.
+    if (window.afDlg.top()) return;
     if (e.target.closest && e.target.closest("input, textarea, select, [contenteditable]")) return;
     if (e.key === "ArrowLeft" || e.key === "ArrowUp") { e.preventDefault(); go("a[data-newer]"); }
     if (e.key === "ArrowRight" || e.key === "ArrowDown") { e.preventDefault(); go("a[data-older]"); }
@@ -1308,4 +1405,55 @@ document.addEventListener("click", (e) => {
     const now = [...to.querySelectorAll("[data-sortable]")];
     was.forEach((b, i) => { if (b.dataset.sortDir && now[i]) sort(now[i], +b.dataset.sortCol, b.dataset.sortDir); });
   };
+})();
+
+// A path folds its first parts into "…" only when it doesn't fit its line, and "…" shows them all
+// (the owner, 2026-11-25, D-282: "why is this always ".../" ? can we expand this?"). Measured with
+// its parts unshrunk, again when its width changes and when a dialog brings one.
+(() => {
+  const fit = (nav) => {
+    const ol = nav.querySelector("ol");
+    if (!ol || nav.classList.contains("unfolded")) return;
+    for (const li of ol.querySelectorAll("li.pfold")) li.remove();
+    const items = [...ol.children];
+    for (const li of items) li.hidden = false;
+    nav.classList.remove("folded");
+    nav.classList.add("pmeasure");
+    const fits = () => ol.scrollWidth <= ol.clientWidth + 1;
+    if (items.length > 1 && !fits()) {
+      const more = document.createElement("li");
+      more.className = "pfold";
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "pfold-btn";
+      b.textContent = "…";
+      b.title = "Show the whole path";
+      b.setAttribute("aria-label", "Show the whole path");
+      more.append(b);
+      ol.insertBefore(more, items[0]);
+      let i = 0;
+      while (i < items.length - 1 && !fits()) items[i++].hidden = true;
+      nav.classList.add("folded");
+    }
+    nav.classList.remove("pmeasure");
+  };
+  const seen = new WeakSet();
+  const ro = "ResizeObserver" in window ? new ResizeObserver((es) => { for (const e of es) fit(e.target); }) : null;
+  const all = () => {
+    for (const nav of document.querySelectorAll("nav.path")) {
+      if (!seen.has(nav)) { seen.add(nav); if (ro) ro.observe(nav); }
+      fit(nav);
+    }
+  };
+  document.addEventListener("click", (e) => {
+    const b = e.target.closest && e.target.closest(".pfold-btn");
+    if (!b) return;
+    const nav = b.closest("nav.path");
+    nav.classList.add("unfolded");
+    nav.classList.remove("folded");
+    b.parentElement.remove();
+    for (const li of nav.querySelectorAll("li[hidden]")) li.hidden = false;
+  });
+  document.addEventListener("af:content", () => requestAnimationFrame(all));
+  all();
 })();

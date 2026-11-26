@@ -1,4 +1,5 @@
-//! Builders: agents run builds and tests on a stronger machine with `flow remote -- <command>`.
+//! Builders: agents run builds and tests on a stronger machine with
+//! `flow remote --name "<what it is>" -- <command>`.
 //! A builder connects itself to the server (`agentflow-builder`, see `crate::builders`); SSH
 //! builders are gone (the owner, 2026-11-17: "can we remove SSH builders overall? like even the
 //! option to have one"). AgentFlow brings the project's work folder there to the agent's snapshot,
@@ -219,6 +220,8 @@ pub type Shared = Arc<Mutex<Live>>;
 #[derive(Debug, Clone, Serialize)]
 pub struct Job {
     pub id: i64,
+    /// What it is, in a few words ("Tests for PR #170"); '' for jobs from before names (D-275).
+    pub name: String,
     pub server: String,
     pub project_id: i64,
     pub project: String,
@@ -260,6 +263,10 @@ impl Job {
     pub fn is_finished(&self) -> bool {
         matches!(self.state.as_str(), "done" | "failed" | "cancelled")
     }
+    /// Its title: its name, or its command for a job from before names.
+    pub fn title(&self) -> String {
+        if self.name.is_empty() { self.command_line() } else { self.name.clone() }
+    }
     pub fn target(&self) -> String {
         format!("job-{}", self.id)
     }
@@ -268,12 +275,13 @@ impl Job {
 const JOB_COLUMNS: &str =
     "j.id, j.server, j.project_id, p.slug, j.actor, j.dir, j.subdir, j.command, j.fetch, j.gpu, j.state,
      j.reason, j.exit_code, j.commit_sha, j.dirty, j.threads, j.sent_bytes, j.lines, j.warnings, j.errors, j.created_at,
-     j.started_at, j.finished_at, j.manifest, j.bundle, j.setup, j.artifacts, j.slot";
+     j.started_at, j.finished_at, j.manifest, j.bundle, j.setup, j.artifacts, j.slot, j.name";
 
 fn job_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<Job> {
     let list = |s: String| serde_json::from_str::<Vec<String>>(&s).unwrap_or_default();
     Ok(Job {
         id: r.get(0)?,
+        name: r.get(28)?,
         server: r.get(1)?,
         project_id: r.get(2)?,
         project: r.get(3)?,
@@ -353,6 +361,8 @@ pub fn check_fetch(p: &str) -> anyhow::Result<()> {
 
 #[derive(Default)]
 pub struct NewJob {
+    /// What it is, in a few words; required (D-275).
+    pub name: String,
     pub server: String,
     pub project_id: i64,
     pub actor: String,
@@ -370,13 +380,17 @@ pub fn create(conn: &Connection, j: &NewJob) -> anyhow::Result<i64> {
     if j.command.is_empty() || j.command.iter().map(String::len).sum::<usize>() > 8000 {
         bail!("give the command to run, e.g. -- cargo build --release");
     }
+    let name = j.name.trim();
+    if name.is_empty() || name.chars().count() > 120 || name.contains('\n') {
+        bail!("give the job a name, a few words on one line: flow remote --name \"Tests for PR #170\" -- …");
+    }
     for f in &j.fetch {
         check_fetch(f)?;
     }
     conn.execute(
         "INSERT INTO remote_jobs (server, project_id, actor, dir, subdir, command, fetch, gpu, state, reason, created_at,
-                                  manifest, bundle, setup)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'queued', 'waiting for its turn', ?9, ?10, ?11, ?12)",
+                                  manifest, bundle, setup, name)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'queued', 'waiting for its turn', ?9, ?10, ?11, ?12, ?13)",
         params![
             j.server,
             j.project_id,
@@ -389,7 +403,8 @@ pub fn create(conn: &Connection, j: &NewJob) -> anyhow::Result<i64> {
             now_ms(),
             j.manifest,
             j.bundle,
-            j.setup
+            j.setup,
+            name
         ],
     )?;
     Ok(conn.last_insert_rowid())
@@ -619,7 +634,7 @@ pub fn build_hint(conn: &Connection, project_id: i64) -> anyhow::Result<serde_js
                 "server": name,
                 "online": up,
                 "how": if up {
-                    format!("Heavy builds and tests go to {name}: flow remote [--fetch target/release/app] -- cargo build --release. Programs that must run on this machine (a different glibc) are built here.")
+                    format!("Heavy builds and tests go to {name}: flow remote --name \"Release build\" [--fetch target/release/app] -- cargo build --release. Programs that must run on this machine (a different glibc) are built here.")
                 } else {
                     format!("{name} is offline: build here (flow remote exits 75).")
                 },
@@ -631,7 +646,7 @@ pub fn build_hint(conn: &Connection, project_id: i64) -> anyhow::Result<serde_js
             "how": if online.is_empty() {
                 "No build server is picked for this project and none is online: build here.".to_owned()
             } else {
-                format!("No build server is picked for this project (the owner picks one in its Settings), but {} online: flow remote --server {} -- …", online.join(", "), online[0])
+                format!("No build server is picked for this project (the owner picks one in its Settings), but {} online: flow remote --server {} --name \"…\" -- …", online.join(", "), online[0])
             },
         }),
     })
@@ -1559,6 +1574,7 @@ mod tests {
     fn a_job_waits_for_room_and_its_project() {
         let server = BuildServer { name: "hq".into(), ..Default::default() };
         let job = |id, project_id| Job {
+            name: String::new(),
             id,
             server: "hq".into(),
             project_id,

@@ -1,13 +1,13 @@
 {% extends "base.html" %}
 {% import "ui.html" as ui %}
-{% block title %}{{ name }}{% endblock %}
+{% block title %}{% for (key, label) in tabs %}{% if tab == *key %}{{ label }} · {% endif %}{% endfor %}{{ name }}{% endblock %}
 {% block content %}
 <div class="head proj-head">
   <div class="crumb-row">{% include "path.html" %}{% if let Some(u) = session_url %}<a class="session-link" href="{{ u }}" target="_blank" rel="noopener" title="The project agent's Claude Code session on claude.ai">{{ crate::web::icons::icon("session")|safe }}<span class="hide-phone">Open the agent's session</span><span class="only-phone">Agent session</span>{{ crate::web::icons::icon("out")|safe }}</a>{% endif %}</div>
-  {# The page's title: the project on its overview, otherwise the tab, as Usage or the Log have theirs
-     (the owner, 2026-11-24: "maybe we should give titles to all these pages so they don't look so
-     empty"). #}
-  <h1>{% if tab == "overview" %}{{ name }}{% else %}{% for (key, label) in tabs %}{% if tab == *key %}{{ label }}{% endif %}{% endfor %}{% endif %}{% if status != "active" %} <span class="chip">{{ status }}</span>{% endif %}</h1>
+  {# The page's title is its tab, as Usage or the Log have theirs (the owner, 2026-11-24: "maybe we
+     should give titles to all these pages so they don't look so empty"), the overview's too: the
+     project's name is in the switcher and the path (2026-11-25, D-281). #}
+  <h1>{% for (key, label) in tabs %}{% if tab == *key %}{{ label }}{% endif %}{% endfor %}{% if status != "active" %} <span class="chip">{{ status }}</span>{% endif %}</h1>
   <p class="status-line"><span class="dot{% if agent.online %} ok{% endif %}" aria-hidden="true"></span>{% if !repo.is_empty() %}<a href="https://github.com/{{ repo }}">github.com/{{ repo }}</a> · {% endif %}<span>{{ headline }}</span></p>
 </div>
 <nav class="tabs proj-tabs" aria-label="Project">
@@ -33,8 +33,8 @@
   <article class="qc{% if !loop.first %} qc-more{% endif %}" aria-labelledby="qt-{{ q.short }}">
     <div class="qh"><a class="mono qid" href="{{ q.url }}">{{ q.short }}</a><span class="chip">{{ q.scope }}</span><span class="qwhen">{{ q.asked }}</span>{% if !q.blocks.is_empty() %}<span class="warn-text qblocks">· blocks {% for (t, u) in q.blocks %}{% if !loop.first %}, {% endif %}<a class="warn-text" href="{{ u }}">{{ t }}</a>{% endfor %}</span>{% endif %}</div>
     <h3 class="qt" id="qt-{{ q.short }}"><a href="{{ q.url }}">{{ q.title }}</a></h3>
-    {% if !q.options.is_empty() %}{% call ui::choices("/p/{}/{}/answer"|format(slug, q.short), "/p/{}?answered={}"|format(slug, q.short), q.options.as_slice(), false, "") %}{% endcall %}{% endif %}
-    <div class="qf"><span class="sub">{% if q.options.is_empty() %}No options: answer in your own words{% else %}Answer one here{% endif %}</span><a class="sub" href="{{ q.url }}">{% if q.options.is_empty() %}Answer{% else if q.more > 0 %}{{ q.more }} more, or your own{% else %}or write your own{% endif %}</a></div>
+    {% call ui::choices("/p/{}/{}/answer"|format(slug, q.short), "/p/{}?answered={}"|format(slug, q.short), q.options.as_slice(), false, "qw-{}"|format(q.short)) %}{% endcall %}
+    {% if !q.options.is_empty() %}<div class="qf"><span class="sub">Answer one here</span><a class="sub" href="{{ q.url }}">{% if q.more > 0 %}{{ q.more }} more, or your own{% else %}or write your own{% endif %}</a></div>{% endif %}
   </article>
   {% if !loop.first %}<a class="qmini" href="{{ q.url }}"><span><span class="mono qid">{{ q.short }}</span> <span class="sub">· {{ q.scope }} · {{ q.asked }}</span><br><span class="qm-t">{{ q.title }}</span></span><span class="of-chev">{{ crate::web::icons::icon("chevron")|safe }}</span></a>{% endif %}
   {% endfor %}
@@ -169,14 +169,18 @@
 {% endif %}
 
 {% if tab == "prs" %}
-<section class="card pad stack">
-  <div class="sec"><h2>Open pull requests</h2><span class="sub">in merge order · changes are on GitHub</span></div>
+<section class="card">
+  <div class="card-head"><h2>Open pull requests</h2><span class="sub">in merge order · changes are on GitHub</span></div>
+  <div class="card-body stack">
   {% if prs.is_empty() %}<p class="sub">No open pull requests.</p>{% else %}{% include "pr_list.html" %}{% endif %}
+  </div>
 </section>
 {% for rel in releases %}
-<section class="card pad stack" aria-label="Release {{ rel.tag }}">
-  <div class="sec"><h2><span class="mono">{{ rel.tag }}</span> · {{ rel.title }}</h2><span class="sub">{{ rel.waits }}{% for (n, u) in rel.open_prs %} <a class="mono" href="{{ u }}">{{ n }}</a>{% endfor %}</span></div>
+<section class="card" aria-label="Release {{ rel.tag }}">
+  <div class="card-head"><h2><span class="mono">{{ rel.tag }}</span> · {{ rel.title }}</h2><span class="sub">{{ rel.waits }}{% for (n, u) in rel.open_prs %} <a class="mono" href="{{ u }}">{{ n }}</a>{% endfor %}</span></div>
+  <div class="card-body stack">
   {% for b in rel.buttons %}{% include "button.html" %}{% endfor %}
+  </div>
 </section>
 {% endfor %}
 {% endif %}

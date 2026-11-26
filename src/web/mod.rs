@@ -203,7 +203,8 @@ fn dialog_parent(uri: &axum::http::Uri) -> Option<(String, &'static str)> {
     let parts: Vec<&str> = path.split('/').collect();
     let record = |s: &str| {
         s.split_once('-').is_some_and(|(k, n)| {
-            ["T", "Q", "D", "ADR", "PR", "TT", "S", "F", "N"].contains(&k)
+            // Not notes: they are pages of their own (D-264).
+            ["T", "Q", "D", "ADR", "PR", "TT", "S", "F"].contains(&k)
                 && !n.is_empty()
                 && n.bytes().all(|b| b.is_ascii_digit())
         })

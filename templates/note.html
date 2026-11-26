@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% import "ui.html" as ui %}
+{% block title %}{{ short }} · {{ project_name }}{% endblock %}
+{% block content %}
+{#- A note is a page of its own (D-264): its text like a file on the left, its facts beside it. -#}
+<div class="head">
+  <div class="crumb-row">{% include "path.html" %}{% if let Some(u) = session_url %}<a class="session-link" href="{{ u }}" target="_blank" rel="noopener" title="The project agent's Claude Code session on claude.ai">{{ crate::web::icons::icon("session")|safe }}<span class="hide-phone">Open the agent's session</span><span class="only-phone">Agent session</span>{{ crate::web::icons::icon("out")|safe }}</a>{% endif %}</div>
+  <h1 class="rec-title note-title">{{ title }}</h1>
+</div>
+<div class="npage">
+  <section class="card ndoc" aria-label="{{ note.filename }}">
+    <div class="card-head ndoc-head">
+      <span class="itile sm t-{{ note.tint }} hide-phone" aria-hidden="true">{{ crate::web::icons::icon(note.icon)|safe }}</span>
+      <span class="mono ndoc-name">{{ note.filename }}</span>
+      <span class="sub">{{ note.size }}</span>
+      {% if note.version > 1 %}<span class="sub">version {{ note.version }}</span>{% endif %}
+      {% if !note.lines.is_empty() %}<span class="sub hide-phone">{{ note.lines.len() + note.more }} lines</span>{% endif %}
+      <span class="grow"></span>
+      {% if !note.lines.is_empty() %}<label class="check ndoc-wrap"><input type="checkbox" class="cv-wrap"> Wrap long lines</label>{% endif %}
+      {% if !note.raw.is_empty() %}<button type="button" class="ibtn flat" data-copy-from="ndoc-raw" title="Copy the text" aria-label="Copy the text">{{ crate::web::icons::icon("copy")|safe }}</button><textarea id="ndoc-raw" class="vh" readonly tabindex="-1" aria-hidden="true">{{ note.raw }}</textarea>{% endif %}
+      <a class="btn sm secondary hide-phone" href="{{ note.download }}" download>{{ crate::web::icons::icon("download")|safe }}Download</a>
+      <a class="ibtn flat only-phone" href="{{ note.download }}" download title="Download" aria-label="Download {{ note.filename }}">{{ crate::web::icons::icon("download")|safe }}</a>
+    </div>
+    {% if !note.text_html.is_empty() %}
+    <div class="ndoc-body prose">{{ note.text_html|safe }}</div>
+    {% else if !note.lines.is_empty() %}
+    {% let long = note.lines.len() > 60 %}
+    {% if long %}<input type="checkbox" class="vh cv-all" id="cv-all" aria-label="Show every line">{% endif %}
+    <div class="codeview{% if long %} cv-fold{% endif %}" role="presentation">{% for l in note.lines %}<span class="cv-n">{{ l.n }}</span><span class="cv-t">{{ l.head }}{% if !l.level.is_empty() %}<span class="lv-{{ l.level }}">{{ l.word }}</span>{{ l.tail }}{% endif %}</span>{% endfor %}</div>
+    {% if long || note.more > 0 %}
+    <div class="card-foot ndoc-foot">
+      {% if long %}<span class="sub cv-when-folded">The first 40 of {{ note.lines.len() + note.more }} lines</span><label class="btn sm quiet" for="cv-all"><span class="cv-when-folded">Show all {{ note.lines.len() }} lines</span><span class="cv-when-open">Show the first 40</span></label>{% endif %}
+      {% if note.more > 0 %}<span class="sub">{{ note.more }} more lines are in the download.</span>{% endif %}
+    </div>
+    {% endif %}
+    {% else %}
+    <p class="ndoc-body sub">This file isn't shown here. Download it to open it.</p>
+    {% endif %}
+  </section>
+
+  <aside class="nside">
+    <section class="card" aria-labelledby="about-h">
+      <div class="card-head"><h2 id="about-h">About</h2></div>
+      <div class="card-body">
+        <dl class="kv nkv">
+          {% if !note.category.is_empty() %}<dt>Category</dt><dd><span class="chip">{{ note.category }}</span></dd>{% endif %}
+          <dt>State</dt><dd>{% if state == "resolved" %}<span class="chip ok">resolved</span>{% else %}{{ state }}{% endif %}</dd>
+          <dt>Written by</dt><dd><span class="byline">{% if note.by.0 %}<span class="itile sm accent" aria-hidden="true">{{ crate::web::icons::icon("robot")|safe }}</span>{% else %}<span class="itile sm" aria-hidden="true">{{ crate::web::icons::icon("person")|safe }}</span>{% endif %}<span>{{ note.by.1 }}{% if !note.subagent.is_empty() %}<span class="sub">its subagent · {{ note.subagent }}</span>{% endif %}</span></span></dd>
+          <dt>Added</dt><dd>{{ note.added }}</dd>
+          {% if let Some((name, mtitle, href)) = note.milestone %}<dt>Milestone</dt><dd><a class="mono" href="{{ href }}">{{ name }}</a> {{ mtitle }}</dd>{% endif %}
+          {% if !note.resurface.is_empty() && state != "resolved" %}<dt>Comes back</dt><dd>{{ note.resurface }}</dd>{% endif %}
+        </dl>
+      </div>
+    </section>
+    <section class="card" aria-labelledby="links-h">
+      <div class="card-head"><h2 id="links-h">Linked records</h2></div>
+      <div class="card-body stack-sm">
+        {% if links.is_empty() %}<p class="sub">Nothing linked.</p>{% endif %}
+        {% for g in links %}
+        <div class="stack-sm"><span class="sub">{{ g.label }}</span>
+          <ul class="rows">{% for (r, other) in g.items %}<li class="item-row"><span class="mono sub id-col">{% if *other %}{{ r.id }}{% else %}{{ r.short }}{% endif %}</span><div class="ttl"><a href="{{ r.url }}">{{ r.title }}</a></div><span class="chip">{{ r.state }}</span></li>{% endfor %}</ul>
+        </div>
+        {% endfor %}
+      </div>
+    </section>
+    {% if !stale.is_empty() %}
+    <section class="card warn-card" aria-labelledby="stale-h">
+      <div class="card-head"><h2 id="stale-h">May be stale</h2></div>
+      <div class="card-body stack">
+      <ul class="rows">{% for r in stale %}<li class="item-row"><div class="ttl"><a href="{{ r.url }}">{{ r.short }} {{ r.title }}</a><span class="sub">depends on this, {{ r.sub }}, before this changed</span></div></li>{% endfor %}</ul>
+      </div>
+    </section>
+    {% endif %}
+    {% if history.count > 0 %}{% call ui::history(history, short, false) %}{% endcall %}{% endif %}
+  </aside>
+</div>
+{% endblock %}

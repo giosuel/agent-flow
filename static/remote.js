@@ -1,17 +1,20 @@
-// A build job's page follows its output while it runs: new lines every second, the state and the
-// time with them. Stops when the job is over (and while the tab is hidden).
+// A build job's page follows its output while it runs: new lines every second, numbered as in a
+// note's log (the library's code view, D-275), the state and the time with them. Stops when the
+// job is over (and while the tab is hidden).
 "use strict";
 (() => {
   const log = document.getElementById("job-log");
   if (!log || log.dataset.done) return;
   const id = log.dataset.job;
   let next = Number(log.dataset.next || 0);
+  let n = Number(log.dataset.n || 0);
   let busy = false;
+  // As remote::line_severity on the server, in the code view's tones.
   const cls = (line) => {
-    if (line.startsWith("· ")) return "d";
+    if (line.startsWith("· ")) return "cv-dim";
     const l = line.trimStart();
-    if (l.startsWith("error") || l.startsWith("FAILED") || l.includes("panicked at") || l.startsWith("test result: FAILED")) return "e";
-    if (l.startsWith("warning")) return "w";
+    if (l.startsWith("error") || l.startsWith("FAILED") || l.includes("panicked at") || l.startsWith("test result: FAILED")) return "lv-error";
+    if (l.startsWith("warning")) return "lv-warn";
     return "";
   };
   async function tick() {
@@ -22,13 +25,20 @@
       if (!r.ok) return;
       const j = await r.json();
       const atBottom = log.scrollTop + log.clientHeight >= log.scrollHeight - 30;
-      for (const line of j.text.split("\n")) {
-        if (line === "" && j.text.endsWith("\n")) continue;
-        const div = document.createElement("div");
-        div.className = cls(line);
-        div.textContent = line;
-        log.appendChild(div);
+      const lines = j.text.split("\n");
+      if (j.text.endsWith("\n")) lines.pop();
+      for (const line of j.text ? lines : []) {
+        const num = document.createElement("span");
+        num.className = "cv-n";
+        num.textContent = String(++n);
+        const text = document.createElement("span");
+        text.className = `cv-t ${cls(line)}`.trim();
+        text.textContent = line;
+        log.append(num, text);
+        document.getElementById("job-empty")?.remove();
       }
+      const count = document.getElementById("job-lines");
+      if (count) count.textContent = `${j.finished ? "" : "live · "}${j.lines} lines`;
       next = j.next;
       if (atBottom) log.scrollTop = log.scrollHeight;
       document.getElementById("job-time").textContent = j.time;

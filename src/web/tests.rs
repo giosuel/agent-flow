@@ -735,6 +735,37 @@ async fn the_usage_page_shows_the_plan_and_the_cost() {
 }
 
 #[tokio::test]
+async fn a_question_without_options_is_answered_in_a_text_box() {
+    // The owner, 2026-11-25 (D-287): "sometimes a question has no answers, so a text box there
+    // would be appropriate instead".
+    let s = TestServer::start().await;
+    let token = s.token(TokenKind::Project, Some("vinculum")).await;
+    let sess = mcp_session(&s, &token).await;
+    mcp_tool(&s, &token, &sess, "ask_question", json!({"title": "Which port?"})).await;
+    let cookie = s.owner_cookie().await;
+    let overview = owner_page(&s, &cookie, "/p/vinculum").await;
+    assert!(overview.contains(r#"<textarea id="qw-Q-1" name="words" rows="4""#), "{overview}");
+    assert!(!overview.contains("No options"), "{overview}");
+    let tab = owner_page(&s, &cookie, "/p/vinculum?tab=questions").await;
+    assert!(tab.contains(r#"<textarea id="dqw-Q-1" name="words""#), "{tab}");
+    let page = owner_page(&s, &cookie, "/p/vinculum/Q-1").await;
+    assert!(page.contains(r#"<textarea id="words" name="words""#), "{page}");
+    // The words are the answer.
+    let res = s
+        .http
+        .post(s.url("/p/vinculum/Q-1/answer"))
+        .header(COOKIE, &cookie)
+        .header(ORIGIN, &s.base)
+        .form(&[("words", "8990"), ("next", "/p/vinculum?answered=Q-1")])
+        .send()
+        .await
+        .unwrap();
+    assert!(res.status().is_redirection() || res.status().is_success(), "{}", res.status());
+    let q = owner_page(&s, &cookie, "/p/vinculum/Q-1").await;
+    assert!(q.contains("8990") && !q.contains(r#"name="words""#), "{q}");
+}
+
+#[tokio::test]
 async fn the_owner_answers_on_the_page_and_the_agent_reads_it() {
     let s = TestServer::start().await;
     let token = s.token(TokenKind::Project, Some("vinculum")).await;
@@ -784,7 +815,11 @@ async fn the_owner_answers_on_the_page_and_the_agent_reads_it() {
         .unwrap();
     assert_eq!(res.headers()[LOCATION], "/p/vinculum/Q-1?error=both", "an option or own words, not both");
     let page = s.http.get(s.url("/p/vinculum/Q-1?error=both")).header(COOKIE, &cookie).send().await.unwrap();
-    assert!(page.text().await.unwrap().contains("not both"));
+    let page = page.text().await.unwrap();
+    assert!(page.contains("not both"));
+    // Sent from the question's page (or its dialog), the answer goes back to the project, not the
+    // Dashboard (09-9).
+    assert!(page.contains(r#"name="next" value="/p/vinculum?answered=Q-1""#), "{page}");
     let res = s
         .http
         .post(s.url("/p/vinculum/Q-1/answer"))
@@ -805,8 +840,9 @@ async fn the_owner_answers_on_the_page_and_the_agent_reads_it() {
     assert!(none < decided && !tab.contains("Waiting on you"), "{tab}");
     // The tab is the page's title; the project's name is the overview's.
     assert!(tab.contains("<h1>Questions</h1>"), "{tab}");
+    // The overview's title is Overview too (D-281); the project's name is in the switcher and the path.
     let overview = owner_page(&s, &cookie, "/p/vinculum").await;
-    assert!(overview.contains("<h1>") && !overview.contains("<h1>Overview"), "{overview}");
+    assert!(overview.contains("<h1>Overview</h1>") && overview.contains("<title>Overview · "), "{overview}");
     // Answering twice goes back to the question with the reason.
     let res = s
         .http
@@ -1059,11 +1095,25 @@ async fn the_bar_shows_the_project_its_tabs_and_the_global_pages() {
         json!({"title": "A or B?", "options": [{"title": "A"}, {"title": "B"}]}),
     )
     .await;
+    s.token(TokenKind::Project, Some("lituus")).await;
     let cookie = s.owner_cookie().await;
     let page = owner_page(&s, &cookie, "/p/vinculum?tab=questions").await;
     let bar = &page[page.find("<header").unwrap()..page.find("</header>").unwrap()];
+    // Switching projects keeps the page (the owner, 2026-11-25, D-280): from Vinculum's Questions to
+    // Lituus's; from Plan to Plan; from Settings (a dialog) to the overview.
+    assert!(bar.contains(r#"href="/p/lituus?tab=questions""#), "{bar}");
+    for (from, to) in
+        [("/p/vinculum/plan", "/p/lituus/plan"), ("/p/vinculum/settings", "/p/lituus"), ("/p/vinculum", "/p/lituus")]
+    {
+        let page = owner_page(&s, &cookie, from).await;
+        let menu = &page[page.find("pswitch-menu").unwrap()..page.find("New project").unwrap()];
+        assert!(menu.contains(&format!(r#"href="{to}">"#)), "{from}: {menu}");
+    }
     assert!(bar.contains(r#"<summary class="pswitch-btn"><span>vinculum</span>"#), "{bar}");
-    assert!(bar.contains(r#"href="/p/vinculum" aria-current="page""#), "the project is checked in the switcher");
+    assert!(
+        bar.contains(r#"href="/p/vinculum?tab=questions" aria-current="page""#),
+        "the project is checked in the switcher"
+    );
     // Questions and Decisions are one tab, Questions (Q-6, D-250): it counts the open question.
     assert!(bar.contains(
         r#"<a href="/p/vinculum?tab=questions" class="on" aria-current="page">Questions<span class="count warn">1</span></a>"#
@@ -1094,6 +1144,10 @@ async fn the_bar_shows_the_project_its_tabs_and_the_global_pages() {
     let bar = &usage[usage.find("<header").unwrap()..usage.find("</header>").unwrap()];
     assert!(bar.contains(r#"<summary class="pswitch-btn"><span>vinculum</span>"#), "{bar}");
     assert!(bar.contains(r#"<a href="/p/vinculum">Overview</a>"#), "its tabs, none lit: {bar}");
+    assert!(
+        bar.contains(r#"href="/p/lituus">"#),
+        "from a page outside the projects, the switcher goes to the overview"
+    );
     assert!(bar.contains(r#"Questions<span class="count warn">1</span>"#), "with their counts");
     assert!(bar.contains(r#"<a href="/usage" class="on" aria-current="page">"#), "the page is still Usage");
     let unknown = owner_page(&s, &format!("{cookie}; af_project=nope"), "/usage").await;
@@ -1297,7 +1351,7 @@ async fn a_subagents_model_note_and_links_show() {
     assert!(res.status().is_success(), "{}", res.text().await.unwrap());
     let cookie = s.owner_cookie().await;
     let note = owner_page(&s, &cookie, "/p/vinculum/N-1").await;
-    assert!(note.contains("by a subagent · code-review · Fable 5.2"), "{note}");
+    assert!(note.contains("its subagent · code-review · Fable 5.2"), "{note}");
     assert!(note.contains("s subagent · "), "its History says who: {note}");
     let notes = owner_page(&s, &cookie, "/p/vinculum?tab=notes").await;
     assert!(notes.contains(r#"<span class="chip info""#), "{notes}");
@@ -2467,10 +2521,13 @@ async fn notes_are_files_or_text_and_come_back() {
     assert!(!call("update_note", json!({"id": "N-1", "text": "x"})).await.0, "files get a new version instead");
 
     let cookie = s.owner_cookie().await;
-    // Its History (the owner, 2026-11-18): folded, one short line per change, the file it replaced
-    // linked, no "changed the size" noise.
+    // Its History (the owner, 2026-11-18): one short line per change, the file it replaced linked,
+    // no "changed the size" noise; on the note's page it stands open, without a box (D-268).
     let n1 = owner_page(&s, &cookie, "/p/vinculum/N-1").await;
-    assert!(n1.contains(r#"<details class="rhist">"#) && n1.contains("<b>2 changes</b> · last: New version"), "{n1}");
+    assert!(
+        n1.contains(r#"<section class="changes" aria-labelledby="changes-h-N-1">"#) && n1.contains("2 changes"),
+        "{n1}"
+    );
     assert!(n1.contains(r#"href="/p/vinculum/N-1/file?v=1""#) && n1.contains("Created the note"), "{n1}");
     assert!(!n1.contains("changed the size") && !n1.contains(">size<") && !n1.contains("report.md)"), "{n1}");
     let tab =
@@ -2527,14 +2584,37 @@ async fn notes_are_files_or_text_and_come_back() {
     assert!(!t.contains("<script>alert") && t.contains("Nothing matches"), "{t}");
     let page = s.http.get(s.url("/p/vinculum/N-1")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
     assert!(page.contains("<li>T-5</li>") && page.contains("v1"), "the newest version rendered: {page}");
-    // Opened directly (a link in a notification, a reload), it's its project's page with the note
-    // in a dialog over it (the owner, 2026-11-17: "Notes are not consistent").
+    // A note is a page of its own (the owner, 2026-11-25, D-264): its file's head with its name,
+    // size and version (no version menu, D-265), who wrote it said plainly (D-269).
+    assert!(page.contains(r#"<span class="mono ndoc-name">report.md</span>"#), "{page}");
+    assert!(page.contains("<span class=\"sub\">version 2</span>") && !page.contains("of 2<"), "{page}");
+    assert!(page.contains("vinculum&#39;s project agent"), "{page}");
+    // Opened directly (a link in a notification, a reload), it's the note's own page, not a
+    // dialog over its project's.
     let direct = |path: &'static str| {
         s.http.get(s.url(path)).header(COOKIE, &cookie).header("sec-fetch-mode", "navigate").send()
     };
     let note = direct("/p/vinculum/N-1").await.unwrap().text().await.unwrap();
-    assert!(note.contains(r#"data-open-dlg="rec" data-open-url="/p/vinculum/N-1" data-open-from="/p/vinculum""#));
-    assert!(!note.contains("<title>N-1") && !note.contains("<li>T-5</li>"), "the project's page, not the note's");
+    assert!(!note.contains("data-open-dlg") && note.contains("<title>N-1") && note.contains("<li>T-5</li>"), "{note}");
+    // A text note is shown like a Markdown file (D-267): N-3.md, its text rendered, Download gives
+    // that file; resolved, it says so in About and doesn't come back.
+    let n3 = owner_page(&s, &cookie, "/p/vinculum/N-3").await;
+    assert!(n3.contains(r#"<span class="mono ndoc-name">N-3.md</span>"#), "{n3}");
+    assert!(n3.contains(r#"<div class="ndoc-body prose"><p>Check on every Loro update.</p>"#), "{n3}");
+    assert!(n3.contains(r#"<span class="chip ok">resolved</span>"#) && !n3.contains("<dt>Comes back</dt>"), "{n3}");
+    let f = s.http.get(s.url("/p/vinculum/N-3/file")).header(COOKIE, &cookie).send().await.unwrap();
+    assert!(f.headers()["content-disposition"].to_str().unwrap().contains("N-3.md"));
+    assert_eq!(f.text().await.unwrap(), "Check on every Loro update.");
+    // A log: its lines numbered, a level in its tone, Wrap and Copy.
+    assert!(
+        up("name=Dev%20log&category=test%20log&filename=dev.log", b"a INFO x\nb WARN y\n").await.status().is_success()
+    );
+    let log = owner_page(&s, &cookie, "/p/vinculum/N-6").await;
+    assert!(
+        log.contains(r#"<span class="cv-n">2</span><span class="cv-t">b <span class="lv-warn">WARN</span> y</span>"#),
+        "{log}"
+    );
+    assert!(log.contains(r#"class="cv-wrap""#) && log.contains(r#"data-copy-from="ndoc-raw""#), "{log}");
     let settings = direct("/settings?s=clients").await.unwrap().text().await.unwrap();
     assert!(settings.contains(r#"data-open-dlg="settings" data-open-url="/settings?s=clients" data-open-from="/""#));
     // The bell's panel and project settings are dialogs only (the owner, 2026-11-18).
@@ -2835,6 +2915,10 @@ async fn screenshots_are_uploaded_shown_and_linked() {
     assert!(!only.contains("Sidebar, variant A") && only.contains("/p/vinculum/S-2/image"), "{only}");
     let page = get("/p/vinculum/S-1".into()).await.text().await.unwrap();
     assert!(page.contains("1280 × 800") && page.contains("Tabs on the left"), "{page}");
+    // Its History, as in every record's dialog: no box, the newest change, Show all at the bottom
+    // (the owner, 2026-11-25, D-268).
+    assert!(page.contains(r#"<section class="changes changes-fold" aria-labelledby="changes-h-S-1">"#), "{page}");
+    assert!(page.contains(r#"<span class="changes-when-folded">Show all "#) && !page.contains("rhist"), "{page}");
     let task = get("/p/vinculum/T-1".into()).await.text().await.unwrap();
     assert!(task.contains("Screenshots") && task.contains("S-1"), "the task links to it: {task}");
     let img = get("/p/vinculum/S-1/image".into()).await;
@@ -3327,7 +3411,7 @@ async fn jobs_run_on_a_builder_and_bring_back_what_was_asked() {
             s.http
                 .post(s.url("/api/remote/jobs"))
                 .bearer_auth(token)
-                .json(&json!({"dir": top, "subdir": sub, "command": ["sh", "-c", cmd], "fetch": ["target/release/app"],
+                .json(&json!({"name": "Snapshot check", "dir": top, "subdir": sub, "command": ["sh", "-c", cmd], "fetch": ["target/release/app"],
                     "manifest": up.as_ref().map(|u| u.manifest.clone()).unwrap_or_default(),
                     "bundle": up.as_ref().map(|u| u.bundle.clone()).unwrap_or_default()}))
                 .send()
@@ -3350,6 +3434,17 @@ async fn jobs_run_on_a_builder_and_bring_back_what_was_asked() {
     })
     .await
     .unwrap();
+    // Every job needs a name, its title (the owner, 2026-11-25, D-275).
+    let unnamed = s
+        .http
+        .post(s.url("/api/remote/jobs"))
+        .bearer_auth(&agent)
+        .json(&json!({"dir": "/x", "command": ["true"], "setup": true}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(unnamed.status(), StatusCode::BAD_REQUEST);
+    assert!(unnamed.text().await.unwrap().contains("give the job a name"));
     let res = start(work.join("crate"), agent.clone()).await;
     assert_eq!(res.status(), StatusCode::OK, "{}", res.text().await.unwrap());
     let id = res.json::<Value>().await.unwrap()["id"].as_i64().unwrap();
@@ -3387,6 +3482,18 @@ async fn jobs_run_on_a_builder_and_bring_back_what_was_asked() {
     );
     assert!(text.contains("v0.1.0"), "tags went over:\n{text}");
     assert!(text.contains("No such file") || !text.contains("junk"), "ignored files stay here:\n{text}");
+    // Its page (D-275): its name as the title, the command among its facts, the output numbered in
+    // the code view a note's log uses, a warning in its tone.
+    let cookie = s.owner_cookie().await;
+    let page = owner_page(&s, &cookie, &format!("/machine/jobs/{id}")).await;
+    assert!(page.contains(r#"<h1 class="rec-title note-title">Snapshot check</h1>"#), "{page}");
+    assert!(
+        page.contains("<dt>Command</dt>") && page.contains(r#"<div class="codeview cv-scroll" id="job-log""#),
+        "{page}"
+    );
+    assert!(page.contains(r#"<span class="cv-t lv-warn">warning: careful</span>"#), "{page}");
+    assert!(page.contains(r#"<dt>Project</dt><dd><a href="/p/imaginarium">"#), "the project it belongs to: {page}");
+    assert!(page.contains(r#"<span class="cv-n">1</span>"#), "{page}");
     // flow remote fetches what came back.
     let job = s.db.call(move |c| crate::remote::get(c, id)).await.unwrap().unwrap();
     let (base, t2, w2) = (s.base.clone(), agent.clone(), work.clone());
@@ -3821,27 +3928,23 @@ async fn questions_and_decisions_have_scopes() {
     assert_eq!(t1["state"], "todo", "archiving unblocks: {t1}");
     let (ok, r) = call("update_question", json!({"id": "Q-4", "state": "open", "reason": "needed after all"})).await;
     assert!(ok && r["state"] == "open", "{r}");
-    // The owner moves an open question's scope on its page before answering.
+    // The agent moves a question to another scope, not the owner (2026-11-25, D-288): its page
+    // only says where the decision goes.
+    let (ok, r) = call("update_question", json!({"id": "Q-3", "scope": "M9", "reason": "about M9"})).await;
+    assert!(ok && r["scope"] == "M9", "{r}");
     let cookie = s.owner_cookie().await;
     let page = s.http.get(s.url("/p/vinculum/Q-3")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
-    assert!(page.contains("Its decision goes into") && page.contains("Project-wide"), "{page}");
-    let m9: i64 =
-        s.db.call(|c| {
-            let p = crate::projects::require(c, "vinculum")?;
-            Ok(crate::projects::find_milestone(c, p.id, "M9")?.id)
-        })
-        .await
-        .unwrap();
+    assert!(page.contains("Scope: M9 · ") && !page.contains(r#"name="scope""#), "{page}");
     let res = s
         .http
         .post(s.url("/p/vinculum/Q-3/scope"))
         .header(COOKIE, &cookie)
         .header(ORIGIN, &s.base)
-        .form(&[("scope", m9.to_string())])
+        .form(&[("scope", "project")])
         .send()
         .await
         .unwrap();
-    assert!(res.status().is_redirection());
+    assert!(!res.status().is_success() && !res.status().is_redirection(), "{}", res.status());
     let res = s
         .http
         .post(s.url("/p/vinculum/Q-3/answer"))
@@ -4402,6 +4505,31 @@ fn the_ui_library_replaced_the_old_buttons() {
     for line in app.lines() {
         if let Some(class) = class_of(line) {
             assert!(!roots.contains(&class), "app.css redefines the library's .{class}: {line}");
+        }
+    }
+    // Every card's header is the one bar (the owner, 2026-11-25, D-276): no card opens with a title
+    // inside its padding or an uppercase label instead.
+    for f in std::fs::read_dir("templates").unwrap() {
+        let path = f.unwrap().path();
+        let t = std::fs::read_to_string(&path).unwrap();
+        for open in ["<section class=\"card pad", "<div class=\"card pad", "<details class=\"card pad", "<form"] {
+            for (i, _) in t.match_indices(open) {
+                let tag_end = i + t[i..].find('>').unwrap() + 1;
+                if open == "<form" && !t[i..tag_end].contains("class=\"card pad") {
+                    continue;
+                }
+                let next = t[tag_end..].trim_start();
+                // A heading only screen readers see (class vh) isn't a header.
+                let bad =
+                    ["<div class=\"sec", "<h2", "<h3", "<summary class=\"label"].iter().any(|h| next.starts_with(h))
+                        && !next[..next.find('>').unwrap_or(0)].contains("class=\"vh\"");
+                assert!(
+                    !bad,
+                    "{}: a card with its own kind of header; use .card-head: {}",
+                    path.display(),
+                    &t[i..tag_end]
+                );
+            }
         }
     }
     let gone = [
