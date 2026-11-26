@@ -1,6 +1,6 @@
 //! Build servers over HTTP: agents start jobs (`flow remote`) and follow their output; the
-//! owner watches the Machine page's Build servers section and each job's page, and can pause builds
-//! or cancel a job. See `crate::remote`.
+//! owner watches each job's page (the Machines pages are in machine.rs), and can pause builds or
+//! cancel a job. See `crate::remote`.
 
 use askama::Template;
 use axum::extract::{Path, Query, State};
@@ -23,8 +23,14 @@ pub fn routes() -> Router<AppState> {
         .route("/api/remote/jobs", post(start))
         .route("/api/remote/jobs/{id}/output", get(output_api))
         .route("/api/remote/jobs/{id}/cancel", post(cancel_api))
-        .route("/machine/builds", get(section))
-        .route("/machine/jobs/{id}", get(job_page))
+        .route("/machines/jobs/{id}", get(job_page))
+        .route("/machines/jobs/{id}/output", get(output))
+        .route("/machines/jobs/{id}/cancel", post(cancel_page))
+        .route("/machines/{name}/pause", post(pause))
+        .route("/machines/{name}/resume", post(resume))
+        // The addresses from before Machines (D-277): agents' terminals and the Log hold job links,
+        // and a page open since then posts its forms there.
+        .route("/machine/jobs/{id}", get(|Path(id): Path<i64>| async move { Redirect::to(&job_url(id)) }))
         .route("/machine/jobs/{id}/output", get(output))
         .route("/machine/jobs/{id}/cancel", post(cancel_page))
         .route("/machine/servers/{name}/pause", post(pause))
@@ -34,8 +40,16 @@ pub fn routes() -> Router<AppState> {
         .route("/settings/build-servers/{name}/remove", post(remove_server))
 }
 
+/// A job's page.
+pub fn job_url(id: i64) -> String {
+    format!("/machines/jobs/{id}")
+}
+
 #[derive(Deserialize)]
 struct StartJob {
+    /// What it is, in a few words ("Tests for PR #170"): its title (D-275). Required.
+    #[serde(default)]
+    name: String,
     /// The checkout (or a folder in it) the command runs in, on this machine.
     dir: String,
     command: Vec<String>,
@@ -79,7 +93,7 @@ async fn start(State(state): State<AppState>, Extension(actor): Extension<Actor>
         let why = match (&wanted, online.first()) {
             (Some(n), _) => format!("there's no build server called {n}"),
             (None, Some(first)) => format!(
-                "no build server is picked for this project (the owner picks one in its Settings); online now: {} (flow remote --server {first} -- …)",
+                "no build server is picked for this project (the owner picks one in its Settings); online now: {} (flow remote --server {first} --name \"…\" -- …)",
                 online.join(", ")
             ),
             (None, None) => "no build server is picked for this project and none is online; build here instead".into(),
@@ -115,6 +129,7 @@ async fn start(State(state): State<AppState>, Extension(actor): Extension<Actor>
             return json_error(StatusCode::BAD_REQUEST, "subdir is a folder inside the checkout");
         }
         NewJob {
+            name: s.name,
             server: server.name.clone(),
             project_id: *project_id,
             actor: slug.clone(),
@@ -136,7 +151,7 @@ async fn start(State(state): State<AppState>, Extension(actor): Extension<Actor>
     let e = Entry::new(&actor, Via::Build, Action::Run, format!("job #{id} queued on {}", server.name))
         .target(format!("job-{id}"));
     activity::write(&state.db, e).await;
-    let url = format!("{}/machine/jobs/{id}", state.config.public_url.trim_end_matches('/'));
+    let url = format!("{}{}", state.config.public_url.trim_end_matches('/'), job_url(id));
     Json(json!({"id": id, "url": url, "server": server.name})).into_response()
 }
 
@@ -236,10 +251,27 @@ async fn cancel_page(
         Entry::new(&actor, Via::Page, Action::Run, format!("cancelled job #{id}")).target(format!("job-{id}")),
     )
     .await;
-    Ok(Redirect::to(&format!("/machine/jobs/{id}")).into_response())
+    Ok(Redirect::to(&job_url(id)).into_response())
 }
 
-async fn set_paused(state: &AppState, actor: &Actor, name: &str, paused: bool) -> AppResult<Response> {
+/// The page a pause or resume came from, to go back to: one of the Machines pages.
+#[derive(Deserialize)]
+struct Back {
+    #[serde(default)]
+    next: String,
+}
+
+impl Back {
+    fn to(&self) -> &str {
+        let n = self.next.as_str();
+        let ok = (n == "/machines" || n.starts_with("/machines/") || n.starts_with("/machines?"))
+            && !n.contains("//")
+            && !n.chars().any(char::is_control);
+        if ok { n } else { "/machines" }
+    }
+}
+
+async fn set_paused(state: &AppState, actor: &Actor, name: &str, paused: bool, back: &Back) -> AppResult<Response> {
     actor.require_owner()?;
     if !remote::servers(state).iter().any(|b| b.name == name) {
         return Err(AppError::NotFound);
@@ -247,28 +279,31 @@ async fn set_paused(state: &AppState, actor: &Actor, name: &str, paused: bool) -
     state.remote.lock().unwrap_or_else(|e| e.into_inner()).servers.entry(name.to_owned()).or_default().paused = paused;
     let what = if paused { format!("paused builds on {name}") } else { format!("resumed builds on {name}") };
     activity::write(&state.db, Entry::new(actor, Via::Page, Action::Run, what)).await;
-    Ok(Redirect::to("/machine#builds").into_response())
+    Ok(Redirect::to(back.to()).into_response())
 }
 
 async fn pause(
     State(state): State<AppState>,
     Extension(actor): Extension<Actor>,
     Path(name): Path<String>,
+    axum::Form(back): axum::Form<Back>,
 ) -> AppResult<Response> {
-    set_paused(&state, &actor, &name, true).await
+    set_paused(&state, &actor, &name, true, &back).await
 }
 
 async fn resume(
     State(state): State<AppState>,
     Extension(actor): Extension<Actor>,
     Path(name): Path<String>,
+    axum::Form(back): axum::Form<Back>,
 ) -> AppResult<Response> {
-    set_paused(&state, &actor, &name, false).await
+    set_paused(&state, &actor, &name, false, &back).await
 }
 
 // ---------------------------------------------------------------------------------------------
-// The Machine page's section
+// What the Machines pages and a job's page share
 
+/// A build machine's CPU, memory or GPU now: what you use, what builds use, what's free.
 pub struct Meter {
     pub label: &'static str,
     pub you: f64,
@@ -287,22 +322,31 @@ impl Meter {
     pub fn builds_pct(&self) -> String {
         self.pct(self.builds)
     }
+    /// "4", or "12%" for the GPU.
     pub fn you_s(&self) -> String {
-        num(self.you)
+        self.with_unit(self.you)
     }
     pub fn builds_s(&self) -> String {
-        num(self.builds)
+        self.with_unit(self.builds)
     }
-    pub fn total_s(&self) -> String {
-        num(self.total)
+    /// "free 6 of 32 threads", "free 88%".
+    pub fn free_s(&self) -> String {
+        let free = (self.total - self.you - self.builds).max(0.0);
+        if self.unit == "%" {
+            format!("free {}%", num(free))
+        } else {
+            format!("free {} of {} {}", num(free), num(self.total), self.unit)
+        }
     }
-    pub fn free(&self) -> String {
-        num((self.total - self.you - self.builds).max(0.0))
+    fn with_unit(&self, v: f64) -> String {
+        if self.unit == "%" { format!("{}%", num(v)) } else { num(v) }
     }
 }
 
-fn num(v: f64) -> String {
-    if v >= 10.0 || v.fract() == 0.0 { format!("{v:.0}") } else { format!("{v:.1}") }
+/// "7", "6.4", "32": one decimal below ten, none when it's whole ("7", not "7.0").
+pub fn num(v: f64) -> String {
+    let r = (v * 10.0).round() / 10.0;
+    if r >= 10.0 || r.fract() == 0.0 { format!("{r:.0}") } else { format!("{r:.1}") }
 }
 
 pub struct JobRow {
@@ -317,28 +361,8 @@ pub struct JobRow {
     pub v: (i64, i64),
 }
 
-pub struct ServerView {
-    pub name: String,
-    pub online: bool,
-    pub paused: bool,
-    pub line: String,
-    pub meters: Vec<Meter>,
-    pub jobs: Vec<JobRow>,
-    pub min_threads: String,
-    pub min_memory: String,
-    /// "3 projects, 96 GB (imaginarium 48, vinculum 31) and the shared cache 22 GB"
-    pub folders: String,
-    pub keep_days: i64,
-}
-
-#[derive(Template)]
-#[template(path = "builds.html")]
-pub struct Section {
-    pub servers: Vec<ServerView>,
-    pub is_owner: bool,
-}
-
-fn took(j: &Job) -> String {
+/// How long it ran (or runs): "4:12", "1:02:09"; "–" before it starts.
+pub fn took(j: &Job) -> String {
     let Some(s) = j.started_at else { return "–".into() };
     let end = j.finished_at.unwrap_or_else(now_ms);
     let secs = (end - s) / 1000;
@@ -349,7 +373,7 @@ fn took(j: &Job) -> String {
     }
 }
 
-fn bytes(n: Option<i64>) -> String {
+pub fn bytes(n: Option<i64>) -> String {
     match n {
         None => "–".into(),
         Some(b) if b < 1024 => format!("{b} B"),
@@ -398,71 +422,9 @@ pub fn job_row(j: &Job) -> JobRow {
     }
 }
 
-pub async fn section_data(state: &AppState, actor: &Actor) -> anyhow::Result<Section> {
-    state.remote.lock().unwrap_or_else(|e| e.into_inner()).watched_at = now_ms();
-    let jobs = state.db.call(|c| remote::recent(c, None, 40)).await?;
-    let now = now_ms();
-    let list = remote::servers(state);
-    let live = state.remote.lock().unwrap_or_else(|e| e.into_inner());
-    let servers = list
-        .iter()
-        .map(|b| {
-            let l = live.servers.get(&b.name);
-            let p = l.map(|l| l.probe.clone()).unwrap_or_default();
-            let mut facts = Vec::new();
-            if !p.model.is_empty() {
-                facts.push(p.model.replace(" 16-Core Processor", ""));
-            }
-            if p.threads > 0.0 {
-                facts.push(format!("{} threads", p.threads));
-                facts.push(format!("{:.0} GB", p.mem_total_gb));
-            }
-            if !p.gpu_name.is_empty() {
-                facts.push(p.gpu_name.replace("NVIDIA GeForce ", ""));
-            }
-            facts.push(match (p.at, p.online) {
-                (0, _) => "not checked yet".into(),
-                (t, true) => format!("online, checked {}", ago(t, now)),
-                (t, false) => format!("offline (checked {}): {}", ago(t, now), p.error),
-            });
-            let mut meters = Vec::new();
-            if p.online && p.threads > 0.0 {
-                meters.push(Meter {
-                    label: "CPU · threads",
-                    you: p.yours(),
-                    builds: p.builds,
-                    total: p.threads,
-                    unit: "threads",
-                });
-                meters.push(Meter {
-                    label: "Memory · GB",
-                    you: p.mem_yours_gb(),
-                    builds: p.mem_builds_gb,
-                    total: p.mem_total_gb,
-                    unit: "GB",
-                });
-                if !p.gpu_name.is_empty() {
-                    meters.push(Meter { label: "GPU · %", you: p.gpu_util, builds: 0.0, total: 100.0, unit: "%" });
-                }
-            }
-            ServerView {
-                name: b.name.clone(),
-                online: crate::builders::hub().is_online(&b.name),
-                paused: l.is_some_and(|l| l.paused),
-                line: facts.join(" · "),
-                meters,
-                jobs: jobs.iter().filter(|j| j.server == b.name).take(12).map(job_row).collect(),
-                folders: l.map(|l| folders(&l.sizes)).unwrap_or_default(),
-                keep_days: b.keep_days,
-                min_threads: num(b.min_threads),
-                min_memory: num(b.min_memory_gb),
-            }
-        })
-        .collect();
-    Ok(Section { servers, is_owner: actor.is_owner() })
-}
-
-fn folders(sizes: &[(String, f64)]) -> String {
+/// A builder's work folders: "3 projects, 96 GB (imaginarium 48, vinculum 31); the shared
+/// compiler cache 22 GB".
+pub fn folders(sizes: &[(String, f64)]) -> String {
     let projects: Vec<&(String, f64)> = sizes.iter().filter(|(n, _)| n != ".sccache").collect();
     if projects.is_empty() {
         return String::new();
@@ -482,31 +444,37 @@ fn folders(sizes: &[(String, f64)]) -> String {
     )
 }
 
-/// The section alone, for the Machine page to refresh every few seconds.
-async fn section(State(state): State<AppState>, Extension(actor): Extension<Actor>) -> AppResult<Response> {
-    actor.require_owner()?;
-    let s = section_data(&state, &actor).await?;
-    Ok(axum::response::Html(s.render().map_err(anyhow::Error::from)?).into_response())
-}
-
 // ---------------------------------------------------------------------------------------------
 // A job's page
 
+/// A job's page (D-275): the note page's layout, its name as the title, its output in the same
+/// numbered lines as a note's log, its facts beside it.
 #[derive(Template)]
 #[template(path = "remote_job.html")]
 struct JobPage {
     nav: Nav,
+    path: Vec<super::pages::PathPart>,
     job: Job,
     row: JobRow,
-    command: String,
+    /// Its name, or its command for a job from before names (then shown as code).
+    title: String,
+    named: bool,
+    /// The project it belongs to: (name, its page).
+    project: (String, String),
+    /// Who started it: an icon (robot for a project's agent, person for a person or a device) and
+    /// "Imaginarium's project agent".
+    by: (&'static str, String),
     started: String,
     facts: Vec<(String, String)>,
-    lines: Vec<(&'static str, String)>,
+    /// Its server's page, while the server is there.
+    server_page: Option<String>,
+    /// (number, the line's class in the code view, the line)
+    lines: Vec<(usize, &'static str, String)>,
     next: u64,
     is_owner: bool,
 }
 
-/// A line's class on the page: AgentFlow's own notes dimmed, errors and warnings marked.
+/// A line's class on the Log: AgentFlow's own notes dimmed, errors and warnings marked.
 pub fn line_class(line: &str) -> &'static str {
     if line.starts_with("· ") {
         "d"
@@ -516,6 +484,16 @@ pub fn line_class(line: &str) -> &'static str {
             "warn" => "w",
             _ => "",
         }
+    }
+}
+
+/// The same in the code view (a job's page, as a note's log): the library's tones.
+pub fn cv_class(line: &str) -> &'static str {
+    match line_class(line) {
+        "d" => "cv-dim",
+        "e" => "lv-error",
+        "w" => "lv-warn",
+        _ => "",
     }
 }
 
@@ -538,6 +516,9 @@ async fn job_page(
         output = format!("· … the start is in the Log\n{}", &output[i + 1..]);
     }
     let mut facts = vec![("Server".into(), job.server.clone()), ("Checkout".into(), job.dir.clone())];
+    if !job.name.is_empty() {
+        facts.insert(0, ("Command".into(), job.command_line()));
+    }
     if !job.subdir.is_empty() {
         facts.push(("Runs in".into(), job.subdir.clone()));
     }
@@ -555,21 +536,55 @@ async fn job_page(
     if let Some(t) = job.threads {
         facts.push(("Threads at the start".into(), t.to_string()));
     }
-    facts.push(("Output".into(), format!("{} lines, {} warnings, {} errors", job.lines, job.warnings, job.errors)));
+    let n = |k: i64, one: &str, many: &str| format!("{k} {}", if k == 1 { one } else { many });
+    facts.push((
+        "Output".into(),
+        format!(
+            "{}, {}, {}",
+            n(job.lines, "line", "lines"),
+            n(job.warnings, "warning", "warnings"),
+            n(job.errors, "error", "errors")
+        ),
+    ));
     if !job.fetch.is_empty() {
         facts.push(("Brings back".into(), job.fetch.join(", ")));
     }
     if job.gpu {
         facts.push(("GPU".into(), "waits for an idle GPU".into()));
     }
-    let started = format!("started by the {} agent {}", job.project, tz.full(job.created_at).get(..16).unwrap_or(""));
+    use super::pages::PathPart;
+    // Under its machine (D-277): Machines / HEADQUARTERS / Job #12.
+    let server_page =
+        remote::servers(&state).iter().any(|b| b.name == job.server).then(|| format!("/machines/{}", job.server));
+    let path = vec![
+        PathPart::link("Machines", "/machines"),
+        PathPart::link(job.server.clone(), server_page.clone().unwrap_or_else(|| "/machines".into())),
+        PathPart::here(format!("Job #{}", job.id)),
+    ];
+    let pid = job.project_id;
+    let pname = state.db.call(move |c| crate::projects::get_by_id(c, pid).map(|p| p.name)).await.unwrap_or_default();
+    // Jobs come from projects' agents (their slug is the job's actor); anyone else is a person.
+    let by = if job.actor != job.project {
+        ("person", job.actor.clone())
+    } else if pname.is_empty() {
+        ("robot", format!("the {} agent", job.project))
+    } else if pname.ends_with('s') {
+        ("robot", format!("{pname}' project agent"))
+    } else {
+        ("robot", format!("{pname}'s project agent"))
+    };
     render(JobPage {
-        nav: nav(&state, &actor, "/machine").await.back_to("/machine#builds", "Machine"),
+        nav: nav(&state, &actor, "/machines").await.up(&path),
+        path,
         row: job_row(&job),
-        command: job.command_line(),
-        started,
+        title: job.title(),
+        project: (if pname.is_empty() { job.project.clone() } else { pname.clone() }, format!("/p/{}", job.project)),
+        named: !job.name.is_empty(),
+        by,
+        started: tz.short(job.created_at),
         facts,
-        lines: output.lines().map(|l| (line_class(l), l.to_owned())).collect(),
+        server_page,
+        lines: output.lines().enumerate().map(|(i, l)| (i + 1, cv_class(l), l.to_owned())).collect(),
         next,
         is_owner: actor.is_owner(),
         job,
@@ -664,8 +679,8 @@ pub async fn servers_card(state: &AppState, code: Option<&str>) -> anyhow::Resul
                     Some((v, ..)) => format!("online · builder {v}"),
                     None => "online".to_owned(),
                 }
-            } else if p.at > 0 {
-                format!("offline · last seen {}", ago(p.at, now))
+            } else if p.seen > 0 {
+                format!("offline · last seen {}", ago(p.seen, now))
             } else {
                 "not connected".to_owned()
             };
@@ -858,40 +873,6 @@ pub async fn remove_server(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// An online builder's meters are the build-server meter (.bmeter, its own stacked bar), and
-    /// their key is the library's legend with its swatches (PR 10: .key and the meter's old name
-    /// clashed with the library's .meter).
-    #[test]
-    fn an_online_builder_shows_its_meters_and_their_legend() {
-        let html = Section {
-            servers: vec![ServerView {
-                name: "headquarters".into(),
-                online: true,
-                paused: false,
-                line: "online".into(),
-                meters: vec![Meter { label: "CPU · threads", you: 4.0, builds: 8.0, total: 32.0, unit: "threads" }],
-                jobs: vec![],
-                min_threads: "8".into(),
-                min_memory: "16".into(),
-                folders: String::new(),
-                keep_days: 14,
-            }],
-            is_owner: true,
-        }
-        .render()
-        .unwrap();
-        assert!(
-            html.contains(r#"<div class="bmeters">"#)
-                && html.contains(r#"<div class="bmeter"><span class="label">CPU · threads</span>"#),
-            "{html}"
-        );
-        assert!(
-            html.contains(r#"<ul class="legend"><li><span class="swatch" style="--c: var(--bar-you)"></span>you"#),
-            "{html}"
-        );
-        assert!(!html.contains(r#"class="meter""#) && !html.contains(r#"class="key""#), "{html}");
-    }
 
     /// Build servers start folded, even a lone one (the owner, 2026-11-23).
     #[test]

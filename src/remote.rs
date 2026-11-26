@@ -1,4 +1,5 @@
-//! Builders: agents run builds and tests on a stronger machine with `flow remote -- <command>`.
+//! Builders: agents run builds and tests on a stronger machine with
+//! `flow remote --name "<what it is>" -- <command>`.
 //! A builder connects itself to the server (`agentflow-builder`, see `crate::builders`); SSH
 //! builders are gone (the owner, 2026-11-17: "can we remove SSH builders overall? like even the
 //! option to have one"). AgentFlow brings the project's work folder there to the agent's snapshot,
@@ -69,7 +70,10 @@ pub fn sh_quote(s: &str) -> String {
 /// The server as last seen.
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct Probe {
+    /// When it was probed last, whether it answered or not.
     pub at: i64,
+    /// When it last answered: an offline builder's "last seen" (0: not since AgentFlow started).
+    pub seen: i64,
     pub online: bool,
     pub error: String,
     pub model: String,
@@ -120,7 +124,7 @@ pub struct Counters {
 
 /// Reads the probe script's output; CPU use is the difference to `prev`.
 pub fn parse_probe(text: &str, prev: Option<Counters>, at: i64) -> (Probe, Counters) {
-    let mut p = Probe { at, online: true, ..Default::default() };
+    let mut p = Probe { at, seen: at, online: true, ..Default::default() };
     let mut c = Counters { at, ..Default::default() };
     for line in text.lines() {
         let (key, rest) = line.split_once(' ').unwrap_or((line, ""));
@@ -219,6 +223,8 @@ pub type Shared = Arc<Mutex<Live>>;
 #[derive(Debug, Clone, Serialize)]
 pub struct Job {
     pub id: i64,
+    /// What it is, in a few words ("Tests for PR #170"); '' for jobs from before names (D-275).
+    pub name: String,
     pub server: String,
     pub project_id: i64,
     pub project: String,
@@ -260,6 +266,10 @@ impl Job {
     pub fn is_finished(&self) -> bool {
         matches!(self.state.as_str(), "done" | "failed" | "cancelled")
     }
+    /// Its title: its name, or its command for a job from before names.
+    pub fn title(&self) -> String {
+        if self.name.is_empty() { self.command_line() } else { self.name.clone() }
+    }
     pub fn target(&self) -> String {
         format!("job-{}", self.id)
     }
@@ -268,12 +278,13 @@ impl Job {
 const JOB_COLUMNS: &str =
     "j.id, j.server, j.project_id, p.slug, j.actor, j.dir, j.subdir, j.command, j.fetch, j.gpu, j.state,
      j.reason, j.exit_code, j.commit_sha, j.dirty, j.threads, j.sent_bytes, j.lines, j.warnings, j.errors, j.created_at,
-     j.started_at, j.finished_at, j.manifest, j.bundle, j.setup, j.artifacts, j.slot";
+     j.started_at, j.finished_at, j.manifest, j.bundle, j.setup, j.artifacts, j.slot, j.name";
 
 fn job_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<Job> {
     let list = |s: String| serde_json::from_str::<Vec<String>>(&s).unwrap_or_default();
     Ok(Job {
         id: r.get(0)?,
+        name: r.get(28)?,
         server: r.get(1)?,
         project_id: r.get(2)?,
         project: r.get(3)?,
@@ -333,6 +344,98 @@ pub fn in_state(conn: &Connection, server: &str, states: &[&str]) -> anyhow::Res
     Ok(rows.collect::<Result<_, _>>()?)
 }
 
+/// Which of a build server's jobs its page lists (D-277).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Show {
+    All,
+    Failed,
+    /// Not over yet: running, paused or waiting.
+    Running,
+}
+
+impl Show {
+    pub fn parse(s: &str) -> Self {
+        match s {
+            "failed" => Show::Failed,
+            "running" => Show::Running,
+            _ => Show::All,
+        }
+    }
+
+    /// Its value in the page's address (`?show=`), "" for all.
+    pub fn key(self) -> &'static str {
+        match self {
+            Show::All => "",
+            Show::Failed => "failed",
+            Show::Running => "running",
+        }
+    }
+
+    fn sql(self) -> &'static str {
+        match self {
+            Show::All => "1",
+            Show::Failed => "j.state = 'failed'",
+            Show::Running => "j.state IN ('running', 'paused', 'queued')",
+        }
+    }
+}
+
+/// A build server's jobs, counted: in all, failed and not over yet (the page's filters), the
+/// first one's time, those since `today` and how many of them failed, and when the last finished.
+#[derive(Debug, Clone, Default)]
+pub struct Counts {
+    pub all: i64,
+    pub failed: i64,
+    pub running: i64,
+    pub first: Option<i64>,
+    pub today: i64,
+    pub today_failed: i64,
+    pub last_finished: Option<i64>,
+}
+
+impl Counts {
+    /// How many jobs `show` lists.
+    pub fn of(&self, show: Show) -> i64 {
+        match show {
+            Show::All => self.all,
+            Show::Failed => self.failed,
+            Show::Running => self.running,
+        }
+    }
+}
+
+pub fn counts(conn: &Connection, server: &str, today: i64) -> anyhow::Result<Counts> {
+    Ok(conn.query_row(
+        "SELECT count(*), coalesce(sum(state = 'failed'), 0), coalesce(sum(state IN ('running', 'paused', 'queued')), 0),
+                min(created_at), coalesce(sum(created_at >= ?2), 0), coalesce(sum(created_at >= ?2 AND state = 'failed'), 0),
+                max(finished_at)
+         FROM remote_jobs WHERE server = ?1",
+        params![server, today],
+        |r| {
+            Ok(Counts {
+                all: r.get(0)?,
+                failed: r.get(1)?,
+                running: r.get(2)?,
+                first: r.get(3)?,
+                today: r.get(4)?,
+                today_failed: r.get(5)?,
+                last_finished: r.get(6)?,
+            })
+        },
+    )?)
+}
+
+/// One page of a build server's jobs, the newest first: `limit` of those `show` lists, from `offset`.
+pub fn history(conn: &Connection, server: &str, show: Show, limit: i64, offset: i64) -> anyhow::Result<Vec<Job>> {
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {JOB_COLUMNS} FROM remote_jobs j JOIN projects p ON p.id = j.project_id
+         WHERE j.server = ?1 AND {} ORDER BY j.id DESC LIMIT ?2 OFFSET ?3",
+        show.sql()
+    ))?;
+    let rows = stmt.query_map(params![server, limit, offset], job_from_row)?;
+    Ok(rows.collect::<Result<_, _>>()?)
+}
+
 fn set_state(conn: &Connection, id: i64, state: &str, reason: &str) -> anyhow::Result<()> {
     conn.execute("UPDATE remote_jobs SET state = ?2, reason = ?3 WHERE id = ?1", params![id, state, reason])?;
     Ok(())
@@ -353,6 +456,8 @@ pub fn check_fetch(p: &str) -> anyhow::Result<()> {
 
 #[derive(Default)]
 pub struct NewJob {
+    /// What it is, in a few words; required (D-275).
+    pub name: String,
     pub server: String,
     pub project_id: i64,
     pub actor: String,
@@ -370,13 +475,17 @@ pub fn create(conn: &Connection, j: &NewJob) -> anyhow::Result<i64> {
     if j.command.is_empty() || j.command.iter().map(String::len).sum::<usize>() > 8000 {
         bail!("give the command to run, e.g. -- cargo build --release");
     }
+    let name = j.name.trim();
+    if name.is_empty() || name.chars().count() > 120 || name.contains('\n') {
+        bail!("give the job a name, a few words on one line: flow remote --name \"Tests for PR #170\" -- …");
+    }
     for f in &j.fetch {
         check_fetch(f)?;
     }
     conn.execute(
         "INSERT INTO remote_jobs (server, project_id, actor, dir, subdir, command, fetch, gpu, state, reason, created_at,
-                                  manifest, bundle, setup)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'queued', 'waiting for its turn', ?9, ?10, ?11, ?12)",
+                                  manifest, bundle, setup, name)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'queued', 'waiting for its turn', ?9, ?10, ?11, ?12, ?13)",
         params![
             j.server,
             j.project_id,
@@ -389,7 +498,8 @@ pub fn create(conn: &Connection, j: &NewJob) -> anyhow::Result<i64> {
             now_ms(),
             j.manifest,
             j.bundle,
-            j.setup
+            j.setup,
+            name
         ],
     )?;
     Ok(conn.last_insert_rowid())
@@ -619,7 +729,7 @@ pub fn build_hint(conn: &Connection, project_id: i64) -> anyhow::Result<serde_js
                 "server": name,
                 "online": up,
                 "how": if up {
-                    format!("Heavy builds and tests go to {name}: flow remote [--fetch target/release/app] -- cargo build --release. Programs that must run on this machine (a different glibc) are built here.")
+                    format!("Heavy builds and tests go to {name}: flow remote --name \"Release build\" [--fetch target/release/app] -- cargo build --release. Programs that must run on this machine (a different glibc) are built here.")
                 } else {
                     format!("{name} is offline: build here (flow remote exits 75).")
                 },
@@ -631,7 +741,7 @@ pub fn build_hint(conn: &Connection, project_id: i64) -> anyhow::Result<serde_js
             "how": if online.is_empty() {
                 "No build server is picked for this project and none is online: build here.".to_owned()
             } else {
-                format!("No build server is picked for this project (the owner picks one in its Settings), but {} online: flow remote --server {} -- …", online.join(", "), online[0])
+                format!("No build server is picked for this project (the owner picks one in its Settings), but {} online: flow remote --server {} --name \"…\" -- …", online.join(", "), online[0])
             },
         }),
     })
@@ -1559,6 +1669,7 @@ mod tests {
     fn a_job_waits_for_room_and_its_project() {
         let server = BuildServer { name: "hq".into(), ..Default::default() };
         let job = |id, project_id| Job {
+            name: String::new(),
             id,
             server: "hq".into(),
             project_id,

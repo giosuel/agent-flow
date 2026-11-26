@@ -209,15 +209,19 @@ async fn file(
         .await;
     let Ok(Some(r)) = found else { return StatusCode::NOT_FOUND.into_response() };
     let ext = r.str("ext").to_owned();
-    if ext.is_empty() {
-        return StatusCode::NOT_FOUND.into_response();
-    }
-    let v = q.v.unwrap_or(0).max(0);
-    let path = notes::path(&state.config.data_dir(), &slug, r.number, &ext, v);
-    let Ok(bytes) = tokio::fs::read(&path).await else { return StatusCode::NOT_FOUND.into_response() };
+    // A text note downloads as a Markdown file of its text (D-267).
+    let (bytes, ext, name) = if ext.is_empty() {
+        (r.body.clone().into_bytes(), "md".to_owned(), format!("N-{}.md", r.number))
+    } else {
+        let v = q.v.unwrap_or(0).max(0);
+        let path = notes::path(&state.config.data_dir(), &slug, r.number, &ext, v);
+        let Ok(bytes) = tokio::fs::read(&path).await else { return StatusCode::NOT_FOUND.into_response() };
+        let name: String =
+            r.str("filename").chars().filter(|c| c.is_ascii_alphanumeric() || "-_. ".contains(*c)).collect();
+        let name = if name.trim().is_empty() { format!("N-{}.{ext}", r.number) } else { name };
+        (bytes, ext, name)
+    };
     let mime = if notes::readable(&ext) { "text/plain; charset=utf-8" } else { "application/octet-stream" };
-    let name: String = r.str("filename").chars().filter(|c| c.is_ascii_alphanumeric() || "-_. ".contains(*c)).collect();
-    let name = if name.trim().is_empty() { format!("N-{}.{ext}", r.number) } else { name };
     let mut res = bytes.into_response();
     let h = res.headers_mut();
     h.insert(header::CONTENT_TYPE, HeaderValue::from_static(mime));
@@ -681,14 +685,78 @@ pub fn view(c: &rusqlite::Connection, slug: &str, project_id: i64, f: &Filter, n
 pub struct NotePage {
     /// "code-review · Fable 5.2" when a subagent wrote it (D-229), else "".
     pub subagent: String,
+    /// A Markdown file's text, or a text note's (shown like a Markdown file, D-267).
     pub text_html: String,
-    pub plain: String,
+    /// A plain text file's lines, numbered, a log's level picked out.
+    pub lines: Vec<CodeLine>,
+    /// Lines past `lines` (the rest is in the download).
+    pub more: usize,
+    /// The text as it is, for Copy; empty when the page doesn't show it.
+    pub raw: String,
     pub download: String,
+    /// The file's name; a text note's is N-12.md.
     pub filename: String,
     pub size: String,
     pub category: String,
     pub resurface: String,
-    pub versions: Vec<(i64, String)>,
+    /// The file's version now: 1 for the first. Older ones open from History (D-265).
+    pub version: i64,
+    /// Its icon and tint, as in the Notes tab.
+    pub icon: &'static str,
+    pub tint: &'static str,
+    /// Who wrote it (D-269): (an agent, "Lituus' project agent").
+    /// (an agent, the name, a person's icon).
+    pub by: (bool, String, String),
+    /// "23 Nov 22:12".
+    pub added: String,
+    /// The milestone or step it belongs to: (name, title, its place in Plan).
+    pub milestone: Option<(String, String, String)>,
+}
+
+/// One line of a text file: its number, and the text around a log level ("WARN") if it has one.
+pub struct CodeLine {
+    pub n: usize,
+    pub head: String,
+    /// "warn", "error", "info", or "" for a line without a level.
+    pub level: &'static str,
+    pub word: String,
+    pub tail: String,
+}
+
+/// Most lines a page shows of a text file; the rest is in the download.
+const MAX_LINES: usize = 5000;
+
+/// A line split around its log level: the first of ERROR, WARN, INFO, DEBUG, TRACE standing as a
+/// word of its own.
+fn code_line(n: usize, line: &str) -> CodeLine {
+    const LEVELS: [(&str, &str); 7] = [
+        ("ERROR", "error"),
+        ("ERR", "error"),
+        ("WARNING", "warn"),
+        ("WARN", "warn"),
+        ("INFO", "info"),
+        ("DEBUG", "info"),
+        ("TRACE", "info"),
+    ];
+    let word_at = |i: usize, w: &str| {
+        let before = line[..i].chars().next_back().is_none_or(|c| !c.is_alphanumeric());
+        let after = line[i + w.len()..].chars().next().is_none_or(|c| !c.is_alphanumeric());
+        before && after
+    };
+    let found = LEVELS
+        .iter()
+        .filter_map(|(w, lv)| line.match_indices(w).map(|(i, _)| i).find(|&i| word_at(i, w)).map(|i| (i, *w, *lv)))
+        .min_by_key(|(i, w, _)| (*i, std::cmp::Reverse(w.len())));
+    match found {
+        Some((i, w, lv)) => CodeLine {
+            n,
+            head: line[..i].to_owned(),
+            level: lv,
+            word: w.to_owned(),
+            tail: line[i + w.len()..].to_owned(),
+        },
+        None => CodeLine { n, head: line.to_owned(), level: "", word: String::new(), tail: String::new() },
+    }
 }
 
 /// Who of the subagents wrote a note, as shown: its type (or description) and model, e.g.
@@ -706,24 +774,48 @@ pub fn subagent_line(r: &records::Record) -> String {
     if parts.is_empty() { "subagent".into() } else { parts.join(" · ") }
 }
 
+/// A note's page (D-264): its text the way a file is shown, a text note as N-12.md (D-267). Who
+/// wrote it, when and where it belongs are filled in by the record page.
 pub fn page(data_dir: &std::path::Path, r: &records::Record) -> NotePage {
     let ext = r.str("ext");
-    let (text_html, plain) = match text_of(data_dir, r) {
-        Some((t, true)) => (crate::markdown::to_html(&t), String::new()),
-        Some((t, false)) => (String::new(), t),
-        None => (String::new(), String::new()),
+    let text = text_of(data_dir, r);
+    let (text_html, lines, more) = match &text {
+        Some((t, true)) => (crate::markdown::to_html(t), Vec::new(), 0),
+        Some((t, false)) => {
+            let all: Vec<&str> = t.strip_suffix('\n').unwrap_or(t).split('\n').collect();
+            let lines = all
+                .iter()
+                .take(MAX_LINES)
+                .enumerate()
+                .map(|(i, l)| code_line(i + 1, l.trim_end_matches('\r')))
+                .collect();
+            (String::new(), lines, all.len().saturating_sub(MAX_LINES))
+        }
+        None => (String::new(), Vec::new(), 0),
     };
-    let versions = r.data.get("versions").and_then(Value::as_i64).unwrap_or(0);
+    let (icon, tint) = type_icon(if ext.is_empty() { "md" } else { ext });
+    let text_note = ext.is_empty();
     NotePage {
         subagent: subagent_line(r),
         text_html,
-        plain,
-        download: if ext.is_empty() { String::new() } else { format!("{}/file", r.url()) },
-        filename: r.str("filename").to_owned(),
-        size: r.data.get("size").and_then(Value::as_i64).map(notes::size).unwrap_or_default(),
+        lines,
+        more,
+        raw: text.map(|(t, _)| t).unwrap_or_default(),
+        download: format!("{}/file", r.url()),
+        filename: if text_note { format!("N-{}.md", r.number) } else { r.str("filename").to_owned() },
+        size: if text_note {
+            notes::size(r.body.len() as i64)
+        } else {
+            r.data.get("size").and_then(Value::as_i64).map(notes::size).unwrap_or_default()
+        },
         category: r.str("category").to_owned(),
         resurface: r.str("resurface").to_owned(),
-        versions: (1..=versions).rev().map(|v| (v, format!("{}/file?v={v}", r.url()))).collect(),
+        version: r.data.get("versions").and_then(Value::as_i64).unwrap_or(0) + 1,
+        icon,
+        tint,
+        by: (true, r.author.clone(), String::new()),
+        added: String::new(),
+        milestone: None,
     }
 }
 

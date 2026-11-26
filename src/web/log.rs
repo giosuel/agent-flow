@@ -171,8 +171,8 @@ pub(super) fn enc(s: &str) -> String {
 
 /// The query with `field:value` in place of any earlier `field:…`; an empty value removes it.
 fn with_field(q: &str, field: &str, value: &str) -> String {
-    let mut parts: Vec<String> = q
-        .split_whitespace()
+    let mut parts: Vec<String> = logview::tokens(q)
+        .into_iter()
         .filter(|t| !t.trim_start_matches('-').to_lowercase().starts_with(&format!("{field}:")))
         .map(str::to_owned)
         .collect();
@@ -185,7 +185,9 @@ fn with_field(q: &str, field: &str, value: &str) -> String {
 
 /// The value the query gives a field, if any (not negated).
 fn field_of(q: &str, field: &str) -> Option<String> {
-    q.split_whitespace().find_map(|t| t.strip_prefix(&format!("{field}:")).map(|v| v.trim_matches('"').to_owned()))
+    logview::tokens(q)
+        .into_iter()
+        .find_map(|t| t.strip_prefix(&format!("{field}:")).map(|v| v.trim_matches('"').to_owned()))
 }
 
 fn record_url(target: &str) -> Option<String> {
@@ -240,7 +242,7 @@ fn row(r: &LogRow, archived: bool, range: &str, tz: &Tz) -> Row {
             Some((id, lines))
         });
     if let Some((id, _)) = &job {
-        actions.push(("Open job page".into(), format!("/machine/jobs/{id}"), "out"));
+        actions.push(("Open job page".into(), super::remote::job_url(*id), "out"));
         actions.push(("Full output".into(), url("/log", &format!("target:job-{id}"), "all", None, None, None), "list"));
     }
     if let Some(u) = r.target.as_deref().and_then(record_url) {
@@ -293,7 +295,7 @@ fn row(r: &LogRow, archived: bool, range: &str, tz: &Tz) -> Row {
         severity: r.severity.clone(),
         count: 1,
         archived,
-        query: format!("cat:{cat} actor:{}", r.actor),
+        query: with_field(&format!("cat:{cat}"), "actor", &r.actor),
         fields,
         actions,
         job_outcome,
@@ -321,21 +323,28 @@ fn fold(rows: Vec<(LogRow, bool)>, range: &str, tz: &Tz) -> Vec<Row> {
     out.into_iter().map(|(r, _)| r).collect()
 }
 
-/// Rows for a query: from the database, then the archive when the range reaches it.
+/// Rows for a query, newest first: from the database and, when the range reaches it, the archive.
+/// Changes stay in the database for good, so archived reads fall between its rows: the two are
+/// merged by seq, each asked for a page older than the same `before`.
 async fn load(state: &AppState, filter: &Filter, before: Option<i64>) -> anyhow::Result<Vec<(LogRow, bool)>> {
     let f = filter.clone();
     let rows = state.db.call(move |c| logview::page(c, &f, before, PAGE)).await?;
-    let mut out: Vec<(LogRow, bool)> = rows.into_iter().map(|r| (r, false)).collect();
     let cutoff = now_ms() - logview::READS_KEPT_DAYS * 86_400_000;
-    if filter.from.is_none_or(|f| f < cutoff) && (out.len() as i64) < PAGE {
-        let data = state.config.data_dir();
-        let (f, b, need) = (filter.clone(), out.last().map(|r| r.0.seq).or(before), (PAGE as usize) - out.len());
-        let archived = tokio::task::spawn_blocking(move || logview::search_archive(&data, &f, b, need))
+    // Only reads older than the cutoff are archived, so a full page of newer rows has none
+    // between them (a day's margin for entries written out of order).
+    let reaches = filter.from.is_none_or(|f| f < cutoff)
+        && ((rows.len() as i64) < PAGE || rows.last().is_some_and(|r| r.at < cutoff + 86_400_000));
+    let mut out: Vec<(LogRow, bool)> = rows.into_iter().map(|r| (r, false)).collect();
+    if reaches {
+        let (data, f) = (state.config.data_dir(), filter.clone());
+        let archived = tokio::task::spawn_blocking(move || logview::search_archive(&data, &f, before, PAGE as usize))
             .await
             .ok()
             .and_then(Result::ok)
             .unwrap_or_default();
         out.extend(archived.into_iter().map(|r| (r, true)));
+        out.sort_by_key(|r| std::cmp::Reverse(r.0.seq));
+        out.truncate(PAGE as usize);
     }
     Ok(out)
 }
@@ -471,6 +480,8 @@ async fn page(
         .collect();
     let axis = (0..=4).map(|i| tz.short(from + (to - from) * i / 4)).collect();
     let total = counts.iter().sum();
+    let data = state.config.data_dir();
+    let archive = tokio::task::spawn_blocking(move || logview::archive_months(&data)).await.unwrap_or_default();
     render(LogPage {
         nav: nav(&state, &actor, "/log").await,
         tz: tz.name().to_owned(),
@@ -497,7 +508,7 @@ async fn page(
         next,
         end,
         latest,
-        archive: logview::archive_months(&state.config.data_dir()),
+        archive,
     })
 }
 
@@ -531,6 +542,7 @@ async fn stream(
     State(state): State<AppState>,
     Extension(actor): Extension<Actor>,
     Query(sq): Query<StreamQuery>,
+    headers: axum::http::HeaderMap,
     tz: Tz,
 ) -> Response {
     if actor.require_owner().is_err() {
@@ -539,7 +551,11 @@ async fn stream(
     let (tx, rx) = tokio::sync::mpsc::channel::<Result<Event, Infallible>>(32);
     let filter = parse_query(&sq.q);
     let range = if sq.range.is_empty() { "24h".to_owned() } else { sq.range };
-    let mut after = sq.after;
+    // Each event carries its seq as its id, and EventSource gives the last one back when it
+    // reconnects (to the URL it first opened, with the page's `after`): without it, every row
+    // since the page loaded would come again.
+    let resumed = headers.get("last-event-id").and_then(|v| v.to_str().ok()?.trim().parse::<i64>().ok());
+    let mut after = sq.after.max(resumed.unwrap_or(0));
     tokio::spawn(async move {
         loop {
             let f = filter.clone();
@@ -552,7 +568,7 @@ async fn stream(
                 let html =
                     RowsPart { rows: fold(list, &range, &tz), next: None, end: None }.render().unwrap_or_default();
                 let data = serde_json::json!({"after": after, "html": html});
-                if tx.send(Ok(Event::default().data(data.to_string()))).await.is_err() {
+                if tx.send(Ok(Event::default().id(after.to_string()).data(data.to_string()))).await.is_err() {
                     return;
                 }
             }
@@ -578,6 +594,19 @@ mod tests {
         assert_eq!(record_url("vinculum/Q-12").as_deref(), Some("/p/vinculum/Q-12"));
         assert_eq!(record_url("../x/Q-1"), None);
         assert_eq!(enc("a b&c"), "a+b%26c");
+    }
+
+    #[test]
+    fn values_with_a_space_stay_one_value() {
+        // "Filter by actor build servers" and the Actor dropdown write the value quoted.
+        let q = with_field("merge", "actor", "build servers");
+        assert_eq!(q, "merge actor:\"build servers\"");
+        let f = Filter::parse(&q);
+        assert_eq!(f.fields, vec![("actor".into(), "build servers".into(), false)]);
+        assert_eq!(f.words, vec!["merge"]);
+        assert_eq!(field_of(&q, "actor").as_deref(), Some("build servers"));
+        assert_eq!(with_field(&q, "actor", "agentflow"), "merge actor:agentflow");
+        assert_eq!(with_field(&q, "actor", ""), "merge");
     }
 
     #[test]

@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "ui.html" as ui %}
 {% block title %}Settings{% endblock %}
 {% block content %}
 {# A classic settings dialog (the owner, 2026-11-17: "I don't like the settings page right now with
@@ -9,17 +10,31 @@
   <nav class="set-nav navlist" aria-label="Settings sections">
     {% for (group, links) in groups %}
     <p class="set-group">{{ group }}</p>
-    {% for l in links %}<a href="/settings?s={{ l.key }}"{% if l.key == section %} class="on" aria-current="page"{% endif %}>{{ crate::web::icons::icon(l.icon)|safe }}<span>{{ l.label }}</span>{% if let Some(b) = l.badge %}<span class="chip warn">{{ b }}</span>{% endif %}<span class="chev" aria-hidden="true">{{ crate::web::icons::icon("chevron")|safe }}</span></a>{% endfor %}
+    {% for l in links %}<a href="/settings?s={{ l.key }}"{% if l.key == section %} class="on" aria-current="page"{% endif %}>{{ crate::web::icons::icon(l.icon)|safe }}<span>{{ l.label }}</span>{% if let Some(b) = l.badge %}<span class="chip{% if l.key == "clients" %} warn{% endif %}">{{ b }}</span>{% endif %}<span class="chev" aria-hidden="true">{{ crate::web::icons::icon("chevron")|safe }}</span></a>{% endfor %}
     {% endfor %}
   </nav>
   <div class="set-pane">
   {% if let Some(notice) = notice %}<p class="notice ok flash" role="status">{{ crate::web::icons::icon("check")|safe }}<span>{{ notice }}</span></p>{% endif %}
   <a class="set-back" href="/settings">{{ crate::web::icons::icon("back")|safe }}<span>Settings</span></a>
 
-  {% if section == "passkeys" %}
+  {% if section == "profile" %}
+  {#- How you show up to the others (D-270; mockup: UsersProfile). -#}
+  <section aria-labelledby="h-sec">
+    <h2 id="h-sec">Profile</h2>
+    <p class="sub set-lead">How you show up to the others on this AgentFlow.</p>
+    <form method="post" action="/settings/profile" class="stack">
+      <div class="set-row"><div class="set-txt"><strong>Icon</strong><span class="sub">Shown at the top right and next to everything you write.</span></div></div>
+      <div class="set-avatar">{% call ui::avatar(profile.2, "lg") %}{% endcall %}{% call ui::avatar_picker(profile.2) %}{% endcall %}</div>
+      <div class="set-row"><div class="set-txt"><label for="p-user"><strong>Username</strong></label><span class="sub">Lowercase letters, digits and dashes.</span></div><input id="p-user" name="username" value="{{ profile.0 }}" required minlength="2" maxlength="32" autocapitalize="none" spellcheck="false"></div>
+      <div class="set-row"><div class="set-txt"><label for="p-mail"><strong>Email</strong></label><span class="sub">Only the people on this AgentFlow see it.</span></div><input id="p-mail" name="email" type="email" value="{{ profile.1 }}" required maxlength="200"></div>
+      <div class="row set-save"><button class="btn sm" type="submit">Save</button></div>
+    </form>
+  </section>
+
+  {% else if section == "passkeys" %}
   <section aria-labelledby="h-sec">
     <h2 id="h-sec">Passkeys</h2>
-    <p class="sub set-lead">How you sign in to AgentFlow. Lost every one? <code>sudo flow server add-passkey</code> on the server gives a one-time link.</p>
+    <p class="sub set-lead">How you sign in to AgentFlow. Lost every one? <code>sudo flow server add-device</code> on the server gives a one-time link, or <code>sudo flow server setup</code> for the admin.</p>
     {% if passkeys.is_empty() %}<div class="set-row"><div class="set-txt"><strong>No passkey yet</strong><span class="sub">You're signed in with a one-time link.</span></div></div>{% endif %}
     {% for p in passkeys %}
     <div class="set-row"><div class="set-txt"><strong>{{ p.name }}</strong><span class="sub">added {{ p.added }} · used {{ p.used }}</span></div>
@@ -32,7 +47,37 @@
     {% else %}
     <p class="notice">{{ crate::web::icons::icon("info")|safe }}<span>Passkeys work only at AgentFlow's https address. This page is open at {{ public_url }}.</span></p>
     {% endif %}
+    {#- A new device gets in with a link from here (D-274; mockup: UsersPasskeys). -#}
+    <h3 class="label set-sub">Another device</h3>
+    <div class="set-row"><div class="set-txt"><strong>Sign in on another device</strong><span class="sub">Makes a link that works once, for 15 minutes. Open it on the new device, or scan the code with its camera; it asks for a new passkey there.</span></div>
+      <form method="post" action="/settings/passkeys/link"><button class="btn sm secondary" type="submit">Make a link</button></form></div>
+    {% if let Some(m) = made %}{% if m.what == "device" %}<div class="card pad linkbox">{% if !m.qr.is_empty() %}<div class="qr-box">{{ m.qr|safe }}</div>{% endif %}<div class="stack-sm linkbox-txt"><strong>Open this on the new device</strong><div class="row copyrow"><label class="vh" for="made-link">The link</label><input class="mono" id="made-link" value="{{ m.url }}" readonly><button type="button" class="ibtn flat" data-copy-from="made-link" title="Copy the link" aria-label="Copy the link">{{ crate::web::icons::icon("copy")|safe }}</button></div><span class="sub">Works once, until {{ m.until }}. Or on the server: <code>sudo flow server add-device</code></span><form method="post" action="/settings/links/{{ m.id }}/withdraw"><button class="btn sm secondary" type="submit">Cancel the link</button></form></div></div>{% endif %}{% endif %}
   </section>
+
+  {% else if section == "people" %}
+  {#- Everyone on this AgentFlow (D-272, D-273; mockup: UsersPeople): the same rights for all, only
+      the admin invites. -#}
+  <section aria-labelledby="h-sec">
+    <h2 id="h-sec">People</h2>
+    <p class="sub set-lead">Everyone who can sign in to this AgentFlow. Everyone can do the same things; {% if admin %}only you, the admin, can invite someone.{% else %}only the admin, {{ admin_name }}, invites people.{% endif %}</p>
+    {% for p in people %}
+    <div class="set-row"><div class="row person-row">{% call ui::avatar(p.icon, "") %}{% endcall %}<div class="set-txt"><strong>{{ p.name }}{% if p.admin %} <span class="chip accent">admin</span>{% endif %}{% if p.you %} <span class="chip">you</span>{% endif %}</strong><span class="sub">{% if !p.email.is_empty() %}{{ p.email }} · {% endif %}{{ p.since }} · {{ p.passkeys }}</span></div></div>
+      {% if admin && !p.you %}<div class="row"><form method="post" action="/settings/people/{{ p.id }}/link"><button class="btn sm secondary" type="submit" title="A link that adds a passkey to {{ p.name }}'s account, for 15 minutes">Sign-in link</button></form><form method="post" action="/settings/people/{{ p.id }}/remove"><button class="btn sm danger" type="submit" data-confirm="Remove {{ p.name }}? They're signed out everywhere and can't sign in again; what they did keeps their name.">Remove</button></form></div>{% endif %}</div>
+    {% if let Some(m) = made %}{% if m.what == "person" && m.person == p.id %}<div class="card pad linkbox">{% if !m.qr.is_empty() %}<div class="qr-box">{{ m.qr|safe }}</div>{% endif %}<div class="stack-sm linkbox-txt"><strong>A sign-in link for {{ p.name }}</strong><div class="row copyrow"><label class="vh" for="made-link">The link</label><input class="mono" id="made-link" value="{{ m.url }}" readonly><button type="button" class="ibtn flat" data-copy-from="made-link" title="Copy the link" aria-label="Copy the link">{{ crate::web::icons::icon("copy")|safe }}</button></div><span class="sub">Send it to them; it adds a passkey to their account and works once, until {{ m.until }}.</span><form method="post" action="/settings/links/{{ m.id }}/withdraw"><button class="btn sm secondary" type="submit">Cancel the link</button></form></div></div>{% endif %}{% endif %}
+    {% endfor %}
+    {% if admin %}
+    <h3 class="label set-sub">Invites</h3>
+    <div class="set-row"><div class="set-txt"><strong>Invite someone</strong><span class="sub">Makes a link that works once, for 7 days. Whoever opens it makes a passkey and picks their name and icon.</span></div>
+      <form method="post" action="/settings/people/invite"><button class="btn sm" type="submit">{{ crate::web::icons::icon("plus")|safe }}Invite someone</button></form></div>
+    {% if let Some(m) = made %}{% if m.what == "invite" %}<div class="card pad linkbox">{% if !m.qr.is_empty() %}<div class="qr-box">{{ m.qr|safe }}</div>{% endif %}<div class="stack-sm linkbox-txt"><strong>New invite, made just now</strong><div class="row copyrow"><label class="vh" for="made-link">The link</label><input class="mono" id="made-link" value="{{ m.url }}" readonly><button type="button" class="ibtn flat" data-copy-from="made-link" title="Copy the link" aria-label="Copy the link">{{ crate::web::icons::icon("copy")|safe }}</button></div><span class="sub">Send it to the person you're inviting. It works once, until {{ m.until }}. Or on the server: <code>sudo flow server invite</code></span><form method="post" action="/settings/links/{{ m.id }}/withdraw"><button class="btn sm secondary" type="submit">Withdraw</button></form></div></div>{% endif %}{% endif %}
+    {% for (id, when, until) in invites %}
+    <div class="set-row"><div class="set-txt"><strong>An invite, not used yet</strong><span class="sub">made {{ when }} · works until {{ until }}</span></div>
+      <form method="post" action="/settings/links/{{ id }}/withdraw"><button class="btn sm danger" type="submit" data-confirm="Withdraw this invite? Its link stops working.">Withdraw</button></form></div>
+    {% endfor %}
+    {% endif %}
+  </section>
+
+
 
   {% else if section == "browsers" %}
   <section aria-labelledby="h-sec">

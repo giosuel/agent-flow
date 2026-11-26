@@ -1,24 +1,45 @@
 {% extends "base.html" %}
-{% block title %}Job #{{ job.id }}{% endblock %}
+{% block title %}Job #{{ job.id }} · {{ title }}{% endblock %}
 {% block scripts %}<script src="/static/remote.js?v={{ nav.version }}" defer></script>{% endblock %}
 {% block content %}
-<div class="head stack-sm">
-  <nav class="crumbs" aria-label="Back"><a class="crumb-back" href="/machine#builds">{{ crate::web::icons::icon("back")|safe }}<span>Machine</span></a><span class="crumb-where">Build job</span></nav>
-  <div class="row wrap"><span class="chip {{ row.chip }}" id="job-state">{{ row.label }}</span><span class="sub mono">job #{{ job.id }} · <span id="job-time">{{ row.time }}</span></span></div>
-  <h1 class="rec-title">{{ job.project }} · <span class="mono">{{ command }}</span></h1>
-  <p class="sub">on {{ job.server }} · {{ started }}</p>
+{#- A build job's page (D-275): the note page's layout, its name as the title, its output in the same
+    numbered lines as a note's log, its facts beside it. -#}
+<div class="head">
+  <div class="crumb-row">{% include "path.html" %}</div>
+  <h1 class="rec-title note-title">{% if named %}{{ title }}{% else %}<span class="mono">{{ title }}</span>{% endif %}</h1>
 </div>
-<div class="split">
-  <section class="split-main stack" aria-labelledby="out-h">
-    <div class="sec"><h2 id="out-h">Output</h2><span class="sub">{% if !job.is_finished() %}live · {% endif %}every line is in the Log too: <a href="/log?q=target:job-{{ job.id }}&amp;range=all">target:job-{{ job.id }}</a></span></div>
-    <div class="joblog" id="job-log" role="log" aria-live="polite" data-job="{{ job.id }}" data-next="{{ next }}" data-done="{% if job.is_finished() %}1{% endif %}">{% for (cls, line) in lines %}<div class="{{ cls }}">{{ line }}</div>{% endfor %}</div>
-    {% if is_owner && !job.is_finished() %}
-    <form method="post" action="/machine/jobs/{{ job.id }}/cancel" class="row wrap" id="job-cancel"><button class="btn danger" type="submit" data-confirm="Cancel job #{{ job.id }}? It stops on {{ job.server }}; the agent hears it was cancelled.">Cancel the job</button><span class="sub">Stops it on {{ job.server }}; the agent gets "cancelled by the owner".</span></form>
-    {% endif %}
+<div class="npage">
+  <section class="card ndoc" aria-labelledby="out-h">
+    <div class="card-head ndoc-head">
+      <span class="itile sm hide-phone" aria-hidden="true">{{ crate::web::icons::icon("session")|safe }}</span>
+      <h2 id="out-h">Output</h2>
+      <span class="sub" id="job-lines">{% if !job.is_finished() %}live · {% endif %}{{ job.lines }} lines</span>
+      <span class="grow"></span>
+      <label class="check ndoc-wrap"><input type="checkbox" class="cv-wrap"> Wrap long lines</label>
+      <button type="button" class="ibtn flat" data-copy-from="job-log" title="Copy the output" aria-label="Copy the output">{{ crate::web::icons::icon("copy")|safe }}</button>
+      <a class="act hide-phone" href="/log?q=target:job-{{ job.id }}&amp;range=all" title="Every line is in the Log too">In the Log</a>
+    </div>
+    <div class="codeview cv-scroll" id="job-log" role="log" aria-live="polite" aria-label="The job's output" data-job="{{ job.id }}" data-next="{{ next }}" data-n="{{ lines.len() }}" data-done="{% if job.is_finished() %}1{% endif %}">{% for (n, cls, line) in lines %}<span class="cv-n">{{ n }}</span><span class="cv-t{% if !cls.is_empty() %} {{ cls }}{% endif %}">{{ line }}</span>{% endfor %}</div>
+    {% if lines.is_empty() %}<p class="ndoc-body sub" id="job-empty">{% if job.is_finished() %}It printed nothing.{% else %}Nothing yet; lines show here as they come.{% endif %}</p>{% endif %}
   </section>
-  <aside class="split-side stack-lg">
-    <section class="card pad stack-sm" aria-labelledby="f-h"><h2 class="label" id="f-h">This job</h2>
-      <dl class="kv">{% for (k, v) in facts %}<dt>{{ k }}</dt><dd>{{ v }}</dd>{% endfor %}</dl>
+
+  <aside class="nside">
+    <section class="card" aria-labelledby="f-h">
+      <div class="card-head"><h2 id="f-h">This job</h2></div>
+      <div class="card-body stack">
+        <dl class="kv nkv">
+          <dt>State</dt><dd><span class="chip {{ row.chip }}" id="job-state">{{ row.label }}</span></dd>
+          <dt>Time</dt><dd class="mono" id="job-time">{{ row.time }}</dd>
+          {#- What points somewhere is a chip (D-279): the project and the server link to their pages. -#}
+          <dt>Project</dt><dd><a class="chip link" href="{{ project.1 }}">{{ crate::web::icons::icon("folder")|safe }}<span>{{ project.0 }}</span></a></dd>
+          <dt>Started by</dt><dd><span class="chip">{{ crate::web::icons::icon(by.0)|safe }}<span>{{ by.1 }}</span></span></dd>
+          <dt>Started</dt><dd>{{ started }}</dd>
+          {% for (k, v) in facts %}<dt>{{ k }}</dt>{% if k == "Server" %}<dd>{% if let Some(h) = server_page %}<a class="chip link" href="{{ h }}">{{ crate::web::icons::icon("server")|safe }}<span>{{ v }}</span></a>{% else %}<span class="chip">{{ crate::web::icons::icon("server")|safe }}<span>{{ v }}</span></span>{% endif %}</dd>{% else %}<dd{% if k == "Command" || k == "Checkout" || k == "Runs in" %} class="mono job-fact"{% endif %}>{{ v }}</dd>{% endif %}{% endfor %}
+        </dl>
+        {% if is_owner && !job.is_finished() %}
+        <form method="post" action="/machines/jobs/{{ job.id }}/cancel" id="job-cancel"><button class="btn sm danger wide" type="submit" data-confirm="Cancel job #{{ job.id }}? It stops on {{ job.server }}; the agent hears it was cancelled.">Cancel the job</button></form>
+        {% endif %}
+      </div>
     </section>
   </aside>
 </div>

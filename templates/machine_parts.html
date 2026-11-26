@@ -1,0 +1,11 @@
+{# Parts the Machines pages share (D-277). Import with {% import "machine_parts.html" as parts %}. #}
+
+{#- A build machine's CPU, memory and GPU now: what you use, what builds use, what's free. -#}
+{% macro meters(ms) %}<div class="bmeters">{% for mt in ms.iter() %}<div class="bmeter"><span class="label">{{ mt.label }}</span><div class="bar3" role="img" aria-label="{{ mt.label }}: you {{ mt.you_s() }}, builds {{ mt.builds_s() }}, {{ mt.free_s() }}"><i class="you" style="width: {{ mt.you_pct() }}%"></i><i class="builds" style="width: {{ mt.builds_pct() }}%"></i></div><div class="nums"><span>you {{ mt.you_s() }}</span><span>builds {{ mt.builds_s() }}</span><span>{{ mt.free_s() }}</span></div></div>{% endfor %}</div>{% endmacro %}
+
+{#- Pause or resume a build machine's builds, an icon button (D-278: "lets do an icon pause button
+    instead of the button with text"); back to `next` after. -#}
+{% macro pause(name, paused, next) %}<form method="post" action="/machines/{{ name }}/{% if paused %}resume{% else %}pause{% endif %}" class="mpause"><input type="hidden" name="next" value="{{ next }}">{% if paused %}<button class="ibtn" type="submit" title="Resume builds on {{ name }}" aria-label="Resume builds on {{ name }}">{{ crate::web::icons::icon("play")|safe }}</button>{% else %}<button class="ibtn" type="submit" title="Pause builds on {{ name }}" aria-label="Pause builds on {{ name }}">{{ crate::web::icons::icon("pause")|safe }}</button>{% endif %}</form>{% endmacro %}
+
+{#- Paused: what that means. -#}
+{% macro paused() %}<p class="notice warn" role="status">{{ crate::web::icons::icon("alert")|safe }}<span>Builds are paused: nothing starts, running jobs are frozen until you resume.</span></p>{% endmacro %}

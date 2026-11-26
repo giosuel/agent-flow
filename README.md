@@ -86,10 +86,11 @@ flow.example {
 }
 ```
 
-Add your passkey with the one-time link this prints (valid 15 minutes):
+Make the admin account and its passkey with the one-time link this prints (valid 15 minutes);
+you invite others from Settings › People or with `sudo flow server invite`:
 
 ```sh
-sudo flow server add-passkey
+sudo flow server setup
 ```
 
 Then connect each machine and set up a project in its folder:

@@ -32,7 +32,7 @@ pub fn routes() -> Router<AppState> {
 const NAV: &[(&str, &str)] = &[
     ("/", "Dashboard"),
     ("/projects", "Projects"),
-    ("/machine", "Machine"),
+    ("/machines", "Machines"),
     ("/usage", "Usage"),
     ("/conversations", "Conversations"),
     ("/handbook", "Handbook"),
@@ -51,7 +51,7 @@ impl NavItem {
         super::icons::icon(match self.href {
             "/" => "grid",
             "/projects" => "folder",
-            "/machine" => "machine",
+            "/machines" => "machine",
             "/usage" => "chart",
             "/conversations" => "message",
             "/handbook" => "book",
@@ -85,6 +85,30 @@ pub struct Here {
     pub slug: String,
     pub name: String,
     pub tabs: Vec<BarTab>,
+    /// The tab the page is under ("" on a page outside the project).
+    pub tab: String,
+}
+
+impl Here {
+    /// Where the switcher takes you in the project `slug`: the page you're on here, in that
+    /// project (the owner, 2026-11-25, D-280: "when I am looking at imaginarium's notes and then
+    /// switch to lituus, i want to immediately be on the lituus notes page"). From Settings (a
+    /// dialog) and from pages outside a project, its overview.
+    pub fn switch_to(&self, slug: &str) -> String {
+        match self.tab.as_str() {
+            "settings" => tab_href(slug, "overview"),
+            tab => tab_href(slug, tab),
+        }
+    }
+}
+
+/// The address of the project `slug`'s tab `key` (a key of the project page's tabs).
+pub fn tab_href(slug: &str, key: &str) -> String {
+    match key {
+        "" | "overview" => format!("/p/{slug}"),
+        "plan" | "settings" => format!("/p/{slug}/{key}"),
+        _ => format!("/p/{slug}?tab={key}"),
+    }
 }
 
 /// On the phone a tab bar at the bottom, as in iOS apps and the owner's viber console (the owner,
@@ -97,11 +121,18 @@ const TABS: &[(&str, &str, &str)] = &[
     ("/handbook", "Handbook", "book"),
 ];
 pub const MORE: &[(&str, &str, &str)] = &[
-    ("/machine", "Machine", "machine"),
+    ("/machines", "Machines", "machine"),
     ("/conversations", "Conversations", "message"),
     ("/log", "Log", "list"),
     ("/settings", "Settings", "gear"),
 ];
+
+/// Who is signed in, for the avatar at the top right (D-270).
+pub struct Me {
+    pub name: String,
+    pub email: String,
+    pub icon: String,
+}
 
 pub struct Tab {
     pub href: &'static str,
@@ -126,6 +157,8 @@ pub struct Nav {
     pub projects: Vec<NavProject>,
     /// The project the page is in, if any.
     pub here: Option<Here>,
+    /// Who is signed in (None on pages without a person).
+    pub me: Option<Me>,
 }
 
 /// The cookie that keeps the project last opened (the owner, 2026-11-23: "lets do cookie"): on
@@ -187,8 +220,13 @@ pub async fn keep_project(
 pub async fn nav(state: &AppState, actor: &Actor, active: &str) -> Nav {
     let mut n = Nav::new(active);
     if actor.is_owner() {
+        if let Some(id) = actor.person() {
+            let me = state.db.call(move |c| crate::people::get(c, id)).await.ok().flatten();
+            n.me = me.map(|p| Me { name: p.name(), email: p.email, icon: p.icon });
+        }
         n.waiting = state.db.call(|c| crate::waiting::count(c)).await.unwrap_or(0) as i64;
-        n.unread = state.db.call(|c| crate::notifications::unread(c)).await.unwrap_or(0);
+        let me = actor.person().unwrap_or(0);
+        n.unread = state.db.call(move |c| crate::notifications::unread(c, me)).await.unwrap_or(0);
         let now = crate::util::now_ms();
         n.projects = state
             .db
@@ -231,6 +269,7 @@ impl Nav {
             unread: 0,
             projects: Vec::new(),
             here: None,
+            me: None,
         }
     }
 }
@@ -306,11 +345,7 @@ impl Nav {
                 };
                 BarTab {
                     label,
-                    href: match key {
-                        "overview" => format!("/p/{slug}"),
-                        "plan" | "settings" => format!("/p/{slug}/{key}"),
-                        _ => format!("/p/{slug}?tab={key}"),
-                    },
+                    href: tab_href(slug, key),
                     count: if count > 0 { count.to_string() } else { String::new() },
                     warn,
                     on: key == tab,
@@ -318,7 +353,7 @@ impl Nav {
                 }
             })
             .collect();
-        self.here = Some(Here { slug: slug.to_owned(), name, tabs });
+        self.here = Some(Here { slug: slug.to_owned(), name, tabs, tab: tab.to_owned() });
         self
     }
 
@@ -415,19 +450,16 @@ async fn passkey_finish(
     let result = state
         .db
         .call(move |c| {
-            let name = pk.finish_login(c, &body.id, &body.credential)?;
-            Ok((name, auth::create_session(c, "passkey", &limits, ua.as_deref(), Some(&ip2))?))
+            let (name, person) = pk.finish_login(c, &body.id, &body.credential)?;
+            // The Log names who signed in, not only the passkey's own name (the security review).
+            let who = crate::people::get(c, person)?.map(|p| p.name()).unwrap_or_default();
+            let what = format!("{who} signed in with passkey \"{name}\"");
+            Ok((what, auth::create_session(c, person, "passkey", &limits, ua.as_deref(), Some(&ip2))?))
         })
         .await;
     match result {
         Ok((name, session)) => {
-            let e = Entry::new(
-                &Actor::Anonymous,
-                Via::Page,
-                Action::Login,
-                format!("owner signed in with passkey \"{name}\""),
-            )
-            .ip(Some(ip));
+            let e = Entry::new(&Actor::Anonymous, Via::Page, Action::Login, name).ip(Some(ip));
             activity::write(&state.db, e).await;
             let jar = jar.add(session_cookie(&state, session));
             (jar, Json(serde_json::json!({"ok": true}))).into_response()
@@ -442,7 +474,7 @@ async fn passkey_finish(
     }
 }
 
-fn user_agent(headers: &HeaderMap) -> Option<String> {
+pub(super) fn user_agent(headers: &HeaderMap) -> Option<String> {
     headers.get(header::USER_AGENT).and_then(|v| v.to_str().ok()).map(|s| s.chars().take(300).collect::<String>())
 }
 
@@ -460,8 +492,20 @@ async fn link_use(
     let session = state
         .db
         .call(move |c| {
-            let Some(purpose) = auth::consume_login_link(c, &secret)? else { return Ok(None) };
-            Ok(Some((purpose, auth::create_session(c, "link", &limits, ua.as_deref(), Some(&ip2))?)))
+            // A sign-in link names its person; setup, invite and device links have pages of their
+            // own (links.rs).
+            let tx = c.transaction()?;
+            let Some(link) = auth::consume_login_link(&tx, &secret)? else { return Ok(None) };
+            // Only sign-in links here; a device, setup or invite link has its own page (refused
+            // here, it stays unused).
+            if link.purpose != auth::purpose::SIGNIN && link.purpose != "add-passkey" {
+                return Ok(None);
+            }
+            let person = link.person.map(|p| crate::people::get(&tx, p)).transpose()?.flatten();
+            let Some(person) = person else { return Ok(None) };
+            let session = auth::create_session(&tx, person.id, "link", &limits, ua.as_deref(), Some(&ip2))?;
+            tx.commit()?;
+            Ok(Some((link.purpose, session)))
         })
         .await?;
     let Some((purpose, session)) = session else {
@@ -472,20 +516,19 @@ async fn link_use(
         }
         let page = LoginPage::new(
             None,
-            Some("This link has expired or was already used. Run `sudo flow server add-passkey` on the server for a new one.".into()),
+            Some("This link has expired or was already used. Run `sudo flow server add-device` on the server for a new one.".into()),
         );
         return Ok((StatusCode::GONE, Html(page.render()?)).into_response());
     };
-    let e =
-        Entry::new(&Actor::Anonymous, Via::Page, Action::Login, "owner signed in with a one-time link").ip(Some(ip));
+    let e = Entry::new(&Actor::Anonymous, Via::Page, Action::Login, "signed in with a one-time link").ip(Some(ip));
     activity::write(&state.db, e).await;
     let jar = jar.add(session_cookie(&state, session));
-    // A link from `flow server add-passkey` (or the first start) leads straight to adding one.
-    let to = if purpose == super::admin_socket::PURPOSE { "/settings?add_passkey=1#passkeys" } else { "/" };
+    // A link from before people (`flow server add-passkey`) led straight to adding a passkey.
+    let to = if purpose == "add-passkey" { "/settings?add_passkey=1#passkeys" } else { "/" };
     Ok((jar, Redirect::to(to)).into_response())
 }
 
-fn session_cookie(state: &AppState, value: String) -> Cookie<'static> {
+pub(super) fn session_cookie(state: &AppState, value: String) -> Cookie<'static> {
     Cookie::build((state.session_cookie_name(), value))
         .path("/")
         .http_only(true)

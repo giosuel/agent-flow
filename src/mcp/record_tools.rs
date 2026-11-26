@@ -263,7 +263,7 @@ pub struct AskQuestion {
     #[serde(default)]
     pub in_chat: bool,
     /// Where its answer applies (it becomes a decision there): a milestone ("M9"; a step means its
-    /// milestone) or "project". Default: the current milestone. The owner can change it on the page.
+    /// milestone) or "project". Default: the current milestone. To move it later, update_question.
     pub scope: Option<String>,
     /// Earlier decisions this question touches, e.g. ["D-12"]: shown with it, so the owner sees
     /// what they might change. What the answer means for them is yours to act on afterwards.

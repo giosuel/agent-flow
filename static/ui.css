@@ -22,6 +22,8 @@
   /* The soft violet light at the top of a page, as on the website's landing page (the owner,
      2026-11-24, D-257). */
   --glow-a: rgba(167, 139, 250, 0.16); --glow-b: rgba(76, 61, 138, 0.2);
+  /* The ground's fine blueprint grid, as on the website's docs (the owner, 2026-11-24, D-260). */
+  --grid-line: rgba(255, 255, 255, 0.028); --grid-size: 32px;
   --accent: #A78BFA; --accent-ink: #C4B5FD; --on-accent: #1A0F3A; --accent-bg: #1C1530; --accent-chip: #251B40; --accent-chip-ink: #D2C4FF; --accent-deep: #4C3D8A;
   /* Status: fill, text, background, border per tone */
   --ok: #4ADE80; --ok-ink: #86EFAC; --ok-bg: #0F2A1A; --ok-line: #1E4D30;
@@ -60,7 +62,7 @@
 /* ---------------------------------------------------------------- Base */
 * { box-sizing: border-box; }
 html { -webkit-text-size-adjust: 100%; }
-body { margin: 0; background: var(--ground); color: var(--ink); font: var(--fs-body)/1.5 var(--sans); min-height: 100vh; display: flex; flex-direction: column; }
+body { margin: 0; background-color: var(--ground); background-image: linear-gradient(to right, var(--grid-line) 1px, transparent 1px), linear-gradient(to bottom, var(--grid-line) 1px, transparent 1px); background-size: var(--grid-size) var(--grid-size); color: var(--ink); font: var(--fs-body)/1.5 var(--sans); min-height: 100vh; display: flex; flex-direction: column; }
 a { color: var(--accent); }
 a:hover { color: var(--accent-ink); }
 h1, h2, h3 { margin: 0; font-weight: 600; }
@@ -244,7 +246,11 @@ input[type=checkbox]:disabled, input[type=radio]:disabled { background-color: va
 .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--r-lg); min-width: 0; }
 .card.pad { padding: var(--sp-6); }
 .card.list { overflow: hidden; }
-.card-head { display: flex; align-items: center; gap: var(--sp-2) var(--sp-3); flex-wrap: wrap; min-height: 56px; padding: var(--sp-3) var(--sp-5); border-bottom: 1px solid var(--line2); }
+/* Every card's header is this bar, one height everywhere (the owner, 2026-11-25: "please make sure
+   all card headers are standardized"): its title (h2, 16 px), a count or a few words beside it
+   (.sub), then on the right links (.act), small buttons (.btn.sm), icon buttons (.ibtn) or a small
+   switch (.seg.sm): nothing taller than 36 px, so the bar stays 60 px. */
+.card-head { display: flex; align-items: center; gap: var(--sp-2) var(--sp-3); flex-wrap: wrap; min-height: 60px; padding: var(--sp-2) var(--sp-5); border-bottom: 1px solid var(--line2); }
 .card-head h2, .card-head h3 { margin: 0; font-size: var(--fs-h3); font-weight: 600; color: var(--ink); letter-spacing: 0; text-transform: none; }
 .card-head.flat { border-bottom: 0; }
 summary.card-head { list-style: none; cursor: pointer; }
@@ -351,6 +357,10 @@ summary.card-head::-webkit-details-marker { display: none; }
 .chip.info { background: var(--info-bg); color: var(--info-ink); }
 .chip.quiet { background: transparent; box-shadow: inset 0 0 0 1px var(--line); color: var(--muted); }
 .chip .i { width: var(--ic-2xs); height: var(--ic-2xs); stroke-width: 2.2; }
+/* A chip that goes somewhere: a job's project and its server (D-279). No underline; the pointer
+   brings the ink and a ring: <a class="chip link" href="…">(icon)<span>name</span></a> */
+a.chip.link { text-decoration: none; }
+a.chip.link:hover { color: var(--ink); box-shadow: inset 0 0 0 1px var(--border); }
 
 /* Tag: small metadata (scope, milestone, model, platform); .line bordered, .dashed for the unsure */
 .tag { display: inline-flex; align-items: center; height: 20px; padding: 0 7px; border-radius: var(--r-sm); font: 500 var(--fs-micro) var(--mono); background: var(--chip); color: var(--ink2); white-space: nowrap; vertical-align: middle; }
@@ -388,6 +398,8 @@ summary.card-head::-webkit-details-marker { display: none; }
 .choice.rec .num { background: var(--accent-chip); color: var(--accent-chip-ink); }
 .choice-own { display: flex; gap: var(--sp-2); justify-content: flex-end; }
 .choice-own input { flex: 1; min-width: 0; }
+.choice-own.alone { flex-direction: column; align-items: flex-end; }
+.choice-own.alone textarea { align-self: stretch; min-height: 96px; }
 
 /* Copy field: a command or token with the copy icon in its corner (app.js adds the button) */
 .cmd { display: block; margin: 0; padding: 10px 12px; background: var(--sunken); color: var(--ink); border: 1px solid var(--line); border-radius: var(--r-md); font: var(--fs-sub)/1.5 var(--mono); overflow-x: auto; white-space: pre; }
@@ -435,6 +447,10 @@ summary.card-head::-webkit-details-marker { display: none; }
 [aria-sort=ascending] > .th-sort .sort-i::before { top: 3px; }
 [aria-sort=descending] > .th-sort .sort-i::after { bottom: 3px; }
 [aria-sort] > .th-sort .sort-i { opacity: 1; color: var(--accent-ink); }
+/* Pager: a long table's pages, in its card's foot (ui::pager): which rows, which page, and the
+   pages before and after as icon links ("1–20 of 214 · page 1 of 11 ‹ ›"). */
+.pager.links { flex: 1 1 auto; flex-wrap: wrap; min-width: 0; }
+.pager-range { margin-right: auto; }
 .th-sort:hover .sort-i { opacity: .9; }
 
 /* ---------------------------------------------------------------- List row: one row for every list
@@ -502,6 +518,49 @@ a.item-row:hover { background: var(--hover-bg); }
 .tl .ev-meta { display: block; margin-top: 2px; font-size: var(--fs-sub); color: var(--muted); }
 .tl-day { display: flex; align-items: center; gap: var(--sp-2); padding: 10px 0 6px; font-size: var(--fs-label); color: var(--muted); }
 .tl-day::after { content: ""; flex: 1; border-top: 1px solid var(--line2); }
+
+/* History without a box (D-268): a section with a thin line on top, like the others in a dialog
+   or a page's side. .changes-fold shows only the newest change until "Show all" (a checkbox, so it
+   works without scripts) opens the rest. */
+.changes { display: flex; flex-direction: column; padding-top: var(--sp-4); border-top: 1px solid var(--line2); }
+.changes-head { display: flex; align-items: baseline; gap: var(--sp-3); margin-bottom: var(--sp-1); }
+.changes-head .label { margin: 0; }
+.changes .tl-day:first-of-type { padding-top: var(--sp-1); }
+.changes-fold .changes-more { display: none; }
+.changes-fold .changes-all:checked ~ .tl-day.changes-more { display: flex; }
+.changes-fold .changes-all:checked ~ .tl .changes-more { display: grid; }
+.changes-fold .changes-all:not(:checked) ~ .tl .ev:first-child .rail::before { bottom: calc(100% - 8px); }
+.changes-toggle { display: inline-flex; align-self: flex-start; align-items: center; gap: var(--sp-1_5); min-height: var(--h-sm); margin-left: 72px; color: var(--accent-ink); font-size: var(--fs-sm); cursor: pointer; }
+.changes-toggle .i { width: var(--ic-sm); height: var(--ic-sm); transition: transform .15s; }
+.changes-toggle:hover { color: var(--ink); }
+.changes-when-open { display: none; }
+.changes-all:checked ~ .changes-toggle .changes-when-open { display: inline; }
+.changes-all:checked ~ .changes-toggle .changes-when-folded { display: none; }
+.changes-all:checked ~ .changes-toggle .i { transform: rotate(180deg); }
+.changes-all:focus-visible ~ .changes-toggle { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--r-sm); }
+@media (prefers-reduced-motion: reduce) { .changes-toggle .i { transition: none; } }
+
+/* A text file's lines, numbered (a note's log or text): the number column, the line, a log level
+   in its tone. .cv-fold shows the first 40 until the checkbox before it (.cv-all) is ticked. */
+.codeview { display: grid; grid-template-columns: max-content minmax(0, 1fr); padding: var(--sp-3) 0; background: var(--sunken); font: var(--fs-sub)/1.7 var(--mono); overflow-x: auto; }
+.cv-n { padding: 0 var(--sp-3) 0 var(--sp-4); color: var(--dim); text-align: right; user-select: none; border-right: 1px solid var(--line2); }
+.cv-t { padding: 0 var(--sp-4); color: var(--ink2); white-space: pre; }
+.lv-error { color: var(--bad-ink); }
+.lv-warn { color: var(--warn-ink); }
+.lv-info { color: var(--muted); }
+.cv-t.cv-dim { color: var(--muted); }
+/* Output that grows while you watch (a build job's): it scrolls in its own box. */
+.codeview.cv-scroll { max-height: 70vh; overflow-y: auto; align-content: start; }
+.codeview.cv-fold > :nth-child(n+81) { display: none; }
+.cv-all:checked + .codeview.cv-fold > :nth-child(n+81) { display: block; }
+.cv-when-open { display: none; }
+.cv-all:checked ~ * .cv-when-open { display: inline; }
+.cv-all:checked ~ * .cv-when-folded { display: none; }
+.cv-all:focus-visible ~ * label[for="cv-all"] { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* Who wrote something (D-269): an icon (a robot for an agent) and the name. */
+.byline { display: inline-flex; align-items: center; gap: var(--sp-2); color: var(--ink); }
+.byline .sub { display: block; }
 
 /* ---------------------------------------------------------------- Icon tile: an icon on a tinted square
    .itile (36), .sm (28), .lg (44); muted on the chip by default, or a state tone (.accent, .ok,
@@ -648,3 +707,23 @@ html.dlg-on { overflow: hidden; }
   .pop-back.open { opacity: 1; }
   .pop { inset: calc(12px + env(safe-area-inset-top)) 0 0 0; width: auto; max-height: none; border-radius: 16px 16px 0 0; border-bottom: 0; transform: translateY(24px); }
 }
+
+/* A person's icon (D-270): one of the 15 in static/avatars, round; 32 px, sm 20, lg 112. Someone
+   who hasn't picked one yet gets the person glyph. */
+.avatar { display: inline-grid; place-items: center; width: 32px; height: 32px; flex: none; border-radius: 50%; object-fit: cover; background: var(--chip); color: var(--muted); }
+.avatar.sm { width: 20px; height: 20px; }
+.avatar.lg { width: 112px; height: 112px; }
+.avatar.none .i { width: 60%; height: 60%; }
+/* Picking one: a grid of them, the picked one ringed in the accent with a check. */
+.avpick { display: grid; grid-template-columns: repeat(5, 56px); gap: var(--sp-3); justify-content: start; margin: 0; padding: 0; border: 0; }
+.avpick legend { margin-bottom: var(--sp-2); padding: 0; }
+.avpick-o { position: relative; display: grid; place-items: center; width: 56px; height: 56px; border-radius: 50%; cursor: pointer; }
+.avpick-o input { position: absolute; opacity: 0; pointer-events: none; }
+.avpick-o .avatar { width: 48px; height: 48px; transition: transform .12s; }
+.avpick-o:hover .avatar { transform: scale(1.06); }
+.avpick-o:has(input:checked) { box-shadow: 0 0 0 2px var(--accent); }
+.avpick-o:has(input:focus-visible) { box-shadow: var(--focus-ring); }
+.avpick-o .avpick-ck { position: absolute; right: -2px; bottom: -2px; display: none; place-items: center; width: 18px; height: 18px; border-radius: 50%; background: var(--accent); color: var(--on-accent); }
+.avpick-o .avpick-ck .i { width: var(--ic-2xs); height: var(--ic-2xs); stroke-width: 3; }
+.avpick-o:has(input:checked) .avpick-ck { display: grid; }
+@media (max-width: 420px) { .avpick { grid-template-columns: repeat(5, 48px); gap: var(--sp-2); } .avpick-o { width: 48px; height: 48px; } .avpick-o .avatar { width: 40px; height: 40px; } }

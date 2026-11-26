@@ -1,6 +1,7 @@
-//! Who is asking. Every request carries one identity: the owner (a browser session), one of the
-//! owner's devices, a project's agent, or the consultant (admin). There is no anonymous access to
-//! anything but the sign-in page and static files.
+//! Who is asking. Every request carries one identity: a person in a browser (the admin or someone
+//! they invited; still called the owner in the code, since everyone has the owner's rights apart
+//! from inviting, D-272), one of the owner's devices, a project's agent, or the consultant
+//! (admin). There is no anonymous access to anything but the sign-in pages and static files.
 
 use anyhow::{Context, bail};
 use rusqlite::{Connection, OptionalExtension, params};
@@ -9,10 +10,19 @@ use crate::util::{hash_secret, new_secret, now_ms};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Actor {
-    /// The owner in a browser. `method` is how the session started: `passkey` or `link`.
+    /// A person in a browser. `method` is how the session started: `passkey` or `link`.
     Owner {
         session_id: i64,
         method: String,
+        /// Who: a row of `people`.
+        person: i64,
+        /// The first person, who invites the others.
+        admin: bool,
+        /// Their username, email and icon are set (the first sign-in's step 2).
+        ready: bool,
+        /// Their username (or a stand-in until they pick one): what they do is recorded with it
+        /// (D-272).
+        name: String,
     },
     /// One of the owner's machines: the CLI, flow run.
     Device {
@@ -55,7 +65,7 @@ impl Actor {
 
     pub fn name(&self) -> String {
         match self {
-            Actor::Owner { .. } => "owner".into(),
+            Actor::Owner { name, .. } => name.clone(),
             Actor::Device { name, .. } | Actor::Admin { name, .. } | Actor::Builder { name, .. } => name.clone(),
             Actor::Project { slug, .. } => slug.clone(),
             Actor::System(what) => (*what).into(),
@@ -83,6 +93,22 @@ impl Actor {
 
     pub fn is_owner(&self) -> bool {
         matches!(self, Actor::Owner { .. })
+    }
+
+    /// The person in the browser, if it's one.
+    pub fn person(&self) -> Option<i64> {
+        match self {
+            Actor::Owner { person, .. } => Some(*person),
+            _ => None,
+        }
+    }
+
+    /// Only the admin invites people (D-273); everything else is the same for everyone (D-272).
+    pub fn require_admin(&self) -> Result<(), Forbidden> {
+        match self {
+            Actor::Owner { admin: true, .. } => Ok(()),
+            _ => Err(Forbidden("only the admin can do this")),
+        }
     }
 
     /// Owner-only actions (merge, push a tag, new project, settings) need a real browser session.
@@ -296,28 +322,75 @@ pub fn token_lookup(conn: &Connection, secret: &str, from: &str) -> anyhow::Resu
 // ---------------------------------------------------------------------------------------------
 // One-time links and browser sessions
 
+/// Setup, device and sign-in links work for 15 minutes; an invite for 7 days.
 pub const LINK_MINUTES: i64 = 15;
+pub const INVITE_MINUTES: i64 = 7 * 24 * 60;
 
-/// Creates a one-time sign-in link secret, valid for 15 minutes.
-pub fn create_login_link(conn: &Connection, purpose: &str) -> anyhow::Result<String> {
+/// What a one-time link does (D-273, D-274).
+pub mod purpose {
+    /// Makes the admin, or makes the admin anew when they lost their passkeys.
+    pub const SETUP: &str = "setup";
+    /// Someone new, invited by the admin.
+    pub const INVITE: &str = "invite";
+    /// A passkey for a new device, for the person the link names.
+    pub const DEVICE: &str = "device";
+    /// Signs the person it names in (tests, and links from before people).
+    pub const SIGNIN: &str = "signin";
+}
+
+/// A one-time link, read without using it up (the page a link opens) or as it's used.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Link {
+    pub purpose: String,
+    /// The person it signs in; None for someone new (setup without an admin, an invite).
+    pub person: Option<i64>,
+    pub made_by: Option<i64>,
+    pub expires_at: i64,
+}
+
+/// Creates a one-time link secret, valid for `minutes`.
+pub fn create_login_link(
+    conn: &Connection,
+    purpose: &str,
+    person: Option<i64>,
+    made_by: Option<i64>,
+    minutes: i64,
+) -> anyhow::Result<String> {
     // The prefix lets the log's redaction recognise it anywhere.
     let secret = new_secret("af_lnk_");
     let now = now_ms();
     conn.execute(
-        "INSERT INTO login_links (hash, purpose, created_at, expires_at) VALUES (?1, ?2, ?3, ?4)",
-        params![hash_secret(&secret), purpose, now, now + LINK_MINUTES * 60_000],
+        "INSERT INTO login_links (hash, purpose, created_at, expires_at, person_id, made_by) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![hash_secret(&secret), purpose, now, now + minutes * 60_000, person, made_by],
     )?;
     Ok(secret)
 }
 
-/// Uses up a link. Returns its purpose, or None if it's unknown, expired or already used.
-pub fn consume_login_link(conn: &Connection, secret: &str) -> anyhow::Result<Option<String>> {
+fn link_row(r: &rusqlite::Row) -> rusqlite::Result<Link> {
+    Ok(Link { purpose: r.get(0)?, person: r.get(1)?, made_by: r.get(2)?, expires_at: r.get(3)? })
+}
+
+/// A link that still works, without using it up.
+pub fn peek_login_link(conn: &Connection, secret: &str) -> anyhow::Result<Option<Link>> {
+    Ok(conn
+        .query_row(
+            "SELECT purpose, person_id, made_by, expires_at FROM login_links
+             WHERE hash = ?1 AND used_at IS NULL AND expires_at > ?2",
+            params![hash_secret(secret), now_ms()],
+            link_row,
+        )
+        .optional()?)
+}
+
+/// Uses up a link. None if it's unknown, expired or already used.
+pub fn consume_login_link(conn: &Connection, secret: &str) -> anyhow::Result<Option<Link>> {
     let now = now_ms();
     Ok(conn
         .query_row(
-            "UPDATE login_links SET used_at = ?1 WHERE hash = ?2 AND used_at IS NULL AND expires_at > ?1 RETURNING purpose",
+            "UPDATE login_links SET used_at = ?1 WHERE hash = ?2 AND used_at IS NULL AND expires_at > ?1
+             RETURNING purpose, person_id, made_by, expires_at",
             params![now, hash_secret(secret)],
-            |r| r.get(0),
+            link_row,
         )
         .optional()?)
 }
@@ -327,9 +400,10 @@ pub struct SessionLimits {
     pub max_ms: i64,
 }
 
-/// Starts an owner session and returns the cookie secret.
+/// Starts a person's browser session and returns the cookie secret.
 pub fn create_session(
     conn: &Connection,
+    person: i64,
     method: &str,
     limits: &SessionLimits,
     user_agent: Option<&str>,
@@ -338,9 +412,9 @@ pub fn create_session(
     let secret = new_secret("af_ses_");
     let now = now_ms();
     conn.execute(
-        "INSERT INTO web_sessions (hash, method, created_at, last_seen_at, expires_at, user_agent, ip)
-         VALUES (?1, ?2, ?3, ?3, ?4, ?5, ?6)",
-        params![hash_secret(&secret), method, now, now + limits.max_ms, user_agent, ip],
+        "INSERT INTO web_sessions (hash, method, created_at, last_seen_at, expires_at, user_agent, ip, person_id)
+         VALUES (?1, ?2, ?3, ?3, ?4, ?5, ?6, ?7)",
+        params![hash_secret(&secret), method, now, now + limits.max_ms, user_agent, ip, person],
     )?;
     Ok(secret)
 }
@@ -350,13 +424,26 @@ pub fn session_actor(conn: &Connection, secret: &str, limits: &SessionLimits) ->
     let now = now_ms();
     let row = conn
         .query_row(
-            "SELECT id, method, last_seen_at FROM web_sessions
-             WHERE hash = ?1 AND revoked_at IS NULL AND expires_at > ?2",
+            "SELECT s.id, s.method, s.last_seen_at, p.id, p.admin, p.username IS NOT NULL AND p.icon != '',
+                    COALESCE(p.username, CASE WHEN p.admin THEN 'the admin' ELSE 'person ' || p.id END)
+             FROM web_sessions s
+             JOIN people p ON p.id = s.person_id AND p.removed_at IS NULL
+             WHERE s.hash = ?1 AND s.revoked_at IS NULL AND s.expires_at > ?2",
             params![hash_secret(secret), now],
-            |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?)),
+            |r| {
+                Ok((
+                    r.get::<_, i64>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, i64>(2)?,
+                    r.get::<_, i64>(3)?,
+                    r.get::<_, i64>(4)?,
+                    r.get::<_, bool>(5)?,
+                    r.get::<_, String>(6)?,
+                ))
+            },
         )
         .optional()?;
-    let Some((id, method, last_seen)) = row else { return Ok(None) };
+    let Some((id, method, last_seen, person, admin, ready, name)) = row else { return Ok(None) };
     if now - last_seen > limits.idle_ms {
         conn.execute("UPDATE web_sessions SET revoked_at = ?1 WHERE id = ?2", params![now, id])?;
         return Ok(None);
@@ -365,7 +452,7 @@ pub fn session_actor(conn: &Connection, secret: &str, limits: &SessionLimits) ->
     if now - last_seen > 60_000 {
         conn.execute("UPDATE web_sessions SET last_seen_at = ?1 WHERE id = ?2", params![now, id])?;
     }
-    Ok(Some(Actor::Owner { session_id: id, method }))
+    Ok(Some(Actor::Owner { session_id: id, method, person, admin: admin != 0, ready, name }))
 }
 
 pub fn end_session(conn: &Connection, session_id: i64) -> anyhow::Result<()> {
@@ -415,9 +502,11 @@ mod tests {
     fn login_links_work_once() {
         let db = Db::open_memory();
         db.call_blocking(|c| {
-            let link = create_login_link(c, "signin")?;
-            assert_eq!(consume_login_link(c, &link)?.as_deref(), Some("signin"));
+            let link = create_login_link(c, purpose::SIGNIN, None, None, LINK_MINUTES)?;
+            assert_eq!(peek_login_link(c, &link)?.map(|l| l.purpose).as_deref(), Some("signin"), "peeking keeps it");
+            assert_eq!(consume_login_link(c, &link)?.map(|l| l.purpose).as_deref(), Some("signin"));
             assert_eq!(consume_login_link(c, &link)?, None);
+            assert_eq!(peek_login_link(c, &link)?, None, "used up");
             c.execute("UPDATE login_links SET used_at = NULL, expires_at = 0", [])?;
             assert_eq!(consume_login_link(c, &link)?, None, "expired");
             Ok(())
@@ -429,8 +518,9 @@ mod tests {
     fn sessions_expire_when_idle() {
         let db = Db::open_memory();
         db.call_blocking(|c| {
-            let s = create_session(c, "link", &limits(), Some("test"), None)?;
-            assert!(matches!(session_actor(c, &s, &limits())?, Some(Actor::Owner { .. })));
+            let p = crate::people::create(c, true, None, webauthn_rs::prelude::Uuid::new_v4())?;
+            let s = create_session(c, p, "link", &limits(), Some("test"), None)?;
+            assert!(matches!(session_actor(c, &s, &limits())?, Some(Actor::Owner { admin: true, .. })));
             c.execute("UPDATE web_sessions SET last_seen_at = 0", [])?;
             assert_eq!(session_actor(c, &s, &limits())?, None);
             Ok(())

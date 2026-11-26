@@ -382,9 +382,8 @@ fn admin_sockets() -> Vec<PathBuf> {
     v
 }
 
-/// `sudo flow server add-passkey`: asks the server on this machine, over its local socket that
-/// only root may use, for a one-time link that adds a passkey.
-pub fn add_passkey(socket: Option<&Path>) -> anyhow::Result<()> {
+/// Asks the server on this machine over its local socket, which only root may use (D-273, D-274).
+fn admin_request(socket: Option<&Path>, req: Value) -> anyhow::Result<Value> {
     use std::io::{BufRead, BufReader};
     let candidates = match socket {
         Some(s) => vec![s.to_path_buf()],
@@ -402,21 +401,110 @@ pub fn add_passkey(socket: Option<&Path>) -> anyhow::Result<()> {
             }
         };
         stream.set_read_timeout(Some(Duration::from_secs(10)))?;
-        writeln!(stream, "{}", json!({"request": "add_passkey"}))?;
+        writeln!(stream, "{req}")?;
         let mut line = String::new();
         BufReader::new(&stream).read_line(&mut line)?;
         let v: Value = serde_json::from_str(&line).context("a broken answer from the server")?;
         if let Some(e) = v["error"].as_str() {
-            bail!("{e}");
+            bail!("{}", printable(e));
         }
-        println!("Open this within 15 minutes to add a passkey (it works once):");
-        println!("  {}", v["url"].as_str().unwrap_or(""));
-        return Ok(());
+        // Say which server answered: another user's socket can answer too, and root should see
+        // whose it was (the security review).
+        let owner = std::os::unix::fs::MetadataExt::uid(&std::fs::metadata(&path)?);
+        eprintln!("(the AgentFlow server at {}, run by uid {owner})", path.display());
+        return Ok(v);
     }
     if tried.is_empty() {
         bail!("no AgentFlow server is running on this machine (no admin socket found)");
     }
     bail!("couldn't reach the server's socket: {} (run it with sudo)", tried.join("; "))
+}
+
+/// A string from the server, without control characters (it's printed on root's terminal).
+fn printable(s: &str) -> String {
+    s.chars().filter(|c| !c.is_control()).collect()
+}
+
+/// A field of the server's answer, printable.
+fn field(v: &Value, k: &str) -> String {
+    printable(v[k].as_str().unwrap_or(""))
+}
+
+/// "15 minutes" when it's that, otherwise "until Wed 2 Dec 15:40".
+fn works_until(v: &Value) -> String {
+    let at = v["expires_at"].as_i64().unwrap_or(0);
+    let left = at - crate::util::now_ms();
+    if left <= 16 * 60_000 {
+        "for 15 minutes".into()
+    } else {
+        let tz = crate::tz::Tz::default();
+        format!("until {} {}", tz.day_label(at).split(' ').next().unwrap_or(""), tz.short(at))
+    }
+}
+
+/// `sudo flow server setup`: a link that makes the admin, or makes the admin anew when they lost
+/// their passkeys (their passkeys go and their browsers are signed out when it's used).
+pub fn server_setup(socket: Option<&Path>) -> anyhow::Result<()> {
+    let status = admin_request(socket, json!({"request": "status"}))?;
+    let at = status["url"].as_str().unwrap_or("this server").to_owned();
+    let mut confirm = String::new();
+    if let Some(admin) = status["admin"].as_object() {
+        let name = printable(admin["name"].as_str().unwrap_or("the admin"));
+        let others = status["people"].as_i64().unwrap_or(1) - 1;
+        println!(
+            "This AgentFlow already has an admin: {name} ({} passkey{}, {} signed-in browser{}).",
+            admin["passkeys"],
+            if admin["passkeys"] == 1 { "" } else { "s" },
+            admin["browsers"],
+            if admin["browsers"] == 1 { "" } else { "s" }
+        );
+        println!("Setting it up again makes the admin anew: when the link is used, {name}'s passkeys,");
+        println!("unused links and devices' notifications are removed and their browsers signed out.");
+        println!("Projects, records and the {others} other {} stay.", if others == 1 { "person" } else { "people" });
+        let prompt =
+            if admin["username"].is_string() { "Type the admin's username to go on" } else { "Type yes to go on" };
+        confirm = ask(prompt, "")?;
+    } else {
+        println!("AgentFlow at {at} has no admin yet.");
+    }
+    let v = admin_request(socket, json!({"request": "setup", "confirm": confirm}))?;
+    if v["again"].as_bool() == Some(true) {
+        println!("Open this link to make a new passkey for the admin.");
+    } else {
+        println!("Open this link to make the admin account and its first passkey.");
+    }
+    println!("It works once, {}:", works_until(&v));
+    println!("  {}", field(&v, "url"));
+    if v["again"].as_bool() != Some(true) {
+        println!("Then you pick your username, email and icon.");
+    }
+    Ok(())
+}
+
+/// `sudo flow server invite`: a link for someone new, from the admin; it works once, for 7 days.
+pub fn server_invite(socket: Option<&Path>) -> anyhow::Result<()> {
+    let v = admin_request(socket, json!({"request": "invite"}))?;
+    println!("Send this link to the person you're inviting.");
+    println!("It works once, {}:", works_until(&v));
+    println!("  {}", field(&v, "url"));
+    println!("They make a passkey there and pick their name and icon.");
+    println!("Settings › People lists it until it's used, with Withdraw.");
+    Ok(())
+}
+
+/// `sudo flow server add-device [username]`: a link that adds a passkey for a new device to that
+/// person's account (the admin's if no one is named).
+pub fn server_add_device(socket: Option<&Path>, username: Option<&str>) -> anyhow::Result<()> {
+    let v = admin_request(socket, json!({"request": "add_device", "username": username.unwrap_or("")}))?;
+    let who = field(&v, "person");
+    let admin = if v["admin"].as_bool() == Some(true) { " (the admin)" } else { "" };
+    println!("Open this link on the new device to add a passkey to {who}{admin}.");
+    println!("It works once, {}:", works_until(&v));
+    println!("  {}", field(&v, "url"));
+    if username.is_none() {
+        println!("For someone else: sudo flow server add-device <username>");
+    }
+    Ok(())
 }
 
 /// Asks a question on the terminal; Enter takes the default.

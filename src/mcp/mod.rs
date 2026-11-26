@@ -60,8 +60,9 @@ issues, comments, commits), even if a token would let you: draft them with `flow
 owner to try, add it with `add_to_test` (a category of your choosing, and the build it comes with); open items \
 come along with every release and build until the owner tried them: they mark each Works, Problem or Skip on the \
 Builds tab (you hear it as news), and you mark what they tell you with `resolve_tests`. For heavy builds and \
-tests, use the build server (hello's `builds` says which and whether it's online): `flow remote [--fetch \
-target/release/app] -- cargo build --release` runs it there and prints the output; exit code 75 means it's \
+tests, use the build server (hello's `builds` says which and whether it's online): `flow remote --name \
+\"Release build\" [--fetch target/release/app] -- cargo build --release` runs it there (every job needs a \
+name, its title in AgentFlow) and prints the output; exit code 75 means it's \
 offline, so build here; 78 means none is picked for your project and names the online ones for `--server`. \
 The owner's plan is shared by every agent: `usage` (or `flow usage`) tells how much of its 5-hour and weekly \
 windows is used and what your tokens cost; look before a big job or many subagents. Your token can \

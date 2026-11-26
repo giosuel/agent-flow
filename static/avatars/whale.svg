@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" fill="none" stroke-linecap="round" stroke-linejoin="round">
+<defs>
+<linearGradient id="whale-bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#0F2036"/><stop offset="1" stop-color="#070F1C"/></linearGradient>
+<linearGradient id="whale-b" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#BFDBFE"/><stop offset="1" stop-color="#2563EB"/></linearGradient>
+<linearGradient id="whale-v" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#241A45"/><stop offset="1" stop-color="#120C24"/></linearGradient>
+<radialGradient id="whale-e" cx=".5" cy=".5" r=".5"><stop offset="0" stop-color="#F5F3FF"/><stop offset="1" stop-color="#BFDBFE" stop-opacity="0"/></radialGradient>
+</defs>
+<circle cx="32" cy="32" r="32" fill="url(#whale-bg)"/>
+<circle cx="32" cy="32" r="30.5" stroke="#2563EB" stroke-opacity=".55" stroke-width="1.2" stroke-dasharray="2 4"/>
+
+<path d="M26 14 C26 10 23 8 21 9 M26 14 C27 10 30 8 32 10" stroke="#BFDBFE" stroke-width="1.8"/>
+<path d="M8 36 C8 24 18 20 30 20 C42 20 48 26 50 33 L57 27 C59 33 58 39 53 42 C49 50 40 52 29 52 C16 52 8 46 8 36 Z" fill="url(#whale-b)"/>
+<path d="M12 42 C18 48 30 49 42 46" stroke="#EFF6FF" stroke-opacity=".6" stroke-width="1.6"/>
+<rect x="13" y="29" width="22" height="10" rx="5" fill="url(#whale-v)"/>
+<circle cx="19" cy="34" r="4.4" fill="url(#whale-e)"/><circle cx="29" cy="34" r="4.4" fill="url(#whale-e)"/><circle cx="19" cy="34" r="2" fill="#F5F3FF"/><circle cx="29" cy="34" r="2" fill="#F5F3FF"/>
+
+</svg>

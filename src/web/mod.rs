@@ -5,6 +5,7 @@ pub(crate) mod admin_socket;
 mod api;
 mod approvals;
 mod assets;
+pub(crate) mod avatars;
 pub(crate) mod builders;
 mod builds;
 pub(crate) mod consultant;
@@ -23,6 +24,7 @@ mod decisions;
 mod editor;
 mod handbook;
 mod icons;
+mod links;
 mod log;
 mod machine;
 mod new_project;
@@ -30,9 +32,11 @@ mod notes;
 mod notifications;
 mod overview;
 mod pages;
+mod profile;
 mod projectdoc;
 mod projects;
 mod pwa;
+mod qr;
 mod settings;
 mod steps;
 mod tone;
@@ -144,6 +148,8 @@ pub fn router(state: AppState) -> Router {
     let mcp = crate::mcp::service(state.clone());
     let app = Router::new()
         .merge(pages::routes())
+        .merge(links::routes())
+        .merge(profile::routes())
         .merge(settings::routes())
         .merge(projects::routes())
         .merge(api::routes())
@@ -203,7 +209,8 @@ fn dialog_parent(uri: &axum::http::Uri) -> Option<(String, &'static str)> {
     let parts: Vec<&str> = path.split('/').collect();
     let record = |s: &str| {
         s.split_once('-').is_some_and(|(k, n)| {
-            ["T", "Q", "D", "ADR", "PR", "TT", "S", "F", "N"].contains(&k)
+            // Not notes: they are pages of their own (D-264).
+            ["T", "Q", "D", "ADR", "PR", "TT", "S", "F"].contains(&k)
                 && !n.is_empty()
                 && n.bytes().all(|b| b.is_ascii_digit())
         })
@@ -489,6 +496,7 @@ async fn shutdown_signal() {
 fn is_public(path: &str) -> bool {
     path == "/login"
         || path.starts_with("/login/")
+        || links::is_public(path)
         || assets::is_asset(path)
         || pwa::is_public(path)
         || approvals::is_public(path)
@@ -510,7 +518,10 @@ fn is_unlogged(path: &str) -> bool {
         || path == "/api/sync"
         // A job's output, asked for every second by each waiting `flow remote` and the job's page:
         // the job is in the Log already, with its outcome and lines (the owner, 2026-11-17).
-        || (path.ends_with("/output") && (path.starts_with("/api/remote/jobs/") || path.starts_with("/machine/jobs/")))
+        || (path.ends_with("/output")
+            && (path.starts_with("/api/remote/jobs/")
+                || path.starts_with("/machines/jobs/")
+                || path.starts_with("/machine/jobs/")))
 }
 
 fn client_ip(config: &Config, peer: Option<IpAddr>, headers: &HeaderMap) -> String {
@@ -619,6 +630,17 @@ async fn authenticate(State(state): State<AppState>, jar: CookieJar, mut req: Re
         }
     };
 
+    // Someone signed in who hasn't picked their username, email and icon yet does that first (the
+    // first sign-in's step 2, D-270); the pages they need on the way stay open.
+    if let Actor::Owner { ready: false, .. } = actor
+        && req.method() == axum::http::Method::GET
+        && wants_html(req.headers())
+        && !profile::open_before_profile(&path)
+    {
+        let to = if path == "/" { "/welcome".to_owned() } else { format!("/welcome?next={path}") };
+        return Redirect::to(&to).into_response();
+    }
+
     // A builder's token opens the builder's own endpoints and nothing else.
     if matches!(actor, Actor::Builder { .. }) && !path.starts_with("/api/builders/") {
         return (
@@ -630,7 +652,10 @@ async fn authenticate(State(state): State<AppState>, jar: CookieJar, mut req: Re
 
     // A browser session may only change things from AgentFlow's own pages, so another site can't
     // make the owner's browser press a button (CSRF). Tokens aren't sent by browsers on their own.
-    if via_cookie && !is_safe(req.method()) && !same_origin(&state.config, req.headers()) {
+    // The sign-in and link pages too, cookie or not (the security review): another site mustn't
+    // sign a browser in as someone else (login CSRF).
+    let signs_in = links::is_public(&path) || path.starts_with("/login/");
+    if (via_cookie || signs_in) && !is_safe(req.method()) && !same_origin(&state.config, req.headers()) {
         let e = Entry::new(
             &actor,
             Via::Page,

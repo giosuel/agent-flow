@@ -45,7 +45,7 @@ the same with every option.
 | `flow screenshot <file> --name N --category C` | Upload a screenshot: PNG, JPEG or WebP up to 10 MB. `--description`, `--record T-12`, `--design-url`, `--state`. |
 | `flow note <file> --name N --category C` | Hand in a file as a note, up to 25 MB. `--record`, `--resurface`, `--replaces N-6`. |
 | `flow time [--on T-12] -- <command>` | Run a command and log its wall time, CPU and peak memory on a task, step or PR. Exits with the command's code. |
-| `flow remote [--fetch path] -- <command>` | Run a build or test on a build server and stream its output. See [Build servers](/docs/build-servers/). |
+| `flow remote --name "…" [--fetch path] -- <command>` | Run a build or test on a build server and stream its output. See [Build servers](/docs/build-servers/). |
 | `flow contribute pr\|issue\|comment\|commits` | Draft a contribution for someone else's repository. See [Contributions](/docs/concepts/contributions/). |
 | `flow usage [--all] [--json]` | The plan's 5-hour and weekly windows, and what this project's tokens cost at API prices. |
 | `flow sync [--all]` | Send what's new in the folder's Claude Code conversations. Hooks run it after each reply. |
@@ -64,7 +64,9 @@ These wait for your approval in the browser, every time. Agents' tokens can't as
 | `flow backup` | Back up the database and export every project now. |
 | `flow import-prs <project> 300-374` | Bring a project's older PRs in as records. |
 | `flow builder add` / `list` / `edit` / `remove` / `status` | Build machines. See [Build servers](/docs/build-servers/). |
-| `sudo flow server add-passkey` | On the server: a one-time link (15 minutes) to add a passkey. |
+| `sudo flow server setup` | On the server: a one-time link (15 minutes) that makes the admin, or makes the admin anew when they lost every passkey. |
+| `sudo flow server invite` | On the server: a link for someone new (once, for 7 days). Only the admin invites. |
+| `sudo flow server add-device [username]` | On the server: a one-time link (15 minutes) that adds a passkey for a new device, to the admin's account or `username`'s. |
 
 ## The server's commands
 

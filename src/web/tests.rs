@@ -88,9 +88,39 @@ impl TestServer {
     }
 
     /// Signs in through a one-time link and returns the session cookie.
+    /// The admin, with a profile, made the first time it's asked for.
+    pub async fn admin(&self) -> i64 {
+        self.db
+            .call(|c| {
+                if let Some(a) = crate::people::admin(c)? {
+                    return Ok(a.id);
+                }
+                let id = crate::people::create(c, true, None, webauthn_rs::prelude::Uuid::new_v4())?;
+                c.execute(
+                    "UPDATE people SET username = 'giosuel', email = 'me@giosuel.ch', icon = 'owl' WHERE id = ?1",
+                    [id],
+                )?;
+                Ok(id)
+            })
+            .await
+            .unwrap()
+    }
+
+    /// Signs the admin in through a one-time link and returns the session cookie.
     pub async fn owner_cookie(&self) -> String {
-        let link = self.db.call(|c| auth::create_login_link(c, "signin")).await.unwrap();
-        let res = self.http.post(self.url(&format!("/login/link/{link}"))).send().await.unwrap();
+        let admin = self.admin().await;
+        self.cookie_for(admin).await
+    }
+
+    /// Signs a person in through a one-time link and returns the session cookie.
+    pub async fn cookie_for(&self, person: i64) -> String {
+        let link = self
+            .db
+            .call(move |c| auth::create_login_link(c, auth::purpose::SIGNIN, Some(person), None, auth::LINK_MINUTES))
+            .await
+            .unwrap();
+        let res =
+            self.http.post(self.url(&format!("/login/link/{link}"))).header(ORIGIN, &self.base).send().await.unwrap();
         assert_eq!(res.status(), StatusCode::SEE_OTHER);
         let cookie = res.headers()[SET_COOKIE].to_str().unwrap();
         cookie.split(';').next().unwrap().to_owned()
@@ -144,12 +174,16 @@ async fn tokens_identify_and_are_logged() {
 #[tokio::test]
 async fn login_link_signs_in_once() {
     let s = TestServer::start().await;
-    let link = s.db.call(|c| auth::create_login_link(c, "signin")).await.unwrap();
+    let admin = s.admin().await;
+    let link =
+        s.db.call(move |c| auth::create_login_link(c, auth::purpose::SIGNIN, Some(admin), None, auth::LINK_MINUTES))
+            .await
+            .unwrap();
     // Opening the link only shows a confirmation; a link preview can't use it up.
     let page = s.http.get(s.url(&format!("/login/link/{link}"))).send().await.unwrap().text().await.unwrap();
     assert!(page.contains("Sign in on this device?"));
 
-    let res = s.http.post(s.url(&format!("/login/link/{link}"))).send().await.unwrap();
+    let res = s.http.post(s.url(&format!("/login/link/{link}"))).header(ORIGIN, &s.base).send().await.unwrap();
     assert_eq!(res.status(), StatusCode::SEE_OTHER);
     let set = res.headers()[SET_COOKIE].to_str().unwrap().to_owned();
     assert!(set.contains("HttpOnly") && set.contains("SameSite=Lax"));
@@ -159,32 +193,380 @@ async fn login_link_signs_in_once() {
     assert_eq!(page.status(), StatusCode::OK);
     assert!(page.text().await.unwrap().contains("Dashboard"));
 
-    let again = s.http.post(s.url(&format!("/login/link/{link}"))).send().await.unwrap();
+    let again = s.http.post(s.url(&format!("/login/link/{link}"))).header(ORIGIN, &s.base).send().await.unwrap();
     assert_eq!(again.status(), StatusCode::GONE);
 }
 
-/// `sudo flow server add-passkey` (and the first start) hand out a link that leads straight to
-/// adding a passkey, logged and announced.
+/// The way in (the owner, 2026-11-25: D-273, D-274): `sudo flow server setup` makes the admin,
+/// `invite` someone new, `add-device` a link for a new device; setup again makes the admin anew.
+/// Each link page only shows itself; using the link signs in (here with the link itself: the test
+/// server's plain http can't do passkeys).
 #[tokio::test]
-async fn a_passkey_link_leads_to_adding_a_passkey() {
+async fn people_get_in_with_setup_invite_and_device_links() {
     let s = TestServer::start().await;
-    let url = crate::web::admin_socket::passkey_link(&s.state, "root").await.unwrap();
-    let link = url.rsplit('/').next().unwrap().to_owned();
-    let res = s.http.post(s.url(&format!("/login/link/{link}"))).send().await.unwrap();
-    assert_eq!(res.headers()["location"], "/settings?add_passkey=1#passkeys");
-    let cookie = res.headers()[SET_COOKIE].to_str().unwrap().split(';').next().unwrap().to_owned();
-    let page = s
-        .http
-        .get(s.url("/settings?add_passkey=1"))
-        .header(COOKIE, &cookie)
-        .send()
-        .await
-        .unwrap()
-        .text()
+    let ask = |req: serde_json::Value| {
+        let state = s.state.clone();
+        async move { crate::web::admin_socket::test_link(&state, req).await }
+    };
+    let secret = |v: &serde_json::Value| v["url"].as_str().unwrap().rsplit('/').next().unwrap().to_owned();
+    let cookie_of =
+        |res: &reqwest::Response| res.headers()[SET_COOKIE].to_str().unwrap().split(';').next().unwrap().to_owned();
+    let whoami = |cookie: String| {
+        let s = &s;
+        async move {
+            // The welcome page works before someone picked their name; nothing else does.
+            let res = s.http.get(s.url("/welcome")).header(COOKIE, &cookie).send().await.unwrap();
+            res.status()
+        }
+    };
+    assert!(ask(json!({"request": "invite"})).await.is_err(), "nobody to invite from yet");
+    assert!(ask(json!({"request": "add_passkey"})).await.unwrap_err().to_string().contains("add-device"));
+
+    // Setup makes the admin.
+    let v = ask(json!({"request": "setup"})).await.unwrap();
+    assert!(v["url"].as_str().unwrap().contains("/setup/af_lnk_") && v["again"] == false, "{v}");
+    let setup = secret(&v);
+    let page = s.http.get(s.url(&format!("/setup/{setup}"))).send().await.unwrap().text().await.unwrap();
+    assert!(page.contains("Set up AgentFlow") && page.contains("You'll be this AgentFlow's admin"), "{page}");
+    assert!(page.contains("Sign in with this link"), "no passkeys on plain http: {page}");
+    // The link is for /setup/ only: the wrong page refuses it and leaves it unused.
+    let wrong = s.http.post(s.url(&format!("/device/{setup}"))).header(ORIGIN, &s.base).send().await.unwrap();
+    assert_eq!(wrong.status(), StatusCode::GONE);
+    let res = s.http.post(s.url(&format!("/setup/{setup}"))).header(ORIGIN, &s.base).send().await.unwrap();
+    assert_eq!(res.status(), StatusCode::SEE_OTHER);
+    let admin_cookie = cookie_of(&res);
+    assert_eq!(whoami(admin_cookie.clone()).await, StatusCode::OK);
+    let again = s.http.post(s.url(&format!("/setup/{setup}"))).header(ORIGIN, &s.base).send().await.unwrap();
+    assert_eq!(again.status(), StatusCode::GONE, "it works once");
+    let admin = s.db.call(|c| crate::people::admin(c)).await.unwrap().unwrap();
+    assert!(admin.admin && admin.username.is_none());
+
+    // An invite makes someone new, who isn't the admin.
+    let v = ask(json!({"request": "invite"})).await.unwrap();
+    assert!(v["url"].as_str().unwrap().contains("/invite/"), "{v}");
+    let invite = secret(&v);
+    let page = s.http.get(s.url(&format!("/invite/{invite}"))).send().await.unwrap().text().await.unwrap();
+    assert!(page.contains("You're invited") && page.contains("This invite works once, until"), "{page}");
+    let res = s.http.post(s.url(&format!("/invite/{invite}"))).header(ORIGIN, &s.base).send().await.unwrap();
+    assert_eq!(res.status(), StatusCode::SEE_OTHER);
+    assert_eq!(res.headers()["location"], "/welcome?next=/settings?add_passkey=1", "who are you first");
+    let mira_cookie = cookie_of(&res);
+    let everyone = s.db.call(|c| crate::people::list(c)).await.unwrap();
+    assert_eq!(everyone.len(), 2);
+    let mira = everyone.iter().find(|p| !p.admin).unwrap().clone();
+    assert_eq!(mira.invited_by, Some(admin.id));
+
+    // Only the admin's invites work: one made by someone else is refused and stays unused.
+    let forged = s
+        .db
+        .call(move |c| auth::create_login_link(c, auth::purpose::INVITE, None, Some(mira.id), auth::INVITE_MINUTES))
         .await
         .unwrap();
-    assert!(page.contains("Add a passkey for this device"), "{page}");
-    assert!(s.log_summaries().await.iter().any(|l| l.contains("passkey link made on the server, as root")));
+    let res = s.http.post(s.url(&format!("/invite/{forged}"))).header(ORIGIN, &s.base).send().await.unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(s.db.call(|c| crate::people::list(c)).await.unwrap().len(), 2, "nobody new");
+
+    // A device link for someone named signs in as them; an unknown name is refused.
+    s.db.call(move |c| Ok(c.execute("UPDATE people SET username = 'mira' WHERE id = ?1", [mira.id])?)).await.unwrap();
+    assert!(ask(json!({"request": "add_device", "username": "nobody"})).await.is_err());
+    let v = ask(json!({"request": "add_device", "username": "Mira"})).await.unwrap();
+    assert_eq!(v["person"], "mira");
+    let device = secret(&v);
+    let page = s.http.get(s.url(&format!("/device/{device}"))).send().await.unwrap().text().await.unwrap();
+    assert!(page.contains("Add this device") && page.contains("<strong>mira</strong>"), "{page}");
+
+    // People can't touch each other's browsers.
+    let admin_sessions: Vec<i64> =
+        s.db.call(move |c| {
+            let mut st = c.prepare("SELECT id FROM web_sessions WHERE person_id = ?1")?;
+            Ok(st.query_map([admin.id], |r| r.get(0))?.collect::<Result<_, _>>()?)
+        })
+        .await
+        .unwrap();
+    let res = s
+        .http
+        .post(s.url(&format!("/settings/sessions/{}/end", admin_sessions[0])))
+        .header(COOKIE, &mira_cookie)
+        .header(ORIGIN, &s.base)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::NOT_FOUND, "not mira's browser");
+    assert_eq!(whoami(admin_cookie.clone()).await, StatusCode::OK);
+
+    // Setup again needs the admin typed back, and signs out the admin's browsers when it's used.
+    assert!(ask(json!({"request": "setup", "confirm": "mira"})).await.is_err());
+    let v = ask(json!({"request": "setup", "confirm": "yes"})).await.unwrap();
+    assert_eq!(v["again"], true);
+    let page = s.http.get(s.url(&format!("/setup/{}", secret(&v)))).send().await.unwrap().text().await.unwrap();
+    assert!(page.contains("This makes a new passkey for <strong>the admin</strong>"), "{page}");
+    let res = s.http.post(s.url(&format!("/setup/{}", secret(&v)))).header(ORIGIN, &s.base).send().await.unwrap();
+    assert_eq!(res.status(), StatusCode::SEE_OTHER);
+    assert_ne!(whoami(admin_cookie).await, StatusCode::OK, "the admin's old browser is signed out");
+    assert_eq!(whoami(cookie_of(&res)).await, StatusCode::OK);
+    assert_eq!(whoami(mira_cookie).await, StatusCode::OK, "the others stay");
+    assert_eq!(s.db.call(|c| crate::people::list(c)).await.unwrap().len(), 2, "still the same admin");
+
+    // An expired link shows that it expired.
+    let old =
+        s.db.call(move |c| auth::create_login_link(c, auth::purpose::DEVICE, Some(mira.id), None, auth::LINK_MINUTES))
+            .await
+            .unwrap();
+    s.db.call(|c| Ok(c.execute("UPDATE login_links SET expires_at = 0 WHERE used_at IS NULL", [])?)).await.unwrap();
+    let res = s.http.get(s.url(&format!("/device/{old}"))).send().await.unwrap();
+    assert_eq!(res.status(), StatusCode::GONE);
+    assert!(res.text().await.unwrap().contains("doesn't work any more"));
+    let log = s.log_summaries().await;
+    assert!(log.iter().any(|l| l.contains("An invite was made on the server, as root")), "{log:?}");
+    assert!(log.iter().any(|l| l.contains("invite link refused")), "{log:?}");
+}
+
+/// The first sign-in's step 2 (D-270): someone new picks a username, an email and an icon before
+/// anything else opens.
+#[tokio::test]
+async fn someone_new_says_who_they_are_first() {
+    let s = TestServer::start().await;
+    let admin = s.admin().await;
+    let mira =
+        s.db.call(move |c| crate::people::create(c, false, Some(admin), webauthn_rs::prelude::Uuid::new_v4()))
+            .await
+            .unwrap();
+    let cookie = s.cookie_for(mira).await;
+    let res = s
+        .http
+        .get(s.url("/p/vinculum?tab=notes"))
+        .header(COOKIE, &cookie)
+        .header("accept", "text/html")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::SEE_OTHER);
+    assert_eq!(res.headers()["location"], "/welcome?next=/p/vinculum");
+    let page = owner_page(&s, &cookie, "/welcome?next=/p/vinculum").await;
+    assert!(page.contains("Welcome! Who are you?") && page.contains(r#"name="next" value="/p/vinculum""#), "{page}");
+    assert_eq!(page.matches(r#"name="icon""#).count(), 15, "the 15 icons");
+    let post = |form: Vec<(&'static str, &'static str)>| {
+        let (s, cookie) = (&s, cookie.clone());
+        async move {
+            s.http
+                .post(s.url("/welcome"))
+                .header(COOKIE, &cookie)
+                .header(ORIGIN, &s.base)
+                .form(&form)
+                .send()
+                .await
+                .unwrap()
+        }
+    };
+    let res = post(vec![("username", "giosuel"), ("email", "m@x.org"), ("icon", "fox"), ("next", "/p/vinculum")]).await;
+    assert_eq!(res.status(), StatusCode::UNPROCESSABLE_ENTITY, "taken");
+    assert!(res.text().await.unwrap().contains("already called"));
+    let res = post(vec![("username", "Mira"), ("email", "m@x.org"), ("icon", "fox"), ("next", "//evil.example")]).await;
+    assert_eq!(res.status(), StatusCode::SEE_OTHER);
+    assert_eq!(res.headers()["location"], "/", "only paths on this site");
+    let p = s.db.call(move |c| crate::people::get(c, mira)).await.unwrap().unwrap();
+    assert_eq!((p.username.as_deref(), p.email.as_str(), p.icon.as_str()), (Some("mira"), "m@x.org", "fox"));
+    let res = s.http.get(s.url("/")).header(COOKIE, &cookie).header("accept", "text/html").send().await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK, "everything opens now");
+}
+
+/// You and the others (D-270, D-272, D-273, D-274): your icon at the top right with your own
+/// settings; Settings › Profile, Passkeys' link for another device, People with the admin's
+/// invites and sign-in links, and withdrawing a link.
+#[tokio::test]
+async fn settings_for_you_and_the_people() {
+    let s = TestServer::start().await;
+    let admin = s.admin().await;
+    let cookie = s.owner_cookie().await;
+    let page = owner_page(&s, &cookie, "/").await;
+    let header = &page[page.find("<header").unwrap()..page.find("</header>").unwrap()];
+    assert!(header.contains(r#"<details class="me-menu" data-menu>"#) && header.contains("me@giosuel.ch"), "{header}");
+    assert!(header.contains("/static/avatars/owl.svg") && header.contains(">Sign out<"), "{header}");
+    let foot = &page[page.find("<footer").unwrap()..];
+    assert!(!foot.contains("Sign out"), "Sign out moved to the menu: {foot}");
+
+    // Profile.
+    let profile = owner_page(&s, &cookie, "/settings?s=profile").await;
+    assert!(profile.contains(r#"value="giosuel""#) && profile.contains(r#"value="owl" checked"#), "{profile}");
+    let post = |path: &'static str, form: Vec<(&'static str, &'static str)>, cookie: String| {
+        let s = &s;
+        async move {
+            s.http.post(s.url(path)).header(COOKIE, &cookie).header(ORIGIN, &s.base).form(&form).send().await.unwrap()
+        }
+    };
+    let res = post(
+        "/settings/profile",
+        vec![("username", "gio"), ("email", "me@giosuel.ch"), ("icon", "fox")],
+        cookie.clone(),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::SEE_OTHER);
+    let me = s.db.call(move |c| crate::people::get(c, admin)).await.unwrap().unwrap();
+    assert_eq!((me.username.as_deref(), me.icon.as_str()), (Some("gio"), "fox"));
+
+    // A link for another device of your own, with its QR code.
+    let res = post("/settings/passkeys/link", vec![], cookie.clone()).await;
+    let text = res.text().await.unwrap();
+    assert!(text.contains("/device/af_lnk_") && text.contains(r#"<svg class="qr""#), "{text}");
+
+    // People: the admin invites.
+    let people = owner_page(&s, &cookie, "/settings?s=people").await;
+    assert!(people.contains("Invite someone") && people.contains("only you, the admin, can invite"), "{people}");
+    let res = post("/settings/people/invite", vec![], cookie.clone()).await;
+    let text = res.text().await.unwrap();
+    let at = text.find("/invite/af_lnk_").expect("the invite link");
+    let secret: String = text[at + 8..].chars().take_while(|c| c.is_ascii_alphanumeric() || *c == '_').collect();
+    assert!(text.contains("An invite, not used yet"), "{text}");
+    let id: i64 =
+        s.db.call(|c| {
+            Ok(c.query_row("SELECT rowid FROM login_links WHERE purpose = 'invite' AND used_at IS NULL", [], |r| {
+                r.get(0)
+            })?)
+        })
+        .await
+        .unwrap();
+
+    // Someone who isn't the admin sees the people, but can't invite or withdraw the admin's invite.
+    let mira =
+        s.db.call(move |c| {
+            let m = crate::people::create(c, false, Some(admin), webauthn_rs::prelude::Uuid::new_v4())?;
+            crate::people::set_profile(c, m, "mira", "m@x.org", "frog")?;
+            Ok(m)
+        })
+        .await
+        .unwrap();
+    let mira_cookie = s.cookie_for(mira).await;
+    let theirs = owner_page(&s, &mira_cookie, "/settings?s=people").await;
+    assert!(theirs.contains("only the admin, gio, invites people") && !theirs.contains("Invite someone"), "{theirs}");
+    assert_eq!(post("/settings/people/invite", vec![], mira_cookie.clone()).await.status(), StatusCode::FORBIDDEN);
+    let withdraw = format!("/settings/links/{id}/withdraw");
+    let w: &'static str = Box::leak(withdraw.into_boxed_str());
+    assert_eq!(post(w, vec![], mira_cookie.clone()).await.status(), StatusCode::NOT_FOUND);
+    // The admin's sign-in link for mira.
+    let path: &'static str = Box::leak(format!("/settings/people/{mira}/link").into_boxed_str());
+    let text = post(path, vec![], cookie.clone()).await.text().await.unwrap();
+    assert!(text.contains("A sign-in link for mira") && text.contains("/device/af_lnk_"), "{text}");
+    assert_eq!(post(path, vec![], mira_cookie).await.status(), StatusCode::FORBIDDEN, "only the admin");
+
+    // Withdrawn, the invite stops working.
+    assert_eq!(post(w, vec![], cookie.clone()).await.status(), StatusCode::SEE_OTHER);
+    let res = s.http.get(s.url(&format!("/invite/{secret}"))).send().await.unwrap();
+    assert_eq!(res.status(), StatusCode::GONE);
+}
+
+/// What the security review of People found (2026-11-25), fixed: setup links bound to the state
+/// they were made for, setting up again voiding the admin's links and devices, login CSRF on the
+/// link pages, /login/link only for sign-in links, removing people, names that can't pass for
+/// someone else, and `next` kept on this site.
+#[tokio::test]
+async fn the_review_of_people_holds() {
+    let s = TestServer::start().await;
+    let ask = |req: serde_json::Value| {
+        let state = s.state.clone();
+        async move { crate::web::admin_socket::test_link(&state, req).await.unwrap() }
+    };
+    let secret = |v: &serde_json::Value| v["url"].as_str().unwrap().rsplit('/').next().unwrap().to_owned();
+    let post = |path: String, origin: &'static str| {
+        let s = &s;
+        async move {
+            let origin = if origin.is_empty() { s.base.clone() } else { origin.to_owned() };
+            s.http.post(s.url(&path)).header(ORIGIN, origin).send().await.unwrap()
+        }
+    };
+
+    // Two setup links before there's an admin: the first used makes the admin, the other stops.
+    let early = secret(&ask(json!({"request": "setup"})).await);
+    let first = secret(&ask(json!({"request": "setup"})).await);
+    assert_eq!(post(format!("/setup/{first}"), "").await.status(), StatusCode::SEE_OTHER);
+    assert_eq!(post(format!("/setup/{early}"), "").await.status(), StatusCode::GONE, "voided");
+    let admin = s.db.call(|c| crate::people::admin(c)).await.unwrap().unwrap().id;
+    s.db.call(move |c| crate::people::set_profile(c, admin, "giosuel", "me@giosuel.ch", "owl")).await.unwrap();
+
+    // A setup link made for the first setup doesn't reset the admin made since.
+    let stale =
+        s.db.call(|c| auth::create_login_link(c, auth::purpose::SETUP, None, None, auth::LINK_MINUTES)).await.unwrap();
+    assert_eq!(post(format!("/setup/{stale}"), "").await.status(), StatusCode::BAD_REQUEST);
+
+    // Setting up again voids the admin's own links and push devices.
+    let mine = secret(&ask(json!({"request": "add_device"})).await);
+    s.db.call(move |c| {
+        Ok(c.execute(
+            "INSERT INTO push_subscriptions (endpoint, p256dh, auth, device, created_at, person_id) VALUES ('https://web.push.apple.com/x', 'k', 'a', 'd', 0, ?1)",
+            [admin],
+        )?)
+    })
+    .await
+    .unwrap();
+    let again = secret(&ask(json!({"request": "setup", "confirm": "giosuel"})).await);
+    assert_eq!(post(format!("/setup/{again}"), "").await.status(), StatusCode::SEE_OTHER);
+    assert_eq!(post(format!("/device/{mine}"), "").await.status(), StatusCode::GONE, "the admin's device link went");
+    let devices = s.db.call(move |c| crate::push::devices(c, admin)).await.unwrap();
+    assert!(devices.is_empty(), "and their devices' notifications");
+
+    // Another site can't post a link for a browser (login CSRF); ours can.
+    let link = secret(&ask(json!({"request": "add_device"})).await);
+    assert_eq!(post(format!("/device/{link}"), "https://evil.example").await.status(), StatusCode::FORBIDDEN);
+    // /login/link takes only sign-in links: a device link is refused there and stays unused.
+    assert_eq!(post(format!("/login/link/{link}"), "").await.status(), StatusCode::GONE);
+    assert_eq!(post(format!("/device/{link}"), "").await.status(), StatusCode::SEE_OTHER);
+
+    // The admin removes someone: their browser is signed out, they can't come back.
+    let mira =
+        s.db.call(move |c| {
+            let m = crate::people::create(c, false, Some(admin), webauthn_rs::prelude::Uuid::new_v4())?;
+            crate::people::set_profile(c, m, "mira", "m@x.org", "frog")?;
+            Ok(m)
+        })
+        .await
+        .unwrap();
+    let mira_cookie = s.cookie_for(mira).await;
+    let admin_cookie = s.cookie_for(admin).await;
+    let res = s
+        .http
+        .post(s.url(&format!("/settings/people/{admin}/remove")))
+        .header(COOKIE, &admin_cookie)
+        .header(ORIGIN, &s.base)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST, "not the admin");
+    let res = s
+        .http
+        .post(s.url(&format!("/settings/people/{mira}/remove")))
+        .header(COOKIE, &admin_cookie)
+        .header(ORIGIN, &s.base)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::SEE_OTHER);
+    let res = s.http.get(s.url("/welcome")).header(COOKIE, &mira_cookie).send().await.unwrap();
+    assert_ne!(res.status(), StatusCode::OK, "signed out");
+    assert!(s.db.call(move |c| crate::people::get(c, mira)).await.unwrap().is_none());
+
+    // Names that would pass for someone else.
+    let (ok_stand_in, ok_project) =
+        s.db.call(move |c| {
+            let x = crate::people::create(c, false, Some(admin), webauthn_rs::prelude::Uuid::new_v4())?;
+            Ok((
+                crate::people::set_profile(c, x, "person-3", "x@x.org", "fox").is_err(),
+                crate::projects::create(c, "giosuel", "Giosuel", "owner").is_err(),
+            ))
+        })
+        .await
+        .unwrap();
+    assert!(ok_stand_in && ok_project);
+
+    // `next` stays on this site: a tab can't turn it into another site.
+    let res = s
+        .http
+        .post(s.url("/welcome"))
+        .header(COOKIE, &admin_cookie)
+        .header(ORIGIN, &s.base)
+        .form(&[("username", "giosuel"), ("email", "me@giosuel.ch"), ("icon", "owl"), ("next", "/\t/evil.example")])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.headers()["location"], "/");
 }
 
 #[tokio::test]
@@ -724,7 +1106,7 @@ async fn the_usage_page_shows_the_plan_and_the_cost() {
     // The week was past 80% with its first sample: one push, in the bell.
     let mut usage_pushes = 0;
     for _ in 0..50 {
-        let bell = s.db.call(|c| crate::notifications::list(c, 10)).await.unwrap();
+        let bell = s.db.call(|c| crate::notifications::list(c, 1, 10)).await.unwrap();
         usage_pushes = bell.iter().filter(|n| n.kind == "usage").count();
         if usage_pushes > 0 {
             break;
@@ -732,6 +1114,37 @@ async fn the_usage_page_shows_the_plan_and_the_cost() {
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     }
     assert_eq!(usage_pushes, 1);
+}
+
+#[tokio::test]
+async fn a_question_without_options_is_answered_in_a_text_box() {
+    // The owner, 2026-11-25 (D-287): "sometimes a question has no answers, so a text box there
+    // would be appropriate instead".
+    let s = TestServer::start().await;
+    let token = s.token(TokenKind::Project, Some("vinculum")).await;
+    let sess = mcp_session(&s, &token).await;
+    mcp_tool(&s, &token, &sess, "ask_question", json!({"title": "Which port?"})).await;
+    let cookie = s.owner_cookie().await;
+    let overview = owner_page(&s, &cookie, "/p/vinculum").await;
+    assert!(overview.contains(r#"<textarea id="qw-Q-1" name="words" rows="4""#), "{overview}");
+    assert!(!overview.contains("No options"), "{overview}");
+    let tab = owner_page(&s, &cookie, "/p/vinculum?tab=questions").await;
+    assert!(tab.contains(r#"<textarea id="dqw-Q-1" name="words""#), "{tab}");
+    let page = owner_page(&s, &cookie, "/p/vinculum/Q-1").await;
+    assert!(page.contains(r#"<textarea id="words" name="words""#), "{page}");
+    // The words are the answer.
+    let res = s
+        .http
+        .post(s.url("/p/vinculum/Q-1/answer"))
+        .header(COOKIE, &cookie)
+        .header(ORIGIN, &s.base)
+        .form(&[("words", "8990"), ("next", "/p/vinculum?answered=Q-1")])
+        .send()
+        .await
+        .unwrap();
+    assert!(res.status().is_redirection() || res.status().is_success(), "{}", res.status());
+    let q = owner_page(&s, &cookie, "/p/vinculum/Q-1").await;
+    assert!(q.contains("8990") && !q.contains(r#"name="words""#), "{q}");
 }
 
 #[tokio::test]
@@ -784,7 +1197,11 @@ async fn the_owner_answers_on_the_page_and_the_agent_reads_it() {
         .unwrap();
     assert_eq!(res.headers()[LOCATION], "/p/vinculum/Q-1?error=both", "an option or own words, not both");
     let page = s.http.get(s.url("/p/vinculum/Q-1?error=both")).header(COOKIE, &cookie).send().await.unwrap();
-    assert!(page.text().await.unwrap().contains("not both"));
+    let page = page.text().await.unwrap();
+    assert!(page.contains("not both"));
+    // Sent from the question's page (or its dialog), the answer goes back to the project, not the
+    // Dashboard (09-9).
+    assert!(page.contains(r#"name="next" value="/p/vinculum?answered=Q-1""#), "{page}");
     let res = s
         .http
         .post(s.url("/p/vinculum/Q-1/answer"))
@@ -803,6 +1220,11 @@ async fn the_owner_answers_on_the_page_and_the_agent_reads_it() {
     let tab = owner_page(&s, &cookie, "/p/vinculum?tab=questions").await;
     let (none, decided) = (tab.find("No open questions.").unwrap(), tab.find("A or B?").unwrap());
     assert!(none < decided && !tab.contains("Waiting on you"), "{tab}");
+    // The tab is the page's title; the project's name is the overview's.
+    assert!(tab.contains("<h1>Questions</h1>"), "{tab}");
+    // The overview's title is Overview too (D-281); the project's name is in the switcher and the path.
+    let overview = owner_page(&s, &cookie, "/p/vinculum").await;
+    assert!(overview.contains("<h1>Overview</h1>") && overview.contains("<title>Overview · "), "{overview}");
     // Answering twice goes back to the question with the reason.
     let res = s
         .http
@@ -1055,11 +1477,25 @@ async fn the_bar_shows_the_project_its_tabs_and_the_global_pages() {
         json!({"title": "A or B?", "options": [{"title": "A"}, {"title": "B"}]}),
     )
     .await;
+    s.token(TokenKind::Project, Some("lituus")).await;
     let cookie = s.owner_cookie().await;
     let page = owner_page(&s, &cookie, "/p/vinculum?tab=questions").await;
     let bar = &page[page.find("<header").unwrap()..page.find("</header>").unwrap()];
+    // Switching projects keeps the page (the owner, 2026-11-25, D-280): from Vinculum's Questions to
+    // Lituus's; from Plan to Plan; from Settings (a dialog) to the overview.
+    assert!(bar.contains(r#"href="/p/lituus?tab=questions""#), "{bar}");
+    for (from, to) in
+        [("/p/vinculum/plan", "/p/lituus/plan"), ("/p/vinculum/settings", "/p/lituus"), ("/p/vinculum", "/p/lituus")]
+    {
+        let page = owner_page(&s, &cookie, from).await;
+        let menu = &page[page.find("pswitch-menu").unwrap()..page.find("New project").unwrap()];
+        assert!(menu.contains(&format!(r#"href="{to}">"#)), "{from}: {menu}");
+    }
     assert!(bar.contains(r#"<summary class="pswitch-btn"><span>vinculum</span>"#), "{bar}");
-    assert!(bar.contains(r#"href="/p/vinculum" aria-current="page""#), "the project is checked in the switcher");
+    assert!(
+        bar.contains(r#"href="/p/vinculum?tab=questions" aria-current="page""#),
+        "the project is checked in the switcher"
+    );
     // Questions and Decisions are one tab, Questions (Q-6, D-250): it counts the open question.
     assert!(bar.contains(
         r#"<a href="/p/vinculum?tab=questions" class="on" aria-current="page">Questions<span class="count warn">1</span></a>"#
@@ -1090,6 +1526,10 @@ async fn the_bar_shows_the_project_its_tabs_and_the_global_pages() {
     let bar = &usage[usage.find("<header").unwrap()..usage.find("</header>").unwrap()];
     assert!(bar.contains(r#"<summary class="pswitch-btn"><span>vinculum</span>"#), "{bar}");
     assert!(bar.contains(r#"<a href="/p/vinculum">Overview</a>"#), "its tabs, none lit: {bar}");
+    assert!(
+        bar.contains(r#"href="/p/lituus">"#),
+        "from a page outside the projects, the switcher goes to the overview"
+    );
     assert!(bar.contains(r#"Questions<span class="count warn">1</span>"#), "with their counts");
     assert!(bar.contains(r#"<a href="/usage" class="on" aria-current="page">"#), "the page is still Usage");
     let unknown = owner_page(&s, &format!("{cookie}; af_project=nope"), "/usage").await;
@@ -1332,7 +1772,7 @@ async fn a_subagents_model_note_and_links_show() {
     assert!(res.status().is_success(), "{}", res.text().await.unwrap());
     let cookie = s.owner_cookie().await;
     let note = owner_page(&s, &cookie, "/p/vinculum/N-1").await;
-    assert!(note.contains("by a subagent · code-review · Fable 5.2"), "{note}");
+    assert!(note.contains("its subagent · code-review · Fable 5.2"), "{note}");
     assert!(note.contains("s subagent · "), "its History says who: {note}");
     let notes = owner_page(&s, &cookie, "/p/vinculum?tab=notes").await;
     assert!(notes.contains(r#"<span class="chip info""#), "{notes}");
@@ -1516,7 +1956,7 @@ async fn a_build_goes_from_agent_to_owner_and_feedback_comes_back() {
     // part of it now (Q-6): its old links open Builds.
     let page = owner_page(&s, &cookie, "/p/imaginarium?tab=builds").await;
     assert!(page.contains("New in B-1") && page.contains("2 of 2 tried"), "{page}");
-    assert!(page.contains("blurry at 200 % (you, ") && page.contains("the border is cut off"), "{page}");
+    assert!(page.contains("blurry at 200 % (giosuel, ") && page.contains("the border is cut off"), "{page}");
     assert!(page.contains("Still to try") && page.contains("Undo a table edit"), "{page}");
     assert!(!page.contains(r#"class="tt-t">Tables</span>"#), "tested, off the list: {page}");
     assert!(page.contains("<pre class=\"cmd\">flow run imaginarium 1</pre>"), "{page}");
@@ -2097,6 +2537,87 @@ async fn the_log_page_filters_and_streams() {
     assert_eq!(res.headers()["content-type"], "text/event-stream");
 }
 
+/// Writes a Log entry by the owner, and returns its seq.
+async fn log_entry(s: &TestServer, action: crate::activity::Action, summary: &str) -> i64 {
+    let summary = summary.to_owned();
+    s.db.call(move |c| {
+        let owner = crate::auth::Actor::Owner {
+            session_id: 1,
+            method: "passkey".into(),
+            person: 1,
+            admin: true,
+            ready: true,
+            name: "giosuel".into(),
+        };
+        let e = crate::activity::Entry::new(&owner, crate::activity::Via::Page, action, summary);
+        crate::activity::write_conn(c, &e)?;
+        crate::logview::latest_seq(c)
+    })
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+async fn archived_reads_take_their_place_among_older_entries() {
+    use crate::activity::Action;
+    let s = TestServer::start().await;
+    let cookie = s.owner_cookie().await;
+    // A change, thirty reads, a change: the reads go to the archive, the changes stay.
+    log_entry(&s, Action::Write, "probe first").await;
+    for i in 0..30 {
+        log_entry(&s, Action::Read, &format!("probe read {i}")).await;
+    }
+    log_entry(&s, Action::Write, "probe last").await;
+    let data = s.state.config.data_dir();
+    s.db.call(move |c| {
+        c.execute("UPDATE log SET at = at - 100 * 86400000 WHERE summary LIKE 'probe %'", [])?;
+        crate::logview::archive_old_reads(c, &data, crate::util::now_ms())
+    })
+    .await
+    .unwrap();
+    let html = s
+        .http
+        .get(s.url("/log/rows?q=probe&range=all"))
+        .header(COOKIE, &cookie)
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert_eq!(html.matches("data-seq=").count(), 32, "{html}");
+    assert_eq!(html.matches("<span class=\"tag\">archived</span>").count(), 30);
+    // Newest first, the archived reads between the two changes.
+    let first = html.find("probe first").unwrap();
+    assert!(html.find("probe last").unwrap() < html.find("probe read 29").unwrap());
+    assert!(html.find("probe read 0").unwrap() < first);
+}
+
+#[tokio::test]
+async fn the_live_log_picks_up_where_it_left_off() {
+    use crate::activity::Action;
+    let s = TestServer::start().await;
+    let cookie = s.owner_cookie().await;
+    let seen = log_entry(&s, Action::Write, "probe shown before").await;
+    // EventSource reconnects to the URL it opened, and says which event it got last.
+    let mut res = s
+        .http
+        .get(s.url("/log/stream?after=0"))
+        .header(COOKIE, &cookie)
+        .header("last-event-id", seen.to_string())
+        .send()
+        .await
+        .unwrap();
+    log_entry(&s, Action::Write, "probe new").await;
+    let mut got = String::new();
+    while !got.contains("probe new") {
+        let chunk = tokio::time::timeout(std::time::Duration::from_secs(10), res.chunk()).await.expect("an event");
+        got.push_str(&String::from_utf8_lossy(&chunk.unwrap().expect("still open")));
+    }
+    assert!(!got.contains("probe shown before"), "{got}");
+    assert!(got.contains("\nid: ") || got.starts_with("id: "), "events carry their seq: {got}");
+}
+
 #[tokio::test]
 async fn usage_and_machine_pages_show_the_counts() {
     let s = TestServer::start().await;
@@ -2162,14 +2683,13 @@ async fn usage_and_machine_pages_show_the_counts() {
     // The phone's More tab lists the sections that don't fit in the tab bar.
     let more = get("/more").await.text().await.unwrap();
     assert!(more.contains("Conversations") && more.contains("class=\"tabbar\""), "{more}");
-    let res = get("/machine?range=6h").await;
+    let res = get("/machines").await;
     assert_eq!(res.status(), StatusCode::OK);
-    assert!(res.text().await.unwrap().contains("GB free of"));
-    // The live figures: one per tile, in the same order.
-    let now: serde_json::Value = get("/machine/now").await.json().await.unwrap();
-    assert_eq!(now["tiles"].as_array().unwrap().len(), 5);
-    assert!(now["tiles"][0]["small"].as_str().unwrap().contains(" cores"));
-    let res = s.http.get(s.url("/machine/now")).bearer_auth(&token).send().await.unwrap();
+    let html = res.text().await.unwrap();
+    // AgentFlow's figures, live (machine.js swaps the parts marked data-live in).
+    assert!(html.contains("GB free of") && html.matches(r#"<div class="card pad mtile"#).count() == 5, "{html}");
+    assert!(html.contains(r#"<div class="mtiles" id="tiles" data-live"#), "{html}");
+    let res = s.http.get(s.url("/machines")).bearer_auth(&token).send().await.unwrap();
     assert_eq!(res.status(), StatusCode::FORBIDDEN);
     let html = get("/p/imaginarium").await.text().await.unwrap();
     assert!(html.contains("Tokens, 7 days") && html.contains("1.2 M"));
@@ -2502,10 +3022,13 @@ async fn notes_are_files_or_text_and_come_back() {
     assert!(!call("update_note", json!({"id": "N-1", "text": "x"})).await.0, "files get a new version instead");
 
     let cookie = s.owner_cookie().await;
-    // Its History (the owner, 2026-11-18): folded, one short line per change, the file it replaced
-    // linked, no "changed the size" noise.
+    // Its History (the owner, 2026-11-18): one short line per change, the file it replaced linked,
+    // no "changed the size" noise; on the note's page it stands open, without a box (D-268).
     let n1 = owner_page(&s, &cookie, "/p/vinculum/N-1").await;
-    assert!(n1.contains(r#"<details class="rhist">"#) && n1.contains("<b>2 changes</b> · last: New version"), "{n1}");
+    assert!(
+        n1.contains(r#"<section class="changes" aria-labelledby="changes-h-N-1">"#) && n1.contains("2 changes"),
+        "{n1}"
+    );
     assert!(n1.contains(r#"href="/p/vinculum/N-1/file?v=1""#) && n1.contains("Created the note"), "{n1}");
     assert!(!n1.contains("changed the size") && !n1.contains(">size<") && !n1.contains("report.md)"), "{n1}");
     let tab =
@@ -2562,14 +3085,37 @@ async fn notes_are_files_or_text_and_come_back() {
     assert!(!t.contains("<script>alert") && t.contains("Nothing matches"), "{t}");
     let page = s.http.get(s.url("/p/vinculum/N-1")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
     assert!(page.contains("<li>T-5</li>") && page.contains("v1"), "the newest version rendered: {page}");
-    // Opened directly (a link in a notification, a reload), it's its project's page with the note
-    // in a dialog over it (the owner, 2026-11-17: "Notes are not consistent").
+    // A note is a page of its own (the owner, 2026-11-25, D-264): its file's head with its name,
+    // size and version (no version menu, D-265), who wrote it said plainly (D-269).
+    assert!(page.contains(r#"<span class="mono ndoc-name">report.md</span>"#), "{page}");
+    assert!(page.contains("<span class=\"sub\">version 2</span>") && !page.contains("of 2<"), "{page}");
+    assert!(page.contains("vinculum&#39;s project agent"), "{page}");
+    // Opened directly (a link in a notification, a reload), it's the note's own page, not a
+    // dialog over its project's.
     let direct = |path: &'static str| {
         s.http.get(s.url(path)).header(COOKIE, &cookie).header("sec-fetch-mode", "navigate").send()
     };
     let note = direct("/p/vinculum/N-1").await.unwrap().text().await.unwrap();
-    assert!(note.contains(r#"data-open-dlg="rec" data-open-url="/p/vinculum/N-1" data-open-from="/p/vinculum""#));
-    assert!(!note.contains("<title>N-1") && !note.contains("<li>T-5</li>"), "the project's page, not the note's");
+    assert!(!note.contains("data-open-dlg") && note.contains("<title>N-1") && note.contains("<li>T-5</li>"), "{note}");
+    // A text note is shown like a Markdown file (D-267): N-3.md, its text rendered, Download gives
+    // that file; resolved, it says so in About and doesn't come back.
+    let n3 = owner_page(&s, &cookie, "/p/vinculum/N-3").await;
+    assert!(n3.contains(r#"<span class="mono ndoc-name">N-3.md</span>"#), "{n3}");
+    assert!(n3.contains(r#"<div class="ndoc-body prose"><p>Check on every Loro update.</p>"#), "{n3}");
+    assert!(n3.contains(r#"<span class="chip ok">resolved</span>"#) && !n3.contains("<dt>Comes back</dt>"), "{n3}");
+    let f = s.http.get(s.url("/p/vinculum/N-3/file")).header(COOKIE, &cookie).send().await.unwrap();
+    assert!(f.headers()["content-disposition"].to_str().unwrap().contains("N-3.md"));
+    assert_eq!(f.text().await.unwrap(), "Check on every Loro update.");
+    // A log: its lines numbered, a level in its tone, Wrap and Copy.
+    assert!(
+        up("name=Dev%20log&category=test%20log&filename=dev.log", b"a INFO x\nb WARN y\n").await.status().is_success()
+    );
+    let log = owner_page(&s, &cookie, "/p/vinculum/N-6").await;
+    assert!(
+        log.contains(r#"<span class="cv-n">2</span><span class="cv-t">b <span class="lv-warn">WARN</span> y</span>"#),
+        "{log}"
+    );
+    assert!(log.contains(r#"class="cv-wrap""#) && log.contains(r#"data-copy-from="ndoc-raw""#), "{log}");
     let settings = direct("/settings?s=clients").await.unwrap().text().await.unwrap();
     assert!(settings.contains(r#"data-open-dlg="settings" data-open-url="/settings?s=clients" data-open-from="/""#));
     // The bell's panel and project settings are dialogs only (the owner, 2026-11-18).
@@ -2870,6 +3416,10 @@ async fn screenshots_are_uploaded_shown_and_linked() {
     assert!(!only.contains("Sidebar, variant A") && only.contains("/p/vinculum/S-2/image"), "{only}");
     let page = get("/p/vinculum/S-1".into()).await.text().await.unwrap();
     assert!(page.contains("1280 × 800") && page.contains("Tabs on the left"), "{page}");
+    // Its History, as in every record's dialog: no box, the newest change, Show all at the bottom
+    // (the owner, 2026-11-25, D-268).
+    assert!(page.contains(r#"<section class="changes changes-fold" aria-labelledby="changes-h-S-1">"#), "{page}");
+    assert!(page.contains(r#"<span class="changes-when-folded">Show all "#) && !page.contains("rhist"), "{page}");
     let task = get("/p/vinculum/T-1".into()).await.text().await.unwrap();
     assert!(task.contains("Screenshots") && task.contains("S-1"), "the task links to it: {task}");
     let img = get("/p/vinculum/S-1/image".into()).await;
@@ -3362,7 +3912,7 @@ async fn jobs_run_on_a_builder_and_bring_back_what_was_asked() {
             s.http
                 .post(s.url("/api/remote/jobs"))
                 .bearer_auth(token)
-                .json(&json!({"dir": top, "subdir": sub, "command": ["sh", "-c", cmd], "fetch": ["target/release/app"],
+                .json(&json!({"name": "Snapshot check", "dir": top, "subdir": sub, "command": ["sh", "-c", cmd], "fetch": ["target/release/app"],
                     "manifest": up.as_ref().map(|u| u.manifest.clone()).unwrap_or_default(),
                     "bundle": up.as_ref().map(|u| u.bundle.clone()).unwrap_or_default()}))
                 .send()
@@ -3385,6 +3935,17 @@ async fn jobs_run_on_a_builder_and_bring_back_what_was_asked() {
     })
     .await
     .unwrap();
+    // Every job needs a name, its title (the owner, 2026-11-25, D-275).
+    let unnamed = s
+        .http
+        .post(s.url("/api/remote/jobs"))
+        .bearer_auth(&agent)
+        .json(&json!({"dir": "/x", "command": ["true"], "setup": true}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(unnamed.status(), StatusCode::BAD_REQUEST);
+    assert!(unnamed.text().await.unwrap().contains("give the job a name"));
     let res = start(work.join("crate"), agent.clone()).await;
     assert_eq!(res.status(), StatusCode::OK, "{}", res.text().await.unwrap());
     let id = res.json::<Value>().await.unwrap()["id"].as_i64().unwrap();
@@ -3422,6 +3983,34 @@ async fn jobs_run_on_a_builder_and_bring_back_what_was_asked() {
     );
     assert!(text.contains("v0.1.0"), "tags went over:\n{text}");
     assert!(text.contains("No such file") || !text.contains("junk"), "ignored files stay here:\n{text}");
+    // Its page (D-275): its name as the title, the command among its facts, the output numbered in
+    // the code view a note's log uses, a warning in its tone.
+    let cookie = s.owner_cookie().await;
+    let page = owner_page(&s, &cookie, &format!("/machines/jobs/{id}")).await;
+    assert!(page.contains(r#"<h1 class="rec-title note-title">Snapshot check</h1>"#), "{page}");
+    assert!(
+        page.contains("<dt>Command</dt>") && page.contains(r#"<div class="codeview cv-scroll" id="job-log""#),
+        "{page}"
+    );
+    assert!(page.contains(r#"<span class="cv-t lv-warn">warning: careful</span>"#), "{page}");
+    // Under its machine (D-277); what points somewhere is a chip (D-279).
+    assert!(
+        page.contains(&format!(
+            r#"<li><a href="/machines" title="Machines">Machines</a></li><li><a href="/machines/{name}" title="{name}">{name}</a></li><li><span aria-current="page" title="Job #{id}">Job #{id}</span></li>"#
+        )),
+        "{page}"
+    );
+    assert!(
+        page.contains(r#"<dt>Project</dt><dd><a class="chip link" href="/p/imaginarium"><svg class="i""#),
+        "the project it belongs to: {page}"
+    );
+    assert!(page.contains(r#"<dt>Started by</dt><dd><span class="chip"><svg class="i""#), "{page}");
+    assert!(page.contains(r#"s project agent</span></span></dd>"#), "{page}");
+    assert!(
+        page.contains(&format!(r#"<dt>Server</dt><dd><a class="chip link" href="/machines/{name}"><svg class="i""#)),
+        "{page}"
+    );
+    assert!(page.contains(r#"<span class="cv-n">1</span>"#), "{page}");
     // flow remote fetches what came back.
     let job = s.db.call(move |c| crate::remote::get(c, id)).await.unwrap().unwrap();
     let (base, t2, w2) = (s.base.clone(), agent.clone(), work.clone());
@@ -3498,6 +4087,181 @@ async fn jobs_run_on_a_builder_and_bring_back_what_was_asked() {
     }
     let res = start(work.clone(), agent.clone()).await;
     assert_eq!(res.status(), StatusCode::SERVICE_UNAVAILABLE);
+}
+
+/// Machines (D-277): an overview without job tables, a card per build machine; a page per
+/// machine with its history, filtered and paged; jobs under /machines; the old addresses lead
+/// there; pausing is an icon button that comes back to the page it was pressed on (D-278).
+#[tokio::test]
+async fn machines_are_an_overview_and_a_page_each() {
+    let s = TestServer::start().await;
+    let cookie = s.owner_cookie().await;
+    s.token(TokenKind::Project, Some("vinculum")).await;
+    // The jobs go back 29 minutes: just after midnight some would be yesterday's, and the overview
+    // counts today's. Start them half an hour into the day at the earliest.
+    let now = crate::util::now_ms().max(crate::tz::Tz::default().day_start(crate::util::now_ms()) + 31 * 60_000);
+    s.db.call(move |c| {
+        for name in ["hq", "box-2"] {
+            crate::remote::add_daemon(c, &crate::config::BuildServer { name: name.into(), ..Default::default() })?;
+        }
+        let pid = crate::projects::get(c, "vinculum")?.unwrap().id;
+        // 25 jobs on hq, the oldest first: every fifth failed, the newest still waiting.
+        for i in 1..=25i64 {
+            let state = if i == 25 {
+                "queued"
+            } else if i % 5 == 0 {
+                "failed"
+            } else {
+                "done"
+            };
+            c.execute(
+                "INSERT INTO remote_jobs (server, project_id, actor, dir, command, state, reason, created_at, started_at, finished_at, name)
+                 VALUES ('hq', ?1, 'vinculum', '/w', '[\"cargo\",\"test\"]', ?2, ?3, ?4, ?4, ?5, ?6)",
+                rusqlite::params![
+                    pid,
+                    state,
+                    if state == "failed" { "exit code 101" } else { "" },
+                    now - (30 - i) * 60_000,
+                    if state == "queued" { None } else { Some(now - (30 - i) * 60_000 + 30_000) },
+                    format!("Job number {i}")
+                ],
+            )?;
+        }
+        Ok(())
+    })
+    .await
+    .unwrap();
+    crate::remote::reload(&s.state).await;
+    let ids: Vec<i64> =
+        s.db.call(|c| {
+            let mut st = c.prepare("SELECT id FROM remote_jobs ORDER BY id")?;
+            let r = st.query_map([], |r| r.get(0))?.collect::<Result<_, _>>()?;
+            Ok(r)
+        })
+        .await
+        .unwrap();
+    let get = |path: &str| {
+        let (http, url, cookie) = (s.http.clone(), s.url(path), cookie.clone());
+        async move { http.get(url).header(COOKIE, cookie).send().await.unwrap() }
+    };
+
+    // The overview: AgentFlow's figures and a card per build machine, no job tables.
+    let html = get("/machines").await.text().await.unwrap();
+    assert!(html.contains("<h1>Machines</h1>") && html.contains("AgentFlow runs on "), "{html}");
+    assert!(html.contains("2 build machines, 0 online") && html.contains("nothing running, 1 waiting"), "{html}");
+    assert_eq!(html.matches(r#"<section class="card mcard off""#).count(), 2, "dimmed while offline: {html}");
+    assert!(html.contains(r#""><a href="/machines/hq">hq</a></h2><span class="sub">offline</span>"#), "{html}");
+    assert!(html.contains(r#"<a class="act ilink" href="/machines/box-2"><span>Its builds</span>"#), "{html}");
+    assert!(html.contains("Today 25 jobs, 4 failed") && html.contains("No jobs today"), "{html}");
+    assert!(!html.contains("<table") && !html.contains("data-sortable"), "no job tables: {html}");
+    assert!(!html.contains("By project") && !html.contains("Claimed ports"), "D-283: {html}");
+    // The nav says Machines, lit here.
+    assert!(
+        html.contains(r#"<a href="/machines" class="on" aria-current="page">"#)
+            && html.contains("<span>Machines</span>"),
+        "{html}"
+    );
+    let dash = get("/").await.text().await.unwrap();
+    assert!(dash.contains(r#"<a href="/machines" aria-label="Machines" data-name="Machines">"#), "{dash}");
+    assert!(!dash.contains(r#"href="/machine""#), "{dash}");
+    assert!(get("/more").await.text().await.unwrap().contains(r#"<a href="/machines">"#));
+
+    // Pausing: an icon button, back to the page it was pressed on (only a Machines page).
+    let post = |path: &str, next: &str| {
+        let (http, url, cookie, base) = (s.http.clone(), s.url(path), cookie.clone(), s.base.clone());
+        let form = vec![("next", next.to_owned())];
+        async move {
+            let res = http.post(url).header(COOKIE, cookie).header(ORIGIN, base).form(&form).send().await.unwrap();
+            assert_eq!(res.status(), StatusCode::SEE_OTHER);
+            res.headers()[LOCATION].to_str().unwrap().to_owned()
+        }
+    };
+    assert_eq!(post("/machines/hq/pause", "/machines/hq?show=failed").await, "/machines/hq?show=failed");
+    let html = get("/machines").await.text().await.unwrap();
+    assert!(
+        html.contains(
+            r#"<button class="ibtn" type="submit" title="Resume builds on hq" aria-label="Resume builds on hq">"#
+        ) && html.contains("Builds are paused"),
+        "{html}"
+    );
+    assert_eq!(post("/machines/hq/resume", "https://evil.example/").await, "/machines", "no open redirects");
+    // A page open from before posts to the old address.
+    assert_eq!(post("/machine/servers/hq/pause", "").await, "/machines");
+    assert_eq!(post("/machine/servers/hq/resume", "").await, "/machines");
+    assert_eq!(get("/machines/nowhere/pause").await.status(), StatusCode::METHOD_NOT_ALLOWED);
+
+    // A machine's page: its path, its history 20 a page, newest first, with the pager.
+    let html = get("/machines/hq").await.text().await.unwrap();
+    assert!(
+        html.contains(r#"<li><a href="/machines" title="Machines">Machines</a></li><li><span aria-current="page" title="hq">hq</span></li>"#)
+            && html.contains(r#"<h1 class="rec-title note-title">hq</h1>"#),
+        "{html}"
+    );
+    assert!(
+        html.contains("25 jobs since ")
+            && html.contains(r#"<h2 id="hist-h">Build history</h2><span class="sub">25 jobs</span>"#),
+        "{html}"
+    );
+    assert!(html.contains(r#"<table class="table jobs" data-sortable>"#), "the table component: {html}");
+    assert_eq!(html.matches(r#"<tr><th scope="row" data-v=""#).count(), 20, "{html}");
+    assert!(html.contains(&format!(r#"<a href="/machines/jobs/{}">#{}</a>"#, ids[24], ids[24])), "the newest: {html}");
+    assert!(!html.contains(&format!(r#"<a href="/machines/jobs/{}">#{}</a></th>"#, ids[4], ids[4])), "{html}");
+    assert!(
+        html.contains(r#"<span class="sub pager-range">1–20 of 25</span><span class="sub mono">page 1 of 2</span>"#)
+            && html.contains(
+                r##"<a class="ibtn" href="/machines/hq?page=2#history" title="Older jobs" aria-label="Older jobs">"##
+            ),
+        "{html}"
+    );
+    // Right now: the waiting job.
+    assert!(html.contains("offline · 1 waiting") && html.contains("Job number 25"), "{html}");
+    assert!(html.contains(r#"<dt>Starts a job</dt><dd>while 8 threads and 16 GB are free</dd>"#), "{html}");
+    assert!(html.contains(r#"href="/settings?s=builders" data-settings"#), "{html}");
+    let html = get("/machines/hq?page=2").await.text().await.unwrap();
+    assert_eq!(html.matches(r#"<tr><th scope="row" data-v=""#).count(), 5, "{html}");
+    assert!(
+        html.contains("21–25 of 25") && html.contains(r##"href="/machines/hq#history" title="Newer jobs""##),
+        "{html}"
+    );
+    // Filters: failed, then running or waiting; a page past the end is the last one.
+    let html = get("/machines/hq?show=failed&page=9").await.text().await.unwrap();
+    assert_eq!(html.matches(r#"<tr><th scope="row" data-v=""#).count(), 4, "{html}");
+    assert!(
+        html.contains("4 failed of 25") && html.contains(r#"<span class="sub pager-range">1–4 of 4</span></nav>"#),
+        "{html}"
+    );
+    assert!(
+        html.contains(r##"<a class="on" aria-current="true" href="/machines/hq?show=failed#history">Failed</a>"##),
+        "{html}"
+    );
+    let html = get("/machines/hq?show=running&page=x").await.text().await.unwrap();
+    assert_eq!(html.matches(r#"<tr><th scope="row" data-v=""#).count(), 1, "{html}");
+    assert!(html.contains(r#"<span class="chip ">waiting</span>"#), "{html}");
+    let html = get("/machines/box-2").await.text().await.unwrap();
+    assert!(html.contains("No jobs yet: agents build here with flow remote --server box-2."), "{html}");
+    assert_eq!(get("/machines/nowhere").await.status(), StatusCode::NOT_FOUND);
+
+    // The old addresses lead to the new ones.
+    for (old, new) in [
+        ("/machine", "/machines".to_owned()),
+        ("/machine/now", "/machines".to_owned()),
+        ("/machine/builds", "/machines".to_owned()),
+        (&*format!("/machine/jobs/{}", ids[0]), format!("/machines/jobs/{}", ids[0])),
+    ] {
+        let res = get(old).await;
+        assert!(res.status().is_redirection(), "{old}");
+        assert_eq!(res.headers()[LOCATION], new.as_str(), "{old}");
+    }
+    let page = get(&format!("/machines/jobs/{}", ids[0])).await.text().await.unwrap();
+    assert!(page.contains(r#"<li><a href="/machines/hq" title="hq">hq</a></li>"#), "{page}");
+    // Its output answers at both addresses (a page open from before follows it there).
+    for path in [format!("/machines/jobs/{}/output", ids[0]), format!("/machine/jobs/{}/output", ids[0])] {
+        assert_eq!(get(&path).await.status(), StatusCode::OK, "{path}");
+    }
+    // Agents don't see the pages.
+    let token = s.token(TokenKind::Project, Some("vinculum")).await;
+    let res = s.http.get(s.url("/machines/hq")).bearer_auth(&token).send().await.unwrap();
+    assert_eq!(res.status(), StatusCode::FORBIDDEN);
 }
 
 #[tokio::test]
@@ -3856,27 +4620,23 @@ async fn questions_and_decisions_have_scopes() {
     assert_eq!(t1["state"], "todo", "archiving unblocks: {t1}");
     let (ok, r) = call("update_question", json!({"id": "Q-4", "state": "open", "reason": "needed after all"})).await;
     assert!(ok && r["state"] == "open", "{r}");
-    // The owner moves an open question's scope on its page before answering.
+    // The agent moves a question to another scope, not the owner (2026-11-25, D-288): its page
+    // only says where the decision goes.
+    let (ok, r) = call("update_question", json!({"id": "Q-3", "scope": "M9", "reason": "about M9"})).await;
+    assert!(ok && r["scope"] == "M9", "{r}");
     let cookie = s.owner_cookie().await;
     let page = s.http.get(s.url("/p/vinculum/Q-3")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
-    assert!(page.contains("Its decision goes into") && page.contains("Project-wide"), "{page}");
-    let m9: i64 =
-        s.db.call(|c| {
-            let p = crate::projects::require(c, "vinculum")?;
-            Ok(crate::projects::find_milestone(c, p.id, "M9")?.id)
-        })
-        .await
-        .unwrap();
+    assert!(page.contains("Scope: M9 · ") && !page.contains(r#"name="scope""#), "{page}");
     let res = s
         .http
         .post(s.url("/p/vinculum/Q-3/scope"))
         .header(COOKIE, &cookie)
         .header(ORIGIN, &s.base)
-        .form(&[("scope", m9.to_string())])
+        .form(&[("scope", "project")])
         .send()
         .await
         .unwrap();
-    assert!(res.status().is_redirection());
+    assert!(!res.status().is_success() && !res.status().is_redirection(), "{}", res.status());
     let res = s
         .http
         .post(s.url("/p/vinculum/Q-3/answer"))
@@ -4439,6 +5199,31 @@ fn the_ui_library_replaced_the_old_buttons() {
             assert!(!roots.contains(&class), "app.css redefines the library's .{class}: {line}");
         }
     }
+    // Every card's header is the one bar (the owner, 2026-11-25, D-276): no card opens with a title
+    // inside its padding or an uppercase label instead.
+    for f in std::fs::read_dir("templates").unwrap() {
+        let path = f.unwrap().path();
+        let t = std::fs::read_to_string(&path).unwrap();
+        for open in ["<section class=\"card pad", "<div class=\"card pad", "<details class=\"card pad", "<form"] {
+            for (i, _) in t.match_indices(open) {
+                let tag_end = i + t[i..].find('>').unwrap() + 1;
+                if open == "<form" && !t[i..tag_end].contains("class=\"card pad") {
+                    continue;
+                }
+                let next = t[tag_end..].trim_start();
+                // A heading only screen readers see (class vh) isn't a header.
+                let bad =
+                    ["<div class=\"sec", "<h2", "<h3", "<summary class=\"label"].iter().any(|h| next.starts_with(h))
+                        && !next[..next.find('>').unwrap_or(0)].contains("class=\"vh\"");
+                assert!(
+                    !bad,
+                    "{}: a card with its own kind of header; use .card-head: {}",
+                    path.display(),
+                    &t[i..tag_end]
+                );
+            }
+        }
+    }
     let gone = [
         "ghost",
         "lsearch",
@@ -4576,6 +5361,13 @@ async fn the_ui_catalogue_shows_the_library() {
     // The owner's words, and a menu's group head (M16.1).
     assert!(
         page.contains(r#"<blockquote class="quote sm">"#) && page.contains(r#"<p class="dd-group label">"#),
+        "{page}"
+    );
+    // Link chips and the pager (T-210).
+    assert!(page.contains(r##"<a class="chip link" href="#ui-chip">"##), "{page}");
+    assert!(
+        page.contains(r#"<nav class="pager links" aria-label="Pages of the example"><span class="sub pager-range">1–20 of 214</span><span class="sub mono">page 1 of 11</span><span class="ibtn off" aria-hidden="true">"#)
+            && page.contains(r##"<a class="ibtn" href="/ui?page=2#ui-table" title="Older jobs" aria-label="Older jobs">"##),
         "{page}"
     );
     let res = s.http.get(s.url("/ui")).send().await.unwrap();

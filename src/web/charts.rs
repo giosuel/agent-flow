@@ -142,7 +142,9 @@ pub fn stacked_bars(
     (out, max)
 }
 
-/// Stacked areas over evenly spaced points; `labels` names each point for the hover layer.
+/// Stacked areas over evenly spaced points; `labels` names each point for the hover layer. The
+/// Machine page's CPU and memory by project drew these; it may come back (D-283).
+#[allow(dead_code)]
 pub fn stacked_areas(
     label: &str,
     labels: &[String],

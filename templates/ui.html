@@ -6,13 +6,31 @@
    id is prefix-key; max may be "" for none. #}
 {% macro number(prefix, key, name, min, max, value) %}<span class="numf"><input id="{{ prefix }}-{{ key }}" class="num" name="{{ name }}" type="number" min="{{ min }}"{% if !max.is_empty() %} max="{{ max }}"{% endif %} step="1" value="{{ value }}"><span class="numf-b"><button type="button" tabindex="-1" data-step="1" aria-label="One more">{{ crate::web::icons::icon("chevron")|safe }}</button><button type="button" tabindex="-1" data-step="-1" aria-label="One less">{{ crate::web::icons::icon("chevron")|safe }}</button></span></span>{% endmacro %}
 
+{#- Pager (ui.css .pager): a long table's pages in its card's foot, from web::uilib::Pager: which rows
+    ("1–20 of 214"), which page, and the pages before and after as icon links; a page that isn't
+    there is the same icon, off. One page shows only its rows. -#}
+{% macro pager_links(p) %}<nav class="pager links" aria-label="{{ p.label }}"><span class="sub pager-range">{{ p.range }}</span>{% if p.pages > 1 %}<span class="sub mono">page {{ p.page }} of {{ p.pages }}</span>{% if let Some(h) = p.prev %}<a class="ibtn" href="{{ h }}" title="{{ p.prev_label }}" aria-label="{{ p.prev_label }}">{{ crate::web::icons::icon("prev")|safe }}</a>{% else %}<span class="ibtn off" aria-hidden="true">{{ crate::web::icons::icon("prev")|safe }}</span>{% endif %}{% if let Some(h) = p.next %}<a class="ibtn" href="{{ h }}" title="{{ p.next_label }}" aria-label="{{ p.next_label }}">{{ crate::web::icons::icon("chevron")|safe }}</a>{% else %}<span class="ibtn off" aria-hidden="true">{{ crate::web::icons::icon("chevron")|safe }}</span>{% endif %}{% endif %}</nav>{% endmacro %}
+
+{#- A person's icon (D-270): `size` is "", "sm" or "lg"; no icon yet: the person glyph. -#}
+{% macro avatar(icon, size) %}{{ crate::web::avatars::html(icon, size)|safe }}{% endmacro %}
+
+{#- Picking one of the 15 icons: radio buttons named `icon`, `chosen` checked. -#}
+{% macro avatar_picker(chosen) %}<fieldset class="avpick"><legend class="label">Your icon</legend>{% for a in crate::web::avatars::AVATARS %}<label class="avpick-o" title="{{ a }}"><input type="radio" name="icon" value="{{ a }}"{% if crate::web::avatars::same(a, chosen) %} checked{% endif %} required><img class="avatar" src="/static/avatars/{{ a }}.svg" alt="{{ a }}"><span class="avpick-ck" aria-hidden="true">{{ crate::web::icons::icon("check")|safe }}</span></label>{% endfor %}</fieldset>{% endmacro %}
+
+{#- History without a box (D-268): a section like the others, its timeline by day. Folded, only the
+    newest change shows, with "Show all" at the bottom; that works without scripts (a checkbox). -#}
+{% macro history(h, key, folded) %}<section class="changes{% if folded %} changes-fold{% endif %}" aria-labelledby="changes-h-{{ key }}">{% if folded && h.count > 1 %}<input type="checkbox" class="vh changes-all" id="changes-all-{{ key }}" aria-label="Show all {{ h.count }} changes">{% endif %}<div class="changes-head"><h2 class="label" id="changes-h-{{ key }}">History</h2><span class="sub">{{ h.count }} change{% if h.count != 1 %}s{% endif %}</span></div>
+{% for d in h.days %}{% let first_day = loop.first %}<div class="tl-day{% if !first_day %} changes-more{% endif %}">{{ d.label }}</div>
+<ol class="tl">{% for e in d.events %}<li class="ev{% if !(first_day && loop.first) %} changes-more{% endif %}"><span class="tm">{{ e.time }}</span><span class="rail"><span class="dot {{ e.dot }}" aria-hidden="true"></span></span><span class="txt">{{ e.what }}{% for (k, v, acc) in e.chips %} <span class="hist-chip{% if *acc %} acc{% endif %}">{{ k }}{% if !v.is_empty() %} <b>{{ v }}</b>{% endif %}</span>{% endfor %}{% if let Some((label, url)) = e.replaced %} <a class="mono hist-v" href="{{ url }}" title="The file this version replaced">{{ label }}</a>{% endif %}<span class="ev-meta">{{ e.who }} · <span class="mono">r{{ e.rev }}</span></span></span></li>{% endfor %}</ol>
+{% endfor %}{% if folded && h.count > 1 %}<label class="changes-toggle" for="changes-all-{{ key }}"><span class="changes-when-folded">Show all {{ h.count }} changes</span><span class="changes-when-open">Show less</span>{{ crate::web::icons::icon("caret")|safe }}</label>{% endif %}</section>{% endmacro %}
 {# Answer a question: pick one option or write your own words, never both, and nothing goes out
    until Send answer (the owner, 2026-11-11); one control on the Dashboard, the overview and the
    question's page (N-19 #1). app.js enables Send when exactly one of them is given; the server
    refuses both too. Fields an item needs: n, title, detail, recommended. #}
 {% macro choices(action, next, items, own, own_id) %}<form method="post" action="{{ action }}" class="choices" data-answer>{% if !next.is_empty() %}<input type="hidden" name="next" value="{{ next }}">{% endif %}
 {% if !items.is_empty() %}<fieldset class="choice-list"><legend class="vh">Options</legend>{% for c in items %}<label class="choice{% if c.recommended %} rec{% endif %}"><input type="radio" name="option" value="{{ c.n }}"><span class="num">{{ c.n }}</span><span class="txt">{{ c.title }}{% if !c.detail.is_empty() %}<span class="sub">{{ c.detail }}</span>{% endif %}</span>{% if c.recommended %}<span class="chip accent">recommended</span>{% endif %}</label>{% endfor %}</fieldset>{% endif %}
-<div class="choice-own">{% if own %}<label class="vh" for="{{ own_id }}">Answer in your own words</label><input id="{{ own_id }}" name="words" autocomplete="off" placeholder="{% if items.is_empty() %}Your answer{% else %}Or answer in your own words{% endif %}">{% endif %}<button class="btn" type="submit">Send answer</button></div>
+{#- A question without options is answered in a text box (the owner, 2026-11-25, D-287). -#}
+<div class="choice-own{% if items.is_empty() %} alone{% endif %}">{% if own || items.is_empty() %}<label class="vh" for="{{ own_id }}">Answer in your own words</label>{% if items.is_empty() %}<textarea id="{{ own_id }}" name="words" rows="4" placeholder="Your answer, in your own words"></textarea>{% else %}<input id="{{ own_id }}" name="words" autocomplete="off" placeholder="Or answer in your own words">{% endif %}{% endif %}<button class="btn" type="submit">Send answer</button></div>
 </form>{% endmacro %}
 
 {# A button's confirmation (D-263): what pressing it runs, said plainly. The data-confirm button just

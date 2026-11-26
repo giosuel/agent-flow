@@ -94,7 +94,12 @@ pub fn item(r: &Record, cx: &Context<'_>) -> Item {
             ps.iter()
                 .filter_map(|p| {
                     let at = p.get("at").and_then(Value::as_i64).unwrap_or(0);
-                    let by = if p.get("by").and_then(Value::as_str) == Some("owner") { "you, " } else { "" };
+                    // Who found it: a person's username (D-272); "owner" from before people.
+                    let by = match p.get("by").and_then(Value::as_str) {
+                        Some("owner") => "you, ".to_owned(),
+                        Some(b) if !b.is_empty() => format!("{b}, "),
+                        _ => String::new(),
+                    };
                     Some(format!("{} ({by}{})", p.get("note")?.as_str()?, ago(at, cx.now)))
                 })
                 .collect()
@@ -214,12 +219,12 @@ async fn mark(
         return Err(AppError::BadRequest("keep the note under 2,000 characters".into()));
     }
     let back = super::local_path(f.get("back").map(String::as_str)).unwrap_or_else(|| format!("/p/{slug}?tab=builds"));
-    let (s, i, v) = (slug.clone(), id.clone(), verdict.clone());
+    let (s, i, v, by) = (slug.clone(), id.clone(), verdict.clone(), actor.name());
     let done = state
         .db
         .call(move |c| {
             let r = records::find_str(c, &format!("{s}/{i}"), None)?;
-            crate::totest::owner_mark(c, &r, &v, &note)
+            crate::totest::owner_mark(c, &r, &v, &note, &by)
         })
         .await
         .map_err(|e| AppError::BadRequest(format!("{e:#}")))?;
