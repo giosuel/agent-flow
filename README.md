@@ -1,90 +1,84 @@
-# AgentFlow
+<p align="center"><img src="static/logo.svg" width="96" height="96" alt=""></p>
 
-Project management for a team of Claude agents and the person they work for. Each project's agent
-records its tasks, decisions, questions, pull requests and builds in AgentFlow over MCP; the owner
-answers questions, merges, tags and gives feedback from a web page that also works as a home-screen
-app on the phone. Everything that happens is logged.
+<h1 align="center">AgentFlow</h1>
 
-Two Rust programs: `agentflow` is the server (the web app, the MCP endpoint, its setup), a background
-program started by systemd; `flow` is the command people and agents type (builds, the agents'
-commands). `agentflow hello`, `news` and the other client commands from before still work for one
-release: the server hands them to `flow`. Data
-lives in SQLite in `~/.local/state/agentflow/`.
+<p align="center">Project management for a team of Claude agents and the person they work for.</p>
 
-## Build and run
+<p align="center"><a href="https://giosuel.github.io/agent-flow/">Website and docs</a> ·
+<a href="https://giosuel.github.io/agent-flow/docs/getting-started/">Getting started</a> ·
+<a href="https://giosuel.github.io/agent-flow/docs/reference/mcp/">MCP tools</a></p>
+
+Each project has one agent. It records its milestones, steps, tasks, questions, decisions, pull
+requests, releases, test builds and notes in AgentFlow over MCP, instead of in Markdown files in the
+repository. The owner answers questions, presses Merge and Push tag, tries builds and sends
+contributions from a web app that also works as a home-screen app on the phone. Everything that
+happens is logged.
+
+## Features
+
+- **Questions become decisions.** Agents ask one question at a time, with numbered options and a
+  recommendation. The answer is recorded as a decision in the owner's words and unblocks the tasks
+  that waited.
+- **The plan.** Milestones that end with a tag, steps that start and conclude as the work does,
+  tasks with estimates, and time counted from the tasks' states.
+- **Pull requests in merge order.** PRs are read from GitHub every three minutes. Each gets a Merge
+  button; a stack merges from the bottom with one **Merge #a–#b**. A release's **Push tag** unlocks
+  once its PRs are merged and closes the milestone.
+- **Test builds.** Agents publish with `flow publish`; the owner runs them on any machine with
+  `flow run` and marks what to try Works, Problem or Skip.
+- **Contributions.** Agents draft PRs, issues and comments for other people's repositories; only the
+  owner sends them, as themselves.
+- **The log.** One row for every MCP call, API call, page view and button press, kept for good.
+- **Usage and the machine.** Token use per agent, project and task at API prices, the plan's 5-hour
+  and weekly windows, and the server's CPU and memory per agent.
+- **Build servers.** Machines that connect themselves and run agents' builds with `flow remote`.
+
+## Install
+
+From v0.1.0, releases publish Linux x86_64 programs and `.deb` packages on
+[GitHub Releases](https://github.com/giosuel/agent-flow/releases), and AUR packages. Until then,
+build from source.
 
 ```sh
-cargo build --release
-./target/release/agentflow serve
+# Debian, Ubuntu (from v0.1.0): the server needs the client package too
+sudo apt install ./agentflow-client_0.1.0_amd64.deb ./agentflow_0.1.0_amd64.deb
+
+# Arch (from v0.1.0); other machines need only agentflow-client-bin or agentflow-client
+yay -S agentflow-bin    # the release programs
+yay -S agentflow        # built from the tagged source
+
+# The release archive (from v0.1.0)
+curl -LO https://github.com/giosuel/agent-flow/releases/download/v0.1.0/agentflow-0.1.0-linux-x86_64.tar.gz
+tar -xzf agentflow-0.1.0-linux-x86_64.tar.gz && cd agentflow-0.1.0-linux-x86_64
+sudo install -m 755 agentflow flow agentflow-builder /usr/local/bin/
+
+# From source (Rust 1.90 or newer)
+git clone https://github.com/giosuel/agent-flow && cd agent-flow
+cargo build --release --locked
+sudo install -m 755 target/release/{agentflow,flow,agentflow-builder} /usr/local/bin/
 ```
 
-There are two ways to run it.
+There are three programs:
 
-**As its own user (recommended on a shared machine).** The agents can't read AgentFlow's
-database, tokens or sessions. Install the binary where only root can change it, then run setup once:
+- `agentflow`: the server, a background program under systemd (the web app, the MCP endpoint, the
+  API, setup);
+- `flow`: the command people and agents type;
+- `agentflow-builder`: a build machine's background program.
+
+## Quick start
+
+On the server, as root, once. Setup creates the user `agentflow`, writes
+`/etc/agentflow/config.toml`, installs the system service (data in `/var/lib/agentflow`) and
+`agentflow-hands`, a user service of the agents' user that does what has to happen as them:
 
 ```sh
-sudo install -m 755 target/release/agentflow /usr/local/bin/agentflow
-sudo /usr/local/bin/agentflow setup --public-url https://flow.example --agents-user <user> --dry-run  # the steps
-sudo /usr/local/bin/agentflow setup --public-url https://flow.example --agents-user <user>
+sudo agentflow setup --public-url https://flow.example --agents-user <user> --dry-run  # the steps
+sudo agentflow setup --public-url https://flow.example --agents-user <user>
 # then, as the agents' user:
 systemctl --user daemon-reload; systemctl --user enable --now agentflow-hands
 ```
 
-Setup creates the user `agentflow` and writes `/etc/agentflow/config.toml`. It installs the
-system service (`packaging/system/agentflow.service`, data in `/var/lib/agentflow`, no access to
-`/home`) and `agentflow-hands`, a user service of the agents' user. `--import <dir>` brings
-a single-user instance's data along.
-
-The server runs as `agentflow`; what has to happen as the agents' user goes to `agentflow hands`
-over a Unix socket that only `agentflow` may use (`src/hands.rs`). That covers the buttons, `gh`
-with the agents' login, guide edits, token files, new projects' folders, transcripts and the
-agents' process folders. To make the first account, the admin (or make it again after losing
-every passkey): `sudo flow server setup` on the server prints a one-time link; the first start
-also logs one (`journalctl -u agentflow`) while nobody is set up.
-
-**Packages.** Two of them, as `.deb` (`scripts/deb.sh`, from the release programs) and from the AUR
-(`packaging/arch/PKGBUILD`, a split package built from a release tag):
-- `agentflow`, the server: `agentflow`, its system service, the agents' helper service and the
-  `agentflow` user. It needs `agentflow-client` (agents on the server use `flow`). Then run
-  `sudo agentflow setup …` as above (no `install` step needed), and `sudo flow server setup`.
-- `agentflow-client`: `flow`, and `agentflow-builder` with its user service, for every machine that
-  connects to the server (`flow connect`) or builds for agents (`flow builder add`). A builder keeps
-  running while its user isn't logged in only with linger on: `sudo loginctl enable-linger <user>`.
-
-**As one user (a personal machine).** `scripts/install.sh` builds the release programs, installs them as
-`~/.local/bin/agentflow` and `~/.local/bin/flow` and runs it as a systemd user service (`packaging/agentflow.service`).
-Everything runs as you, so agents running as you can read its files.
-
-## Configuration
-
-`~/.config/agentflow/config.toml`; every field is optional:
-
-```toml
-listen = "127.0.0.1:8790"            # never a wildcard address; refused at start-up
-public_url = "https://flow.example"  # decides cookie flags, passkey domain and allowed hosts
-data_dir = "~/.local/state/agentflow"
-trusted_proxies = ["127.0.0.1", "::1"]  # may set X-Forwarded-For (a reverse proxy)
-session_idle_days = 14
-session_max_days = 30
-token_dir = "~/.config/agentflow/tokens"   # project tokens for headersHelper
-push_contact = "mailto:you@example.com"     # the sender contact push services ask for
-handbook_dir = "~/ai-handbook"              # the guides: a git checkout agents read through AgentFlow
-handbook_repo = "owner/ai-handbook"         # its GitHub repository, for pull requests
-git_author = "Name <you@example.com>"       # who your guide edits are committed as
-github_writes = true                        # false on a test instance: no merges on GitHub
-build_free_gb = 10                          # disk a build upload must leave free
-transcripts_dir = "~/.claude/projects"      # Claude Code transcripts, read for token usage
-agents_home = "/home/agents"                # as its own user: where ~/ points (the agents' home)
-hands_socket = "/run/agentflow-hands/hands.sock"  # as its own user: the agents' helper
-external_token_file = "~/.config/gh/external-token"  # public_repo token; used only on the owner's Send
-git_host = "https://github.com"             # where drafts' repositories are fetched and pushed
-
-```
-
-## Behind Caddy (passkeys and push)
-
-Passkeys and push notifications need https on a domain name. With Caddy in front:
+Put https in front (passkeys and push need a domain name). With Caddy:
 
 ```
 flow.example {
@@ -92,143 +86,63 @@ flow.example {
 }
 ```
 
-and in `config.toml`: `listen = "127.0.0.1:8790"`, `public_url = "https://flow.example"`. On a
-plain-http address (e.g. a VPN IP) everything else works and sign-in uses one-time links.
-
-## Home-screen app and notifications
-
-AgentFlow is a web app you can add to the home screen (on iPhone: Share, then Add to Home Screen;
-iOS 16.4 or later). Open it from there, go to Settings and press "Turn on for this device". Push
-messages are encrypted for each device (RFC 8291) and signed with the server's VAPID key
-(`vapid.key` in the data directory). Settings has a switch for each kind: new question, build
-ready to try, something to review, and urgent calls from an agent.
-
-## Access
-
-Every request is authenticated. Public are only the sign-in page, asking to connect a machine,
-the install script and the `flow` download.
-
-- **People** sign in in the browser with a passkey. The first account is the admin:
-  `sudo flow server setup` on the server prints a one-time link (valid 15 minutes) that makes it
-  and its first passkey. Only the admin invites others, from Settings › People or with
-  `sudo flow server invite` (a link valid 7 days). A new device gets a link from Settings ›
-  Passkeys, or `sudo flow server add-device [username]`; an admin who lost every passkey runs
-  `setup` again, which replaces their passkeys and signs out their browsers. The commands go
-  through a local socket only root may use, and every link is logged and pushed.
-- **Machines** get `flow` and connect with one command, `curl -fsSL <server>/install.sh | sh`
-  (or `flow connect <server>`): the owner approves the machine in the browser, where the page shows
-  the same short code as the terminal, and the machine gets a token of its own (read-only).
-  `flow disconnect` revokes it, `flow status` shows the server, both versions and who you are,
-  `flow update` fetches the matching `flow`.
-- **The owner's admin jobs** from a connected machine also wait for approval in the browser, each
-  time: `flow token create project <project> [--file F]` or `consultant`, `flow token list`,
-  `revoke ID`, `rotate ID`, `flow project add <slug> --name …`, `flow backup`,
-  `flow import-prs <project> 300-374`. Agents' tokens can't ask for them.
-- **Tokens** stand for a project's agent (changes its own project, reads the rest), the consultant
-  (changes anything) or a machine (reads). Only the owner's browser session presses merge and tag
-  buttons. Settings lists them and rotates project and consultant tokens: the new token is written
-  to `~/.config/agentflow/tokens/<project>.token` for the agent's `headersHelper`.
-
-## Connecting an agent
-
-**New project** on the Projects page creates the project and an empty M0, its folder with a local
-git repository (an existing folder or repository is left alone, so it onboards existing projects
-too), a project token in `~/.config/agentflow/tokens/<project>.token`, and a first note in the
-agent's memory. It then shows the command that registers AgentFlow with Claude Code for that
-folder, letting Claude fetch the token itself so it never sits in `~/.claude.json`:
+Make the admin account and its passkey with the one-time link this prints (valid 15 minutes);
+you invite others from Settings › People or with `sudo flow server invite`:
 
 ```sh
-claude mcp add-json agentflow '{"type": "http", "url": "https://flow.example/mcp",
-  "headersHelper": "flow mcp-headers --token-file ~/.config/agentflow/tokens/<project>.token"}'
+sudo flow server setup
 ```
 
-Start the agent in that folder with `env AGENTFLOW_TOKEN_FILE=~/.config/agentflow/tokens/<project>.token
-claude` (the page shows this command too), so the `agentflow` commands it runs (publish, screenshot,
-contribute, remote, wait) use the same token. `hello` tells the agent where the file is as well.
+Then connect each machine and set up a project in its folder:
 
-`agentflow managed-settings` prints Claude Code managed settings that keep every session's
-Read and Edit tools away from AgentFlow's tokens, data and config, and the root command to
-install them. Shell commands run as the same user can still read those files; running AgentFlow
-as its own Unix user is the stronger fence.
+```sh
+curl -fsSL https://flow.example/install.sh | sh    # or: flow connect https://flow.example
+cd ~/my-project && flow project setup               # Enter at the prompt creates a new project
+claude
+```
 
-## Builds
+On a personal machine, `scripts/install.sh` builds the programs and runs the server as a systemd
+user service instead; everything then runs as you.
 
-Agents publish test builds with `flow publish <file-or-folder> --product <name> --summary …
-[--entry …] [--feature "Title: what to try"]…`; the owner runs them on any machine with
-`flow run <product> [number]`, which downloads the build once, checks every file against
-its checksum and starts it. A build with features waits for feedback on its page.
+## How agents connect
 
-## Screenshots
+AgentFlow serves MCP over streamable HTTP at `/mcp`. `flow project setup` writes the project's
+`.mcp.json`, with the token read from its file by Claude Code's `headersHelper`, so it never sits in
+a config:
 
-Agents upload screenshots with `flow screenshot <file> --name "…" --category "…"
-[--description "…"] [--record T-12]`: PNG, JPEG or WebP up to 10 MB. The category is free text
-(test build, mockup, spike test, bug, …). Each one is a record (`S-4`) on the project's Screenshots
-tab, which can filter by category, and opens full size on its own page. With `--record` it's linked
-to that task, build or question and listed there too. The images are in `<data_dir>/screenshots/`.
+```json
+{
+  "mcpServers": {
+    "agentflow": {
+      "type": "http",
+      "url": "https://flow.example/mcp",
+      "headersHelper": "flow mcp-headers --token-file ~/.config/agentflow/tokens/<project>.token"
+    }
+  }
+}
+```
 
-## Other people's repositories
+It also writes `.claude/settings.local.json`: hooks that run `flow hello` at every session start,
+`flow news` before each prompt and `flow sync` after each reply, the status line, and
+`AGENTFLOW_TOKEN_FILE` for the agent's `flow` commands. Both files stay out of git through
+`.git/info/exclude`. A project's token changes only its own project and reads all others; merges and
+tags are pressed only from the owner's signed-in browser.
 
-Agents never post or push to other people's repositories themselves. They draft: `agentflow
-contribute pr --repo <owner/name> --base main --branch <name> --title "…" --body-file <file>` in
-their checkout sends the commits on top of that branch (as a git bundle), `flow contribute
-issue|comment|commits` the rest, and the MCP tool `draft_contribution` does issues and comments.
-AgentFlow reads the commits into a repository of its own (`<data_dir>/outgoing/`) and shows the
-owner the diff it computed, the text and a few checks (their PR template's headings, Claude
-attribution, a linked decision). The owner can edit the text, then press **Send** (AgentFlow pushes
-to the owner's fork and opens the PR, issue or comment as them, with exactly that text), **Ask for
-changes** (the note goes to the agent word for word), or **Drop**. Sent ones are watched every 30
-minutes; new comments, reviews, merges and closes go to the project's agent.
+## Architecture
 
-Sending needs `external_token_file`: a GitHub token with `public_repo`, read only when the owner
-presses Send and never shown or logged.
+- One Rust crate, three programs. The server is axum, with rmcp for MCP and askama for the pages;
+  the pages are server-rendered with a little JavaScript and load nothing from a CDN.
+- One SQLite database (WAL mode) in the data folder, backed up every day to
+  `<data_dir>/backups/` (the last 30 kept) and exported as Markdown to `<data_dir>/export/`.
+- As its own Unix user, the server can't touch the agents' files; what has to happen as them
+  (buttons, `gh`, token files, transcripts) goes to `agentflow hands` over a Unix socket only the
+  server's user may use.
+- Builders connect out to the server over a WebSocket; `flow remote` sends only the files a builder
+  doesn't have yet, by content.
+- Web Push is implemented on the RustCrypto crates: VAPID (RFC 8292) and aes128gcm (RFC 8291).
 
-## Build servers
-
-Agents run builds and tests on a stronger machine with
-`flow remote --name "Release build" -- cargo build --release` (every job has a name, its title in
-AgentFlow; `--fetch target/release/app` brings files back, `--gpu` waits for an idle GPU). A build server is
-a builder that connects itself to AgentFlow (`agentflow-builder`, set up with `flow builder add` on
-that machine); SSH build servers are gone. Each project has one work folder there: `flow remote`
-sends a snapshot of the checkout, and only files the server and the builder don't have yet travel
-(by content, zstd-compressed, checked by SHA-256), with new commits as a git bundle. Only files
-that changed are rewritten, so cargo rebuilds only that. The target folder stays there between
-jobs; sccache is used when it's installed there (`flow remote --setup -- …` installs tools in the
-builder's home). Jobs run in a systemd unit of their own at low CPU and IO weight: they take what
-the machine's user isn't using, several at once when there's room, and pause when memory runs
-short. Output streams to the agent, the job's page and the Log (`via:build`; the job's entry has
-its warnings and errors). When the builder is offline, the command exits with 75 at once, so the
-agent builds locally.
-
-Builders show on the Settings page with their limits (when jobs start and pause), and `flow builder
-list/edit/remove` manage them from a connected machine. Each project picks its build server in its
-own Settings; a project without one builds where its agent is (`flow remote` exits with 75). A
-builder that used to be an SSH build server waits for `flow builder add` on its machine, which takes
-it over with its projects and jobs; `build_servers` in `config.toml` are no longer read.
-
-For the low priority to hold against the machine's own user, give the build user's slice a low
-weight once (as root there): `systemctl set-property user-<uid>.slice CPUWeight=10 IOWeight=10`.
-
-## Guides
-
-The guides are the Markdown files of a git repository (`handbook_dir`). Agents read them through
-MCP (`guides`, `guide`). The Guides page shows them by section; your edits are committed to the
-checkout's main branch as `git_author` and never pushed. The consultant changes them with pull
-requests, which the page lists with a Merge button pinned to the commit you saw.
-
-## Usage and Machine
-
-Every five minutes AgentFlow reads what's new in Claude Code's transcripts and keeps one row per
-model call (keyed by its message id, so subagents' repeats count once): the Usage page shows
-tokens per day or hour, per agent, per project and per task. Claude Code deletes transcripts
-after 30 days; the counts stay. The Machine page samples the machine every minute and puts each
-process under the agent session that started it.
-
-## Backups
-
-Once a day the database is copied to `<data_dir>/backups/flow-<date>.db` (the last 30 are kept)
-and every project is exported to `<data_dir>/export/<slug>.md`. `flow backup` does
-both now (with the owner's approval). Reads older than 90 days move to monthly compressed archives in `<data_dir>/log-archive/`;
-nothing in the log is ever deleted.
+The [docs](https://giosuel.github.io/agent-flow/docs/) cover the concepts, every `flow` command and
+MCP tool, the configuration, self-hosting and build servers.
 
 ## Development
 
@@ -238,7 +152,9 @@ cargo clippy --all-targets --locked -- -D warnings
 cargo test --locked
 ```
 
-Versions come from the git tags (`scripts/version.sh`, `version.rs`), like MinVer.
+Versions come from the git tags (`scripts/version.sh`, `version.rs`), like MinVer. The UI library
+is `static/ui.css`; a running server shows its catalogue at `/ui`. The website is in `site/`
+(Astro and Starlight): `cd site && npm ci && npm run dev`.
 
 ## License
 

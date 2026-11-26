@@ -1,0 +1,21 @@
+---
+import logo from '../../../../static/logo.svg?url';
+import Icon from '../Icon.astro';
+const base = import.meta.env.BASE_URL;
+---
+
+<header class="nav" data-nav>
+  <div class="wide nav-in">
+    <a class="brand" href={base}><img src={logo} alt="" width="32" height="32" />AgentFlow</a>
+    <ul class="nav-links">
+      <li class="opt"><a href="#line">The line</a></li>
+      <li class="opt"><a href="#features">Features</a></li>
+      <li class="opt"><a href="#connect">Agents</a></li>
+      <li class="opt"><a href="#install">Install</a></li>
+      <li><a href={`${base}docs/`}>Docs</a></li>
+    </ul>
+    <span class="grow"></span>
+    <a class="ibtn flat nav-gh" href="https://github.com/giosuel/agent-flow" aria-label="AgentFlow on GitHub"><Icon name="git" /></a>
+    <a class="btn sm" href={`${base}docs/getting-started/`}>Get started</a>
+  </div>
+</header>

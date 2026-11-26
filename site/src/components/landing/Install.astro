@@ -1,0 +1,96 @@
+---
+import Icon from '../Icon.astro';
+const base = import.meta.env.BASE_URL;
+---
+
+<section class="sec" id="programs">
+  <div class="wrap">
+    <div class="sec-top rv">
+      <div>
+        <div class="sec-head"><span class="n">04</span><span>Three programs</span><span class="rule"></span></div>
+        <h2 class="sec-title">A server, a command, and a builder.</h2>
+      </div>
+      <p class="sec-lead">All three are Rust programs for Linux, built from one crate. The server keeps everything in one SQLite database and backs it up every day.</p>
+    </div>
+    <div class="progs">
+      <article class="prog rv">
+        <span class="itile lg accent"><Icon name="server" class="lg" /></span>
+        <span class="role">The server</span>
+        <span class="bin">agentflow</span>
+        <p>The web app, the MCP endpoint and the API. Runs under systemd, as its own user on a shared machine.</p>
+        <ul><li><b>agentflow setup</b> · system service</li><li><b>agentflow backup</b> · copy the database</li><li><b>agentflow managed-settings</b></li></ul>
+      </article>
+      <article class="prog rv">
+        <span class="itile lg t-teal"><Icon name="code" class="lg" /></span>
+        <span class="role">The command</span>
+        <span class="bin">flow</span>
+        <p>What people and agents type: connect a machine, set up a project, publish and run builds, hand in notes.</p>
+        <ul><li><b>flow run</b> lumen 7</li><li><b>flow publish</b> · <b>flow screenshot</b> · <b>flow note</b></li><li><b>flow remote</b> · <b>flow time</b> · <b>flow wait</b></li></ul>
+      </article>
+      <article class="prog rv">
+        <span class="itile lg t-orange"><Icon name="hammer" class="lg" /></span>
+        <span class="role">The builder</span>
+        <span class="bin">agentflow-builder</span>
+        <p>Runs agents' builds and tests on a stronger machine. Connects out over a WebSocket and keeps jobs going through network drops.</p>
+        <ul><li><b>flow builder add</b> · on the machine</li><li><b>flow builder status</b> · live in the terminal</li><li><b>flow builder edit</b> · limits</li></ul>
+      </article>
+    </div>
+  </div>
+</section>
+
+<section class="sec" id="install">
+  <div class="wrap">
+    <div class="sec-top rv">
+      <div>
+        <div class="sec-head"><span class="n">05</span><span>Install</span><span class="rule"></span></div>
+        <h2 class="sec-title">From v0.1.0: binaries, .deb and AUR.</h2>
+      </div>
+      <p class="sec-lead">
+        v0.1.0 publishes Linux x86_64 programs and .deb packages on <a href="https://github.com/giosuel/agent-flow/releases">GitHub Releases</a>,
+        and the <code class="mono">agentflow</code> and <code class="mono">agentflow-bin</code> packages on the AUR. Until then, build it from source.
+      </p>
+    </div>
+    <div class="install">
+      <div class="inst rv">
+        <input class="vh" type="radio" name="inst" id="i-rel" checked />
+        <input class="vh" type="radio" name="inst" id="i-deb" />
+        <input class="vh" type="radio" name="inst" id="i-aur" />
+        <input class="vh" type="radio" name="inst" id="i-src" />
+        <div class="inst-tabs">
+          <label for="i-rel">Release</label>
+          <label for="i-deb">Debian, Ubuntu</label>
+          <label for="i-aur">Arch (AUR)</label>
+          <label for="i-src">From source</label>
+        </div>
+        <div class="inst-p p-rel">
+          <p>The release's Linux x86_64 programs, installed where only root can change them:</p>
+          <code class="cmd">{'curl -LO https://github.com/giosuel/agent-flow/releases/download/v0.1.0/agentflow-0.1.0-linux-x86_64.tar.gz\ntar -xzf agentflow-0.1.0-linux-x86_64.tar.gz && cd agentflow-0.1.0-linux-x86_64\nsudo install -m 755 agentflow flow agentflow-builder /usr/local/bin/'}</code>
+          <p class="sub">From v0.1.0.</p>
+        </div>
+        <div class="inst-p p-deb">
+          <p>Two packages: <code class="mono">agentflow</code>, the server, needs <code class="mono">agentflow-client</code>, which has <code class="mono">flow</code> and the builder.</p>
+          <code class="cmd">sudo apt install ./agentflow-client_0.1.0_amd64.deb ./agentflow_0.1.0_amd64.deb</code>
+          <p class="sub">From v0.1.0. Other machines need only agentflow-client.</p>
+        </div>
+        <div class="inst-p p-aur">
+          <p>The release programs, or built from the tagged source:</p>
+          <code class="cmd">{'yay -S agentflow-bin\nyay -S agentflow'}</code>
+          <p class="sub">From v0.1.0. Other machines need only the client: agentflow-client-bin or agentflow-client.</p>
+        </div>
+        <div class="inst-p p-src">
+          <p>Rust 1.90 or newer. The version comes from the git tags.</p>
+          <code class="cmd">{'git clone https://github.com/giosuel/agent-flow && cd agent-flow\ncargo build --release --locked\nsudo install -m 755 target/release/{agentflow,flow,agentflow-builder} /usr/local/bin/'}</code>
+        </div>
+      </div>
+      <div class="then rv">
+        <span class="label">Then, on the server</span>
+        <ol>
+          <li><span>Make it a service, running as its own user.</span><code class="cmd">sudo agentflow setup --public-url https://flow.example --agents-user you</code></li>
+          <li><span>Put https in front (Caddy, nginx) and add your passkey.</span><code class="cmd">sudo flow server add-passkey</code></li>
+          <li><span>Connect machines and set up projects.</span><code class="cmd">flow connect https://flow.example</code></li>
+        </ol>
+        <a class="act" href={`${base}docs/getting-started/`}>The whole walk-through →</a>
+      </div>
+    </div>
+  </div>
+</section>
