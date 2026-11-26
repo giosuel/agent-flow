@@ -780,6 +780,26 @@ async fn a_machine_connects_after_the_owner_approves() {
     let fresh = reqwest::Client::builder().redirect(reqwest::redirect::Policy::none()).build().unwrap();
     let res = fresh.get(s.url(&format!("/approve/{code}"))).header("accept", "text/html").send().await.unwrap();
     assert_eq!(res.headers()["location"], format!("/login?next=/approve/{code}"));
+    // Opened from a notification it's an overlay over the Dashboard, not a page of its own (the
+    // owner, 2026-11-25); signed out, sign-in still leads back to the approval, not the Dashboard.
+    let nav = |c: &reqwest::Client, cookie: Option<&str>| {
+        let mut r = c
+            .get(s.url(&format!("/approve/{code}")))
+            .header("accept", "text/html")
+            .header("sec-fetch-mode", "navigate");
+        if let Some(k) = cookie {
+            r = r.header(COOKIE, k);
+        }
+        r.send()
+    };
+    let res = nav(&fresh, None).await.unwrap();
+    assert_eq!(res.headers()["location"], format!("/login?next=/approve/{code}"));
+    let over = nav(&s.http, Some(&cookie)).await.unwrap().text().await.unwrap();
+    assert!(
+        over.contains(&format!(r#"data-open-dlg="dlg" data-open-url="/approve/{code}" data-open-from="/""#)),
+        "{over}"
+    );
+    assert!(page.contains(r#"data-dlg-content data-dlg-size="sm""#), "{page}");
 
     let done = s
         .http
@@ -794,6 +814,7 @@ async fn a_machine_connects_after_the_owner_approves() {
         .await
         .unwrap();
     assert!(done.contains("Approved and done"), "{done}");
+    assert!(done.contains(r#"<a class="btn wide" href="/" data-dlg-close>Done</a>"#), "{done}");
     let got = polled(poll.clone()).await;
     assert_eq!(got["state"], "approved");
     let token = got["result"]["token"].as_str().unwrap().to_owned();

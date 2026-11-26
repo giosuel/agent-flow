@@ -2,7 +2,8 @@
 {% block title %}Approve · {{ a.code }}{% endblock %}
 {% block content %}
 <div class="approve-wrap">
-<section class="card approve" aria-labelledby="approve-title">
+<section class="card approve" aria-labelledby="approve-title" data-dlg-content data-dlg-size="sm">
+  <div class="head" hidden><h1>A terminal asks</h1></div>
   <span class="itile lg accent approve-icon" aria-hidden="true">{{ crate::web::icons::icon("machine")|safe }}</span>
   <h1 id="approve-title">{{ what }}?</h1>
   <p class="sub">A terminal asked for this {{ asked }}. Check that it shows the same code before you approve.</p>
@@ -12,6 +13,7 @@
   </dl>
   {% if let Some((ok, text)) = outcome %}
   <p class="notice{% if *ok %} ok{% else %} bad{% endif %}" role="status">{% if *ok %}{{ crate::web::icons::icon("check")|safe }}{% else %}{{ crate::web::icons::icon("alert")|safe }}{% endif %}<span>{{ text }}</span></p>
+  <a class="btn wide" href="/" data-dlg-close>Done</a>
   {% else if a.state == "pending" %}
   <form method="post" action="/approve/{{ a.code }}" class="approve-btns">
     <button class="btn secondary" type="submit" name="decision" value="deny">Deny</button>
@@ -20,6 +22,7 @@
   <p class="sub approve-foot">If you didn't start this, deny it.</p>
   {% else %}
   <p class="notice" role="status">{{ crate::web::icons::icon("info")|safe }}<span>This request is {{ a.state }}{% if let Some(e) = a.error %}: {{ e }}{% endif %}.</span></p>
+  <a class="btn wide secondary" href="/" data-dlg-close>Done</a>
   {% endif %}
 </section>
 </div>

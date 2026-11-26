@@ -694,6 +694,8 @@ a.ms:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .approve .kv { text-align: left; }
 .approve-btns { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .approve-foot { margin: 0; }
+/* Over the Dashboard (a dialog), without the page's card around it. */
+.pdlg .approve { width: auto; padding: 4px 0 0; border: 0; background: none; }
 @media (max-width: 700px) { .approve-wrap { min-height: calc(100dvh - 180px); } .approve { padding: 24px 20px; } .approve-code { font-size: var(--fs-display); } }
 
 /* Dialogs instead of the browser's confirm and alert (static/app.js, afDialog). */
