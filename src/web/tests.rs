@@ -2502,7 +2502,14 @@ async fn the_log_page_filters_and_streams() {
 async fn log_entry(s: &TestServer, action: crate::activity::Action, summary: &str) -> i64 {
     let summary = summary.to_owned();
     s.db.call(move |c| {
-        let owner = crate::auth::Actor::Owner { session_id: 1, method: "passkey".into() };
+        let owner = crate::auth::Actor::Owner {
+            session_id: 1,
+            method: "passkey".into(),
+            person: 1,
+            admin: true,
+            ready: true,
+            name: "giosuel".into(),
+        };
         let e = crate::activity::Entry::new(&owner, crate::activity::Via::Page, action, summary);
         crate::activity::write_conn(c, &e)?;
         crate::logview::latest_seq(c)

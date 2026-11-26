@@ -546,7 +546,14 @@ mod tests {
         let db = Db::open_memory();
         let dir = tempfile::tempdir().unwrap();
         db.call_blocking(|c| {
-            let owner = Actor::Owner { session_id: 1, method: "passkey".into() };
+            let owner = Actor::Owner {
+                session_id: 1,
+                method: "passkey".into(),
+                person: 1,
+                admin: true,
+                ready: true,
+                name: "giosuel".into(),
+            };
             for i in 0..5 {
                 write_conn(c, &Entry::new(&owner, Via::Page, Action::Read, format!("GET /p/{i}")))?;
             }
