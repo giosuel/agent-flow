@@ -17,6 +17,8 @@ pub struct PrInfo {
     pub draft: bool,
     pub base: String,
     pub head: String,
+    /// The commit the head branch is at ("" when not known): what a Merge button pins.
+    pub head_sha: String,
     /// mergeable, conflicting or unknown
     pub mergeable: String,
     /// passing, failing, pending or none
@@ -87,10 +89,10 @@ pub trait GitHub: Send + Sync {
     fn tag_exists<'a>(&'a self, repo: &'a str, tag: &'a str) -> BoxFuture<'a, anyhow::Result<bool>>;
 }
 
-const FIELDS: &str = "number,title,url,state,isDraft,baseRefName,headRefName,mergeable,statusCheckRollup";
+const FIELDS: &str = "number,title,url,state,isDraft,baseRefName,headRefName,headRefOid,mergeable,statusCheckRollup";
 /// The same without CI: a fine-grained token without the "checks" permission on a repository
 /// gets "Resource not accessible" for statusCheckRollup, and then nothing else either.
-const FIELDS_NO_CI: &str = "number,title,url,state,isDraft,baseRefName,headRefName,mergeable";
+const FIELDS_NO_CI: &str = "number,title,url,state,isDraft,baseRefName,headRefName,headRefOid,mergeable";
 
 /// Runs a `gh pr` query, and once more without CI status when the token may not read checks.
 async fn pr_query(args: &[&str]) -> anyhow::Result<Vec<u8>> {
@@ -134,6 +136,8 @@ struct GhPr {
     base_ref_name: String,
     head_ref_name: String,
     #[serde(default)]
+    head_ref_oid: String,
+    #[serde(default)]
     mergeable: String,
     #[serde(default)]
     status_check_rollup: Vec<serde_json::Value>,
@@ -149,6 +153,7 @@ impl From<GhPr> for PrInfo {
             draft: p.is_draft,
             base: p.base_ref_name,
             head: p.head_ref_name,
+            head_sha: p.head_ref_oid,
             mergeable: p.mergeable.to_lowercase(),
             ci: ci_state(&p.status_check_rollup),
         }
@@ -205,8 +210,7 @@ impl GhCli {
         }
         let argv = std::iter::once("gh").chain(args.iter().copied()).map(String::from).collect();
         let out: crate::hands::ExecOut =
-            crate::hands::run_async(crate::hands::Job::Exec { argv, cwd: None, timeout_s: 60, env: Vec::new() })
-                .await?;
+            crate::hands::run_async(crate::hands::Job::Exec { argv, cwd: None, timeout_s: 60 }).await?;
         if out.timed_out {
             bail!("gh took longer than a minute");
         }
@@ -447,6 +451,7 @@ pub mod fake {
             draft: false,
             base: base.into(),
             head: head.into(),
+            head_sha: String::new(),
             mergeable: "mergeable".into(),
             ci: "passing".into(),
         }
