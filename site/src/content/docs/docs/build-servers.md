@@ -6,10 +6,12 @@ description: Machines that connect themselves and run agents' builds and tests w
 Agents run heavy builds and tests on a stronger machine:
 
 ```sh
-flow remote -- cargo build --release
-flow remote --fetch target/release/lumen -- cargo build --release
-flow remote -- cargo test --workspace
+flow remote --name "Release build" -- cargo build --release
+flow remote --name "Lumen for a test build" --fetch target/release/lumen -- cargo build --release
+flow remote --name "Tests for PR #12" -- cargo test --workspace
 ```
+
+Every job has a name, a few words on one line: it's the job's title in AgentFlow.
 
 The output streams back as it comes, and `flow remote` exits with the command's exit code.
 
@@ -51,11 +53,12 @@ agent is.
 
 | Option | What it does |
 | --- | --- |
+| `--name TEXT` | The job's name, its title in AgentFlow (required). |
 | `--server NAME` | Which build server, if not the project's. |
 | `--fetch PATH` | Bring a file or folder back when it succeeds (repeat for more). `target/…` comes from the project's target folder there. |
 | `--gpu` | Wait until the GPU there is idle. |
 | `--dir DIR` | Run it in a folder of the checkout. |
-| `--setup` | Run it in the builder's home instead, to install the tools a project needs: `flow remote --setup -- sh -c '…'`. |
+| `--setup` | Run it in the builder's home instead, to install the tools a project needs: `flow remote --setup --name "Install the tools" -- sh -c '…'`. |
 | `--cancel JOB` | Cancel jobs of this project by number. |
 
 ## Limits
