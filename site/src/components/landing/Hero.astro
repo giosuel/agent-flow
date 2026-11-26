@@ -1,0 +1,92 @@
+---
+import logo from '../../../../static/logo.svg?url';
+import Icon from '../Icon.astro';
+const base = import.meta.env.BASE_URL;
+
+// The emblem's dial: a tick every 5°, a longer one every 30°.
+const C = 280;
+const ticks = Array.from({ length: 72 }, (_, i) => {
+  const a = (i * 5 * Math.PI) / 180;
+  const r1 = i % 6 === 0 ? 246 : 254;
+  const r2 = 262;
+  return {
+    x1: C + r1 * Math.cos(a), y1: C + r1 * Math.sin(a),
+    x2: C + r2 * Math.cos(a), y2: C + r2 * Math.sin(a),
+    major: i % 6 === 0,
+  };
+});
+const at = (deg: number, r: number) => {
+  const a = (deg * Math.PI) / 180;
+  return [C + r * Math.cos(a), C + r * Math.sin(a)];
+};
+const nodes = [
+  { deg: -90, t: 'AGENTS', s: 'mcp · streamable http', pulses: ['', 'd2'] },
+  { deg: 30, t: 'YOU', s: 'web app · push', pulses: ['out', 'd1'] },
+  { deg: 150, t: 'BUILDERS', s: 'websocket', pulses: ['out d1', 'd2'] },
+].map((n) => {
+  const [x, y] = at(n.deg, 236);
+  const [sx, sy] = at(n.deg, 210);
+  const [ex, ey] = at(n.deg, 100);
+  return { ...n, x, y, path: `M${sx.toFixed(1)} ${sy.toFixed(1)} L${ex.toFixed(1)} ${ey.toFixed(1)}` };
+});
+---
+
+<section class="hero">
+  <div class="wide hero-in">
+    <div>
+      <a class="pill" href="#install"><span class="tag">v0.1.0</span>Linux binaries, .deb and AUR packages are coming<Icon name="chevron" /></a>
+      <h1>A factory floor<br /> for <em>Claude agents.</em></h1>
+      <p class="lead">
+        <strong>Project management for a team of Claude agents and the person they work for.</strong> Agents
+        record their plan, questions, pull requests and builds over MCP. You answer, merge, tag and try
+        builds from one web app. Everything is logged.
+      </p>
+      <div class="cta">
+        <a class="btn" href={`${base}docs/getting-started/`}>Get started</a>
+        <a class="btn secondary" href="https://github.com/giosuel/agent-flow"><Icon name="git" />Source on GitHub</a>
+      </div>
+      <ul class="specs">
+        <li>Rust + SQLite</li>
+        <li>MCP over HTTP</li>
+        <li>Passkeys · PWA · Web Push</li>
+        <li>AGPL-3.0</li>
+      </ul>
+    </div>
+
+    <div class="emblem" aria-hidden="true">
+      <svg viewBox="0 0 560 560">
+        <defs>
+          <radialGradient id="core" cx="0.5" cy="0.5" r="0.5">
+            <stop offset="0" stop-color="#A78BFA" stop-opacity="0.42"></stop>
+            <stop offset="0.55" stop-color="#4C3D8A" stop-opacity="0.18"></stop>
+            <stop offset="1" stop-color="#000" stop-opacity="0"></stop>
+          </radialGradient>
+        </defs>
+        <circle class="core-glow" cx="280" cy="280" r="170" fill="url(#core)"></circle>
+        <g class="ring-a">
+          {ticks.map((t) => (
+            <line x1={t.x1} y1={t.y1} x2={t.x2} y2={t.y2} stroke={t.major ? '#5B4A99' : '#26262D'} stroke-width={t.major ? 1.6 : 1} />
+          ))}
+        </g>
+        <circle class="ring-b" cx="280" cy="280" r="212" fill="none" stroke="#5B4A99" stroke-width="1.2" stroke-dasharray="2 8"></circle>
+        <circle cx="280" cy="280" r="160" fill="none" stroke="#1C1C22" stroke-width="1"></circle>
+        <circle cx="280" cy="280" r="100" fill="none" stroke="#26262D" stroke-width="1"></circle>
+        {nodes.map((n) => (
+          <g>
+            <path class="spoke" d={n.path} />
+            {n.pulses.map((p) => <path class={`pulse ${p}`} d={n.path} fill="none" />)}
+          </g>
+        ))}
+        <image href={logo} x="200" y="200" width="160" height="160"></image>
+        {nodes.map((n) => (
+          <g class="node" transform={`translate(${n.x.toFixed(1)} ${n.y.toFixed(1)})`}>
+            <rect x="-78" y="-26" width="156" height="52" rx="10"></rect>
+            <circle class="led" cx="-60" cy="-7" r="3.5"></circle>
+            <text class="t" x="-50" y="-2.5">{n.t}</text>
+            <text class="s" x="-64" y="15">{n.s}</text>
+          </g>
+        ))}
+      </svg>
+    </div>
+  </div>
+</section>

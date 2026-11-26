@@ -1,0 +1,237 @@
+---
+// The line: a simulated project ("lumen", made up) moving through AgentFlow. Stations on top are
+// what agents and GitHub do; desks below are the owner's buttons, drawn with the app's own
+// components (static/ui.css). src/scripts/line.ts plays it; without JS, or with reduced motion,
+// it holds still on the moment a question waits for you.
+import logo from '../../../../static/logo.svg?url';
+import Icon from '../Icon.astro';
+
+const cats = [
+  ['agents', 'robot'],
+  ['api', 'code'],
+  ['builds', 'hammer'],
+  ['conversations', 'message'],
+  ['you', 'person'],
+  ['system', 'gear'],
+];
+const label: Record<string, string> = {
+  agents: 'Agents', api: 'API', builds: 'Builds', conversations: 'Conversations', you: 'You', system: 'System',
+};
+const icon = Object.fromEntries(cats);
+// The log as it stands when the page opens (times are set by the script).
+const rows = [
+  ['agents', 'lumen', 'lumen', 'ask_question Q-8: Album sidebar: a list of names or a grid of covers?'],
+  ['builds', 'orbit', 'orbit', 'Job #338 cargo test --workspace on forge: passed in 41 s'],
+  ['agents', 'kiln', 'kiln', 'add_tasks: 6 review findings to M2/R, ranked'],
+  ['api', 'lumen', 'lumen', 'flow time on T-31: wall 38 s, CPU 212 s, peak 1.9 GB'],
+  ['conversations', 'orbit', 'orbit', 'orbit → reviewer: check the LAN sync for races'],
+  ['you', 'owner', '–', 'opened lumen · Plan'],
+  ['system', 'poller', 'orbit', '#88 merged on GitHub'],
+];
+---
+
+<section class="line-sec" id="line">
+  <div class="wide">
+    <p class="vh">
+      A simulated project, lumen: its agent asks a question and you answer it; two stacked pull requests
+      merge with one button; the release is tagged, which closes the milestone; a new test build comes off
+      the line and you mark it Works. Every step lands in the log.
+    </p>
+    <div class="console hud" data-console>
+      <header class="console-bar">
+        <div class="cb-id"><span class="dot ok live"></span><b>LINE 01</b><span class="sep">/</span><span>lumen</span><span class="tag line">simulated</span></div>
+        <ul class="meters" aria-hidden="true">
+          <li><b data-c="agents">3</b><span>agents online</span></li>
+          <li><b data-c="doing">4</b><span>tasks in doing</span></li>
+          <li class="warn"><b data-c="waiting">1</b><span>waiting on you</span></li>
+          <li><b data-c="merged">12</b><span>merged this week</span></li>
+          <li><b data-c="builds">6</b><span>builds</span></li>
+        </ul>
+        <div class="cb-right">
+          <time class="clock" data-clock>14:02:11</time>
+          <button class="btn sm quiet" type="button" data-toggle hidden><Icon name="pause" class="xs" /><span>Pause</span></button>
+        </div>
+      </header>
+
+      <div class="floor" aria-hidden="true" inert>
+        <!-- 01: agents, and your phone -->
+        <article class="st">
+          <header class="st-h"><span class="st-n">01</span><span class="st-t">Agents</span><span class="grow"></span><span class="led"></span></header>
+          <ul class="st-b agents">
+            <li><span class="av t-violet">LU</span><span class="ttl"><strong>lumen</strong><span class="sub" data-t="lumen">asks Q-8 · Album sidebar</span></span><span class="eq"><i></i><i></i><i></i></span></li>
+            <li><span class="av t-teal">OR</span><span class="ttl"><strong>orbit</strong><span class="sub" data-t="orbit">T-12 · Sync over LAN</span></span><span class="eq"><i></i><i></i><i></i></span></li>
+            <li><span class="av t-orange">KI</span><span class="ttl"><strong>kiln</strong><span class="sub" data-t="kiln">M2 review · 6 findings</span></span><span class="eq"><i></i><i></i><i></i></span></li>
+          </ul>
+          <footer class="st-f">one agent per project · over MCP</footer>
+        </article>
+        <article class="dk" data-desk="phone">
+          <header class="dk-h"><Icon name="bell" /><span>Your phone</span><span class="grow"></span><span class="who">push</span></header>
+          <ul class="notifs" data-notifs>
+            <li class="nt"><img src={logo} alt="" /><span class="ttl"><strong>New question · lumen</strong><span class="sub">Album sidebar: a list of names or a grid of covers?</span></span><time>now</time></li>
+          </ul>
+        </article>
+
+        <!-- 02: the plan, and the question -->
+        <article class="st">
+          <header class="st-h"><span class="st-n">02</span><span class="st-t">Plan</span><span class="grow"></span><span class="led"></span></header>
+          <div class="st-b">
+            <div class="ms"><span class="tag accent">M3</span><strong>Albums and tags</strong><span class="grow"></span><span class="chip accent" data-m3>active</span></div>
+            <div class="steprow"><span class="mono">S2 · Album sidebar</span><span data-t="stepcount">1 of 4 done</span></div>
+            <span class="meter thin"><i data-meter style="width: 25%"></i></span>
+            <ul class="tasks">
+              <li><span class="id">T-30</span><span class="tt">Album table</span><span class="chip ok" data-task="T-30">done</span></li>
+              <li><span class="id">T-31</span><span class="tt">Album sidebar</span><span class="chip accent" data-task="T-31">doing</span></li>
+              <li><span class="id">T-32</span><span class="tt">Drag photos onto an album</span><span class="chip bad" data-task="T-32">blocked</span></li>
+              <li><span class="id">T-33</span><span class="tt">Album covers</span><span class="chip" data-task="T-33">todo</span></li>
+            </ul>
+          </div>
+          <footer class="st-f">estimated 9 h · 3 h 20 min so far</footer>
+        </article>
+        <article class="dk live" data-desk="answer" data-s="asked">
+          <header class="dk-h"><Icon name="question" /><span>Answer</span><span class="grow"></span><span class="who">Q-8</span></header>
+          <div data-when="idle"><div class="empty-line"><Icon name="check" />No open questions</div></div>
+          <div data-when="asked">
+            <p class="q-meta"><span class="mono">Q-8</span><span class="tag">M3</span><span>blocks T-32</span></p>
+            <p class="q-title">Album sidebar: a list of names or a grid of covers?</p>
+            <div class="choices">
+              <div class="choice rec" data-choice="1"><span class="num">1</span><span class="txt">A list of names<span class="sub">fits 40 albums, no scrolling</span></span><span class="tag accent">rec.</span></div>
+              <div class="choice" data-choice="2"><span class="num">2</span><span class="txt">A grid of covers</span></div>
+            </div>
+            <div class="q-send"><span class="fake-input">Or your own words</span><span class="btn sm" data-btn="answer">Send answer</span></div>
+          </div>
+          <div data-when="answered">
+            <div class="done-line"><span class="chip ok">answered</span><span class="mono note">→ D-14</span></div>
+            <blockquote class="quote sm">“1, a list of names”</blockquote>
+            <p class="note">The sidebar is a list of names · M3 · T-32 unblocked</p>
+          </div>
+        </article>
+
+        <!-- 03: pull requests, and Merge -->
+        <article class="st">
+          <header class="st-h"><span class="st-n">03</span><span class="st-t">Pull requests</span><span class="grow"></span><span class="led"></span></header>
+          <ul class="st-b prs">
+            <li data-pr="51"><span class="n">#51</span><span class="ttl"><span class="tt">feat: album list</span><span class="sub">based on main</span></span><span class="chip ok">ready</span></li>
+            <li data-pr="52" data-s="hidden"><span class="n">#52</span><span class="ttl"><span class="tt">feat: drag photos onto an album</span><span class="sub">based on #51</span></span><span class="chip">CI running</span></li>
+            <li data-pr="49"><span class="n">#49</span><span class="ttl"><span class="tt">docs: albums</span><span class="sub">draft</span></span><span class="chip info">draft</span></li>
+          </ul>
+          <footer class="st-f">in merge order · from GitHub every 3 min</footer>
+        </article>
+        <article class="dk" data-desk="merge" data-s="idle">
+          <header class="dk-h"><Icon name="merge" /><span>Merge</span><span class="grow"></span><span class="who">in order</span></header>
+          <div data-when="idle">
+            <div class="mg"><div class="mg-row"><span class="o">1</span><span class="n">#51</span><span class="tt">feat: album list</span></div></div>
+            <span class="btn secondary wide">Merge</span>
+            <p class="note">The release waits for #52 too.</p>
+          </div>
+          <div data-when="ready">
+            <div class="mg">
+              <div class="mg-row"><span class="o">1</span><span class="n">#51</span><span class="tt">feat: album list</span></div>
+              <div class="mg-row"><span class="o">2</span><span class="n">#52</span><span class="tt">drag photos onto an album</span></div>
+            </div>
+            <span class="btn wide" data-btn="merge">Merge #51–#52</span>
+            <p class="note" data-t="mergenote">Waits for CI on #52.</p>
+          </div>
+          <div data-when="done">
+            <div class="mg">
+              <div class="mg-row"><Icon name="check" /><span class="n">#51</span><span class="tt">merged</span></div>
+              <div class="mg-row"><Icon name="check" /><span class="n">#52</span><span class="tt">merged</span></div>
+            </div>
+            <p class="note ok">Merge #51–#52: 2 of 2 merged, branches deleted.</p>
+          </div>
+        </article>
+
+        <!-- 04: the release, and Push tag -->
+        <article class="st">
+          <header class="st-h"><span class="st-n">04</span><span class="st-t">Release</span><span class="grow"></span><span class="led"></span></header>
+          <div class="st-b">
+            <p class="rel"><b>v0.4.0-m3</b> · M3: Albums and tags</p>
+            <ul class="waits">
+              <li data-w="51"><Icon name="check" />#51</li>
+              <li data-w="52"><Icon name="check" />#52</li>
+            </ul>
+            <p class="big-state warn" data-t="relnote">waits for 2 of its PRs</p>
+            <p class="sub">Notes: album list in the sidebar, drag photos onto an album.</p>
+          </div>
+          <footer class="st-f">annotated tag on main · closes M3</footer>
+        </article>
+        <article class="dk" data-desk="tag" data-s="locked">
+          <header class="dk-h"><Icon name="tag" /><span>Push tag</span><span class="grow"></span><span class="who">R-3</span></header>
+          <div data-when="locked ready">
+            <span class="btn secondary wide" data-btn="tag" data-locked><Icon name="tag" />Push tag v0.4.0-m3</span>
+            <p class="note" data-t="tagnote">Unlocks once #52 is merged.</p>
+          </div>
+          <div data-when="done">
+            <div class="done-line"><span class="chip ok">tagged</span><span class="mono note">v0.4.0-m3</span></div>
+            <p class="note ok">Pushed. M3 is closed.</p>
+          </div>
+        </article>
+
+        <!-- 05: builds, and what to try -->
+        <article class="st">
+          <header class="st-h"><span class="st-n">05</span><span class="st-t">Builds</span><span class="grow"></span><span class="led" data-bled></span></header>
+          <div class="st-b">
+            <div class="b-head"><span class="num" data-t="bnum">B-6</span><span class="chip info">newest</span><span class="tag line">linux-x86_64</span></div>
+            <p class="b-name" data-t="bname">2026-11-23-1718-main-3f1c2aa</p>
+            <span class="meter thin"><i data-bmeter style="width: 100%"></i></span>
+            <code class="cmd" data-t="bcmd"><span class="p">$ </span>flow run lumen 6</code>
+          </div>
+          <footer class="st-f">checked file by file · SHA-256</footer>
+        </article>
+        <article class="dk" data-desk="try" data-s="idle">
+          <header class="dk-h"><Icon name="play" /><span>Try</span><span class="grow"></span><span class="who">Builds tab</span></header>
+          <div data-when="idle"><div class="empty-line"><Icon name="check" />Nothing new to try</div></div>
+          <div data-when="new">
+            <p class="q-meta"><span class="mono">B-7</span><span>new in this build</span><span class="tag">Albums</span></p>
+            <h4>Drag photos onto an album</h4>
+            <p class="note">Select a few photos and drop them on an album in the sidebar.</p>
+            <div class="try-btns">
+              <span class="btn sm ok" data-btn="works"><Icon name="check" />Works</span>
+              <span class="btn sm danger"><Icon name="close" />Problem</span>
+              <span class="btn sm quiet">Skip</span>
+            </div>
+          </div>
+          <div data-when="done">
+            <div class="done-line"><span class="chip ok"><Icon name="check" />works</span><span class="mono note">TT-9</span></div>
+            <p class="note">Off the list. The agent hears it as news.</p>
+          </div>
+        </article>
+
+        <!-- The belt between them -->
+        <div class="belt">
+          <span class="belt-label">▸ the line</span>
+          <span class="belt-label r">your desk ▾</span>
+          <div class="belt-track"></div>
+          {['c1', 'c2', 'c3'].map((c) => (
+            <div class={`carrier ${c}`}>
+              <div class="pk"><span>T-31</span><span>T-31 done</span><span>#52</span><span>v0.4.0-m3</span><span>B-7</span></div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div class="ticker" aria-hidden="true">
+        <div class="tk-h"><span class="label">Log</span><span class="dot ok live"></span><span class="sub">live · newest first</span></div>
+        <ol class="tk" data-log>
+          {rows.map(([cat, who, proj, what]) => (
+            <li>
+              <time>14:02:09</time>
+              <span class={`lcat c-${cat}`}><Icon name={icon[cat]} /><span>{label[cat]}</span></span>
+              <span class="who">{who}</span>
+              <span class="proj">{proj}</span>
+              <span class="what">{what}</span>
+            </li>
+          ))}
+        </ol>
+      </div>
+    </div>
+    <div class="line-foot"><span>A made-up project, drawn with AgentFlow's own UI components.</span><span>Every step above is a real tool, command or button.</span></div>
+  </div>
+  {cats.map(([c, i]) => (
+    <template data-icon={c}><Icon name={i} /></template>
+  ))}
+</section>
+
+<script>
+  import { start } from '../../scripts/line';
+  start();
+</script>
