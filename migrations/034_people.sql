@@ -39,3 +39,16 @@ UPDATE web_sessions SET person_id = 1 WHERE EXISTS (SELECT 1 FROM people WHERE i
 UPDATE push_subscriptions SET person_id = 1 WHERE EXISTS (SELECT 1 FROM people WHERE id = 1);
 -- Unused links from before were the owner's own.
 UPDATE login_links SET person_id = 1 WHERE used_at IS NULL AND EXISTS (SELECT 1 FROM people WHERE id = 1);
+
+-- The bell's read marks are each person's own (D-270): opening the bell reads them for you only.
+CREATE TABLE notification_reads (
+    notification_id INTEGER NOT NULL REFERENCES notifications(id) ON DELETE CASCADE,
+    person_id       INTEGER NOT NULL REFERENCES people(id),
+    read_at         INTEGER NOT NULL,
+    PRIMARY KEY (notification_id, person_id)
+);
+INSERT INTO notification_reads (notification_id, person_id, read_at)
+SELECT id, 1, read_at FROM notifications WHERE read_at IS NOT NULL AND EXISTS (SELECT 1 FROM people WHERE id = 1);
+-- What pushes go out is each person's choice too: today's choices become the admin's.
+INSERT OR IGNORE INTO settings (key, value)
+SELECT 'person.1.' || key, value FROM settings WHERE key LIKE 'notify.%' AND EXISTS (SELECT 1 FROM people WHERE id = 1);

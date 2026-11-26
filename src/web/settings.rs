@@ -37,6 +37,7 @@ pub fn routes() -> Router<AppState> {
         .route("/settings/passkeys/link", post(device_link))
         .route("/settings/people/invite", post(invite))
         .route("/settings/people/{id}/link", post(person_link))
+        .route("/settings/people/{id}/remove", post(person_remove))
         .route("/settings/links/{id}/withdraw", post(link_withdraw))
 }
 
@@ -202,7 +203,7 @@ fn section_of_notice(done: &str) -> &'static str {
         "passkey-removed" | "link-withdrawn-device" => "passkeys",
         "session-ended" => "browsers",
         "profile-saved" => "profile",
-        "link-withdrawn" => "people",
+        "link-withdrawn" | "person-removed" => "people",
         "revoked" | "approved" | "denied" | "approve-failed" => "clients",
         "rotated" => "agents",
         "github-saved" | "github-removed" => "github",
@@ -227,8 +228,9 @@ fn notice_for(key: &str) -> Option<&'static str> {
         "passkey-removed" => "Passkey removed.",
         "profile-saved" => "Saved. This is how you show up from now on.",
         "link-withdrawn" | "link-withdrawn-device" => "Withdrawn: the link doesn't work any more.",
+        "person-removed" => "Removed: they're signed out everywhere and can't sign in again.",
         "device-removed" => "That device won't get notifications any more.",
-        "test-sent" => "Test notification sent to every device that has notifications on.",
+        "test-sent" => "Test notification sent to your devices that have notifications on.",
         "test-none" => "No device has notifications on yet.",
         "notify-saved" => "Notification settings saved.",
         "revoked" => "Token revoked. Whatever used it can no longer reach AgentFlow.",
@@ -352,6 +354,29 @@ async fn person_link(
     render_page(&state, &actor, None, None, Some("people"), Some(made("person", person.id, link))).await
 }
 
+/// Settings › People › Remove (the security review: nobody could be removed). Only the admin.
+async fn person_remove(
+    State(state): State<AppState>,
+    Extension(actor): Extension<Actor>,
+    Extension(ip): Extension<ClientIp>,
+    Path(id): Path<i64>,
+) -> AppResult<Redirect> {
+    actor.require_admin()?;
+    let name = state
+        .db
+        .call(move |c| {
+            let tx = c.transaction()?;
+            let name = crate::people::get(&tx, id)?.map(|p| p.name());
+            crate::people::remove(&tx, id)?;
+            tx.commit()?;
+            Ok(name)
+        })
+        .await
+        .map_err(|e| AppError::BadRequest(format!("{e:#}")))?;
+    log(&state, &actor, &ip, Action::Write, format!("removed {}", name.unwrap_or_default())).await;
+    Ok(Redirect::to("/settings?done=person-removed"))
+}
+
 /// Withdraws a link that isn't used yet: one you made, one for you, or (the admin) an invite.
 async fn link_withdraw(
     State(state): State<AppState>,
@@ -407,8 +432,10 @@ async fn render_page(
         .call(move |c| {
             let passkeys = passkey::list(c, me)?;
             let devices = push::devices(c, me)?;
-            let toggles =
-                Kind::ALL.iter().map(|&k| Ok((k, push::is_enabled(c, k)?))).collect::<anyhow::Result<Vec<_>>>()?;
+            let toggles = Kind::ALL
+                .iter()
+                .map(|&k| Ok((k, push::is_enabled(c, Some(me), k)?)))
+                .collect::<anyhow::Result<Vec<_>>>()?;
             let tokens = auth::list_tokens(c)?;
             let mut stmt = c.prepare(
                 "SELECT id, method, user_agent, last_seen_at FROM web_sessions
@@ -805,7 +832,7 @@ async fn push_test(State(state): State<AppState>, Extension(actor): Extension<Ac
         tag: Some("test".into()),
     };
     // A test goes out even if "urgent" is switched off: it's sent as its own kind of check.
-    let delivered = state.push.send_ignoring_settings(&n).await?;
+    let delivered = state.push.send_test(actor.person().unwrap_or(0), &n).await?;
     Ok(Redirect::to(if delivered > 0 { "/settings?done=test-sent" } else { "/settings?done=test-none" }))
 }
 
@@ -898,11 +925,12 @@ async fn notify_save(
             .collect::<Vec<_>>()
             .join(", ")
     );
+    let me = actor.person().unwrap_or(0);
     state
         .db
         .call(move |c| {
             for k in Kind::ALL {
-                push::set_enabled(c, k, on.contains(&k))?;
+                push::set_enabled(c, me, k, on.contains(&k))?;
             }
             Ok(())
         })

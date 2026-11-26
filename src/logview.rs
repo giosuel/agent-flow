@@ -107,10 +107,33 @@ pub struct Filter {
     pub to: Option<i64>,
 }
 
+/// A query's tokens: split at whitespace, except inside double quotes, so `actor:"build servers"`
+/// (as the page writes a value with a space) is one.
+pub fn tokens(q: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    let (mut start, mut quoted) = (None, false);
+    for (i, ch) in q.char_indices() {
+        if ch == '"' {
+            quoted = !quoted;
+        }
+        if ch.is_whitespace() && !quoted {
+            if let Some(s) = start.take() {
+                out.push(&q[s..i]);
+            }
+        } else if start.is_none() {
+            start = Some(i);
+        }
+    }
+    if let Some(s) = start {
+        out.push(&q[s..]);
+    }
+    out
+}
+
 impl Filter {
     pub fn parse(q: &str) -> Filter {
         let mut f = Filter::default();
-        for token in q.split_whitespace() {
+        for token in tokens(q) {
             let (neg, t) = match token.strip_prefix('-') {
                 Some(rest) if rest.contains(':') => (true, rest),
                 _ => (false, token),
@@ -124,7 +147,13 @@ impl Filter {
                     let v = if col == "severity" && v.eq_ignore_ascii_case("warning") { "warn".into() } else { v };
                     f.fields.push((col.to_owned(), v.to_lowercase(), neg));
                 }
-                _ => f.words.push(token.to_lowercase()),
+                // A quoted phrase is searched as it stands.
+                _ => {
+                    let w = token.trim_matches('"');
+                    if !w.is_empty() {
+                        f.words.push(w.to_lowercase());
+                    }
+                }
             }
         }
         f
@@ -265,6 +294,59 @@ pub fn archive_dir(data_dir: &Path) -> PathBuf {
     data_dir.join("log-archive")
 }
 
+fn archive_file(data_dir: &Path, month: &str) -> PathBuf {
+    archive_dir(data_dir).join(format!("{month}-reads.jsonl.zst"))
+}
+
+/// Beside each month's file, how many reads it holds: the page's footer shows it on every view,
+/// and counting means decompressing the whole month.
+fn count_file(data_dir: &Path, month: &str) -> PathBuf {
+    archive_dir(data_dir).join(format!("{month}-reads.count"))
+}
+
+/// The archive's months, newest first.
+fn months(data_dir: &Path) -> Vec<String> {
+    let mut out: Vec<String> = std::fs::read_dir(archive_dir(data_dir))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|e| e.file_name().to_string_lossy().strip_suffix("-reads.jsonl.zst").map(str::to_owned))
+        .collect();
+    out.sort();
+    out.reverse();
+    out
+}
+
+fn stored_count(data_dir: &Path, month: &str) -> Option<u64> {
+    std::fs::read_to_string(count_file(data_dir, month)).ok()?.trim().parse().ok()
+}
+
+fn store_count(data_dir: &Path, month: &str, n: u64) {
+    let path = count_file(data_dir, month);
+    let tmp = path.with_extension("count.tmp");
+    if std::fs::write(&tmp, n.to_string()).and_then(|_| std::fs::rename(&tmp, &path)).is_err() {
+        // A stale count is worse than none: without one, the month is counted again.
+        let _ = std::fs::remove_file(&path);
+    }
+}
+
+/// The lines of an archive file, counted without parsing them (0 when there's no file yet).
+fn count_lines(path: &Path) -> u64 {
+    let Ok(file) = std::fs::File::open(path) else { return 0 };
+    let Ok(dec) = zstd::Decoder::new(file) else { return 0 };
+    let mut reader = std::io::BufReader::new(dec);
+    let (mut n, mut buf) = (0, Vec::new());
+    while reader.read_until(b'\n', &mut buf).is_ok_and(|len| len > 0) {
+        n += 1;
+        buf.clear();
+    }
+    n
+}
+
+fn month_count(data_dir: &Path, month: &str) -> u64 {
+    stored_count(data_dir, month).unwrap_or_else(|| count_lines(&archive_file(data_dir, month)))
+}
+
 /// `2026-08` for a time.
 fn month_of(ms: i64) -> String {
     let t = time::OffsetDateTime::from_unix_timestamp_nanos(ms as i128 * 1_000_000)
@@ -276,6 +358,12 @@ fn month_of(ms: i64) -> String {
 /// database. Each run appends one zstd frame; readers handle any number of frames. Returns how
 /// many rows moved.
 pub fn archive_old_reads(conn: &mut Connection, data_dir: &Path, now: i64) -> anyhow::Result<usize> {
+    // Months archived before their counts were kept get theirs, once.
+    for month in months(data_dir) {
+        if stored_count(data_dir, &month).is_none() {
+            store_count(data_dir, &month, count_lines(&archive_file(data_dir, &month)));
+        }
+    }
     let cutoff = now - READS_KEPT_DAYS * 86_400_000;
     let rows: Vec<LogRow> = {
         let mut stmt = conn.prepare(&format!(
@@ -294,8 +382,8 @@ pub fn archive_old_reads(conn: &mut Connection, data_dir: &Path, now: i64) -> an
         by_month.entry(month_of(r.at)).or_default().push(r);
     }
     for (month, list) in &by_month {
-        let path = dir.join(format!("{month}-reads.jsonl.zst"));
-        let file = std::fs::OpenOptions::new().create(true).append(true).open(&path)?;
+        let had = month_count(data_dir, month);
+        let file = std::fs::OpenOptions::new().create(true).append(true).open(archive_file(data_dir, month))?;
         let mut enc = zstd::Encoder::new(file, 9)?;
         for r in list {
             serde_json::to_writer(&mut enc, r)?;
@@ -304,6 +392,7 @@ pub fn archive_old_reads(conn: &mut Connection, data_dir: &Path, now: i64) -> an
         let file = enc.finish()?;
         // On disk before the rows leave the database.
         file.sync_all()?;
+        store_count(data_dir, month, had + list.len() as u64);
     }
     let tx = conn.transaction()?;
     let last = rows.last().map(|r| r.seq).unwrap_or(0);
@@ -312,44 +401,48 @@ pub fn archive_old_reads(conn: &mut Connection, data_dir: &Path, now: i64) -> an
     Ok(rows.len())
 }
 
-/// The archive's months, with how many reads each holds (for the page's footer).
+/// The archive's months, newest first, with how many reads each holds (for the page's footer).
 pub fn archive_months(data_dir: &Path) -> Vec<(String, u64)> {
-    let mut out = Vec::new();
-    let Ok(entries) = std::fs::read_dir(archive_dir(data_dir)) else { return out };
-    for e in entries.flatten() {
-        let name = e.file_name().to_string_lossy().into_owned();
-        if let Some(month) = name.strip_suffix("-reads.jsonl.zst") {
-            let lines = read_archive(&e.path(), &Filter::default(), usize::MAX).map(|r| r.len() as u64).unwrap_or(0);
-            out.push((month.to_owned(), lines));
-        }
-    }
-    out.sort();
-    out.reverse();
-    out
+    months(data_dir)
+        .into_iter()
+        .map(|m| {
+            let n = month_count(data_dir, &m);
+            (m, n)
+        })
+        .collect()
 }
 
-/// Matching rows from one archive file, newest first, at most `limit`.
-pub fn read_archive(path: &Path, f: &Filter, limit: usize) -> anyhow::Result<Vec<LogRow>> {
+/// Matching rows from one archive file, older than `before` (a seq) when given, newest first, at
+/// most `limit`.
+pub fn read_archive(path: &Path, f: &Filter, before: Option<i64>, limit: usize) -> anyhow::Result<Vec<LogRow>> {
     let file = std::fs::File::open(path)?;
     let reader = std::io::BufReader::new(zstd::Decoder::new(file)?);
+    let newest = |out: &mut Vec<LogRow>| {
+        out.sort_by_key(|r| std::cmp::Reverse(r.seq));
+        out.truncate(limit);
+    };
     let mut out = Vec::new();
     for line in reader.lines() {
         let line = line?;
         if let Ok(r) = serde_json::from_str::<LogRow>(&line)
+            && before.is_none_or(|b| r.seq < b)
             && f.matches(&r)
         {
             out.push(r);
+            // Only the newest `limit` are kept as it goes, so a month never sits in memory whole.
+            if out.len() >= limit.saturating_mul(2).max(1024) {
+                newest(&mut out);
+            }
         }
     }
-    out.sort_by_key(|r| std::cmp::Reverse(r.seq));
-    out.truncate(limit);
+    newest(&mut out);
     Ok(out)
 }
 
 /// Archived rows matching the filter, for months the time range reaches, newest first.
 pub fn search_archive(data_dir: &Path, f: &Filter, before: Option<i64>, limit: usize) -> anyhow::Result<Vec<LogRow>> {
     let mut out = Vec::new();
-    for (month, _) in archive_months(data_dir) {
+    for month in months(data_dir) {
         // Skip months entirely outside the range.
         let starts =
             time::Date::parse(&format!("{month}-01"), time::macros::format_description!("[year]-[month]-[day]"))
@@ -358,8 +451,7 @@ pub fn search_archive(data_dir: &Path, f: &Filter, before: Option<i64>, limit: u
         if f.to.is_some_and(|to| starts >= to) || f.from.is_some_and(|from| starts + 32 * 86_400_000 < from) {
             continue;
         }
-        let path = archive_dir(data_dir).join(format!("{month}-reads.jsonl.zst"));
-        out.extend(read_archive(&path, f, usize::MAX)?.into_iter().filter(|r| before.is_none_or(|b| r.seq < b)));
+        out.extend(read_archive(&archive_file(data_dir, &month), f, before, limit)?);
         if out.len() >= limit {
             break;
         }
@@ -398,7 +490,14 @@ mod tests {
         let db = Db::open_memory();
         let dir = tempfile::tempdir().unwrap();
         db.call_blocking(|c| {
-            let owner = Actor::Owner { session_id: 1, method: "passkey".into(), person: 1, admin: true, ready: true };
+            let owner = Actor::Owner {
+                session_id: 1,
+                method: "passkey".into(),
+                person: 1,
+                admin: true,
+                ready: true,
+                name: "giosuel".into(),
+            };
             for i in 0..30 {
                 let e = Entry::new(
                     &owner,
@@ -440,5 +539,36 @@ mod tests {
             Ok(())
         })
         .unwrap();
+    }
+
+    #[test]
+    fn the_footer_counts_without_reading_the_archive() {
+        let db = Db::open_memory();
+        let dir = tempfile::tempdir().unwrap();
+        db.call_blocking(|c| {
+            let owner = Actor::Owner {
+                session_id: 1,
+                method: "passkey".into(),
+                person: 1,
+                admin: true,
+                ready: true,
+                name: "giosuel".into(),
+            };
+            for i in 0..5 {
+                write_conn(c, &Entry::new(&owner, Via::Page, Action::Read, format!("GET /p/{i}")))?;
+            }
+            c.execute("UPDATE log SET at = at - 100 * 86400000", [])?;
+            assert_eq!(archive_old_reads(c, dir.path(), crate::util::now_ms())?, 5);
+            Ok(())
+        })
+        .unwrap();
+        // Every view shows the counts; they come from beside the files, not from decompressing
+        // every month.
+        for e in std::fs::read_dir(archive_dir(dir.path())).unwrap().flatten() {
+            if e.file_name().to_string_lossy().ends_with(".zst") {
+                std::fs::write(e.path(), b"").unwrap();
+            }
+        }
+        assert_eq!(archive_months(dir.path()).iter().map(|(_, n)| n).sum::<u64>(), 5);
     }
 }

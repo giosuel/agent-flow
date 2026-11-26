@@ -225,7 +225,8 @@ pub async fn nav(state: &AppState, actor: &Actor, active: &str) -> Nav {
             n.me = me.map(|p| Me { name: p.name(), email: p.email, icon: p.icon });
         }
         n.waiting = state.db.call(|c| crate::waiting::count(c)).await.unwrap_or(0) as i64;
-        n.unread = state.db.call(|c| crate::notifications::unread(c)).await.unwrap_or(0);
+        let me = actor.person().unwrap_or(0);
+        n.unread = state.db.call(move |c| crate::notifications::unread(c, me)).await.unwrap_or(0);
         let now = crate::util::now_ms();
         n.projects = state
             .db
@@ -450,14 +451,15 @@ async fn passkey_finish(
         .db
         .call(move |c| {
             let (name, person) = pk.finish_login(c, &body.id, &body.credential)?;
-            Ok((name, auth::create_session(c, person, "passkey", &limits, ua.as_deref(), Some(&ip2))?))
+            // The Log names who signed in, not only the passkey's own name (the security review).
+            let who = crate::people::get(c, person)?.map(|p| p.name()).unwrap_or_default();
+            let what = format!("{who} signed in with passkey \"{name}\"");
+            Ok((what, auth::create_session(c, person, "passkey", &limits, ua.as_deref(), Some(&ip2))?))
         })
         .await;
     match result {
         Ok((name, session)) => {
-            let e =
-                Entry::new(&Actor::Anonymous, Via::Page, Action::Login, format!("signed in with passkey \"{name}\""))
-                    .ip(Some(ip));
+            let e = Entry::new(&Actor::Anonymous, Via::Page, Action::Login, name).ip(Some(ip));
             activity::write(&state.db, e).await;
             let jar = jar.add(session_cookie(&state, session));
             (jar, Json(serde_json::json!({"ok": true}))).into_response()
@@ -494,6 +496,11 @@ async fn link_use(
             // own (links.rs).
             let tx = c.transaction()?;
             let Some(link) = auth::consume_login_link(&tx, &secret)? else { return Ok(None) };
+            // Only sign-in links here; a device, setup or invite link has its own page (refused
+            // here, it stays unused).
+            if link.purpose != auth::purpose::SIGNIN && link.purpose != "add-passkey" {
+                return Ok(None);
+            }
             let person = link.person.map(|p| crate::people::get(&tx, p)).transpose()?.flatten();
             let Some(person) = person else { return Ok(None) };
             let session = auth::create_session(&tx, person.id, "link", &limits, ua.as_deref(), Some(&ip2))?;

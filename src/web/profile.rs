@@ -41,12 +41,10 @@ struct NextQuery {
     next: Option<String>,
 }
 
-/// Only a path on this site: `/something`, never `//elsewhere`.
+/// Only a path on this site: `/something`, never `//elsewhere` (the same check as every `next`:
+/// printable ASCII only, so a tab can't turn `/\t/x` into `//x`).
 fn safe_next(next: Option<&str>) -> String {
-    match next {
-        Some(n) if n.starts_with('/') && !n.starts_with("//") && !n.contains('\\') => n.to_owned(),
-        _ => "/".to_owned(),
-    }
+    super::local_path(next).unwrap_or_else(|| "/".to_owned())
 }
 
 async fn welcome(

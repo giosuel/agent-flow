@@ -406,14 +406,28 @@ fn admin_request(socket: Option<&Path>, req: Value) -> anyhow::Result<Value> {
         BufReader::new(&stream).read_line(&mut line)?;
         let v: Value = serde_json::from_str(&line).context("a broken answer from the server")?;
         if let Some(e) = v["error"].as_str() {
-            bail!("{e}");
+            bail!("{}", printable(e));
         }
+        // Say which server answered: another user's socket can answer too, and root should see
+        // whose it was (the security review).
+        let owner = std::os::unix::fs::MetadataExt::uid(&std::fs::metadata(&path)?);
+        eprintln!("(the AgentFlow server at {}, run by uid {owner})", path.display());
         return Ok(v);
     }
     if tried.is_empty() {
         bail!("no AgentFlow server is running on this machine (no admin socket found)");
     }
     bail!("couldn't reach the server's socket: {} (run it with sudo)", tried.join("; "))
+}
+
+/// A string from the server, without control characters (it's printed on root's terminal).
+fn printable(s: &str) -> String {
+    s.chars().filter(|c| !c.is_control()).collect()
+}
+
+/// A field of the server's answer, printable.
+fn field(v: &Value, k: &str) -> String {
+    printable(v[k].as_str().unwrap_or(""))
 }
 
 /// "15 minutes" when it's that, otherwise "until Wed 2 Dec 15:40".
@@ -435,7 +449,7 @@ pub fn server_setup(socket: Option<&Path>) -> anyhow::Result<()> {
     let at = status["url"].as_str().unwrap_or("this server").to_owned();
     let mut confirm = String::new();
     if let Some(admin) = status["admin"].as_object() {
-        let name = admin["name"].as_str().unwrap_or("the admin");
+        let name = printable(admin["name"].as_str().unwrap_or("the admin"));
         let others = status["people"].as_i64().unwrap_or(1) - 1;
         println!(
             "This AgentFlow already has an admin: {name} ({} passkey{}, {} signed-in browser{}).",
@@ -444,11 +458,9 @@ pub fn server_setup(socket: Option<&Path>) -> anyhow::Result<()> {
             admin["browsers"],
             if admin["browsers"] == 1 { "" } else { "s" }
         );
-        println!("Setting it up again makes the admin anew: {name}'s passkeys are removed");
-        println!(
-            "and their browsers signed out when the link is used. Projects, records and the {others} other {} stay.",
-            if others == 1 { "person" } else { "people" }
-        );
+        println!("Setting it up again makes the admin anew: when the link is used, {name}'s passkeys,");
+        println!("unused links and devices' notifications are removed and their browsers signed out.");
+        println!("Projects, records and the {others} other {} stay.", if others == 1 { "person" } else { "people" });
         let prompt =
             if admin["username"].is_string() { "Type the admin's username to go on" } else { "Type yes to go on" };
         confirm = ask(prompt, "")?;
@@ -462,7 +474,7 @@ pub fn server_setup(socket: Option<&Path>) -> anyhow::Result<()> {
         println!("Open this link to make the admin account and its first passkey.");
     }
     println!("It works once, {}:", works_until(&v));
-    println!("  {}", v["url"].as_str().unwrap_or(""));
+    println!("  {}", field(&v, "url"));
     if v["again"].as_bool() != Some(true) {
         println!("Then you pick your username, email and icon.");
     }
@@ -474,7 +486,7 @@ pub fn server_invite(socket: Option<&Path>) -> anyhow::Result<()> {
     let v = admin_request(socket, json!({"request": "invite"}))?;
     println!("Send this link to the person you're inviting.");
     println!("It works once, {}:", works_until(&v));
-    println!("  {}", v["url"].as_str().unwrap_or(""));
+    println!("  {}", field(&v, "url"));
     println!("They make a passkey there and pick their name and icon.");
     println!("Settings › People lists it until it's used, with Withdraw.");
     Ok(())
@@ -484,11 +496,11 @@ pub fn server_invite(socket: Option<&Path>) -> anyhow::Result<()> {
 /// person's account (the admin's if no one is named).
 pub fn server_add_device(socket: Option<&Path>, username: Option<&str>) -> anyhow::Result<()> {
     let v = admin_request(socket, json!({"request": "add_device", "username": username.unwrap_or("")}))?;
-    let who = v["person"].as_str().unwrap_or("");
+    let who = field(&v, "person");
     let admin = if v["admin"].as_bool() == Some(true) { " (the admin)" } else { "" };
     println!("Open this link on the new device to add a passkey to {who}{admin}.");
     println!("It works once, {}:", works_until(&v));
-    println!("  {}", v["url"].as_str().unwrap_or(""));
+    println!("  {}", field(&v, "url"));
     if username.is_none() {
         println!("For someone else: sudo flow server add-device <username>");
     }

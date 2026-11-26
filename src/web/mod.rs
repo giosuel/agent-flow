@@ -652,7 +652,10 @@ async fn authenticate(State(state): State<AppState>, jar: CookieJar, mut req: Re
 
     // A browser session may only change things from AgentFlow's own pages, so another site can't
     // make the owner's browser press a button (CSRF). Tokens aren't sent by browsers on their own.
-    if via_cookie && !is_safe(req.method()) && !same_origin(&state.config, req.headers()) {
+    // The sign-in and link pages too, cookie or not (the security review): another site mustn't
+    // sign a browser in as someone else (login CSRF).
+    let signs_in = links::is_public(&path) || path.starts_with("/login/");
+    if (via_cookie || signs_in) && !is_safe(req.method()) && !same_origin(&state.config, req.headers()) {
         let e = Entry::new(
             &actor,
             Via::Page,

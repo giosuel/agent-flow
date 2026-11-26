@@ -32,8 +32,12 @@ pub fn spawn(state: AppState) {
 async fn listen(state: &AppState, path: &Path) -> anyhow::Result<()> {
     use std::os::unix::fs::PermissionsExt;
     let dir = path.parent().context("the socket needs a folder")?;
-    std::fs::create_dir_all(dir)?;
-    std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))?;
+    // Only a folder made here is closed to others; an existing one (a mistaken path such as /tmp)
+    // keeps its permissions (the security review).
+    if !dir.exists() {
+        std::fs::create_dir_all(dir)?;
+        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))?;
+    }
     claim(path)?;
     let listener = UnixListener::bind(path)?;
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
@@ -81,7 +85,12 @@ fn claim(path: &Path) -> anyhow::Result<()> {
     if std::os::unix::net::UnixStream::connect(path).is_ok() {
         bail!("another AgentFlow server already answers there; give this one its own admin_socket in its config");
     }
-    let _ = std::fs::remove_file(path);
+    // Only a leftover socket goes; anything else at that path is a mistake in the config.
+    match std::fs::symlink_metadata(path) {
+        Ok(m) if std::os::unix::fs::FileTypeExt::is_socket(&m.file_type()) => std::fs::remove_file(path)?,
+        Ok(_) => bail!("{} isn't a socket; admin_socket must name a free path", path.display()),
+        Err(_) => {}
+    }
     Ok(())
 }
 
@@ -109,10 +118,10 @@ async fn answer(state: &AppState, req: &serde_json::Value) -> anyhow::Result<ser
             // Setting up again needs the admin's username typed back (or "yes" before they picked
             // one): it removes their passkeys and signs out their browsers when the link is used.
             let confirm = req["confirm"].as_str().unwrap_or("").trim().to_owned();
-            let again = state
+            let admin = state
                 .db
                 .call(move |c| {
-                    let Some(a) = people::admin(c)? else { return Ok(false) };
+                    let Some(a) = people::admin(c)? else { return Ok(None) };
                     let ok = match &a.username {
                         Some(u) => u.eq_ignore_ascii_case(&confirm),
                         None => confirm.eq_ignore_ascii_case("yes"),
@@ -120,10 +129,13 @@ async fn answer(state: &AppState, req: &serde_json::Value) -> anyhow::Result<ser
                     if !ok {
                         bail!("that isn't the admin's username; nothing was made");
                     }
-                    Ok(true)
+                    Ok(Some(a.id))
                 })
                 .await?;
-            let (url, until) = link(state, purpose::SETUP, None, None, auth::LINK_MINUTES).await?;
+            let again = admin.is_some();
+            // The link is for this state: the first setup (no admin) or this admin anew. Used
+            // when things changed (an admin made since, another admin), it's refused.
+            let (url, until) = link(state, purpose::SETUP, admin, None, auth::LINK_MINUTES).await?;
             announce(
                 state,
                 if again {
@@ -236,6 +248,9 @@ mod tests {
         drop(live);
         claim(&path).unwrap();
         assert!(!path.exists(), "a leftover goes");
+        std::fs::write(&path, "not a socket").unwrap();
+        assert!(claim(&path).is_err(), "a file at that path stays");
+        assert!(path.exists());
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }

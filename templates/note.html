@@ -45,7 +45,7 @@
         <dl class="kv nkv">
           {% if !note.category.is_empty() %}<dt>Category</dt><dd><span class="chip">{{ note.category }}</span></dd>{% endif %}
           <dt>State</dt><dd>{% if state == "resolved" %}<span class="chip ok">resolved</span>{% else %}{{ state }}{% endif %}</dd>
-          <dt>Written by</dt><dd><span class="byline">{% if note.by.0 %}<span class="itile sm accent" aria-hidden="true">{{ crate::web::icons::icon("robot")|safe }}</span>{% else %}<span class="itile sm" aria-hidden="true">{{ crate::web::icons::icon("person")|safe }}</span>{% endif %}<span>{{ note.by.1 }}{% if !note.subagent.is_empty() %}<span class="sub">its subagent · {{ note.subagent }}</span>{% endif %}</span></span></dd>
+          <dt>Written by</dt><dd><span class="byline">{% if note.by.0 %}<span class="itile sm accent" aria-hidden="true">{{ crate::web::icons::icon("robot")|safe }}</span>{% else %}{{ crate::web::avatars::html(note.by.2, "sm")|safe }}{% endif %}<span>{{ note.by.1 }}{% if !note.subagent.is_empty() %}<span class="sub">its subagent · {{ note.subagent }}</span>{% endif %}</span></span></dd>
           <dt>Added</dt><dd>{{ note.added }}</dd>
           {% if let Some((name, mtitle, href)) = note.milestone %}<dt>Milestone</dt><dd><a class="mono" href="{{ href }}">{{ name }}</a> {{ mtitle }}</dd>{% endif %}
           {% if !note.resurface.is_empty() && state != "resolved" %}<dt>Comes back</dt><dd>{{ note.resurface }}</dd>{% endif %}

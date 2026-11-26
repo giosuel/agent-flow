@@ -80,7 +80,8 @@ pub fn build_of(item: &Record, builds: &[&Record]) -> Option<String> {
 
 /// The owner's verdict on one item, from a page: works (tested, done), problem (stays open with
 /// the problem in their words) or skip (dropped: they won't try it). The agent hears each.
-pub fn owner_mark(conn: &Connection, item: &Record, verdict: &str, note: &str) -> anyhow::Result<Record> {
+/// A person marks an item tested (`by`: their username, D-272).
+pub fn owner_mark(conn: &Connection, item: &Record, verdict: &str, note: &str, by: &str) -> anyhow::Result<Record> {
     if item.kind != Kind::Test {
         anyhow::bail!("{} isn't something to test", item.ref_id);
     }
@@ -93,7 +94,7 @@ pub fn owner_mark(conn: &Connection, item: &Record, verdict: &str, note: &str) -
         "works" => {
             data.insert("result".into(), "works".into());
             data.insert("tested_at".into(), now_ms().into());
-            data.insert("tested_by".into(), "owner".into());
+            data.insert("tested_by".into(), by.into());
             if !note.is_empty() {
                 data.insert("owner_note".into(), note.into());
             }
@@ -108,7 +109,7 @@ pub fn owner_mark(conn: &Connection, item: &Record, verdict: &str, note: &str) -
                 anyhow::bail!("say what went wrong");
             }
             let mut problems = item.data.get("problems").and_then(Value::as_array).cloned().unwrap_or_default();
-            problems.push(json!({"at": now_ms(), "note": note, "by": "owner"}));
+            problems.push(json!({"at": now_ms(), "note": note, "by": by}));
             data.insert("problems".into(), Value::Array(problems));
             (
                 None,
@@ -130,10 +131,10 @@ pub fn owner_mark(conn: &Connection, item: &Record, verdict: &str, note: &str) -
     let (r, _) = records::update(
         conn,
         item,
-        "owner",
+        by,
         Patch { state, data, quiet: true, note: history.into(), ..Default::default() },
     )?;
-    records::event(conn, Some(item.project_id), Some(item.id), &format!("test.{verdict}"), &news, "owner")?;
+    records::event(conn, Some(item.project_id), Some(item.id), &format!("test.{verdict}"), &news, by)?;
     Ok(r)
 }
 
@@ -205,7 +206,13 @@ pub fn attach_to_release(conn: &Connection, release: &Record, author: &str) -> a
 }
 
 /// The owner ticked these and sent: tested, it works. The agent hears it, with the owner's note.
-pub fn owner_tested(conn: &Connection, project_id: i64, ids: &[i64], note: &str) -> anyhow::Result<Vec<Record>> {
+pub fn owner_tested(
+    conn: &Connection,
+    project_id: i64,
+    ids: &[i64],
+    note: &str,
+    by: &str,
+) -> anyhow::Result<Vec<Record>> {
     let mut done = Vec::new();
     for &id in ids {
         let r = records::get(conn, id)?;
@@ -215,14 +222,14 @@ pub fn owner_tested(conn: &Connection, project_id: i64, ids: &[i64], note: &str)
         let mut data = Map::new();
         data.insert("result".into(), "works".into());
         data.insert("tested_at".into(), now_ms().into());
-        data.insert("tested_by".into(), "owner".into());
+        data.insert("tested_by".into(), by.into());
         if !note.trim().is_empty() {
             data.insert("owner_note".into(), note.trim().into());
         }
         let (r, _) = records::update(
             conn,
             &r,
-            "owner",
+            by,
             Patch {
                 state: Some("tested".into()),
                 data,
@@ -240,7 +247,7 @@ pub fn owner_tested(conn: &Connection, project_id: i64, ids: &[i64], note: &str)
         } else {
             format!("Owner tested, works: {list}. Note: \"{}\"", note.trim())
         };
-        records::event(conn, Some(project_id), done.first().map(|r| r.id), "test.tested", &what, "owner")?;
+        records::event(conn, Some(project_id), done.first().map(|r| r.id), "test.tested", &what, by)?;
     }
     Ok(done)
 }

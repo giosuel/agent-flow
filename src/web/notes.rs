@@ -705,7 +705,8 @@ pub struct NotePage {
     pub icon: &'static str,
     pub tint: &'static str,
     /// Who wrote it (D-269): (an agent, "Lituus' project agent").
-    pub by: (bool, String),
+    /// (an agent, the name, a person's icon).
+    pub by: (bool, String, String),
     /// "23 Nov 22:12".
     pub added: String,
     /// The milestone or step it belongs to: (name, title, its place in Plan).
@@ -812,7 +813,7 @@ pub fn page(data_dir: &std::path::Path, r: &records::Record) -> NotePage {
         version: r.data.get("versions").and_then(Value::as_i64).unwrap_or(0) + 1,
         icon,
         tint,
-        by: (true, r.author.clone()),
+        by: (true, r.author.clone(), String::new()),
         added: String::new(),
         milestone: None,
     }

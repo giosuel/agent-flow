@@ -257,12 +257,17 @@ pub fn save_subscription(conn: &Connection, sub: &Subscription, device: &str, pe
     if auth.len() != 16 {
         bail!("auth must be 16 bytes");
     }
-    conn.execute(
+    // A browser's endpoint stays with the person who subscribed it: another can't take it over
+    // (the security review).
+    let n = conn.execute(
         "INSERT INTO push_subscriptions (endpoint, p256dh, auth, device, created_at, person_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-         ON CONFLICT (endpoint) DO UPDATE SET p256dh = excluded.p256dh, auth = excluded.auth, device = excluded.device,
-           person_id = excluded.person_id",
+         ON CONFLICT (endpoint) DO UPDATE SET p256dh = excluded.p256dh, auth = excluded.auth, device = excluded.device
+         WHERE push_subscriptions.person_id IS excluded.person_id",
         params![sub.endpoint, sub.keys.p256dh, sub.keys.auth, device, now_ms(), person],
     )?;
+    if n == 0 {
+        bail!("this browser gets someone else's notifications; they turn them off first");
+    }
     Ok(())
 }
 
@@ -292,17 +297,23 @@ pub fn devices(conn: &Connection, person: i64) -> anyhow::Result<Vec<DeviceRow>>
     Ok(rows.collect::<Result<_, _>>()?)
 }
 
-pub fn is_enabled(conn: &Connection, kind: Kind) -> anyhow::Result<bool> {
-    let v: Option<String> = conn
-        .query_row("SELECT value FROM settings WHERE key = ?1", [format!("notify.{}", kind.key())], |r| r.get(0))
-        .optional()?;
+/// Whether a person gets pushes of `kind` (each person's own choice, D-270). A device without a
+/// person (from before people) follows the old shared switches.
+pub fn is_enabled(conn: &Connection, person: Option<i64>, kind: Kind) -> anyhow::Result<bool> {
+    let get = |key: String| -> anyhow::Result<Option<String>> {
+        Ok(conn.query_row("SELECT value FROM settings WHERE key = ?1", [key], |r| r.get(0)).optional()?)
+    };
+    let v = match person {
+        Some(p) => get(format!("person.{p}.notify.{}", kind.key()))?,
+        None => get(format!("notify.{}", kind.key()))?,
+    };
     Ok(v.as_deref() != Some("off"))
 }
 
-pub fn set_enabled(conn: &Connection, kind: Kind, on: bool) -> anyhow::Result<()> {
+pub fn set_enabled(conn: &Connection, person: i64, kind: Kind, on: bool) -> anyhow::Result<()> {
     conn.execute(
         "INSERT INTO settings (key, value) VALUES (?1, ?2) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
-        params![format!("notify.{}", kind.key()), if on { "on" } else { "off" }],
+        params![format!("person.{person}.notify.{}", kind.key()), if on { "on" } else { "off" }],
     )?;
     Ok(())
 }
@@ -338,18 +349,19 @@ impl Pusher {
         self.vapid.public_key_b64()
     }
 
-    /// Sends `n` to every device, unless the owner switched `kind` off. Returns how many devices
-    /// accepted it. Runs in the background when called through [`Pusher::spawn`].
+    /// Sends `n` to every person's devices, unless that person switched `kind` off. Returns how
+    /// many devices accepted it. Runs in the background when called through [`Pusher::spawn`].
     pub async fn send(&self, kind: Kind, n: &Notification) -> anyhow::Result<usize> {
-        self.send_inner(Some(kind), n).await
+        self.send_inner(Some(kind), n, None).await
     }
 
-    /// For the "Send a test notification" button: goes out whatever the switches say.
-    pub async fn send_ignoring_settings(&self, n: &Notification) -> anyhow::Result<usize> {
-        self.send_inner(None, n).await
+    /// For the "Send a test notification" button: to the person's own devices, whatever their
+    /// switches say.
+    pub async fn send_test(&self, person: i64, n: &Notification) -> anyhow::Result<usize> {
+        self.send_inner(None, n, Some(person)).await
     }
 
-    async fn send_inner(&self, kind: Option<Kind>, n: &Notification) -> anyhow::Result<usize> {
+    async fn send_inner(&self, kind: Option<Kind>, n: &Notification, only: Option<i64>) -> anyhow::Result<usize> {
         // Kept for the bell, whatever the switches say about pushing it (crate::notifications).
         let (k, t, b, u, tag) = (
             kind.map(|k| k.key()).unwrap_or("test").to_owned(),
@@ -364,15 +376,26 @@ impl Pusher {
                 if let Err(e) = crate::notifications::store(c, &k, &t, &b, &u, tag.as_deref()) {
                     tracing::warn!("keeping a notification: {e:#}");
                 }
-                if let Some(kind) = kind
-                    && !is_enabled(c, kind)?
-                {
-                    return Ok(Vec::new());
+                let mut stmt = c.prepare(
+                    "SELECT s.endpoint, s.p256dh, s.auth, s.person_id FROM push_subscriptions s
+                     LEFT JOIN people p ON p.id = s.person_id
+                     WHERE (?1 IS NULL OR s.person_id = ?1) AND p.removed_at IS NULL",
+                )?;
+                let rows = stmt.query_map([only], |r| {
+                    Ok((
+                        Target { endpoint: r.get(0)?, p256dh: r.get(1)?, auth: r.get(2)? },
+                        r.get::<_, Option<i64>>(3)?,
+                    ))
+                })?;
+                let mut targets = Vec::new();
+                for row in rows {
+                    let (t, person) = row?;
+                    // Each person's own switches (a test goes out whatever they say).
+                    if kind.map(|k| is_enabled(c, person, k)).transpose()?.unwrap_or(true) {
+                        targets.push(t);
+                    }
                 }
-                let mut stmt = c.prepare("SELECT endpoint, p256dh, auth FROM push_subscriptions")?;
-                let rows =
-                    stmt.query_map([], |r| Ok(Target { endpoint: r.get(0)?, p256dh: r.get(1)?, auth: r.get(2)? }))?;
-                Ok(rows.collect::<Result<Vec<_>, _>>()?)
+                Ok(targets)
             })
             .await?;
         // One aes128gcm record holds at most 4096 bytes; notifications are short anyway.
@@ -565,10 +588,18 @@ mod tests {
                 me,
             )?;
             assert_eq!(devices(c, me)?.len(), 1);
+            // The endpoint stays with its person: another can't take it over (the security review).
+            let other = crate::people::create(c, false, Some(me), webauthn_rs::prelude::Uuid::new_v4())?;
+            assert!(
+                save_subscription(c, &sub("https://web.push.apple.com/1", ua, "BTBZMqHH6r4Tts7J_aSIgg"), "x", other)
+                    .is_err()
+            );
+            assert_eq!(devices(c, me)?.len(), 1);
             assert_eq!(devices(c, me + 1)?.len(), 0, "another person's list is their own");
-            assert!(is_enabled(c, Kind::Question)?);
-            set_enabled(c, Kind::Question, false)?;
-            assert!(!is_enabled(c, Kind::Question)?);
+            assert!(is_enabled(c, Some(me), Kind::Question)?);
+            set_enabled(c, me, Kind::Question, false)?;
+            assert!(!is_enabled(c, Some(me), Kind::Question)?);
+            assert!(is_enabled(c, Some(me + 1), Kind::Question)?, "another person's switches are their own");
             Ok(())
         })
         .unwrap();
@@ -659,9 +690,10 @@ mod tests {
         assert_eq!(db.call_blocking(|c| devices(c, 1)).unwrap().len(), 1);
 
         // Switched off: nothing is sent.
-        db.call_blocking(|c| set_enabled(c, Kind::Question, false)).unwrap();
+        db.call_blocking(|c| set_enabled(c, 1, Kind::Question, false)).unwrap();
         assert_eq!(pusher.send(Kind::Question, &n).await.unwrap(), 0);
         assert_eq!(seen.lock().unwrap().len(), 1);
-        assert_eq!(pusher.send_ignoring_settings(&n).await.unwrap(), 1);
+        assert_eq!(pusher.send_test(1, &n).await.unwrap(), 1);
+        assert_eq!(pusher.send_test(2, &n).await.unwrap(), 0, "a test goes to the person's own devices");
     }
 }

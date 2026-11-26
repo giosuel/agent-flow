@@ -111,16 +111,45 @@ pub fn webauthn_id(conn: &Connection, id: i64) -> anyhow::Result<Uuid> {
     Ok(u)
 }
 
-/// Setting AgentFlow up again when the admin lost their passkeys (D-274): the admin's passkeys go
-/// and their browsers are signed out; their profile, projects, records and the other people stay.
-/// Returns how many passkeys and browsers went.
+/// Setting AgentFlow up again when the admin lost their passkeys (D-274): the admin's passkeys go,
+/// their browsers are signed out, and whatever someone holding one of those browsers could have
+/// left behind goes too: their unused links (device links, invites) and their devices' push
+/// subscriptions (the security review). Their profile, projects, records and the other people
+/// stay. Returns how many passkeys and browsers went.
 pub fn reset_admin(conn: &Connection, admin_id: i64) -> anyhow::Result<(usize, usize)> {
     let keys = conn.execute("DELETE FROM passkeys WHERE person_id = ?1", [admin_id])?;
+    let browsers = cut_off(conn, admin_id)?;
+    Ok((keys, browsers))
+}
+
+/// Signs a person out everywhere and voids what could bring them back without a passkey: their
+/// sessions, their unused links (for them or made by them) and their push subscriptions.
+fn cut_off(conn: &Connection, id: i64) -> anyhow::Result<usize> {
+    let now = now_ms();
     let browsers = conn.execute(
         "UPDATE web_sessions SET revoked_at = ?1 WHERE person_id = ?2 AND revoked_at IS NULL",
-        params![now_ms(), admin_id],
+        params![now, id],
     )?;
-    Ok((keys, browsers))
+    conn.execute(
+        "UPDATE login_links SET used_at = ?1 WHERE used_at IS NULL AND (person_id = ?2 OR made_by = ?2)",
+        params![now, id],
+    )?;
+    conn.execute("DELETE FROM push_subscriptions WHERE person_id = ?1", [id])?;
+    Ok(browsers)
+}
+
+/// The admin removes someone (the security review: there was no way to): they can't sign in any
+/// more, everything that could let them back in goes, and their name stays on what they did (it
+/// isn't given to anyone else). The admin can't be removed; `setup` makes them anew instead.
+pub fn remove(conn: &Connection, id: i64) -> anyhow::Result<()> {
+    let p = get(conn, id)?.context("no such person")?;
+    if p.admin {
+        bail!("the admin can't be removed; `sudo flow server setup` makes the admin anew");
+    }
+    conn.execute("DELETE FROM passkeys WHERE person_id = ?1", [id])?;
+    cut_off(conn, id)?;
+    conn.execute("UPDATE people SET removed_at = ?1 WHERE id = ?2", params![now_ms(), id])?;
+    Ok(())
 }
 
 /// How many passkeys and signed-in browsers a person has, for the setup command's warning.
@@ -134,9 +163,69 @@ pub fn counts(conn: &Connection, id: i64) -> anyhow::Result<(i64, i64)> {
     Ok((keys, browsers))
 }
 
+/// How authors read for the person looking (D-269, D-272): "you" for themselves, a person's
+/// username otherwise; "owner", written before there were people, is the admin.
+pub struct Names {
+    me: Option<String>,
+    admin: String,
+    icons: std::collections::HashMap<String, String>,
+}
+
+impl Names {
+    pub fn load(conn: &Connection, me: Option<i64>) -> anyhow::Result<Names> {
+        let everyone = list(conn)?;
+        let admin = everyone.iter().find(|p| p.admin).map(|p| p.name()).unwrap_or_else(|| "the admin".into());
+        let me = me.and_then(|id| everyone.iter().find(|p| p.id == id)).map(|p| p.name());
+        let mut icons: std::collections::HashMap<String, String> =
+            everyone.iter().map(|p| (p.name(), p.icon.clone())).collect();
+        if let Some(i) = icons.get(&admin).cloned() {
+            icons.insert("owner".into(), i);
+        }
+        Ok(Names { me, admin, icons })
+    }
+
+    /// The person an author names: "owner" is the admin.
+    fn person<'a>(&'a self, author: &'a str) -> &'a str {
+        if author == "owner" { &self.admin } else { author }
+    }
+
+    /// Whether the author is a person (not an agent or AgentFlow).
+    pub fn is_person(&self, author: &str) -> bool {
+        self.icons.contains_key(author) || author == "owner"
+    }
+
+    /// "you" for the person looking, their name for anyone else.
+    pub fn who(&self, author: &str) -> String {
+        let p = self.person(author);
+        if self.me.as_deref() == Some(p) { "you".into() } else { p.to_owned() }
+    }
+
+    /// A person's icon ("" for anyone else).
+    pub fn icon(&self, author: &str) -> String {
+        self.icons.get(author).cloned().unwrap_or_default()
+    }
+}
+
 /// Names a person can't take: words pages use for someone else.
-const RESERVED: &[&str] =
-    &["owner", "you", "admin", "system", "github", "agentflow", "consultant", "anonymous", "root", "flow", "agent"];
+const RESERVED: &[&str] = &[
+    "owner",
+    "you",
+    "me",
+    "admin",
+    "the-admin",
+    "system",
+    "github",
+    "agentflow",
+    "consultant",
+    "anonymous",
+    "root",
+    "flow",
+    "agent",
+    "all",
+    "everyone",
+    "nobody",
+    "unknown",
+];
 
 /// A username as kept: lowercase letters, digits and dashes, 2 to 32 of them, starting and ending
 /// with a letter or digit.
@@ -151,7 +240,9 @@ pub fn check_username(raw: &str) -> anyhow::Result<String> {
     if u.starts_with('-') || u.ends_with('-') {
         bail!("a username starts and ends with a letter or digit");
     }
-    if RESERVED.contains(&u.as_str()) {
+    // "person-3" would read like the stand-in for someone without a name yet.
+    let stand_in = u.strip_prefix("person-").is_some_and(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()));
+    if RESERVED.contains(&u.as_str()) || stand_in {
         bail!("{u:?} is taken by AgentFlow itself; pick another");
     }
     Ok(u)
