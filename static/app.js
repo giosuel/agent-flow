@@ -201,17 +201,18 @@ window.afDlg = (() => {
 
 // Confirms and messages in that dialog, never the browser's (the owner, 2026-11-17: "remove all
 // the simple alerts and replace them with actual styled dialogs that fit into the design").
-// window.afDialog({title, text, ok, cancel, danger}) resolves true for OK; without cancel it's a
+// window.afDialog({title, text, body, size, ok, cancel, danger}) resolves true for OK (body: nodes
+// shown instead of the text, such as a button's confirmation, D-263); without cancel it's a
 // message with one button. The safe choice has focus, so Enter never removes something by accident.
-window.afDialog = ({ title, text = "", ok = "OK", cancel = null, danger = false }) =>
+window.afDialog = ({ title, text = "", body = null, size = "sm", ok = "OK", cancel = null, danger = false }) =>
   new Promise((resolve) => {
     let yes = false;
-    const d = window.afDlg.open({ size: "sm", title, cls: "cdlg", role: cancel ? "alertdialog" : "dialog", closed: () => resolve(yes) });
-    const p = document.createElement("p");
-    p.textContent = text;
-    d.body.append(p);
-    d.body.hidden = !text;
-    if (text) { p.id = d.title.id + "-x"; d.el.setAttribute("aria-describedby", p.id); }
+    const d = window.afDlg.open({ size, title, cls: "cdlg", role: cancel ? "alertdialog" : "dialog", closed: () => resolve(yes) });
+    const p = body ? null : document.createElement("p");
+    if (p) { p.textContent = text; d.body.append(p); } else d.body.append(body);
+    const lead = p || d.body.querySelector("p");
+    d.body.hidden = !(body || text);
+    if (lead && (body || text)) { lead.id = d.title.id + "-x"; d.el.setAttribute("aria-describedby", lead.id); }
     const foot = document.createElement("div");
     foot.className = "dlg-foot";
     foot.innerHTML = `${cancel ? '<button type="button" class="btn quiet" data-v="0"></button>' : ""}<button type="button" class="btn${danger ? " danger-solid" : ""}" data-v="1"></button>`;
@@ -241,19 +242,23 @@ window.afRefused = (html, status) => {
 
 // Buttons with data-confirm ask first (no inline handlers: the CSP forbids them). The question's
 // first sentence is the title, the rest the text; the button's own label confirms, red when the
-// button is (.danger) or says so (data-danger), never guessed from its words (N-19 #34).
+// button is (.danger) or says so (data-danger), never guessed from its words (N-19 #34). With
+// data-confirm-body, the question is the title and the <template> right after the button is the
+// text (a button's command, D-263).
 document.addEventListener("click", (e) => {
   const el = e.target.closest("[data-confirm]");
   if (!el || el.dataset.confirmed) return;
   e.preventDefault();
   e.stopImmediatePropagation();
   const q = el.dataset.confirm;
-  const cut = q.search(/[?.]\s/);
+  const tpl = el.hasAttribute("data-confirm-body") && el.nextElementSibling;
+  const body = tpl && tpl.matches("template.confirm-body") ? tpl.content.cloneNode(true) : null;
+  const cut = body ? -1 : q.search(/[?.]\s/);
   const title = cut < 0 ? q : q.slice(0, cut + 1);
   const text = cut < 0 ? "" : q.slice(cut + 2);
   const label = (el.dataset.confirmOk || el.textContent || el.getAttribute("aria-label") || "OK").trim() || "OK";
   const danger = el.classList.contains("danger") || el.dataset.danger !== undefined;
-  window.afDialog({ title, text, ok: label, cancel: "Cancel", danger }).then((yes) => {
+  window.afDialog({ title, text, body, size: body ? "md" : "sm", ok: label, cancel: "Cancel", danger }).then((yes) => {
     if (!yes) return;
     el.dataset.confirmed = "1";
     el.click();

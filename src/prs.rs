@@ -246,6 +246,36 @@ pub fn server_command(cmd: &str) -> Option<ServerCommand> {
     ours.then_some(ServerCommand::Tag { repo, tag })
 }
 
+/// An own command's details in the words of its confirmation (D-263): a merge's method and the
+/// commit it is pinned to, a tag's message. Only for a command [`server_command`] takes apart, so
+/// what the dialog says is read from what runs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Described {
+    Merge { repo: String, number: i64, method: String, head: String },
+    Tag { repo: String, tag: String, message: String },
+}
+
+pub fn describe(cmd: &str) -> Option<Described> {
+    Some(match server_command(cmd)? {
+        ServerCommand::Merge { repo, number } => {
+            let w: Vec<&str> = cmd.split(' ').collect();
+            let method = w.get(6)?.trim_start_matches("--").to_owned();
+            let head = w.get(9).map(|s| (*s).to_owned()).unwrap_or_default();
+            Described::Merge { repo, number, method, head }
+        }
+        ServerCommand::Tag { repo, tag } => {
+            let message = if cmd == tag_command_bare(&repo, &tag) {
+                tag.clone()
+            } else {
+                let start = format!("<<'{MESSAGE_END}'\n");
+                let end = format!("\n{MESSAGE_END}\n)");
+                cmd.split_once(&start)?.1.split_once(&end)?.0.to_owned()
+            };
+            Described::Tag { repo, tag, message }
+        }
+    })
+}
+
 /// Every open PR of the project's own repository has its Merge button (Imaginarium's agent,
 /// 2026-11-12: "a 6-PR stack still means 6 add_button calls"). It unlocks when the PR is ready and
 /// in merge order; pressing it is the owner's approval. One the agent added itself counts too.
