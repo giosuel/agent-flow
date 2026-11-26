@@ -27,6 +27,8 @@ pulldown-cmark = { version = "0.13", default-features = false, features = ["html
 p256 = { version = "0.14", features = ["ecdh", "ecdsa"] }
 rand = "0.10"
 reqwest = { version = "0.13", default-features = false, features = ["json", "native-tls", "blocking", "form"] }
+# Settings › Passkeys: the QR code of a link for another device.
+qrcodegen = "1.8"
 rmcp = { version = "=3.9.0", features = ["server", "macros", "transport-streamable-http-server"] }
 rusqlite = { version = "0.41", features = ["bundled", "functions"] }
 rustix = { version = "1", features = ["fs", "net", "process", "termios"] }

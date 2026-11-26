@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" fill="none" stroke-linecap="round" stroke-linejoin="round">
+<defs>
+<linearGradient id="axolotl-bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2E1226"/><stop offset="1" stop-color="#140710"/></linearGradient>
+<linearGradient id="axolotl-b" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FBCFE8"/><stop offset="1" stop-color="#DB2777"/></linearGradient>
+<linearGradient id="axolotl-v" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#241A45"/><stop offset="1" stop-color="#120C24"/></linearGradient>
+<radialGradient id="axolotl-e" cx=".5" cy=".5" r=".5"><stop offset="0" stop-color="#F5F3FF"/><stop offset="1" stop-color="#FBCFE8" stop-opacity="0"/></radialGradient>
+</defs>
+<circle cx="32" cy="32" r="32" fill="url(#axolotl-bg)"/>
+<circle cx="32" cy="32" r="30.5" stroke="#DB2777" stroke-opacity=".55" stroke-width="1.2" stroke-dasharray="2 4"/>
+
+<path d="M14 26 L7 22 M13 31 L5 31 M14 36 L7 40 M50 26 L57 22 M51 31 L59 31 M50 36 L57 40" stroke="#DB2777" stroke-width="3.4"/>
+<rect x="12" y="20" width="40" height="28" rx="14" fill="url(#axolotl-b)"/>
+<rect x="17" y="27" width="30" height="10" rx="5" fill="url(#axolotl-v)"/>
+<circle cx="23" cy="32" r="4.4" fill="url(#axolotl-e)"/><circle cx="41" cy="32" r="4.4" fill="url(#axolotl-e)"/><circle cx="23" cy="32" r="2" fill="#F5F3FF"/><circle cx="41" cy="32" r="2" fill="#F5F3FF"/>
+<path d="M27 41 C30 44 34 44 37 41" stroke="#2A0A1C" stroke-width="1.8"/>
+
+</svg>

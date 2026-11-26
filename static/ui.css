@@ -701,3 +701,23 @@ html.dlg-on { overflow: hidden; }
   .pop-back.open { opacity: 1; }
   .pop { inset: calc(12px + env(safe-area-inset-top)) 0 0 0; width: auto; max-height: none; border-radius: 16px 16px 0 0; border-bottom: 0; transform: translateY(24px); }
 }
+
+/* A person's icon (D-270): one of the 15 in static/avatars, round; 32 px, sm 20, lg 112. Someone
+   who hasn't picked one yet gets the person glyph. */
+.avatar { display: inline-grid; place-items: center; width: 32px; height: 32px; flex: none; border-radius: 50%; object-fit: cover; background: var(--chip); color: var(--muted); }
+.avatar.sm { width: 20px; height: 20px; }
+.avatar.lg { width: 112px; height: 112px; }
+.avatar.none .i { width: 60%; height: 60%; }
+/* Picking one: a grid of them, the picked one ringed in the accent with a check. */
+.avpick { display: grid; grid-template-columns: repeat(5, 56px); gap: var(--sp-3); justify-content: start; margin: 0; padding: 0; border: 0; }
+.avpick legend { margin-bottom: var(--sp-2); padding: 0; }
+.avpick-o { position: relative; display: grid; place-items: center; width: 56px; height: 56px; border-radius: 50%; cursor: pointer; }
+.avpick-o input { position: absolute; opacity: 0; pointer-events: none; }
+.avpick-o .avatar { width: 48px; height: 48px; transition: transform .12s; }
+.avpick-o:hover .avatar { transform: scale(1.06); }
+.avpick-o:has(input:checked) { box-shadow: 0 0 0 2px var(--accent); }
+.avpick-o:has(input:focus-visible) { box-shadow: var(--focus-ring); }
+.avpick-o .avpick-ck { position: absolute; right: -2px; bottom: -2px; display: none; place-items: center; width: 18px; height: 18px; border-radius: 50%; background: var(--accent); color: var(--on-accent); }
+.avpick-o .avpick-ck .i { width: var(--ic-2xs); height: var(--ic-2xs); stroke-width: 3; }
+.avpick-o:has(input:checked) .avpick-ck { display: grid; }
+@media (max-width: 420px) { .avpick { grid-template-columns: repeat(5, 48px); gap: var(--sp-2); } .avpick-o { width: 48px; height: 48px; } .avpick-o .avatar { width: 40px; height: 40px; } }

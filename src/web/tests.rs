@@ -97,7 +97,7 @@ impl TestServer {
                 }
                 let id = crate::people::create(c, true, None, webauthn_rs::prelude::Uuid::new_v4())?;
                 c.execute(
-                    "UPDATE people SET username = 'giosuel', email = 'me@giosuel.ch', icon = 'orbit' WHERE id = ?1",
+                    "UPDATE people SET username = 'giosuel', email = 'me@giosuel.ch', icon = 'owl' WHERE id = ?1",
                     [id],
                 )?;
                 Ok(id)
@@ -213,7 +213,8 @@ async fn people_get_in_with_setup_invite_and_device_links() {
     let whoami = |cookie: String| {
         let s = &s;
         async move {
-            let res = s.http.get(s.url("/settings")).header(COOKIE, &cookie).send().await.unwrap();
+            // The welcome page works before someone picked their name; nothing else does.
+            let res = s.http.get(s.url("/welcome")).header(COOKIE, &cookie).send().await.unwrap();
             res.status()
         }
     };
@@ -247,6 +248,7 @@ async fn people_get_in_with_setup_invite_and_device_links() {
     assert!(page.contains("You're invited") && page.contains("This invite works once, until"), "{page}");
     let res = s.http.post(s.url(&format!("/invite/{invite}"))).send().await.unwrap();
     assert_eq!(res.status(), StatusCode::SEE_OTHER);
+    assert_eq!(res.headers()["location"], "/welcome?next=/settings?add_passkey=1", "who are you first");
     let mira_cookie = cookie_of(&res);
     let everyone = s.db.call(|c| crate::people::list(c)).await.unwrap();
     assert_eq!(everyone.len(), 2);
@@ -316,6 +318,139 @@ async fn people_get_in_with_setup_invite_and_device_links() {
     let log = s.log_summaries().await;
     assert!(log.iter().any(|l| l.contains("An invite was made on the server, as root")), "{log:?}");
     assert!(log.iter().any(|l| l.contains("invite link refused")), "{log:?}");
+}
+
+/// The first sign-in's step 2 (D-270): someone new picks a username, an email and an icon before
+/// anything else opens.
+#[tokio::test]
+async fn someone_new_says_who_they_are_first() {
+    let s = TestServer::start().await;
+    let admin = s.admin().await;
+    let mira =
+        s.db.call(move |c| crate::people::create(c, false, Some(admin), webauthn_rs::prelude::Uuid::new_v4()))
+            .await
+            .unwrap();
+    let cookie = s.cookie_for(mira).await;
+    let res = s
+        .http
+        .get(s.url("/p/vinculum?tab=notes"))
+        .header(COOKIE, &cookie)
+        .header("accept", "text/html")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::SEE_OTHER);
+    assert_eq!(res.headers()["location"], "/welcome?next=/p/vinculum");
+    let page = owner_page(&s, &cookie, "/welcome?next=/p/vinculum").await;
+    assert!(page.contains("Welcome! Who are you?") && page.contains(r#"name="next" value="/p/vinculum""#), "{page}");
+    assert_eq!(page.matches(r#"name="icon""#).count(), 15, "the 15 icons");
+    let post = |form: Vec<(&'static str, &'static str)>| {
+        let (s, cookie) = (&s, cookie.clone());
+        async move {
+            s.http
+                .post(s.url("/welcome"))
+                .header(COOKIE, &cookie)
+                .header(ORIGIN, &s.base)
+                .form(&form)
+                .send()
+                .await
+                .unwrap()
+        }
+    };
+    let res = post(vec![("username", "giosuel"), ("email", "m@x.org"), ("icon", "fox"), ("next", "/p/vinculum")]).await;
+    assert_eq!(res.status(), StatusCode::UNPROCESSABLE_ENTITY, "taken");
+    assert!(res.text().await.unwrap().contains("already called"));
+    let res = post(vec![("username", "Mira"), ("email", "m@x.org"), ("icon", "fox"), ("next", "//evil.example")]).await;
+    assert_eq!(res.status(), StatusCode::SEE_OTHER);
+    assert_eq!(res.headers()["location"], "/", "only paths on this site");
+    let p = s.db.call(move |c| crate::people::get(c, mira)).await.unwrap().unwrap();
+    assert_eq!((p.username.as_deref(), p.email.as_str(), p.icon.as_str()), (Some("mira"), "m@x.org", "fox"));
+    let res = s.http.get(s.url("/")).header(COOKIE, &cookie).header("accept", "text/html").send().await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK, "everything opens now");
+}
+
+/// You and the others (D-270, D-272, D-273, D-274): your icon at the top right with your own
+/// settings; Settings › Profile, Passkeys' link for another device, People with the admin's
+/// invites and sign-in links, and withdrawing a link.
+#[tokio::test]
+async fn settings_for_you_and_the_people() {
+    let s = TestServer::start().await;
+    let admin = s.admin().await;
+    let cookie = s.owner_cookie().await;
+    let page = owner_page(&s, &cookie, "/").await;
+    let header = &page[page.find("<header").unwrap()..page.find("</header>").unwrap()];
+    assert!(header.contains(r#"<details class="me-menu" data-menu>"#) && header.contains("me@giosuel.ch"), "{header}");
+    assert!(header.contains("/static/avatars/owl.svg") && header.contains(">Sign out<"), "{header}");
+    let foot = &page[page.find("<footer").unwrap()..];
+    assert!(!foot.contains("Sign out"), "Sign out moved to the menu: {foot}");
+
+    // Profile.
+    let profile = owner_page(&s, &cookie, "/settings?s=profile").await;
+    assert!(profile.contains(r#"value="giosuel""#) && profile.contains(r#"value="owl" checked"#), "{profile}");
+    let post = |path: &'static str, form: Vec<(&'static str, &'static str)>, cookie: String| {
+        let s = &s;
+        async move {
+            s.http.post(s.url(path)).header(COOKIE, &cookie).header(ORIGIN, &s.base).form(&form).send().await.unwrap()
+        }
+    };
+    let res = post(
+        "/settings/profile",
+        vec![("username", "gio"), ("email", "me@giosuel.ch"), ("icon", "fox")],
+        cookie.clone(),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::SEE_OTHER);
+    let me = s.db.call(move |c| crate::people::get(c, admin)).await.unwrap().unwrap();
+    assert_eq!((me.username.as_deref(), me.icon.as_str()), (Some("gio"), "fox"));
+
+    // A link for another device of your own, with its QR code.
+    let res = post("/settings/passkeys/link", vec![], cookie.clone()).await;
+    let text = res.text().await.unwrap();
+    assert!(text.contains("/device/af_lnk_") && text.contains(r#"<svg class="qr""#), "{text}");
+
+    // People: the admin invites.
+    let people = owner_page(&s, &cookie, "/settings?s=people").await;
+    assert!(people.contains("Invite someone") && people.contains("only you, the admin, can invite"), "{people}");
+    let res = post("/settings/people/invite", vec![], cookie.clone()).await;
+    let text = res.text().await.unwrap();
+    let at = text.find("/invite/af_lnk_").expect("the invite link");
+    let secret: String = text[at + 8..].chars().take_while(|c| c.is_ascii_alphanumeric() || *c == '_').collect();
+    assert!(text.contains("An invite, not used yet"), "{text}");
+    let id: i64 =
+        s.db.call(|c| {
+            Ok(c.query_row("SELECT rowid FROM login_links WHERE purpose = 'invite' AND used_at IS NULL", [], |r| {
+                r.get(0)
+            })?)
+        })
+        .await
+        .unwrap();
+
+    // Someone who isn't the admin sees the people, but can't invite or withdraw the admin's invite.
+    let mira =
+        s.db.call(move |c| {
+            let m = crate::people::create(c, false, Some(admin), webauthn_rs::prelude::Uuid::new_v4())?;
+            crate::people::set_profile(c, m, "mira", "m@x.org", "frog")?;
+            Ok(m)
+        })
+        .await
+        .unwrap();
+    let mira_cookie = s.cookie_for(mira).await;
+    let theirs = owner_page(&s, &mira_cookie, "/settings?s=people").await;
+    assert!(theirs.contains("only the admin, gio, invites people") && !theirs.contains("Invite someone"), "{theirs}");
+    assert_eq!(post("/settings/people/invite", vec![], mira_cookie.clone()).await.status(), StatusCode::FORBIDDEN);
+    let withdraw = format!("/settings/links/{id}/withdraw");
+    let w: &'static str = Box::leak(withdraw.into_boxed_str());
+    assert_eq!(post(w, vec![], mira_cookie.clone()).await.status(), StatusCode::NOT_FOUND);
+    // The admin's sign-in link for mira.
+    let path: &'static str = Box::leak(format!("/settings/people/{mira}/link").into_boxed_str());
+    let text = post(path, vec![], cookie.clone()).await.text().await.unwrap();
+    assert!(text.contains("A sign-in link for mira") && text.contains("/device/af_lnk_"), "{text}");
+    assert_eq!(post(path, vec![], mira_cookie).await.status(), StatusCode::FORBIDDEN, "only the admin");
+
+    // Withdrawn, the invite stops working.
+    assert_eq!(post(w, vec![], cookie.clone()).await.status(), StatusCode::SEE_OTHER);
+    let res = s.http.get(s.url(&format!("/invite/{secret}"))).send().await.unwrap();
+    assert_eq!(res.status(), StatusCode::GONE);
 }
 
 #[tokio::test]

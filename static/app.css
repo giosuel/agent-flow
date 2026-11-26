@@ -1618,3 +1618,42 @@ ol.lrows { padding: 0; margin: 0; list-style: none; gap: 0; }
 .link-steps .num { display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: var(--chip); font-size: var(--fs-label); }
 .link-steps li.on { color: var(--ink); }
 .link-steps li.on .num { background: var(--accent-chip); color: var(--accent-chip-ink); }
+
+/* The first sign-in (welcome.html): the form as one card, a preview of how you show up. */
+.welcome { text-align: left; }
+.welcome .field { display: flex; flex-direction: column; gap: var(--sp-1); }
+.welcome .field label { font-weight: 600; font-size: var(--fs-sm); }
+.welcome-pv { padding: var(--sp-3) var(--sp-4); border: 1px solid var(--line); border-radius: var(--r-md); background: var(--sunken); }
+
+/* Who is signed in (D-270): their icon at the top right, a menu of their own settings and Sign out
+   under it; on the phone the icon sits after the bell and the menu is a sheet from the bottom. */
+.me-menu { position: relative; flex: none; }
+.me-btn { list-style: none; display: grid; place-items: center; width: 40px; height: 40px; border-radius: 50%; cursor: pointer; }
+.me-btn::-webkit-details-marker { display: none; }
+.me-btn:hover .avatar, .me-menu[open] > .me-btn .avatar { box-shadow: 0 0 0 2px var(--accent-line); }
+.me-pop { position: absolute; top: calc(100% + 8px); right: 0; z-index: 30; width: 260px; display: flex; flex-direction: column; gap: 1px; padding: 6px; box-sizing: border-box; background: var(--panel); border: 1px solid var(--border); border-radius: var(--r-lg); box-shadow: var(--shadow-pop); }
+.me-who { display: flex; align-items: center; gap: 10px; padding: 10px; }
+.me-txt { display: flex; flex-direction: column; min-width: 0; }
+.me-txt strong, .me-txt .sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.me-pop hr { border: 0; border-top: 1px solid var(--line2); margin: 6px -6px; }
+.me-item { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 36px; padding: 0 10px; border: 0; border-radius: var(--r-sm); background: none; color: var(--ink2); font: inherit; font-size: var(--fs-sm); text-align: left; text-decoration: none; cursor: pointer; }
+.me-item:hover { background: var(--hover-bg); color: var(--ink); }
+.me-item .i { width: var(--ic-sm); height: var(--ic-sm); color: var(--muted); }
+.me-pop form { margin: 0; }
+@media (max-width: 700px) {
+  .me-btn { width: 36px; height: 36px; }
+  .me-menu[open]::before { content: ""; position: fixed; inset: 0; z-index: 29; background: var(--scrim); }
+  .me-pop { position: fixed; top: auto; left: 8px; right: 8px; bottom: max(8px, env(safe-area-inset-bottom)); width: auto; padding: 8px; border-radius: var(--r-xl); }
+  .me-item { min-height: 48px; font-size: var(--fs-body); }
+}
+
+/* Settings › Profile, People and a link just made (settings.html). */
+.set-avatar { display: flex; align-items: center; gap: var(--sp-5); flex-wrap: wrap; }
+.set-save { justify-content: flex-end; }
+.person-row { gap: var(--sp-3); min-width: 0; }
+.linkbox { display: flex; gap: var(--sp-4); align-items: flex-start; flex-wrap: wrap; }
+.linkbox-txt { flex: 1 1 260px; min-width: 0; }
+.copyrow { gap: var(--sp-1); }
+.copyrow input { flex: 1; min-width: 0; }
+.qr-box { flex: none; width: 148px; height: 148px; border-radius: var(--r-md); overflow: hidden; }
+.qr-box .qr { display: block; width: 100%; height: 100%; }

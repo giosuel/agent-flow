@@ -34,6 +34,10 @@ pub fn routes() -> Router<AppState> {
         .route("/settings/tokens/{id}/revoke", post(token_revoke))
         .route("/settings/tokens/{id}/rotate", post(token_rotate))
         .route("/settings/sessions/{id}/end", post(session_end))
+        .route("/settings/passkeys/link", post(device_link))
+        .route("/settings/people/invite", post(invite))
+        .route("/settings/people/{id}/link", post(person_link))
+        .route("/settings/links/{id}/withdraw", post(link_withdraw))
 }
 
 /// The refusal for a non-owner calling one of the JSON endpoints, if it isn't the owner.
@@ -96,6 +100,17 @@ struct SessionView {
 struct SettingsPage {
     nav: Nav,
     notice: Option<&'static str>,
+    /// Your username, email and icon (Settings › Profile).
+    profile: (String, String, String),
+    /// Everyone on this AgentFlow, the admin first (Settings › People).
+    people: Vec<PersonView>,
+    /// You're the admin: you invite people.
+    admin: bool,
+    admin_name: String,
+    /// Invites not used yet: (row, made, works until).
+    invites: Vec<(i64, String, String)>,
+    /// A link just made, shown once.
+    made: Option<Made>,
     /// The sections, in groups, for the list on the left.
     groups: Vec<(&'static str, Vec<SectionLink>)>,
     /// The one shown.
@@ -133,6 +148,19 @@ struct ClientView {
     projects: Vec<(String, String, String, String)>,
 }
 
+struct PersonView {
+    id: i64,
+    name: String,
+    email: String,
+    icon: String,
+    admin: bool,
+    you: bool,
+    /// "since 7 Nov" (the admin) or "joined 2 days ago".
+    since: String,
+    /// "3 passkeys".
+    passkeys: String,
+}
+
 struct SectionLink {
     key: &'static str,
     label: &'static str,
@@ -145,8 +173,17 @@ struct SectionLink {
 type Section = (&'static str, &'static str, &'static str);
 
 const SECTIONS: &[(&str, &[Section])] = &[
-    ("Account", &[("passkeys", "Passkeys", "key"), ("browsers", "Signed-in browsers", "window")]),
-    ("", &[("notifications", "Notifications", "bell")]),
+    // Yours alone (D-270); the rest is the same for everyone on this AgentFlow (D-272).
+    (
+        "You",
+        &[
+            ("profile", "Profile", "person"),
+            ("passkeys", "Passkeys", "key"),
+            ("browsers", "Signed-in browsers", "window"),
+            ("notifications", "Notifications", "bell"),
+        ],
+    ),
+    ("People", &[("people", "People", "person")]),
     ("Machines", &[("clients", "Clients", "laptop"), ("builders", "Build servers", "server")]),
     ("Agents", &[("agents", "Agent tokens", "robot"), ("consultant", "Consultant", "message")]),
     ("Connections", &[("github", "GitHub", "git")]),
@@ -162,8 +199,10 @@ fn section_key(k: &str) -> Option<&'static str> {
 /// Which section a notice belongs to (after a form post).
 fn section_of_notice(done: &str) -> &'static str {
     match done {
-        "passkey-removed" => "passkeys",
+        "passkey-removed" | "link-withdrawn-device" => "passkeys",
         "session-ended" => "browsers",
+        "profile-saved" => "profile",
+        "link-withdrawn" => "people",
         "revoked" | "approved" | "denied" | "approve-failed" => "clients",
         "rotated" => "agents",
         "github-saved" | "github-removed" => "github",
@@ -186,6 +225,8 @@ struct PageQuery {
 fn notice_for(key: &str) -> Option<&'static str> {
     Some(match key {
         "passkey-removed" => "Passkey removed.",
+        "profile-saved" => "Saved. This is how you show up from now on.",
+        "link-withdrawn" | "link-withdrawn-device" => "Withdrawn: the link doesn't work any more.",
         "device-removed" => "That device won't get notifications any more.",
         "test-sent" => "Test notification sent to every device that has notifications on.",
         "test-none" => "No device has notifications on yet.",
@@ -223,7 +264,127 @@ async fn page(
             q.done.as_deref().filter(|d| notice_for(d).is_some()).map(section_of_notice)
         }
     });
-    render_page(&state, &actor, notice, q.bs.as_deref(), explicit).await
+    render_page(&state, &actor, notice, q.bs.as_deref(), explicit, None).await
+}
+
+/// A link just made in Settings, shown once (only its hash is kept).
+struct Made {
+    /// "device" (yours), "person" (someone else's device, by the admin) or "invite".
+    what: &'static str,
+    /// For "person": whose account.
+    person: i64,
+    url: String,
+    until: String,
+    /// The link's QR code, as SVG.
+    qr: String,
+    /// Its row, for Withdraw.
+    id: i64,
+}
+
+/// Makes a one-time link and returns it with its row id.
+async fn make_link(
+    state: &AppState,
+    kind: &'static str,
+    person: Option<i64>,
+    made_by: i64,
+    minutes: i64,
+) -> anyhow::Result<(String, i64, i64)> {
+    let (secret, id) = state
+        .db
+        .call(move |c| {
+            let s = auth::create_login_link(c, kind, person, Some(made_by), minutes)?;
+            Ok((s, c.last_insert_rowid()))
+        })
+        .await?;
+    let url = format!("{}/{kind}/{secret}", state.config.public_url.trim_end_matches('/'));
+    Ok((url, id, now_ms() + minutes * 60_000))
+}
+
+fn made(what: &'static str, person: i64, (url, id, until): (String, i64, i64)) -> Made {
+    let tz = crate::tz::Tz::default();
+    let until = if until - now_ms() < 24 * 3_600_000 {
+        tz.hm(until)
+    } else {
+        format!("{} {}", tz.day_label(until).split(' ').next().unwrap_or(""), tz.short(until))
+    };
+    Made { what, person, qr: super::qr::svg(&url), url, until, id }
+}
+
+/// Settings › Passkeys › Sign in on another device (D-274): a link that adds a passkey to your own
+/// account, for 15 minutes, with its QR code.
+async fn device_link(
+    State(state): State<AppState>,
+    Extension(actor): Extension<Actor>,
+    Extension(ip): Extension<ClientIp>,
+) -> AppResult<Response> {
+    actor.require_owner()?;
+    let me = actor.person().unwrap_or(0);
+    let link = make_link(&state, auth::purpose::DEVICE, Some(me), me, auth::LINK_MINUTES).await?;
+    log(&state, &actor, &ip, Action::Write, "a link for another device made".into()).await;
+    render_page(&state, &actor, None, None, Some("passkeys"), Some(made("device", me, link))).await
+}
+
+/// Settings › People › Invite someone: only the admin (D-273); a link for 7 days.
+async fn invite(
+    State(state): State<AppState>,
+    Extension(actor): Extension<Actor>,
+    Extension(ip): Extension<ClientIp>,
+) -> AppResult<Response> {
+    actor.require_admin()?;
+    let me = actor.person().unwrap_or(0);
+    let link = make_link(&state, auth::purpose::INVITE, None, me, auth::INVITE_MINUTES).await?;
+    log(&state, &actor, &ip, Action::Write, "an invite made".into()).await;
+    render_page(&state, &actor, None, None, Some("people"), Some(made("invite", 0, link))).await
+}
+
+/// Settings › People › Sign-in link: the admin makes a device link for someone who lost theirs.
+async fn person_link(
+    State(state): State<AppState>,
+    Extension(actor): Extension<Actor>,
+    Extension(ip): Extension<ClientIp>,
+    Path(id): Path<i64>,
+) -> AppResult<Response> {
+    actor.require_admin()?;
+    let me = actor.person().unwrap_or(0);
+    let person = state.db.call(move |c| crate::people::get(c, id)).await?.ok_or(AppError::NotFound)?;
+    let link = make_link(&state, auth::purpose::DEVICE, Some(person.id), me, auth::LINK_MINUTES).await?;
+    log(&state, &actor, &ip, Action::Write, format!("a sign-in link made for {}", person.name())).await;
+    render_page(&state, &actor, None, None, Some("people"), Some(made("person", person.id, link))).await
+}
+
+/// Withdraws a link that isn't used yet: one you made, one for you, or (the admin) an invite.
+async fn link_withdraw(
+    State(state): State<AppState>,
+    Extension(actor): Extension<Actor>,
+    Extension(ip): Extension<ClientIp>,
+    Path(id): Path<i64>,
+) -> AppResult<Redirect> {
+    actor.require_owner()?;
+    let me = actor.person().unwrap_or(0);
+    let admin = matches!(actor, Actor::Owner { admin: true, .. });
+    let link = state
+        .db
+        .call(move |c| {
+            let link: Option<(String, Option<i64>)> = c
+                .query_row(
+                    "UPDATE login_links SET used_at = ?1 WHERE rowid = ?2 AND used_at IS NULL
+                       AND (made_by = ?3 OR person_id = ?3 OR (?4 AND purpose = 'invite'))
+                     RETURNING purpose, person_id",
+                    params![now_ms(), id, me, admin],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .ok();
+            Ok(link)
+        })
+        .await?;
+    let Some((purpose, person)) = link else { return Err(AppError::NotFound) };
+    log(&state, &actor, &ip, Action::Write, format!("a {purpose} link withdrawn")).await;
+    // Back where it was made: your own device link under Passkeys, the rest under People.
+    Ok(Redirect::to(if person == Some(me) {
+        "/settings?done=link-withdrawn-device"
+    } else {
+        "/settings?done=link-withdrawn"
+    }))
 }
 
 async fn render_page(
@@ -232,6 +393,7 @@ async fn render_page(
     notice: Option<&'static str>,
     bs: Option<&str>,
     explicit: Option<&'static str>,
+    made: Option<Made>,
 ) -> AppResult<Response> {
     let current = match actor {
         Actor::Owner { session_id, .. } => *session_id,
@@ -305,7 +467,49 @@ async fn render_page(
         .iter()
         .map(|a| (a.code.clone(), crate::approvals::describe(a), a.machine.clone(), ago(a.created_at, now)))
         .collect();
-    let section = explicit.unwrap_or("notifications");
+    let section = explicit.unwrap_or("profile");
+    // Who you are, and the others (D-270, D-272).
+    let admin = matches!(actor, Actor::Owner { admin: true, .. });
+    let (me_person, people_rows, invites) = state
+        .db
+        .call(move |c| {
+            let everyone = crate::people::list(c)?;
+            let mut rows = Vec::new();
+            for p in everyone {
+                let (keys, _) = crate::people::counts(c, p.id)?;
+                rows.push((p, keys));
+            }
+            let mut st = c.prepare(
+                "SELECT rowid, created_at, expires_at FROM login_links
+                 WHERE purpose = 'invite' AND used_at IS NULL AND expires_at > ?1 ORDER BY created_at DESC",
+            )?;
+            let invites = st
+                .query_map([now], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?)))?
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok((crate::people::get(c, me)?, rows, invites))
+        })
+        .await?;
+    let tz = crate::tz::Tz::default();
+    let people: Vec<PersonView> = people_rows
+        .into_iter()
+        .map(|(p, keys)| PersonView {
+            id: p.id,
+            name: p.name(),
+            email: p.email.clone(),
+            icon: p.icon.clone(),
+            admin: p.admin,
+            you: p.id == me,
+            since: if p.invited_by.is_some() {
+                format!("joined {}", ago(p.created_at, now))
+            } else {
+                format!("since {}", tz.day(p.created_at))
+            },
+            passkeys: format!("{keys} passkey{}", if keys == 1 { "" } else { "s" }),
+        })
+        .collect();
+    let admin_name = people.iter().find(|p| p.admin).map(|p| p.name.clone()).unwrap_or_default();
+    let invites: Vec<(i64, String, String)> =
+        invites.into_iter().map(|(id, made, until)| (id, ago(made, now), tz.short(until))).collect();
     let groups = SECTIONS
         .iter()
         .map(|(g, links)| {
@@ -315,7 +519,13 @@ async fn render_page(
                     key,
                     label,
                     icon,
-                    badge: (key == "clients" && !approvals.is_empty()).then(|| format!("{} waiting", approvals.len())),
+                    badge: if key == "clients" && !approvals.is_empty() {
+                        Some(format!("{} waiting", approvals.len()))
+                    } else if key == "people" && people.len() > 1 {
+                        Some(people.len().to_string())
+                    } else {
+                        None
+                    },
                 })
                 .collect();
             (*g, links)
@@ -362,6 +572,12 @@ async fn render_page(
     let page = SettingsPage {
         nav,
         notice,
+        profile: me_person.map(|p| (p.username.unwrap_or_default(), p.email, p.icon)).unwrap_or_default(),
+        people,
+        admin,
+        admin_name,
+        invites,
+        made,
         groups,
         section,
         chosen: explicit.is_some(),

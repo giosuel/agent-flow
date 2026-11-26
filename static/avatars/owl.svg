@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" fill="none" stroke-linecap="round" stroke-linejoin="round">
+<defs>
+<linearGradient id="owl-bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#241A45"/><stop offset="1" stop-color="#100B21"/></linearGradient>
+<linearGradient id="owl-b" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#C4B5FD"/><stop offset="1" stop-color="#6D4AE0"/></linearGradient>
+<linearGradient id="owl-v" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#241A45"/><stop offset="1" stop-color="#120C24"/></linearGradient>
+<radialGradient id="owl-e" cx=".5" cy=".5" r=".5"><stop offset="0" stop-color="#F5F3FF"/><stop offset="1" stop-color="#C4B5FD" stop-opacity="0"/></radialGradient>
+</defs>
+<circle cx="32" cy="32" r="32" fill="url(#owl-bg)"/>
+<circle cx="32" cy="32" r="30.5" stroke="#6D4AE0" stroke-opacity=".55" stroke-width="1.2" stroke-dasharray="2 4"/>
+
+<path d="M17 22 L18 11 L26 18 M47 22 L46 11 L38 18" fill="url(#owl-b)"/>
+<path d="M18 11 L26 18 L17 22 Z M46 11 L38 18 L47 22 Z" fill="url(#owl-b)"/>
+<ellipse cx="32" cy="35" rx="17" ry="18" fill="url(#owl-b)"/>
+<circle cx="25" cy="30" r="7" fill="url(#owl-v)"/><circle cx="39" cy="30" r="7" fill="url(#owl-v)"/>
+<circle cx="25" cy="30" r="5" fill="url(#owl-e)"/><circle cx="39" cy="30" r="5" fill="url(#owl-e)"/><circle cx="25" cy="30" r="2.4" fill="#F5F3FF"/><circle cx="39" cy="30" r="2.4" fill="#F5F3FF"/>
+<path d="M30 36 L34 36 L32 40 Z" fill="#FCD34D"/>
+<path d="M25 44 l2 2 2-2 M31 46 l2 2 2-2 M37 44 l2 2 2-2" stroke="#EDE9FE" stroke-opacity=".7" stroke-width="1.4"/>
+
+</svg>

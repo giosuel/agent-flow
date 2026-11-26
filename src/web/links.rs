@@ -172,12 +172,14 @@ fn redeem(
     Ok(Some((person, session, profile)))
 }
 
-/// Where a browser goes once it used a link.
-fn next(kind: &str, with_passkey: bool, profile: bool) -> &'static str {
-    match (kind, with_passkey, profile) {
-        (_, false, _) => "/settings?add_passkey=1#passkeys",
-        (purpose::DEVICE, true, _) | (_, true, true) => "/",
-        _ => "/settings",
+/// Where a browser goes once it used a link: someone new picks who they are first (the first
+/// sign-in's step 2), then adds a passkey if the link signed them in without one.
+fn next(with_passkey: bool, profile: bool) -> &'static str {
+    match (with_passkey, profile) {
+        (true, true) => "/",
+        (true, false) => "/welcome",
+        (false, true) => "/settings?add_passkey=1#passkeys",
+        (false, false) => "/welcome?next=/settings?add_passkey=1",
     }
 }
 
@@ -218,7 +220,7 @@ async fn sign_in(
         Ok(Some((person, session, profile))) => {
             log_use(&state, kind, Some(person), &ip, true, String::new()).await;
             let jar = jar.add(session_cookie(&state, session));
-            Ok((jar, Redirect::to(next(kind, false, profile))).into_response())
+            Ok((jar, Redirect::to(next(false, profile))).into_response())
         }
         Ok(None) => {
             log_use(&state, kind, None, &ip, false, ": unknown, used or expired".into()).await;
@@ -290,7 +292,7 @@ async fn passkey_finish(
         Ok(Some((person, session, profile))) => {
             log_use(&state, kind, Some(person), &ip, true, " with a new passkey".into()).await;
             let jar = jar.add(session_cookie(&state, session));
-            (jar, Json(serde_json::json!({"ok": true, "next": next(kind, true, profile)}))).into_response()
+            (jar, Json(serde_json::json!({"ok": true, "next": next(true, profile)}))).into_response()
         }
         Ok(None) => {
             log_use(&state, kind, None, &ip, false, ": unknown, used or expired".into()).await;

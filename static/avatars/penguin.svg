@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" fill="none" stroke-linecap="round" stroke-linejoin="round">
+<defs>
+<linearGradient id="penguin-bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#0F2036"/><stop offset="1" stop-color="#070F1C"/></linearGradient>
+<linearGradient id="penguin-b" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#BFDBFE"/><stop offset="1" stop-color="#2563EB"/></linearGradient>
+<linearGradient id="penguin-v" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#241A45"/><stop offset="1" stop-color="#120C24"/></linearGradient>
+<radialGradient id="penguin-e" cx=".5" cy=".5" r=".5"><stop offset="0" stop-color="#F5F3FF"/><stop offset="1" stop-color="#BFDBFE" stop-opacity="0"/></radialGradient>
+</defs>
+<circle cx="32" cy="32" r="32" fill="url(#penguin-bg)"/>
+<circle cx="32" cy="32" r="30.5" stroke="#2563EB" stroke-opacity=".55" stroke-width="1.2" stroke-dasharray="2 4"/>
+
+<path d="M15 40 C12 36 12 30 16 27 M49 40 C52 36 52 30 48 27" stroke="url(#penguin-b)" stroke-width="4.5"/>
+<ellipse cx="32" cy="34" rx="16" ry="19" fill="#0F1D45"/>
+<path d="M32 22 C42 22 45 32 44 40 C43 48 38 52 32 52 C26 52 21 48 20 40 C19 32 22 22 32 22 Z" fill="url(#penguin-b)"/>
+<path d="M20 17 C24 14 40 14 44 17 C46 20 46 28 44 30 C40 27 24 27 20 30 C18 28 18 20 20 17 Z" fill="#0F1D45"/>
+<rect x="21" y="19" width="22" height="9" rx="4.5" fill="url(#penguin-v)"/>
+<circle cx="26.5" cy="23.5" r="3.8" fill="url(#penguin-e)"/><circle cx="37.5" cy="23.5" r="3.8" fill="url(#penguin-e)"/><circle cx="26.5" cy="23.5" r="1.9" fill="#F5F3FF"/><circle cx="37.5" cy="23.5" r="1.9" fill="#F5F3FF"/>
+<path d="M29.5 29 H34.5 L32 32.5 Z" fill="#FBBF24"/>
+<ellipse cx="26" cy="53" rx="4" ry="1.6" fill="#FBBF24"/><ellipse cx="38" cy="53" rx="4" ry="1.6" fill="#FBBF24"/>
+
+</svg>

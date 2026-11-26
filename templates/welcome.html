@@ -1,0 +1,19 @@
+{% extends "bare.html" %}
+{% import "ui.html" as ui %}
+{#- The first sign-in's step 2 (the owner, 2026-11-25, D-270; mockup: UsersFirstSignIn): who you are
+    on this AgentFlow. -#}
+{% block title %}Welcome · AgentFlow{% endblock %}
+{% block head %}<script src="/static/app.js?v={{ version }}" defer></script>{% endblock %}
+{% block content %}
+<h1>Welcome! Who are you?</h1>
+<p class="sub">You're signed in. Pick how you show up on this AgentFlow: next to your answers, notes and merges, and at the top right. You can change it later in Settings › Profile.</p>
+{% if let Some(e) = error %}<p class="notice bad" role="alert">{{ crate::web::icons::icon("alert")|safe }}<span>{{ e }}</span></p>{% endif %}
+<form method="post" action="/welcome" class="card pad stack welcome" data-profile>
+  <input type="hidden" name="next" value="{{ next }}">
+  <div class="field"><label for="w-user">Username</label><input id="w-user" name="username" value="{{ username }}" required minlength="2" maxlength="32" pattern="[a-zA-Z0-9][a-zA-Z0-9-]*[a-zA-Z0-9]" autocapitalize="none" autocomplete="username" spellcheck="false" data-pv-name><span class="sub">Lowercase letters, digits and dashes.</span></div>
+  <div class="field"><label for="w-mail">Email</label><input id="w-mail" name="email" type="email" value="{{ email }}" required maxlength="200" autocomplete="email"><span class="sub">Only the people on this AgentFlow see it.</span></div>
+  {% call ui::avatar_picker(icon) %}{% endcall %}
+  <div class="welcome-pv" aria-live="polite"><span class="byline"><img class="avatar sm" src="/static/avatars/{% if icon.is_empty() %}owl{% else %}{{ icon }}{% endif %}.svg" alt="" data-pv-icon><span><strong data-pv-who>{% if username.is_empty() %}you{% else %}{{ username }}{% endif %}</strong> <span class="sub">answered Q-24 · just now</span></span></span></div>
+  <button class="btn wide" type="submit">Continue</button>
+</form>
+{% endblock %}

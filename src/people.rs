@@ -134,6 +134,68 @@ pub fn counts(conn: &Connection, id: i64) -> anyhow::Result<(i64, i64)> {
     Ok((keys, browsers))
 }
 
+/// Names a person can't take: words pages use for someone else.
+const RESERVED: &[&str] =
+    &["owner", "you", "admin", "system", "github", "agentflow", "consultant", "anonymous", "root", "flow", "agent"];
+
+/// A username as kept: lowercase letters, digits and dashes, 2 to 32 of them, starting and ending
+/// with a letter or digit.
+pub fn check_username(raw: &str) -> anyhow::Result<String> {
+    let u = raw.trim().to_lowercase();
+    if !(2..=32).contains(&u.chars().count()) {
+        bail!("a username has 2 to 32 characters");
+    }
+    if !u.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-') {
+        bail!("a username has only lowercase letters, digits and dashes");
+    }
+    if u.starts_with('-') || u.ends_with('-') {
+        bail!("a username starts and ends with a letter or digit");
+    }
+    if RESERVED.contains(&u.as_str()) {
+        bail!("{u:?} is taken by AgentFlow itself; pick another");
+    }
+    Ok(u)
+}
+
+/// An email address's shape: something@something.something, nothing more is checked.
+pub fn check_email(raw: &str) -> anyhow::Result<String> {
+    let e = raw.trim();
+    let ok = e.len() <= 200
+        && !e.chars().any(char::is_whitespace)
+        && e.split_once('@').is_some_and(|(a, b)| {
+            !a.is_empty() && !b.contains('@') && b.contains('.') && !b.starts_with('.') && !b.ends_with('.')
+        });
+    if !ok {
+        bail!("that doesn't look like an email address");
+    }
+    Ok(e.to_owned())
+}
+
+/// Sets a person's username, email and icon (the first sign-in, Settings › Profile).
+pub fn set_profile(conn: &Connection, id: i64, username: &str, email: &str, icon: &str) -> anyhow::Result<()> {
+    let username = check_username(username)?;
+    let email = check_email(email)?;
+    if !crate::web::avatars::is_avatar(icon) {
+        bail!("pick one of the icons");
+    }
+    // A project's agent signs with the project's slug: a person of the same name would be mistaken
+    // for it.
+    let project: Option<i64> = conn
+        .query_row("SELECT id FROM projects WHERE slug = ?1 COLLATE NOCASE", [&username], |r| r.get(0))
+        .optional()?;
+    if project.is_some() {
+        bail!("{username:?} is a project's name; pick another");
+    }
+    if by_username(conn, &username)?.is_some_and(|p| p.id != id) {
+        bail!("someone here is already called {username:?}");
+    }
+    conn.execute(
+        "UPDATE people SET username = ?1, email = ?2, icon = ?3 WHERE id = ?4 AND removed_at IS NULL",
+        params![username, email, icon, id],
+    )?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -154,6 +216,18 @@ mod tests {
             assert!(!get(c, m)?.unwrap().has_profile());
             let u = webauthn_id(c, a)?;
             assert_eq!(webauthn_id(c, a)?, u, "the same handle every time");
+            // Profiles: a username of letters, digits and dashes, a plausible email, one of the icons.
+            assert!(set_profile(c, a, "Gio Suel", "me@giosuel.ch", "owl").is_err());
+            assert!(set_profile(c, a, "you", "me@giosuel.ch", "owl").is_err());
+            assert!(set_profile(c, a, "giosuel", "me", "owl").is_err());
+            assert!(set_profile(c, a, "giosuel", "me@giosuel.ch", "dragon").is_err());
+            set_profile(c, a, "GioSuel", "me@giosuel.ch", "owl")?;
+            assert_eq!(get(c, a)?.unwrap().username.as_deref(), Some("giosuel"));
+            assert!(get(c, a)?.unwrap().has_profile());
+            assert!(set_profile(c, m, "giosuel", "m@x.org", "fox").is_err(), "taken");
+            c.execute("INSERT INTO projects (slug, name, created_at) VALUES ('lituus', 'Lituus', 0)", [])?;
+            assert!(set_profile(c, m, "lituus", "m@x.org", "fox").is_err(), "a project's name");
+            set_profile(c, m, "mira", "m@x.org", "fox")?;
             Ok(())
         })
         .unwrap();

@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" fill="none" stroke-linecap="round" stroke-linejoin="round">
+<defs>
+<linearGradient id="frog-bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#0F2A18"/><stop offset="1" stop-color="#06140B"/></linearGradient>
+<linearGradient id="frog-b" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#BBF7D0"/><stop offset="1" stop-color="#16A34A"/></linearGradient>
+<linearGradient id="frog-v" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#241A45"/><stop offset="1" stop-color="#120C24"/></linearGradient>
+<radialGradient id="frog-e" cx=".5" cy=".5" r=".5"><stop offset="0" stop-color="#F5F3FF"/><stop offset="1" stop-color="#BBF7D0" stop-opacity="0"/></radialGradient>
+</defs>
+<circle cx="32" cy="32" r="32" fill="url(#frog-bg)"/>
+<circle cx="32" cy="32" r="30.5" stroke="#16A34A" stroke-opacity=".55" stroke-width="1.2" stroke-dasharray="2 4"/>
+
+<circle cx="21" cy="25" r="8" fill="url(#frog-b)"/><circle cx="43" cy="25" r="8" fill="url(#frog-b)"/>
+<ellipse cx="32" cy="38" rx="21" ry="14" fill="url(#frog-b)"/>
+<circle cx="21" cy="25" r="5" fill="url(#frog-v)"/><circle cx="43" cy="25" r="5" fill="url(#frog-v)"/>
+<circle cx="21" cy="25" r="4.6" fill="url(#frog-e)"/><circle cx="43" cy="25" r="4.6" fill="url(#frog-e)"/><circle cx="21" cy="25" r="2.2" fill="#F5F3FF"/><circle cx="43" cy="25" r="2.2" fill="#F5F3FF"/>
+<path d="M22 40 C27 45 37 45 42 40" stroke="#062A12" stroke-width="2"/>
+<circle cx="18" cy="38" r="2.4" fill="#F9A8D4" fill-opacity=".7"/><circle cx="46" cy="38" r="2.4" fill="#F9A8D4" fill-opacity=".7"/>
+
+</svg>
