@@ -51,26 +51,64 @@ pub(crate) fn write_token_file_here(path: &Path, secret: &str) -> anyhow::Result
     Ok(())
 }
 
+/// Whether [`rotate`] reaches a token's holder: only tokens whose file is in this machine's token
+/// folder. A machine's and a builder's token live on their own machines, and so does the token of
+/// a project set up elsewhere (`machine` is its project's): a new one written here would cut the
+/// holder off, and leave a builder's token where every local agent can read it.
+pub fn rotates_here(kind: TokenKind, machine: Option<&str>) -> bool {
+    match kind {
+        TokenKind::Device | TokenKind::Builder => false,
+        TokenKind::Admin => true,
+        // Projects from before machines were recorded have none: they're local.
+        TokenKind::Project => {
+            machine.map(str::trim).is_none_or(|m| m.is_empty() || m.eq_ignore_ascii_case(&crate::machine::hostname()))
+        }
+    }
+}
+
 /// Replaces a project or admin token with a new one, writes it to its file and revokes the old
-/// one. Device tokens live on other machines, so they're revoked and re-created by hand instead.
+/// one. Tokens that live on other machines (see [`rotates_here`]) are replaced from there instead.
 pub fn rotate(conn: &mut Connection, id: i64, dir: &Path) -> anyhow::Result<(i64, PathBuf)> {
     let tx = conn.transaction()?;
     let row = tx
         .query_row(
-            "SELECT t.kind, t.name, p.slug FROM tokens t LEFT JOIN projects p ON p.id = t.project_id
+            "SELECT t.kind, t.name, p.slug, p.machine FROM tokens t LEFT JOIN projects p ON p.id = t.project_id
              WHERE t.id = ?1 AND t.revoked_at IS NULL",
             [id],
-            |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, Option<String>>(2)?)),
+            |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, Option<String>>(2)?,
+                    r.get::<_, Option<String>>(3)?,
+                ))
+            },
         )
         .optional()?;
-    let Some((kind, name, project)) = row else { bail!("no active token {id}") };
+    let Some((kind, name, project, machine)) = row else { bail!("no active token {id}") };
     let kind: TokenKind = kind.parse()?;
-    if kind == TokenKind::Device {
-        bail!("device tokens can't be rotated here; revoke it and add a new one");
+    if !rotates_here(kind, machine.as_deref()) {
+        match kind {
+            TokenKind::Device => bail!("device tokens can't be rotated here; revoke it and add a new one"),
+            TokenKind::Builder => bail!("a builder's token is on its own machine; run flow builder add there again"),
+            _ => bail!(
+                "this project is set up on {}; run flow project setup there for a new token",
+                machine.unwrap_or_default()
+            ),
+        }
+    }
+    let path = token_path(dir, project.as_deref(), &name);
+    // An admin token's file is named after the token: never over a project's file.
+    if project.is_none() {
+        let stem = file_stem(&name);
+        let taken: bool =
+            tx.query_row("SELECT EXISTS (SELECT 1 FROM projects WHERE slug = ?1)", [&stem], |r| r.get(0))?;
+        if taken {
+            bail!("its file would be the project {stem}'s token file; revoke it and create one with another name");
+        }
     }
     let (new_id, secret) = auth::create_token(&tx, kind, &name, project.as_deref())?;
     auth::revoke_token(&tx, id)?;
-    let path = token_path(dir, project.as_deref(), &name);
     // Write the file before committing: if writing fails, the old token stays valid.
     write_token_file(&path, &secret)?;
     tx.commit()?;
@@ -102,6 +140,34 @@ mod tests {
             assert!(rotate(c, dev, dir.path()).is_err());
             let (adm, _) = auth::create_token(c, TokenKind::Admin, "Viber Consultant", None)?;
             assert_eq!(rotate(c, adm, dir.path())?.1, dir.path().join("viber-consultant.token"));
+            Ok(())
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn rotate_only_where_the_file_is_the_holders() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Db::open_memory();
+        db.call_blocking(|c| {
+            // A builder keeps its token on its own machine.
+            let (b, b_secret) = auth::create_token(c, TokenKind::Builder, "headquarters", None)?;
+            assert!(rotate(c, b, dir.path()).is_err(), "a builder's token");
+            assert!(auth::token_actor(c, &b_secret, "x")?.is_some(), "the builder's token still works");
+            assert!(!dir.path().join("headquarters.token").exists());
+            // So does a project set up on another machine.
+            c.execute(
+                "INSERT INTO projects (slug, name, machine, created_at) VALUES ('faraway', 'Faraway', 'not-this-host', 0)",
+                [],
+            )?;
+            let (p, p_secret) = auth::create_token(c, TokenKind::Project, "Faraway agent", Some("faraway"))?;
+            assert!(rotate(c, p, dir.path()).is_err(), "a project on another machine");
+            assert!(auth::token_actor(c, &p_secret, "x")?.is_some());
+            assert!(!dir.path().join("faraway.token").exists());
+            // An admin token named like a project would overwrite that project's file.
+            let (a, _) = auth::create_token(c, TokenKind::Admin, "Faraway", None)?;
+            assert!(rotate(c, a, dir.path()).is_err(), "an admin token named like a project");
+            assert!(!dir.path().join("faraway.token").exists());
             Ok(())
         })
         .unwrap();

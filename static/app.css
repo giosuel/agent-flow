@@ -1018,7 +1018,8 @@ ol.lrows { padding: 0; margin: 0; list-style: none; gap: 0; }
 .qmini { display: none; }
 /* Paging (D-234): one row a page on the desktop, five rows on the phone. */
 .qsec [hidden] { display: none !important; }
-.qpager { display: flex; align-items: center; gap: 8px; }
+/* The island's quiet text in its own tone, as its buttons (.ibtn.warn). */
+.qsec-h .sub, .qpager-p .qp-pos { color: var(--warn-ink); opacity: .75; }
 .qpager-p { display: flex; align-items: center; justify-content: space-between; margin-top: 12px; }
 .qpager-p .qp-pos { font-size: var(--fs-body); }
 @media (min-width: 701px) {

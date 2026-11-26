@@ -19,3 +19,7 @@
    before it opens it (app.js) instead of plain text. c is actions::Confirm: AgentFlow's own Merge and
    Push tag in words, with the agent's message; any other command shown whole. #}
 {% macro confirm_body(c) %}<template class="confirm-body"><div class="confirm-x"><p>{{ c.lead }}</p>{% if !c.block.is_empty() %}<div><p class="sub">{{ c.block_label }}</p><pre class="cmd wrap{% if !c.block_is_command %} msg{% else %} mono{% endif %}">{{ c.block }}</pre></div>{% endif %}{% if !c.command.is_empty() %}<details class="cmd-box"><summary class="sub">The exact command</summary><pre class="cmd wrap mono">{{ c.command }}</pre></details>{% endif %}</div></template>{% endmacro %}
+
+{# Pager (static/ui.css .pager): "1–10 of 69 · page 1 of 7" and ‹ ›, hidden until app.js pages the
+   list. tone: "" or "warn" (on the questions island). #}
+{% macro pager(tone) %}<div class="pager" hidden><span class="mono sub pg-range" aria-live="polite"></span><button type="button" class="ibtn{% if !tone.is_empty() %} {{ tone }}{% endif %} pg-prev" aria-label="Previous page">{{ crate::web::icons::icon("prev")|safe }}</button><button type="button" class="ibtn{% if !tone.is_empty() %} {{ tone }}{% endif %} pg-next" aria-label="Next page">{{ crate::web::icons::icon("chevron")|safe }}</button></div>{% endmacro %}

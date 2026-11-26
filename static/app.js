@@ -1133,7 +1133,7 @@ document.addEventListener("click", (e) => {
   const sec = document.querySelector('[data-qpage]');
   if (!sec) return;
   const grid = sec.querySelector('.qgrid');
-  const top = sec.querySelector('.qpager'), bottom = sec.querySelector('.qpager-p');
+  const top = sec.querySelector('.pager'), bottom = sec.querySelector('.qpager-p');
   const phone = matchMedia('(max-width: 700px)');
   const cardsOnly = sec.dataset.qpage === 'cards';
   let page = Math.max(1, parseInt(new URLSearchParams(location.search).get('q'), 10) || 1);
@@ -1162,10 +1162,10 @@ document.addEventListener("click", (e) => {
       if (!phone.matches) grid.style.gridTemplateColumns = `repeat(${per}, minmax(0, 1fr))`;
       sec.dataset.paged = '';
       const first = (page - 1) * per + 1, last = Math.min(page * per, items.length);
-      top.querySelector('.qp-range').textContent = `${first}–${last} of ${items.length} · page ${page} of ${pages}`;
+      top.querySelector('.pg-range').textContent = `${first}–${last} of ${items.length} · page ${page} of ${pages}`;
       bottom.querySelector('.qp-pos').textContent = `${page} / ${pages}`;
-      sec.querySelectorAll('.qp-prev').forEach((b) => { b.disabled = page === 1; });
-      sec.querySelectorAll('.qp-next').forEach((b) => { b.disabled = page === pages; });
+      sec.querySelectorAll('.qp-prev, .pg-prev').forEach((b) => { b.disabled = page === 1; });
+      sec.querySelectorAll('.qp-next, .pg-next').forEach((b) => { b.disabled = page === pages; });
       top.hidden = phone.matches;
       bottom.hidden = !phone.matches;
     }
@@ -1173,14 +1173,45 @@ document.addEventListener("click", (e) => {
     history.replaceState(history.state, '', withPage(location.href));
   }
   sec.addEventListener('click', (e) => {
-    const b = e.target.closest('.qp-prev, .qp-next');
+    const b = e.target.closest('.qp-prev, .qp-next, .pg-prev, .pg-next');
     if (!b || b.disabled) return;
-    page += b.classList.contains('qp-next') ? 1 : -1;
+    page += b.matches('.qp-next, .pg-next') ? 1 : -1;
     render();
   });
   let raf = 0;
   addEventListener('resize', () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(render); });
   render();
+})();
+
+// A long table a page at a time (data-pager="10" on its card; the pager component, ui.html pager):
+// Earlier builds. Sorting starts again at page 1 of the new order.
+(() => {
+  document.querySelectorAll('[data-pager]').forEach((box) => {
+    const per = Math.max(1, parseInt(box.dataset.pager, 10) || 10);
+    const body = box.querySelector('tbody');
+    const pager = box.querySelector('.pager');
+    if (!body || !pager) return;
+    let page = 1;
+    const render = () => {
+      const rows = [...body.children];
+      const pages = Math.max(1, Math.ceil(rows.length / per));
+      page = Math.min(Math.max(page, 1), pages);
+      rows.forEach((r, i) => { r.hidden = Math.floor(i / per) + 1 !== page; });
+      pager.hidden = pages === 1;
+      const first = (page - 1) * per + 1, last = Math.min(page * per, rows.length);
+      pager.querySelector('.pg-range').textContent = `${first}–${last} of ${rows.length} · page ${page} of ${pages}`;
+      pager.querySelector('.pg-prev').disabled = page === 1;
+      pager.querySelector('.pg-next').disabled = page === pages;
+    };
+    box.addEventListener('click', (e) => {
+      const b = e.target.closest('.pg-prev, .pg-next');
+      if (!b || b.disabled || !pager.contains(b)) return;
+      page += b.classList.contains('pg-next') ? 1 : -1;
+      render();
+    });
+    box.addEventListener('af:sorted', () => { page = 1; render(); });
+    render();
+  });
 })();
 
 // Number fields' own steppers (.numf): one step up or down, within min and max, as the browser's
@@ -1260,6 +1291,7 @@ document.addEventListener("click", (e) => {
       return +a.dataset.i - +z.dataset.i;
     });
     body.append(...rows);
+    box.dispatchEvent(new CustomEvent("af:sorted", { bubbles: true }));
   };
   document.addEventListener("click", (e) => {
     const b = e.target.closest && e.target.closest(".th-sort");

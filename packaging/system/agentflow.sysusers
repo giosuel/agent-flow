@@ -1,2 +1,4 @@
 # AgentFlow's own user (systemd-sysusers; installed as /usr/lib/sysusers.d/agentflow.conf).
-u agentflow - "AgentFlow server" /var/lib/agentflow
+# With a shell: the consultant runs in tmux as this user, and tmux runs it with the user's shell
+# (left out, it would be nologin, and the consultant's session would end at once).
+u agentflow - "AgentFlow server" /var/lib/agentflow /bin/bash

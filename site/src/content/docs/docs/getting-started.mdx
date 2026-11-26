@@ -1,0 +1,134 @@
+---
+title: Getting started
+description: Install the server, add your passkey, connect a machine, and set up a project and its agent.
+---
+
+import { Steps, Tabs, TabItem, Aside } from '@astrojs/starlight/components';
+
+This sets up AgentFlow on a Linux server that the agents also run on, the recommended way: the
+server as its own Unix user, so the agents can't read its database, tokens or sessions.
+
+**You need** a Linux server, a domain name with https in front of it (passkeys and push
+notifications need one), [Claude Code](https://claude.com/claude-code) where the agents run, and
+`git` and `gh`.
+
+<Steps>
+
+1. **Install the server.**
+
+   <Aside type="note" title="From v0.1.0">
+   Releases start with v0.1.0: Linux x86_64 programs and `.deb` packages on
+   [GitHub Releases](https://github.com/giosuel/agent-flow/releases), and AUR packages. Until then,
+   build from source.
+   </Aside>
+
+   <Tabs syncKey="install">
+   <TabItem label=".deb">
+   ```sh
+   sudo apt install ./agentflow-client_0.1.0_amd64.deb ./agentflow_0.1.0_amd64.deb
+   ```
+   </TabItem>
+   <TabItem label="AUR">
+   ```sh
+   yay -S agentflow-bin    # the release programs
+   yay -S agentflow        # or built from the tagged source
+   # other machines need only the client: agentflow-client-bin or agentflow-client
+   ```
+   </TabItem>
+   <TabItem label="Release">
+   ```sh
+   # the release's Linux x86_64 archive
+   curl -LO https://github.com/giosuel/agent-flow/releases/download/v0.1.0/agentflow-0.1.0-linux-x86_64.tar.gz
+   tar -xzf agentflow-0.1.0-linux-x86_64.tar.gz && cd agentflow-0.1.0-linux-x86_64
+   sudo install -m 755 agentflow flow agentflow-builder /usr/local/bin/
+   ```
+   </TabItem>
+   <TabItem label="From source">
+   ```sh
+   git clone https://github.com/giosuel/agent-flow && cd agent-flow
+   cargo build --release --locked
+   sudo install -m 755 target/release/{agentflow,flow,agentflow-builder} /usr/local/bin/
+   ```
+   </TabItem>
+   </Tabs>
+
+2. **Run setup once.** It creates the `agentflow` user, writes `/etc/agentflow/config.toml`,
+   installs the system service and the agents' helper service, and starts the server.
+   `--dry-run` prints every step first.
+
+   ```sh
+   sudo agentflow setup --public-url https://flow.example --agents-user <user> --dry-run
+   sudo agentflow setup --public-url https://flow.example --agents-user <user>
+   ```
+
+   Then, as the agents' user, start the helper that does the server's work in their world (the
+   owner's buttons, `gh`, token files, new project folders):
+
+   ```sh
+   systemctl --user daemon-reload; systemctl --user enable --now agentflow-hands
+   ```
+
+3. **Put https in front.** The server listens on `127.0.0.1:8790`. With Caddy:
+
+   ```text
+   flow.example {
+       reverse_proxy 127.0.0.1:8790
+   }
+   ```
+
+4. **Add your passkey.** On the server, this prints a one-time link, valid for 15 minutes, that
+   leads straight to adding a passkey:
+
+   ```sh
+   sudo flow server add-passkey
+   ```
+
+   While no passkey exists, the first start also logs such a link (`journalctl -u agentflow`).
+
+5. **Connect a machine.** On each machine where agents run or where you want `flow run`, as the
+   user who'll use it:
+
+   ```sh
+   curl -fsSL https://flow.example/install.sh | sh
+   ```
+
+   It installs `flow` and `agentflow-builder` into `~/.local/bin` and connects. You approve the
+   machine in the browser, which shows the same short code as the terminal. With `flow` already
+   installed, `flow connect https://flow.example` does the same. `flow status` checks it.
+
+6. **Add a project.** In the project's folder (a new one, or an existing repository):
+
+   ```sh
+   cd ~/lumen && flow project setup
+   ```
+
+   Press Enter at the code prompt to create a new project; you approve it in the browser. It's
+   named after the folder unless you pass `--name`. Not at a computer? Create the project from
+   **Projects › New project** in the web app and run `flow project setup --code <code>` later.
+
+7. **Start the agent.** Run `claude` in the folder. Its first session calls `hello` by itself.
+
+</Steps>
+
+## What `flow project setup` writes
+
+All of it is local and kept out of git through `.git/info/exclude`:
+
+- a git repository, if the folder has none (nothing is created on GitHub);
+- the project's token, in `~/.config/agentflow/tokens/<project>.token` (mode 600);
+- `.mcp.json`: the AgentFlow MCP server, with the token read from its file by `headersHelper`
+  whenever Claude connects, so it never sits in a config;
+- `.claude/settings.local.json`: the hooks (`flow hello` on start, resume, `/clear` and compaction,
+  `flow news` before each prompt, `flow sync` after each reply), the status line, and
+  `AGENTFLOW_TOKEN_FILE` and `AGENTFLOW_URL` for the agent's `flow` commands;
+- the handbook's copy in `~/.local/share/agentflow/handbook`, included from `~/.claude/CLAUDE.md`.
+
+Running it again refreshes the setup and changes nothing else. The folder's earlier Claude Code
+conversations are sent once, for token usage and the log.
+
+## On a personal machine
+
+For a single user, `scripts/install.sh` in a checkout builds the release programs, installs them
+as `~/.local/bin/agentflow`, `flow` and `agentflow-builder`, and runs the server as a systemd user
+service. Everything runs as you, so agents running as you can read its files. See
+[Self-hosting](/docs/self-hosting/).
