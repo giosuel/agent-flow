@@ -30,13 +30,14 @@
         <dl class="kv nkv">
           <dt>State</dt><dd><span class="chip {{ row.chip }}" id="job-state">{{ row.label }}</span></dd>
           <dt>Time</dt><dd class="mono" id="job-time">{{ row.time }}</dd>
-          <dt>Project</dt><dd><a href="{{ project.1 }}">{{ project.0 }}</a></dd>
-          <dt>Started by</dt><dd><span class="byline"><span class="itile sm accent" aria-hidden="true">{{ crate::web::icons::icon("robot")|safe }}</span><span>{{ by }}</span></span></dd>
+          {#- What points somewhere is a chip (D-279): the project and the server link to their pages. -#}
+          <dt>Project</dt><dd><a class="chip link" href="{{ project.1 }}">{{ crate::web::icons::icon("folder")|safe }}<span>{{ project.0 }}</span></a></dd>
+          <dt>Started by</dt><dd><span class="chip">{{ crate::web::icons::icon(by.0)|safe }}<span>{{ by.1 }}</span></span></dd>
           <dt>Started</dt><dd>{{ started }}</dd>
-          {% for (k, v) in facts %}<dt>{{ k }}</dt><dd{% if k == "Command" || k == "Checkout" || k == "Runs in" %} class="mono job-fact"{% endif %}>{{ v }}</dd>{% endfor %}
+          {% for (k, v) in facts %}<dt>{{ k }}</dt>{% if k == "Server" %}<dd>{% if let Some(h) = server_page %}<a class="chip link" href="{{ h }}">{{ crate::web::icons::icon("server")|safe }}<span>{{ v }}</span></a>{% else %}<span class="chip">{{ crate::web::icons::icon("server")|safe }}<span>{{ v }}</span></span>{% endif %}</dd>{% else %}<dd{% if k == "Command" || k == "Checkout" || k == "Runs in" %} class="mono job-fact"{% endif %}>{{ v }}</dd>{% endif %}{% endfor %}
         </dl>
         {% if is_owner && !job.is_finished() %}
-        <form method="post" action="/machine/jobs/{{ job.id }}/cancel" id="job-cancel"><button class="btn sm danger wide" type="submit" data-confirm="Cancel job #{{ job.id }}? It stops on {{ job.server }}; the agent hears it was cancelled.">Cancel the job</button></form>
+        <form method="post" action="/machines/jobs/{{ job.id }}/cancel" id="job-cancel"><button class="btn sm danger wide" type="submit" data-confirm="Cancel job #{{ job.id }}? It stops on {{ job.server }}; the agent hears it was cancelled.">Cancel the job</button></form>
         {% endif %}
       </div>
     </section>

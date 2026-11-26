@@ -25,8 +25,8 @@
           <dl class="kv sl-facts">{% for (k, v, d) in s.facts %}<dt>{{ k }}</dt><dd>{{ v }}{% if !d.is_empty() %} <span class="sub">· {{ d }}</span>{% endif %}</dd>{% endfor %}</dl>{% endif %}
           {% if !s.waiting %}<h3 class="label">Now</h3>
           {% if s.jobs.is_empty() %}<p class="sub">No jobs running or waiting.</p>{% endif %}
-          {% for (id, what, st, sub) in s.jobs %}<a class="sl-job" href="/machine/jobs/{{ id }}"><span class="mono acc-ink">#{{ id }}</span><span class="sl-job-t"><span class="ell">{{ what }}</span><span class="sub ell">{{ sub }}</span></span><span class="chip {% if st == "running" %}ok{% else %}warn{% endif %}">{{ st }}</span></a>{% endfor %}
-          <p class="sub"><a href="/machine">All jobs on the Machine page</a> · in a terminal: <span class="mono">flow builder status {{ s.name }}</span></p>{% endif %}
+          {% for (id, what, st, sub) in s.jobs %}<a class="sl-job" href="/machines/jobs/{{ id }}"><span class="mono acc-ink">#{{ id }}</span><span class="sl-job-t"><span class="ell">{{ what }}</span><span class="sub ell">{{ sub }}</span></span><span class="chip {% if st == "running" %}ok{% else %}warn{% endif %}">{{ st }}</span></a>{% endfor %}
+          <p class="sub"><a href="/machines/{{ s.name }}">Its builds on its page</a> · in a terminal: <span class="mono">flow builder status {{ s.name }}</span></p>{% endif %}
           <h3 class="label">Used by</h3>
           {% if s.projects.is_empty() %}<p class="sub">No project uses it yet.</p>{% else %}<p class="sl-chiprow">{% for p in s.projects %}<span class="chip">{{ p }}</span>{% endfor %}</p>{% endif %}
           <p class="sub">A project picks its build server in its own Settings.</p>

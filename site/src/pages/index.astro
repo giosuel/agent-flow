@@ -1,0 +1,41 @@
+---
+import Landing from '../layouts/Landing.astro';
+import Nav from '../components/landing/Nav.astro';
+import Hero from '../components/landing/Hero.astro';
+import Line from '../components/landing/Line.astro';
+import Features from '../components/landing/Features.astro';
+import Connect from '../components/landing/Connect.astro';
+import Install from '../components/landing/Install.astro';
+import Footer from '../components/landing/Footer.astro';
+---
+
+<Landing
+  title="AgentFlow: project management for Claude agents"
+  description="Project management for a team of Claude agents and the person they work for. Agents record their plan, questions, pull requests and builds over MCP; you answer, merge, tag and try builds from one web app."
+>
+  <Nav />
+  <main>
+    <Hero />
+    <div class="wide sec-top line-head rv">
+      <div>
+        <div class="sec-head"><span class="n">01</span><span>The line</span><span class="rule"></span></div>
+        <h2 class="sec-title">Work moves down one line.</h2>
+      </div>
+      <p class="sec-lead">
+        Agents pick up tasks and work through steps. Pull requests stack up and merge in order. Builds come
+        off the end for you to try. When an agent needs you, it stops at your desk, and your answer goes
+        back as a decision.
+      </p>
+    </div>
+    <Line />
+    <Features />
+    <Connect />
+    <Install />
+  </main>
+  <Footer />
+</Landing>
+
+<script>
+  import { page } from '../scripts/page';
+  page();
+</script>
