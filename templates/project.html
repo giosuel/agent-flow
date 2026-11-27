@@ -169,20 +169,36 @@
 {% endif %}
 
 {% if tab == "prs" %}
-<section class="card">
-  <div class="card-head"><h2>Open pull requests</h2><span class="sub">in merge order · changes are on GitHub</span></div>
-  <div class="card-body stack">
-  {% if prs.is_empty() %}<p class="sub">No open pull requests.</p>{% else %}{% include "pr_list.html" %}{% endif %}
-  </div>
+{# Pull requests merged on GitHub (Q-37, D-294), as drawn (PrsSameHeight on the canvas): the open PRs in
+   merge order, read-only, and beside them the next release with its Push tag and the repository's
+   earlier tags; both cards end level (D-292). #}
+<div class="npage pr-page level">
+<section class="card" aria-labelledby="prl-h">
+  <div class="card-head"><h2 id="prl-h">Open pull requests</h2><span class="sub">{{ prs_total - prs_drafts }}{% if prs_total > prs_drafts %} · merge them on GitHub, from the top{% endif %}</span><span class="grow"></span>{% if !repo.is_empty() %}<a class="act ilink" href="https://github.com/{{ repo }}/pulls">All on GitHub{{ crate::web::icons::icon("out")|safe }}</a>{% endif %}</div>
+  {% if prs.is_empty() %}<p class="empty-in">No open pull requests.</p>{% else %}{% include "pr_list.html" %}{% endif %}
 </section>
-{% for rel in releases %}
-<section class="card" aria-label="Release {{ rel.tag }}">
-  <div class="card-head"><h2><span class="mono">{{ rel.tag }}</span> · {{ rel.title }}</h2><span class="sub">{{ rel.waits }}{% for (n, u) in rel.open_prs %} <a class="mono" href="{{ u }}">{{ n }}</a>{% endfor %}</span></div>
-  <div class="card-body stack">
-  {% for b in rel.buttons %}{% include "button.html" %}{% endfor %}
+<aside class="nside" aria-label="Releases">
+<section class="card" aria-labelledby="rel-h">
+  <div class="card-head"><h2 id="rel-h">Releases</h2><span class="grow"></span>{% if !repo.is_empty() %}<a class="act ilink" href="https://github.com/{{ repo }}/tags">Tags on GitHub{{ crate::web::icons::icon("out")|safe }}</a>{% endif %}</div>
+  {% for rel in releases %}
+  <div class="card-body stack rel-next" aria-label="Release {{ rel.tag }}">
+    <span class="label">Next</span>
+    <div class="row wrap"><a class="mono rel-tag" href="{{ rel.url }}">{{ rel.tag }}</a>{% if rel.open_prs.is_empty() %}<span class="chip ok">ready</span>{% else %}<span class="chip warn">waiting</span>{% endif %}</div>
+    <p>{{ rel.title }}</p>
+    <p class="sub">{{ rel.waits }}{% for (n, u) in rel.open_prs %} <a class="mono" href="{{ u }}">{{ n }}</a>{% endfor %}</p>
+    {% for b in rel.buttons %}{% include "button.html" %}{% endfor %}
+    {% if rel.buttons.is_empty() %}<p class="sub">The agent hasn't added the tag button yet.</p>{% endif %}
   </div>
+  {% endfor %}
+  <div class="card-body stack rel-past">
+    {% if !releases.is_empty() %}<span class="label">Earlier</span>{% endif %}
+    {% if tags.is_empty() %}<p class="sub">{% if repo.is_empty() %}No repository yet.{% else %}No tags in {{ repo }} yet.{% endif %}</p>
+    {% else %}<ul class="rows rel-tags">{% for t in tags %}<li class="item-row dense"><a class="mono rel-tag" href="{{ t.url }}">{{ t.name }}</a><span class="ttl"><span>{{ t.title }}</span></span><span class="sub">{{ t.when }}</span></li>{% endfor %}</ul>{% endif %}
+  </div>
+  {% if tags_total > tags.len() as i64 %}<div class="card-foot"><a class="act" href="https://github.com/{{ repo }}/tags">All {{ tags_total }} tags</a></div>{% endif %}
 </section>
-{% endfor %}
+</aside>
+</div>
 {% endif %}
 
 

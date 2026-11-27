@@ -1,15 +1,6 @@
-{% import "ui.html" as ui %}
-<ol class="prs">
-{% for pr in prs %}
-  <li class="pr-row">
-    <div class="row wrap"><span class="mono sub">{{ pr.position }}</span><a class="mono" href="{{ pr.url }}">#{{ pr.number }}</a><a class="pr-title" href="{{ pr.record_url }}">{{ pr.title }}</a><span class="chip {{ pr.chip_class }}">{{ pr.chip }}</span>{% if !pr.base.is_empty() %}<span class="sub">{{ pr.base }}</span>{% endif %}</div>
-    <div class="pr-actions">
-      {% for b in pr.buttons %}{% include "button.html" %}{% endfor %}
-      {% if let Some((label, ids, confirm)) = pr.up_to %}
-      <form method="post" action="/p/{{ slug }}/merge-up-to/{{ pr.number }}"><input type="hidden" name="actions" value="{{ ids }}"><button class="btn sm" type="submit" data-confirm="{{ confirm.title }}" data-confirm-body>{{ label }}</button>{% call ui::confirm_body(confirm) %}{% endcall %}</form>
-      {% endif %}
-      <a class="sub" href="{{ pr.url }}/files">View changes on GitHub</a>
-    </div>
-  </li>
-{% endfor %}
-</ol>
+{# The open PRs, one read-only line each in merge order (the owner, 2026-11-26, Q-37, D-294: merged
+   on GitHub, from the top); a stacked PR says which one merges first. Drafts fold away below.
+   src/web/buttons.rs pr_lines builds them. #}
+{% macro pr_line(pr) %}<li class="item-row dense pr-line{% if pr.after.is_some() %} stacked{% endif %}"><span class="mono sub pr-pos">{% if pr.position > 0 %}{{ pr.position }}{% endif %}</span><a class="mono pr-num" href="{{ pr.url }}">#{{ pr.number }}</a><span class="ttl"><a href="{{ pr.url }}" title="{{ pr.title }}">{{ pr.title }}</a></span><span class="pr-meta"><span class="chip {{ pr.chip_class }}">{{ pr.chip }}</span>{% if let Some((n, u)) = pr.after %}<span class="sub">after <a class="mono" href="{{ u }}">#{{ n }}</a></span>{% endif %}{% if !pr.note.is_empty() %}<span class="sub">· {{ pr.note }}</span>{% endif %}</span><a class="ibtn flat" href="{{ pr.url }}" aria-label="#{{ pr.number }} on GitHub" title="On GitHub">{{ crate::web::icons::icon("out")|safe }}</a></li>{% endmacro %}
+<ol class="rows flush pr-lines">{% for pr in prs %}{% if !pr.draft %}{% call pr_line(pr) %}{% endcall %}{% endif %}{% endfor %}</ol>
+{% if prs_drafts > 0 %}<details class="fold pr-drafts"><summary class="grphead"><span>{{ prs_drafts }} draft{% if prs_drafts != 1 %}s{% endif %}</span><span class="peek">not ready yet</span></summary><ol class="rows flush pr-lines">{% for pr in prs %}{% if pr.draft %}{% call pr_line(pr) %}{% endcall %}{% endif %}{% endfor %}</ol></details>{% endif %}

@@ -91,6 +91,11 @@ pub async fn poll_project(state: &AppState, p: &projects::Project) -> anyhow::Re
             Err(e) => warn(state, &p.slug, format!("GitHub poll of {repo}#{n} failed: {e:#}")).await,
         }
     }
+    // The repository's tags, for the Pull requests tab; kept as they were when GitHub doesn't answer.
+    match state.github.tags(&p.repo).await {
+        Ok(tags) => state.db.call(move |c| prs::set_repo_tags(c, pid, &tags)).await?,
+        Err(e) => warn(state, &p.slug, format!("reading the tags of {} failed: {e:#}", p.repo)).await,
+    }
     Ok(())
 }
 

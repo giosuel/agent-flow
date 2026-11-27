@@ -20,6 +20,8 @@ pub struct SyncResult {
     pub merged: bool,
     pub closed: bool,
     pub ci_failed: bool,
+    /// GitHub found conflicts with its base: the agent merges the base in (Q-37).
+    pub conflicted: bool,
     pub became_mergeable: bool,
 }
 
@@ -69,7 +71,6 @@ pub fn sync(
             },
         )?;
         link_by_branch(conn, project.id, &r, &info.head, author)?;
-        ensure_merge_button(conn, project, repo, &r)?;
         return Ok((r, SyncResult { created: true, merged: state == "merged", ..Default::default() }));
     };
     let was_ready = merge_ready(&old).is_ok();
@@ -77,6 +78,7 @@ pub fn sync(
         merged: state == "merged" && old.state != "merged",
         closed: state == "closed" && old.state != "closed",
         ci_failed: info.ci == "failing" && old.str("ci") != "failing",
+        conflicted: state == "open" && info.mergeable == "conflicting" && old.str("mergeable") != "conflicting",
         ..Default::default()
     };
     // The revision keeps what changed; the events below say what matters (merged, closed, CI).
@@ -89,12 +91,18 @@ pub fn sync(
     )?;
     result.became_mergeable = !was_ready && merge_ready(&r).is_ok();
     link_by_branch(conn, project.id, &r, &info.head, author)?;
-    ensure_merge_button(conn, project, repo, &r)?;
-    // The agent hears about what GitHub did to its PR.
+    withdraw_merge_buttons(conn, &r)?;
+    // The agent hears about what GitHub did to its PR, and fixes a conflict before the owner
+    // merges on GitHub (Q-37).
     for (happened, kind, what) in [
         (result.merged, "pr.merged", format!("#{} merged: {}", r.number, r.title)),
         (result.closed, "pr.closed", format!("#{} closed without merging", r.number)),
         (result.ci_failed, "pr.ci_failed", format!("CI failing on #{}", r.number)),
+        (
+            result.conflicted,
+            "pr.conflicting",
+            format!("#{} has conflicts with {}: merge {} into it", r.number, r.str("base"), r.str("base")),
+        ),
     ] {
         if happened {
             records::event(conn, Some(project.id), Some(r.id), kind, &what, author)?;
@@ -276,39 +284,13 @@ pub fn describe(cmd: &str) -> Option<Described> {
     })
 }
 
-/// Every open PR of the project's own repository has its Merge button (Imaginarium's agent,
-/// 2026-11-12: "a 6-PR stack still means 6 add_button calls"). It unlocks when the PR is ready and
-/// in merge order; pressing it is the owner's approval. One the agent added itself counts too.
-fn ensure_merge_button(conn: &Connection, project: &Project, repo: &str, pr: &Record) -> anyhow::Result<()> {
-    if pr.state != "open" || repo.is_empty() || !repo.eq_ignore_ascii_case(project.repo.trim()) {
-        return Ok(());
-    }
-    let command = merge_command_at(repo, pr.number, &project.merge_method, pr.str("head_sha"));
-    // AgentFlow's own button follows the PR's newest commit: after a push, the page shows the new
-    // command, and a press from a page that showed the older one is refused.
-    let merges_this = Some(ServerCommand::Merge { repo: repo.to_owned(), number: pr.number });
-    let mut has = 0;
-    for b in crate::actions::for_record(conn, pr.id)?.into_iter().filter(|b| b.is_merge()) {
-        has += 1;
-        let ours = b.added_by == "agentflow" && server_command(&b.command) == merges_this;
-        if ours && b.command != command && ["waiting", "failed"].contains(&b.state.as_str()) {
-            conn.execute("UPDATE actions SET command = ?1 WHERE id = ?2", rusqlite::params![command, b.id])?;
-        }
-    }
-    if has > 0 {
-        return Ok(());
-    }
-    crate::actions::add(
-        conn,
-        pr,
-        &crate::actions::NewButton {
-            label: "Merge",
-            kind: crate::actions::ButtonKind::parse("merge")?,
-            command: &command,
-            workdir: "",
-            requires: &[],
-        },
-        "agentflow",
+/// PRs are merged on GitHub (the owner, 2026-11-26, Q-37: "maybe we can delegate this to github?
+/// like not even have the merge functionality inside agentflow?"): a Merge button from before
+/// is withdrawn when its PR syncs.
+fn withdraw_merge_buttons(conn: &Connection, pr: &Record) -> anyhow::Result<()> {
+    conn.execute(
+        "UPDATE actions SET state = 'withdrawn' WHERE record_id = ?1 AND kind = 'merge' AND state IN ('waiting', 'failed')",
+        [pr.id],
     )?;
     Ok(())
 }
@@ -332,19 +314,8 @@ fn link_by_branch(conn: &Connection, project_id: i64, pr: &Record, head: &str, a
     Ok(())
 }
 
-/// Why a PR's own Merge button is disabled, or Ok when it can be pressed.
+/// Whether a PR can be merged now, apart from its place in the merge order; why not otherwise.
 pub fn merge_ready(pr: &Record) -> Result<(), String> {
-    ready_with(pr, true)
-}
-
-/// Ready to merge as a step inside "Merge #a–#b" (the owner, 2026-11-18, D-215): failing or
-/// running CI doesn't hold a PR in the middle of a stack, as long as the PR the chain ends at
-/// passes, so main ends up green.
-pub fn chain_ready(pr: &Record) -> Result<(), String> {
-    ready_with(pr, false)
-}
-
-fn ready_with(pr: &Record, ci_matters: bool) -> Result<(), String> {
     if pr.state != "open" {
         return Err(format!("already {}", pr.state));
     }
@@ -352,13 +323,13 @@ fn ready_with(pr: &Record, ci_matters: bool) -> Result<(), String> {
     if pr.data.get("draft").and_then(Value::as_bool).unwrap_or(false) {
         return Err("still a draft".into());
     }
-    if ci_matters && pr.str("ci") == "failing" {
+    if pr.str("ci") == "failing" {
         return Err("CI failing".into());
     }
     if pr.str("mergeable") == "conflicting" {
         return Err("has conflicts".into());
     }
-    if ci_matters && pr.str("ci") == "pending" {
+    if pr.str("ci") == "pending" {
         return Err("CI still running".into());
     }
     Ok(())
@@ -444,57 +415,37 @@ pub fn merge_order(conn: &Connection, project_id: i64) -> anyhow::Result<Vec<Ord
     Ok(out)
 }
 
-/// One step of "Merge #a–#b": a PR and its merge button.
-pub struct ChainStep {
-    pub number: i64,
-    pub action: crate::actions::ActionRow,
+/// A repository's tags as GitHub has them now, in place of those kept before.
+pub fn set_repo_tags(c: &Connection, project_id: i64, tags: &[crate::github::RepoTag]) -> anyhow::Result<()> {
+    let tx = c.unchecked_transaction()?;
+    tx.execute("DELETE FROM repo_tags WHERE project_id = ?1", [project_id])?;
+    for t in tags {
+        tx.execute(
+            "INSERT OR IGNORE INTO repo_tags (project_id, name, at, title) VALUES (?1, ?2, ?3, ?4)",
+            rusqlite::params![project_id, t.name, t.at, t.title],
+        )?;
+    }
+    tx.commit()?;
+    Ok(())
 }
 
-/// What "Merge #a–#b" merges to bring stacked PR `number` onto main: every PR from the bottom of
-/// its stack up to it, bottom first, each with its merge button; or why it can't (the owner,
-/// 2026-11-18, D-214: "i dont really want the user being able to mess up anything"). A stacked
-/// PR merges only this way. The PRs below need to be ready apart from CI; the PR it ends at needs
-/// passing CI too, so main ends up green (D-215).
-pub fn chain_to(conn: &Connection, order: &[Ordered], number: i64) -> anyhow::Result<Result<Vec<ChainStep>, String>> {
-    let by_number: HashMap<i64, &Ordered> = order.iter().map(|o| (o.record.number, o)).collect();
-    let Some(&top) = by_number.get(&number) else { return Ok(Err(format!("#{number} isn't open"))) };
-    if top.after.is_none() {
-        return Ok(Err("it isn't stacked: it has its own Merge".into()));
-    }
-    let mut stack = vec![top];
-    while let Some(after) = stack[stack.len() - 1].after {
-        let Some(&below) = by_number.get(&after) else { return Ok(Err(format!("#{after} isn't open"))) };
-        if stack.len() > order.len() {
-            return Ok(Err("its stack goes round in a circle".into()));
-        }
-        stack.push(below);
-    }
-    stack.reverse();
-    if let Err(why) = merge_ready(&top.record) {
-        return Ok(Err(why));
-    }
-    let bottom = &stack[0].record;
-    if !stack[0].base_ok {
-        return Ok(Err(format!(
-            "#{}: based on {}, which isn't main and has no open PR",
-            bottom.number,
-            bottom.str("base")
-        )));
-    }
-    let mut steps = Vec::new();
-    for o in stack {
-        let n = o.record.number;
-        let mine = |why: String| if n == number { why } else { format!("#{n}: {why}") };
-        let button = crate::actions::for_record(conn, o.record.id)?
-            .into_iter()
-            .find(|a| a.is_merge() && matches!(a.state.as_str(), "waiting" | "failed"));
-        let Some(a) = button else { return Ok(Err(mine("no Merge button yet".into()))) };
-        if let Err(why) = crate::actions::enabled_in_chain(conn, &a)? {
-            return Ok(Err(mine(why)));
-        }
-        steps.push(ChainStep { number: n, action: a });
-    }
-    Ok(Ok(steps))
+/// The project repository's newest tags (at most `limit`), and how many it has in all. A tag
+/// without a message of its own takes the title of the release or milestone it closed.
+pub fn repo_tags(c: &Connection, project_id: i64, limit: i64) -> anyhow::Result<(Vec<crate::github::RepoTag>, i64)> {
+    let total: i64 = c.query_row("SELECT count(*) FROM repo_tags WHERE project_id = ?1", [project_id], |r| r.get(0))?;
+    let mut stmt = c.prepare(
+        "SELECT t.name, t.at, CASE WHEN t.title != '' AND t.title != t.name THEN t.title ELSE coalesce(
+             (SELECT r.title FROM records r WHERE r.project_id = t.project_id AND r.kind = 'release'
+               AND json_extract(r.data, '$.tag') = t.name ORDER BY r.id DESC LIMIT 1),
+             (SELECT m.title FROM milestones m WHERE m.project_id = t.project_id AND m.tag = t.name LIMIT 1), '') END
+         FROM repo_tags t WHERE t.project_id = ?1 ORDER BY t.at DESC, t.name DESC LIMIT ?2",
+    )?;
+    let tags = stmt
+        .query_map(rusqlite::params![project_id, limit], |r| {
+            Ok(crate::github::RepoTag { name: r.get(0)?, at: r.get(1)?, title: r.get(2)? })
+        })?
+        .collect::<Result<_, _>>()?;
+    Ok((tags, total))
 }
 
 /// Every PR the release waits for is merged.
@@ -657,99 +608,58 @@ mod tests {
     }
 
     #[test]
-    fn merge_pins_the_commit_the_owner_saw() {
+    fn a_merge_command_pins_its_commit() {
+        let first = "a".repeat(40);
+        let pinned = merge_command_at("o/r", 48, "merge", &first);
+        assert_eq!(pinned, format!("gh pr merge 48 -R o/r --merge --delete-branch --match-head-commit {first}"));
+        assert!(is_server_command(&pinned));
+        assert_eq!(merge_command_at("o/r", 48, "squash", ""), merge_command("o/r", 48, "squash"), "no commit known");
+        // Nothing else may follow the command.
+        for bad in [
+            "--match-head-commit abc",
+            "--match-head-commit $(id)",
+            "--admin",
+            &format!("--match-head-commit {first} --admin"),
+        ] {
+            assert!(!is_server_command(&format!("{} {bad}", merge_command("o/r", 48, "merge"))), "{bad}");
+        }
+    }
+
+    #[test]
+    fn prs_are_merged_on_github_and_conflicts_reach_the_agent() {
         let db = Db::open_memory();
         db.call_blocking(|c| {
             let p = crate::projects::create(c, "v", "V", "t")?;
             let patch = crate::projects::ProjectPatch { repo: Some("o/r".into()), ..Default::default() };
             crate::projects::update(c, p.id, &patch, "owner")?;
             let p = crate::projects::get_by_id(c, p.id)?;
-            let at = |sha: &str| PrInfo { head_sha: sha.into(), ..pr(48, "main", "b48") };
-            let (first, second) = ("a".repeat(40), "b".repeat(40));
-            let (r, _) = sync(c, &p, "o/r", &at(&first), "poller")?;
-            let shown = crate::actions::for_record(c, r.id)?.remove(0);
-            assert_eq!(
-                shown.command,
-                format!("gh pr merge 48 -R o/r --merge --delete-branch --match-head-commit {first}")
-            );
-            assert!(crate::actions::own_command(c, &shown)?, "still AgentFlow's own, with the server's token");
-            // A push after the owner looked: the button moves on, and the old page's press is refused.
-            sync(c, &p, "o/r", &at(&second), "poller")?;
-            let buttons = crate::actions::for_record(c, r.id)?;
-            assert_eq!(buttons.len(), 1);
-            assert!(buttons[0].command.ends_with(&format!("--match-head-commit {second}")), "{}", buttons[0].command);
-            let err = crate::actions::claim(c, shown.id, &shown.hash()).unwrap_err().to_string();
-            assert!(err.contains("isn't the one the page showed"), "{err}");
-            // A new merge method keeps the pin; nothing else may follow the command.
-            let squash = crate::projects::ProjectPatch { merge_method: Some("squash".into()), ..Default::default() };
-            crate::projects::update(c, p.id, &squash, "owner")?;
-            assert_eq!(crate::actions::for_record(c, r.id)?[0].command, merge_command_at("o/r", 48, "squash", &second));
-            for bad in [
-                "--match-head-commit abc",
-                "--match-head-commit $(id)",
-                "--admin",
-                &format!("--match-head-commit {first} --admin"),
-            ] {
-                assert!(!is_server_command(&format!("{} {bad}", merge_command("o/r", 48, "merge"))), "{bad}");
-            }
-            Ok(())
-        })
-        .unwrap();
-    }
-
-    #[test]
-    fn every_pr_of_the_repo_gets_its_merge_button() {
-        let db = Db::open_memory();
-        db.call_blocking(|c| {
-            let p = crate::projects::create(c, "v", "V", "t")?;
-            let patch = crate::projects::ProjectPatch {
-                repo: Some("o/r".into()),
-                merge_method: Some("squash".into()),
-                ..Default::default()
-            };
-            crate::projects::update(c, p.id, &patch, "owner")?;
-            assert!(
-                crate::projects::update(
-                    c,
-                    p.id,
-                    &crate::projects::ProjectPatch { merge_method: Some("yolo".into()), ..Default::default() },
-                    "o"
-                )
-                .is_err()
-            );
-            let p = crate::projects::get_by_id(c, p.id)?;
             let (r, _) = sync(c, &p, "o/r", &pr(48, "main", "b48"), "poller")?;
-            sync(c, &p, "o/r", &pr(48, "main", "b48"), "poller")?;
-            let buttons = crate::actions::for_record(c, r.id)?;
-            assert_eq!(buttons.len(), 1, "once, however often it syncs");
-            assert_eq!(buttons[0].command, "gh pr merge 48 -R o/r --squash --delete-branch");
-            // A new merge method reaches the waiting buttons.
-            crate::projects::update(
-                c,
-                p.id,
-                &crate::projects::ProjectPatch { merge_method: Some("merge".into()), ..Default::default() },
-                "owner",
-            )?;
-            assert_eq!(
-                crate::actions::for_record(c, r.id)?[0].command,
-                "gh pr merge 48 -R o/r --merge --delete-branch"
-            );
-            assert!(buttons[0].is_merge());
-            // Another repository's PR gets none; the agent's own button replaces AgentFlow's.
-            let (other, _) = sync(c, &p, "x/y", &pr(7, "main", "b7"), "poller")?;
-            assert!(crate::actions::for_record(c, other.id)?.is_empty());
-            let mine = crate::actions::NewButton {
+            assert!(crate::actions::for_record(c, r.id)?.is_empty(), "no Merge button (Q-37)");
+            // One from before is withdrawn when the PR syncs.
+            let old = crate::actions::NewButton {
                 label: "Merge",
                 kind: crate::actions::ButtonKind::parse("merge")?,
-                command: "gh pr merge 48 -R o/r --merge",
+                command: "gh pr merge 48 -R o/r --merge --delete-branch",
                 workdir: "",
                 requires: &[],
             };
-            crate::actions::add(c, &r, &mine, "v")?;
-            let live: Vec<_> =
-                crate::actions::for_record(c, r.id)?.into_iter().filter(|b| b.state != "withdrawn").collect();
-            assert_eq!(live.len(), 1);
-            assert_eq!(live[0].command, "gh pr merge 48 -R o/r --merge");
+            crate::actions::add(c, &r, &old, "agentflow")?;
+            let mut conflicting = pr(48, "main", "b48");
+            conflicting.mergeable = "conflicting".into();
+            let (_, done) = sync(c, &p, "o/r", &conflicting, "poller")?;
+            assert!(crate::actions::for_record(c, r.id)?.is_empty(), "withdrawn");
+            // GitHub calling it conflicting tells the agent once.
+            assert!(done.conflicted);
+            let (_, again) = sync(c, &p, "o/r", &conflicting, "poller")?;
+            assert!(!again.conflicted, "once");
+            let events = records::recent_events(c, Some(p.id), 10)?;
+            assert!(
+                events
+                    .iter()
+                    .any(|e| e.kind == "pr.conflicting"
+                        && e.summary == "#48 has conflicts with main: merge main into it"),
+                "{events:?}"
+            );
             Ok(())
         })
         .unwrap();

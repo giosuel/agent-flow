@@ -36,8 +36,9 @@ tasks in doing, the next one, what's blocked) and the notes coming back to you; 
 summarized, call `hello` again with `brief: true`. Work in steps: add a step's tasks \
 in one `add_tasks` call, each with an estimate; set a task to doing when you start it (that starts the step) and \
 done when it is; `conclude_step` once its tasks are done, with a few lines. Your open PRs never hold a step: stack \
-them and move on; every PR gets its Merge button and every release its Push tag button by themselves (a PR \
-that isn't a draft is ready), and pushing a release's tag closes its milestone. Time is \
+them and move on; the owner merges them on GitHub (a PR that isn't a draft is ready; fix conflicts and failing \
+CI when you hear of them), every release gets its Push tag button by itself, and pushing a release's tag closes \
+its milestone. Time is \
 counted from the tasks' states; log builds and tests with `flow time [--on T-12] -- <command>`. Ask the \
 owner with `ask_question`, one question per call, with numbered options and your recommendation, and repeat the \
 same questions with their ids in your chat reply (`in_chat` when the owner is talking with you right now: no \

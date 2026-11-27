@@ -3,7 +3,7 @@
 //! I can test the UI before the onboarding"). Archive it from its page when done.
 //!
 //! Everything a real agent would leave: details, milestones with steps, tasks in every state,
-//! questions (open, blocking, answered), decisions and an ADR, a stack of PRs with Merge buttons
+//! questions (open, blocking, answered), decisions and an ADR, a stack of PRs (merged on GitHub, so no buttons)
 //! and a release with a tag button (all of them only `echo`), two builds you can run (one with
 //! feedback, one waiting for it), screenshots, a conversation with the consultant, and a week of
 //! token usage. It writes straight to the database, as its own author, with no token, so nothing
@@ -269,17 +269,6 @@ pub fn create(c: &mut Connection, data_dir: &Path) -> anyhow::Result<String> {
             ci: "passing".into(),
         };
         let (r, _) = crate::prs::sync(c, &projects::get_by_id(c, p.id)?, REPO, &info, SLUG)?;
-        if state == "open" && !draft {
-            let command = format!("echo 'Demo: nothing is merged (PR #{n} of {REPO}).'");
-            let b = crate::actions::NewButton {
-                label: "Merge",
-                kind: crate::actions::ButtonKind::Merge,
-                command: &command,
-                workdir: "~",
-                requires: &[],
-            };
-            crate::actions::add(c, &r, &b, SLUG)?;
-        }
         prs.push(r);
     }
     records::link(c, &prs[1], &tasks[2], "implements", SLUG)?;
