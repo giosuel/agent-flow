@@ -18,9 +18,6 @@
     <label class="field">Model<select name="model">{% if edit.model.is_empty() %}<option value="" selected>Not set</option>{% endif %}{% for m in edit.models %}<option{% if *m == edit.model %} selected{% endif %}>{{ m }}</option>{% endfor %}</select></label>
     <label class="field">Effort<select name="effort">{% if edit.effort.is_empty() %}<option value="" selected>Not set</option>{% endif %}{% for e in edit.efforts %}<option{% if *e == edit.effort %} selected{% endif %}>{{ e }}</option>{% endfor %}</select></label>
     <label class="field"><span>Build product <span class="optional">optional</span></span><input name="build_product" value="{{ edit.build_product }}" placeholder="{{ slug }}"><span class="help">The name test builds go under; empty means the id.</span></label>
-    <label class="field">How PRs merge<select name="merge_method">
-      {% for (v, t) in [("merge", "A merge commit"), ("squash", "Squash"), ("rebase", "Rebase")] %}<option value="{{ v }}"{% if edit.merge_method == *v %} selected{% endif %}>{{ t }}</option>{% endfor %}
-    </select><span class="help">Every PR of the repository gets a Merge button that merges this way and deletes the branch.</span></label>
     <label class="field">Build server<select name="build_server">
       <option value=""{% if edit.build_server.is_empty() %} selected{% endif %}>None: builds where the agent is</option>
       {% for b in edit.servers %}<option value="{{ b }}"{% if *b == edit.build_server %} selected{% endif %}>{{ b }}</option>{% endfor %}

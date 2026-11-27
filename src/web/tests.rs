@@ -1400,9 +1400,12 @@ async fn the_dashboard_features_a_question_and_answers_on_send() {
     assert!(html.contains(r#"<b class="badge warn gbadge">1</b>"#));
 }
 
+/// PRs are merged on GitHub (the owner, 2026-11-26, Q-37, D-294): the Pull requests tab lists them
+/// read-only in merge order, with the next release and the repository's tags beside them; agents
+/// can't add Merge buttons, and a release's Push tag still runs once its PRs are merged.
 #[tokio::test]
-async fn prs_merge_in_order_from_the_owners_buttons() {
-    use crate::github::fake::pr;
+async fn prs_are_listed_read_only_and_merged_on_github() {
+    use crate::github::{RepoTag, fake::pr};
     let s = TestServer::start().await;
     let token = s.token(TokenKind::Project, Some("vinculum")).await;
     let sess = mcp_session(&s, &token).await;
@@ -1412,74 +1415,85 @@ async fn prs_merge_in_order_from_the_owners_buttons() {
     };
     assert!(!call("update_pr", json!({"number": 48})).await.0, "no repo yet");
     call("update_project", json!({"repo": "giosuel/vinculum"})).await;
-    s.github.set("giosuel/vinculum", pr(48, "main", "b48"));
-    s.github.set("giosuel/vinculum", pr(49, "b48", "b49"));
+    assert!(call("add_milestone", json!({"name": "M3", "title": "Network"})).await.0);
+    assert!(call("update_milestone", json!({"milestone": "M3", "state": "closed", "tag": "v0.0.4-m3"})).await.0);
+    let mut draft = pr(50, "main", "b50");
+    draft.draft = true;
+    let mut conflicting = pr(51, "main", "b51");
+    conflicting.mergeable = "conflicting".into();
+    for p in [pr(48, "main", "b48"), pr(49, "b48", "b49"), draft, conflicting] {
+        s.github.set("giosuel/vinculum", p);
+    }
+    s.github.tag_list.lock().unwrap().insert(
+        "giosuel/vinculum".into(),
+        vec![
+            RepoTag { name: "v0.0.5-m4".into(), at: 1_795_000_000_000, title: "M4: Keybinds".into() },
+            RepoTag { name: "v0.0.4-m3".into(), at: 1_794_000_000_000, title: String::new() },
+        ],
+    );
     crate::poller::poll_once(&s.state).await.unwrap();
 
+    // Readiness is GitHub's draft flag (D-233): the old field is refused with the gh command.
+    let (ok, r) = call("update_pr", json!({"number": 48, "ready": false})).await;
+    assert!(!ok && r.to_string().contains("gh pr ready --undo"), "{r}");
+    let (ok, r) =
+        call("add_button", json!({"record": "PR-48", "label": "Merge", "kind": "merge", "command": "echo merged"}))
+            .await;
+    assert!(!ok && r.to_string().contains("merges PRs on GitHub"), "no Merge buttons: {r}");
     let dir = tempfile::tempdir().unwrap();
     let wd = dir.path().display().to_string();
-    for n in [48, 49] {
-        let (ok, r) = call("update_pr", json!({"number": n})).await;
-        assert!(ok, "{r}");
-        // Readiness is GitHub's draft flag (D-233): the old field is refused with the gh command.
-        let (ok, r) = call("update_pr", json!({"number": n, "ready": false})).await;
-        assert!(!ok && r.to_string().contains("gh pr ready --undo"), "{r}");
-        let (ok, r) = call("add_button", json!({"record": format!("PR-{n}"), "label": "Merge", "kind": "merge", "command": format!("echo merged {n} > merged-{n}"), "workdir": wd})).await;
-        assert!(ok, "{r}");
-    }
     let (ok, r) = call(
         "add_release",
-        json!({"tag": "v0.0.5-m4", "title": "M4: Keybinds", "waits_for": ["PR-48", "PR-49"], "tag_button": false}),
+        json!({"tag": "v0.0.6-m5", "title": "M5: Lituus rename", "waits_for": ["PR-48", "PR-49"], "tag_button": false}),
     )
     .await;
     assert!(ok, "{r}");
-    call("add_button", json!({"record": "R-1", "label": "Push tag v0.0.5-m4", "kind": "tag", "command": "echo tagged > tagged", "workdir": wd, "requires": ["PR-49"]})).await;
+    call("add_button", json!({"record": "R-1", "label": "Push tag v0.0.6-m5", "kind": "tag", "command": "echo tagged > tagged", "workdir": wd, "requires": ["PR-49"]})).await;
 
     let (_, order) = call("pull_requests", json!({})).await;
     assert_eq!(order["merge_order"][0]["mergeable_now"], true);
-    assert_eq!(order["merge_order"][1]["buttons"][0]["locked_because"], "merge #48 first");
+    assert_eq!(order["merge_order"][1]["after"], "PR-48");
+    assert!(order["merge_order"][0].get("buttons").is_none(), "{order}");
+    assert_eq!(order["releases"][0]["buttons"][0]["label"], "Push tag v0.0.6-m5");
 
     let cookie = s.owner_cookie().await;
-    let html =
-        s.http.get(s.url("/p/vinculum?tab=prs")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
-    assert!(html.contains("Merge #48–#49"), "stack button");
-    assert_eq!(html.matches(">Merge</button>").count(), 1, "#49 has no Merge of its own, only #48 does");
-    // The overview has no merge panel any more, only the count on the Pull requests tab.
-    let overview = s.http.get(s.url("/p/vinculum")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
-    assert!(!overview.contains("Merge order") && !overview.contains("Merge #48–#49"), "no merge panel");
-    assert!(overview.contains(r#"<span class="only-phone">PRs</span> <span class="count">2</span>"#), "the count");
-    let start = html.find(r#"name="actions" value=""#).unwrap() + r#"name="actions" value=""#.len();
-    let ids = html[start..].split('"').next().unwrap().to_owned();
-
-    // A token can't press, not even the consultant's.
-    let admin = s.token(TokenKind::Admin, None).await;
-    let res = s
-        .http
-        .post(s.url("/p/vinculum/merge-up-to/49"))
-        .bearer_auth(&admin)
-        .form(&[("actions", ids.as_str())])
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(res.status(), StatusCode::FORBIDDEN);
-
-    s.github.merge_on_fetch.lock().unwrap().extend([48, 49]);
+    let html = owner_page(&s, &cookie, "/p/vinculum?tab=prs").await;
+    assert!(!html.contains(">Merge</button>") && !html.contains("merge-up-to"), "nothing merges here");
+    assert!(html.contains(r#"<a class="mono pr-num" href="https://github.com/o/r/pull/48">#48</a>"#), "{html}");
+    assert!(html.contains(r#"after <a class="mono" href="https://github.com/o/r/pull/48">#48</a>"#), "#49 is stacked");
+    assert!(html.contains(r#"<span class="chip bad">conflicts</span><span class="sub">· the agent was told</span>"#));
+    assert!(html.contains("<span>1 draft</span>"), "drafts fold away");
+    assert!(html.contains("3 · merge them on GitHub, from the top"));
+    assert!(html.contains(r#"href="https://github.com/giosuel/vinculum/pulls""#));
+    // Releases: the next one with its button, the repository's tags; a tag without a message of
+    // its own takes its milestone's title.
+    assert!(html.contains(">v0.0.6-m5</a><span class=\"chip warn\">waiting</span>"), "{html}");
+    assert!(html.contains("Push tag v0.0.6-m5"));
+    assert!(html.contains(r#"href="https://github.com/giosuel/vinculum/releases/tag/v0.0.5-m4">v0.0.5-m4</a><span class="ttl"><span>M4: Keybinds</span>"#));
+    assert!(html.contains(r#">v0.0.4-m3</a><span class="ttl"><span>Network</span>"#), "{html}");
+    assert!(!html.contains("All 2 tags"), "all of them are shown");
+    // The overview counts them on the tab; the old route is gone.
+    let overview = owner_page(&s, &cookie, "/p/vinculum").await;
+    assert!(overview.contains(r#"<span class="only-phone">PRs</span> <span class="count">4</span>"#), "the count");
     let res = s
         .http
         .post(s.url("/p/vinculum/merge-up-to/49"))
         .header(COOKIE, &cookie)
         .header(ORIGIN, &s.base)
-        .form(&[("actions", ids.as_str())])
+        .form(&[("actions", "1:x")])
         .send()
         .await
         .unwrap();
-    assert_eq!(res.headers()[LOCATION], "/p/vinculum?tab=prs&merging=48-49");
-    // It runs on its own, after the redirect.
-    wait_for_records(&s, "vinculum", &[48, 49], "merged").await;
-    assert!(dir.path().join("merged-48").exists() && dir.path().join("merged-49").exists());
+    assert!(!res.status().is_success() && !res.status().is_redirection(), "{}", res.status());
 
-    // The release unlocked; its tag button runs and marks it tagged; the agent hears about all of it.
-    let html = s.http.get(s.url("/p/vinculum/R-1")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
+    // Merged on GitHub: the release unlocks; its tag button runs and marks it tagged; the agent
+    // hears about all of it.
+    for n in [48, 49] {
+        s.github.prs.lock().unwrap().get_mut(&("giosuel/vinculum".to_owned(), n)).unwrap().state = "merged".into();
+    }
+    crate::poller::poll_once(&s.state).await.unwrap();
+    wait_for_records(&s, "vinculum", &[48, 49], "merged").await;
+    let html = owner_page(&s, &cookie, "/p/vinculum/R-1").await;
     let hstart = html.find(r#"name="hash" value=""#).unwrap() + r#"name="hash" value=""#.len();
     let hash = html[hstart..].split('"').next().unwrap().to_owned();
     let tag_id = {
@@ -1501,7 +1515,7 @@ async fn prs_merge_in_order_from_the_owners_buttons() {
     assert_eq!(rel["state"], "tagged");
     let (_, news) = call("since_last_check", json!({})).await;
     let what = news.to_string();
-    assert!(what.contains("#48 merged") && what.contains("Push tag v0.0.5-m4") && what.contains("done"), "{what}");
+    assert!(what.contains("#48 merged") && what.contains("Push tag v0.0.6-m5") && what.contains("done"), "{what}");
 }
 
 /// A page's HTML, as the owner sees it.
@@ -1669,8 +1683,8 @@ async fn wait_for_records(s: &TestServer, slug: &str, numbers: &[i64], state: &s
     panic!("PRs {numbers:?} of {slug} never became {state}");
 }
 
-/// D-263: a button's confirmation says a command runs. AgentFlow's own Merge, "Merge #a–#b" and
-/// Push tag say what they do (the same command every time), with the agent's message.
+/// D-263: a button's confirmation says a command runs. AgentFlow's own Push tag says what it does
+/// (the same command every time), with the agent's message.
 #[tokio::test]
 async fn confirmations_say_what_runs() {
     use crate::github::fake::pr;
@@ -1694,11 +1708,6 @@ async fn confirmations_say_what_runs() {
     let cookie = s.owner_cookie().await;
     let html =
         s.http.get(s.url("/p/vinculum?tab=prs")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
-    assert!(
-        html.contains(r#"data-confirm="Merge #48?" data-confirm-body>Merge</button><template class="confirm-body">"#),
-        "{html}"
-    );
-    assert!(html.contains("merge command for each PR in giosuel/vinculum, one after the other"), "the stack in words");
     assert!(html.contains(r#"data-confirm="Push tag v0.1.0?" data-confirm-body>"#));
     assert!(html.contains("Message, written by vinculum"));
     assert!(
@@ -1706,73 +1715,6 @@ async fn confirmations_say_what_runs() {
         "{html}"
     );
     assert!(html.contains("<summary class=\"sub\">The exact command</summary>"));
-}
-
-/// The owner, 2026-11-18 (D-214, D-215): a stacked PR merges only with the PRs below it, and red
-/// CI in the middle doesn't hold the stack when the PR it ends at is green.
-#[tokio::test]
-async fn a_stack_merges_past_red_ci_in_the_middle_only_up_to_a_green_pr() {
-    use crate::github::fake::pr;
-    let s = TestServer::start().await;
-    let token = s.token(TokenKind::Project, Some("vinculum")).await;
-    let sess = mcp_session(&s, &token).await;
-    let call = |name: &'static str, args: Value| {
-        let (s, token, sess) = (&s, token.clone(), sess.clone());
-        async move { mcp_tool(s, &token, &sess, name, args).await }
-    };
-    call("update_project", json!({"repo": "giosuel/vinculum"})).await;
-    // #61 on main, #62 (red) on #61, #63 (green) on #62, #64 (red) on #63.
-    let mut red62 = pr(62, "b61", "b62");
-    red62.ci = "failing".into();
-    let mut red64 = pr(64, "b63", "b64");
-    red64.ci = "failing".into();
-    for p in [pr(61, "main", "b61"), red62, pr(63, "b62", "b63"), red64] {
-        s.github.set("giosuel/vinculum", p);
-    }
-    crate::poller::poll_once(&s.state).await.unwrap();
-    let dir = tempfile::tempdir().unwrap();
-    let wd = dir.path().display().to_string();
-    for n in [61, 62, 63, 64] {
-        let (ok, r) = call("add_button", json!({"record": format!("PR-{n}"), "label": "Merge", "kind": "merge", "command": format!("echo merged {n} > merged-{n}"), "workdir": wd})).await;
-        assert!(ok, "{r}");
-    }
-
-    let cookie = s.owner_cookie().await;
-    let html =
-        s.http.get(s.url("/p/vinculum?tab=prs")).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap();
-    assert!(html.contains("Merge #61–#63"), "past #62's red CI to the green #63");
-    assert!(!html.contains("Merge #61–#62") && !html.contains("Merge #61–#64"), "never ending at a red PR");
-    assert!(html.contains("<span class=\"sub\">CI failing</span>"), "#64 says why");
-
-    // A page that showed another stack is turned away; so is a chain ending at a red PR.
-    let start = html.find(r#"name="actions" value=""#).unwrap() + r#"name="actions" value=""#.len();
-    let ids = html[start..].split('"').next().unwrap().to_owned();
-    let post = |to: i64, ids: String| {
-        let (s, cookie) = (&s, cookie.clone());
-        async move {
-            s.http
-                .post(s.url(&format!("/p/vinculum/merge-up-to/{to}")))
-                .header(COOKIE, &cookie)
-                .header(ORIGIN, &s.base)
-                .form(&[("actions", ids.as_str())])
-                .send()
-                .await
-                .unwrap()
-        }
-    };
-    let stale = ids.rsplit_once(',').unwrap().0.to_owned();
-    assert_eq!(post(63, stale).await.status(), StatusCode::BAD_REQUEST);
-    assert_eq!(post(64, ids.clone()).await.status(), StatusCode::BAD_REQUEST);
-    assert!(!dir.path().join("merged-61").exists(), "nothing ran");
-
-    s.github.merge_on_fetch.lock().unwrap().extend([61, 62, 63]);
-    let res = post(63, ids).await;
-    assert_eq!(res.headers()[LOCATION], "/p/vinculum?tab=prs&merging=61-63");
-    wait_for_records(&s, "vinculum", &[61, 62, 63], "merged").await;
-    for n in [61, 62, 63] {
-        assert!(dir.path().join(format!("merged-{n}")).exists(), "#{n} ran");
-    }
-    assert!(!dir.path().join("merged-64").exists());
 }
 
 /// The owner, 2026-11-19 (D-228–D-230): a subagent's model shows in Conversations, a note it

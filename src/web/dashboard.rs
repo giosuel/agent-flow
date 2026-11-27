@@ -199,8 +199,9 @@ async fn dashboard(
                     } else {
                         format!("{} · #{} · ready, CI {}", name(&r.project), r.number, r.str("ci"))
                     },
-                    url: r.url(),
-                    action: if r.kind == Kind::Release { "Tag" } else { "Merge" },
+                    // PRs are merged on GitHub (D-294).
+                    url: if r.kind == Kind::Pr && !r.str("url").is_empty() { r.str("url").to_owned() } else { r.url() },
+                    action: if r.kind == Kind::Release { "Tag" } else { "Merge on GitHub" },
                 })
                 .collect();
             let merge_count = merges.len();

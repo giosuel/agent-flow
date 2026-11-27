@@ -87,6 +87,46 @@ pub trait GitHub: Send + Sync {
     fn merge<'a>(&'a self, repo: &'a str, number: i64, head: &'a str) -> BoxFuture<'a, anyhow::Result<String>>;
     /// Whether the repository has this tag already (pushed by hand, or by an earlier press).
     fn tag_exists<'a>(&'a self, repo: &'a str, tag: &'a str) -> BoxFuture<'a, anyhow::Result<bool>>;
+    /// The repository's newest tags (up to 100), newest first.
+    fn tags<'a>(&'a self, repo: &'a str) -> BoxFuture<'a, anyhow::Result<Vec<RepoTag>>>;
+}
+
+/// A tag of a repository: its name, when it was made (the tagger's date, or the commit's for a
+/// lightweight tag), and the first line of its message.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RepoTag {
+    pub name: String,
+    pub at: i64,
+    pub title: String,
+}
+
+/// The newest tags, by the date of the commit they point at; the dates of annotated tags are
+/// their tagger's.
+const TAGS_QUERY: &str = "query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { \
+    refs(refPrefix: \"refs/tags/\", first: 100, orderBy: {field: TAG_COMMIT_DATE, direction: DESC}) { nodes { name \
+    target { __typename ... on Tag { message tagger { date } } ... on Commit { committedDate } } } } } }";
+
+/// Reads `gh api graphql`'s answer to [`TAGS_QUERY`].
+fn parse_tags(out: &[u8]) -> anyhow::Result<Vec<RepoTag>> {
+    let v: serde_json::Value = serde_json::from_slice(out).context("reading gh's answer")?;
+    let nodes = v.pointer("/data/repository/refs/nodes").and_then(|n| n.as_array()).context("no tags in the answer")?;
+    let time = |s: Option<&str>| {
+        s.and_then(|s| time::OffsetDateTime::parse(s, &time::format_description::well_known::Rfc3339).ok())
+            .map(|t| (t.unix_timestamp_nanos() / 1_000_000) as i64)
+            .unwrap_or(0)
+    };
+    Ok(nodes
+        .iter()
+        .filter_map(|n| {
+            let name = n.get("name")?.as_str()?.to_owned();
+            let t = n.get("target")?;
+            let at = time(
+                t.pointer("/tagger/date").and_then(|d| d.as_str()).or(t.get("committedDate").and_then(|d| d.as_str())),
+            );
+            let title = t.get("message").and_then(|m| m.as_str()).and_then(|m| m.lines().next()).unwrap_or("");
+            Some(RepoTag { name, at, title: title.trim().chars().take(120).collect() })
+        })
+        .collect())
 }
 
 const FIELDS: &str = "number,title,url,state,isDraft,baseRefName,headRefName,headRefOid,mergeable,statusCheckRollup";
@@ -346,6 +386,25 @@ impl GitHub for GhCli {
         })
     }
 
+    fn tags<'a>(&'a self, repo: &'a str) -> BoxFuture<'a, anyhow::Result<Vec<RepoTag>>> {
+        Box::pin(async move {
+            check_repo(repo)?;
+            let (owner, name) = repo.split_once('/').context("a repository is owner/name")?;
+            let out = Self::run(&[
+                "api",
+                "graphql",
+                "-f",
+                &format!("query={TAGS_QUERY}"),
+                "-f",
+                &format!("owner={owner}"),
+                "-f",
+                &format!("name={name}"),
+            ])
+            .await?;
+            parse_tags(&out)
+        })
+    }
+
     fn tag_exists<'a>(&'a self, repo: &'a str, tag: &'a str) -> BoxFuture<'a, anyhow::Result<bool>> {
         Box::pin(async move {
             check_repo(repo)?;
@@ -380,6 +439,8 @@ pub mod fake {
         pub merge_on_fetch: Mutex<std::collections::HashSet<i64>>,
         /// Tags on GitHub, as (repo, tag).
         pub tags: Mutex<std::collections::HashSet<(String, String)>>,
+        /// Each repository's tags as the Pull requests tab lists them, newest first.
+        pub tag_list: Mutex<HashMap<String, Vec<RepoTag>>>,
     }
 
     impl FakeGitHub {
@@ -440,6 +501,11 @@ pub mod fake {
             let has = self.tags.lock().unwrap().contains(&(repo.to_owned(), tag.to_owned()));
             Box::pin(async move { Ok(has) })
         }
+
+        fn tags<'a>(&'a self, repo: &'a str) -> BoxFuture<'a, anyhow::Result<Vec<RepoTag>>> {
+            let list = self.tag_list.lock().unwrap().get(repo).cloned().unwrap_or_default();
+            Box::pin(async move { Ok(list) })
+        }
     }
 
     pub fn pr(number: i64, base: &str, head: &str) -> PrInfo {
@@ -462,6 +528,19 @@ pub mod fake {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn tags_come_with_their_dates_and_titles() {
+        let answer = json!({"data": {"repository": {"refs": {"nodes": [
+            {"name": "v0.1.0", "target": {"__typename": "Tag", "message": "AgentFlow 0.1.0\n\nThe first release.",
+                "tagger": {"date": "2026-11-26T12:30:00Z"}}},
+            {"name": "m14", "target": {"__typename": "Commit", "committedDate": "2026-11-20T08:00:00+01:00"}}
+        ]}}}});
+        let tags = parse_tags(answer.to_string().as_bytes()).unwrap();
+        assert_eq!(tags[0], RepoTag { name: "v0.1.0".into(), at: 1_795_696_200_000, title: "AgentFlow 0.1.0".into() });
+        assert_eq!(tags[1], RepoTag { name: "m14".into(), at: 1_795_158_000_000, title: String::new() });
+        assert!(parse_tags(br#"{"data": {"repository": null}}"#).is_err());
+    }
 
     #[test]
     fn ci_folds_checks() {

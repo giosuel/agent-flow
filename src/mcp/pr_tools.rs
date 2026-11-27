@@ -73,14 +73,12 @@ pub struct UpdateRelease {
 pub struct AddButton {
     /// The PR or release, e.g. "PR-58" or "R-3".
     pub record: String,
-    /// What the owner sees on the button: "Merge", "Push tag v0.0.5-m4".
+    /// What the owner sees on the button: "Push tag v0.0.5-m4", "Deploy the docs".
     pub label: String,
-    /// "merge" for a PR's merge (unlocks in merge order, and "Merge #a–#b" uses it), "tag" for a
-    /// release's tag (marks the release tagged once it ran), "other" for anything else.
+    /// "tag" for a release's tag (marks the release tagged once it ran), "other" for anything
+    /// else. No "merge": the owner merges PRs on GitHub (D-294).
     pub kind: String,
-    /// The exact commands, run with bash when the owner presses it, e.g.
-    /// "gh pr merge 58 -R giosuel/vinculum --merge --delete-branch". In a stack, delete the
-    /// branch on merge so GitHub moves the next PR onto main. Never run them yourself.
+    /// The exact commands, run with bash when the owner presses it. Never run them yourself.
     pub command: String,
     /// The folder to run in, e.g. "~/vinculum". Your home if left out.
     #[serde(default)]
@@ -160,7 +158,8 @@ impl FlowMcp {
     }
 
     #[tool(description = "A project's open PRs in merge order (from their bases), each with whether it can be merged \
-        and why not, and its buttons; plus releases waiting to be tagged.")]
+        and why not (the owner merges them on GitHub, from the top); plus releases waiting to be tagged, with their \
+        buttons.")]
     async fn pull_requests(
         &self,
         Extension(parts): Extension<Parts>,
@@ -187,7 +186,7 @@ impl FlowMcp {
                     list.push(json!({
                         "position": o.position, "id": r.ref_id, "title": r.title, "after": o.after.map(|n| format!("PR-{n}")),
                         "ci": r.str("ci"), "ready": r.data.get("ready"), "mergeable_now": prs::merge_ready(r).is_ok() && o.after.is_none(),
-                        "not_mergeable_because": prs::merge_ready(r).err(), "buttons": buttons(c, r.id)?,
+                        "not_mergeable_because": prs::merge_ready(r).err(),
                     }));
                 }
                 let mut releases = Vec::new();
@@ -203,8 +202,7 @@ impl FlowMcp {
 
     #[tool(description = "Plan a tag (a milestone's closing tag or a release) that waits for PRs to be merged. Its \
         \"Push tag …\" button comes by itself (an annotated tag on origin/main); the owner presses it once every PR is \
-        merged, and the milestone it closes is closed with it. Your PRs' Merge buttons come by themselves too (the \
-        project's merge method; update_project merge_method).")]
+        merged, and the milestone it closes is closed with it. The owner merges the PRs on GitHub.")]
     async fn add_release(
         &self,
         Extension(parts): Extension<Parts>,
@@ -367,9 +365,10 @@ impl FlowMcp {
     }
 
     #[tool(
-        description = "Only for something unusual (PRs get their Merge button and releases their Push tag button by \
-        themselves): put a button on one of your PRs or releases: the exact git/gh commands the owner runs by pressing it \
-        (merge, push a tag). The owner sees the command first; pressing it is their approval. Never merge or tag yourself. \
+        description = "Only for something unusual (releases get their Push tag button by themselves, and the owner merges \
+        PRs on GitHub, so there are no Merge buttons): put a button on one of your PRs or releases: the exact git/gh \
+        commands the owner runs by pressing it. The owner sees the command first; pressing it is their approval. Never \
+        merge or tag yourself. \
         At most 40 lines and 2000 characters, since the owner reads all of it. \
         Buttons can't be edited; withdraw one and add a new one instead."
     )]
@@ -387,6 +386,12 @@ impl FlowMcp {
                 let tx = c.transaction()?;
                 let r = writable(&tx, &a, &p.record)?;
                 let kind = actions::ButtonKind::parse(&p.kind)?;
+                if kind == actions::ButtonKind::Merge {
+                    anyhow::bail!(
+                        "the owner merges PRs on GitHub (D-294): no Merge buttons. A PR that isn't a draft is ready; \
+                         fix conflicts and failing CI when you hear of them"
+                    );
+                }
                 let button = actions::NewButton {
                     label: &p.label,
                     kind,

@@ -215,7 +215,6 @@ fn edit_view(c: &Connection, p: &Project) -> anyhow::Result<EditView> {
         efforts: super::new_project::choices(super::new_project::EFFORTS, &p.effort),
         ports: p.ports.join("\n"),
         build_product: p.build_product.clone(),
-        merge_method: p.merge_method.clone(),
     })
 }
 
@@ -760,7 +759,6 @@ pub struct EditView {
     efforts: Vec<String>,
     ports: String,
     build_product: String,
-    merge_method: String,
 }
 
 pub struct ShotCard {
@@ -841,11 +839,15 @@ struct ProjectPage {
     shots: Vec<ShotCard>,
     shots_all: usize,
     shot_cats: Vec<(String, String, usize, bool)>,
-    prs: Vec<super::buttons::PrRow>,
+    /// The Pull requests tab: the open PRs in merge order, drafts last (merged on GitHub, D-294).
+    prs: Vec<super::buttons::PrLine>,
     prs_total: usize,
-    has_stack_button: bool,
+    prs_drafts: usize,
     tabs: &'static [(&'static str, &'static str)],
     releases: Vec<super::buttons::ReleaseRow>,
+    /// The repository's newest tags beside them, and how many it has.
+    tags: Vec<super::buttons::TagLine>,
+    tags_total: i64,
     notice: Option<String>,
     notice_bad: bool,
     /// Where a pressed button returns to.
@@ -901,8 +903,6 @@ struct TabQuery {
     /// After a button: its id and whether it worked.
     ran: Option<i64>,
     ok: Option<u8>,
-    /// After "Merge #a–#b": "a-b".
-    merging: Option<String>,
     /// The Screenshots tab's category filter.
     cat: Option<String>,
     /// The Settings tab's outcome: saved, or why not.
@@ -947,22 +947,11 @@ fn press_notice(q: &TabQuery) -> (Option<String>, bool) {
     if let Some(n) = q.tried.as_deref().and_then(super::totest::tried_notice) {
         return (Some(n), false);
     }
-    let merging = q
-        .merging
-        .as_deref()
-        .and_then(|m| m.split_once('-'))
-        .and_then(|(a, b)| Some((a.parse::<i64>().ok()?, b.parse::<i64>().ok()?)));
-    match (q.ran, q.ok, merging) {
-        (Some(_), Some(1), _) => (Some("Done. The agent has been told.".into()), false),
-        (Some(_), Some(_), _) => {
+    match (q.ran, q.ok) {
+        (Some(_), Some(1)) => (Some("Done. The agent has been told.".into()), false),
+        (Some(_), Some(_)) => {
             (Some("The command failed; its output is under the button. The agent has been told.".into()), true)
         }
-        (_, _, Some((a, b))) => (
-            Some(format!(
-                "Merging #{a}–#{b}, one after the other from the bottom. Each PR leaves this list once it's merged; it stops at the first that fails, with the output under its button. Reload to follow."
-            )),
-            false,
-        ),
         _ => (None, false),
     }
 }
@@ -1120,8 +1109,8 @@ async fn project(
     }
     if tab == "prs" {
         page.prs_total = page.prs.len();
+        page.prs_drafts = page.prs.iter().filter(|p| p.draft).count();
     }
-    page.has_stack_button = page.prs.iter().any(|p| p.up_to.is_some());
     let next = if tab == "overview" { format!("/p/{}", page.slug) } else { format!("/p/{}?tab={tab}", page.slug) };
     let path = project_path(&page, &tab);
     let page = ProjectPage {
@@ -1715,15 +1704,17 @@ fn build_project_page(
         } else {
             0
         },
-        has_stack_button: false,
+        prs_drafts: 0,
         tabs: TABS,
-        prs: if tab == "prs" { super::buttons::pr_rows(c, p.id, now)? } else { Vec::new() },
+        prs: if tab == "prs" { super::buttons::pr_lines(c, p.id)? } else { Vec::new() },
         // Releases appear on the overview and the Pull requests tab only.
         releases: if matches!(tab, "overview" | "prs") {
             super::buttons::release_rows(c, p.id, now)?
         } else {
             Vec::new()
         },
+        tags: if tab == "prs" { super::buttons::tag_lines(c, p.id, &p.repo, tz)?.0 } else { Vec::new() },
+        tags_total: if tab == "prs" { crate::prs::repo_tags(c, p.id, 0)?.1 } else { 0 },
         notice: None,
         notice_bad: false,
         next: String::new(),

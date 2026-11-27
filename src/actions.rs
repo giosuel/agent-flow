@@ -307,13 +307,6 @@ pub fn confirm(conn: &Connection, a: &ActionRow) -> anyhow::Result<Confirm> {
 
 /// Why the button is disabled, or Ok when it can be pressed.
 pub fn enabled(conn: &Connection, a: &ActionRow) -> anyhow::Result<Result<(), String>> {
-    enabled_with(conn, a, false)
-}
-
-/// Like [`enabled`], for a PR's merge as one step of "Merge #a–#b": the chain's order and its
-/// top PR's CI were checked by [`crate::prs::chain_to`], so neither the PR below nor this PR's own
-/// CI holds it.
-fn enabled_with(conn: &Connection, a: &ActionRow, in_chain: bool) -> anyhow::Result<Result<(), String>> {
     match a.state.as_str() {
         "waiting" | "failed" => {}
         "running" => return Ok(Err("running now".into())),
@@ -341,15 +334,13 @@ fn enabled_with(conn: &Connection, a: &ActionRow, in_chain: bool) -> anyhow::Res
         }
     }
     let record = records::get(conn, a.record_id)?;
-    if record.kind == Kind::Pr && a.is_merge() && in_chain {
-        return Ok(crate::prs::chain_ready(&record));
-    }
+    // A Merge button from before PRs were merged on GitHub (D-294) still runs only in order.
     if record.kind == Kind::Pr && a.is_merge() {
         if let Err(why) = crate::prs::merge_ready(&record) {
             return Ok(Err(why));
         }
-        // A stacked PR merges after the one it's based on (or with "Merge up to here"); one at
-        // the bottom must be based on main.
+        // A stacked PR merges after the one it's based on; one at the bottom must be based on
+        // main.
         if let Some(o) =
             crate::prs::merge_order(conn, record.project_id)?.into_iter().find(|o| o.record.id == record.id)
         {
@@ -366,25 +357,11 @@ fn enabled_with(conn: &Connection, a: &ActionRow, in_chain: bool) -> anyhow::Res
 
 /// Marks an action running, if it may be pressed and the page showed this exact command.
 pub fn claim(conn: &Connection, id: i64, shown_hash: &str) -> anyhow::Result<ActionRow> {
-    claim_with(conn, id, shown_hash, false)
-}
-
-/// Claims a PR's merge button as one step of "Merge #a–#b" (see [`enabled_with`]).
-pub fn claim_in_chain(conn: &Connection, id: i64, shown_hash: &str) -> anyhow::Result<ActionRow> {
-    claim_with(conn, id, shown_hash, true)
-}
-
-/// Can this button be pressed as a step of a chain? For [`crate::prs::chain_to`].
-pub fn enabled_in_chain(conn: &Connection, a: &ActionRow) -> anyhow::Result<Result<(), String>> {
-    enabled_with(conn, a, true)
-}
-
-fn claim_with(conn: &Connection, id: i64, shown_hash: &str, in_chain: bool) -> anyhow::Result<ActionRow> {
     let mut a = get(conn, id)?.context("no such button")?;
     if a.hash() != shown_hash {
         bail!("this button's command isn't the one the page showed; reload and look again");
     }
-    if let Err(why) = enabled_with(conn, &a, in_chain)? {
+    if let Err(why) = enabled(conn, &a)? {
         bail!("can't run it now: {why}");
     }
     let n = conn.execute(
@@ -610,14 +587,17 @@ mod tests {
         .unwrap();
     }
 
-    /// A project with repository o/r and its PR #48, which has AgentFlow's own Merge button.
+    /// A project with repository o/r and its PR #48, with a Merge button of AgentFlow's own as
+    /// it made them before PRs were merged on GitHub (D-294).
     fn project_with_pr(c: &Connection) -> anyhow::Result<(Record, ActionRow)> {
         let p = crate::projects::create(c, "v", "V", "t")?;
         let patch = crate::projects::ProjectPatch { repo: Some("o/r".into()), ..Default::default() };
         crate::projects::update(c, p.id, &patch, "t")?;
         let p = crate::projects::get_by_id(c, p.id)?;
         let (r, _) = crate::prs::sync(c, &p, "o/r", &pr(48, "main", "b48"), "poller")?;
-        let own = for_record(c, r.id)?.into_iter().next().context("the PR's own Merge button")?;
+        let command = crate::prs::merge_command("o/r", 48, "merge");
+        let b = NewButton { label: "Merge", kind: ButtonKind::Merge, command: &command, workdir: "", requires: &[] };
+        let own = get(c, add(c, &r, &b, "agentflow")?)?.context("the PR's own Merge button")?;
         Ok((r, own))
     }
 

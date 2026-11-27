@@ -17,7 +17,7 @@ use crate::util::ago;
 use crate::{poller, projects, prs};
 
 pub fn routes() -> Router<AppState> {
-    Router::new().route("/actions/{id}/run", post(run_one)).route("/p/{slug}/merge-up-to/{number}", post(merge_up_to))
+    Router::new().route("/actions/{id}/run", post(run_one))
 }
 
 /// A button as the page shows it.
@@ -67,138 +67,97 @@ pub fn views(c: &Connection, record_id: i64, now: i64) -> anyhow::Result<Vec<But
     actions::for_record(c, record_id)?.iter().map(|a| view(c, a, now)).collect()
 }
 
-/// A PR in the merge-order card.
-pub struct PrRow {
+/// A PR in the Pull requests tab: one read-only line in merge order (the owner, 2026-11-26, Q-37,
+/// D-294: merged on GitHub, "like not even have the merge functionality inside agentflow").
+pub struct PrLine {
+    /// Its place in the merge order; drafts have none.
     pub position: usize,
     pub number: i64,
     pub title: String,
+    /// The PR on GitHub.
     pub url: String,
-    pub record_url: String,
     pub chip: String,
     pub chip_class: &'static str,
-    /// "based on main", or "based on #48" for a stacked PR.
-    pub base: String,
-    pub buttons: Vec<ButtonView>,
-    /// "Merge #48–#50": every PR from the bottom of the stack up to this one, in order: the
-    /// label, the buttons' "id:hash" list, and the dialog listing every PR it merges.
-    pub up_to: Option<(String, String, actions::Confirm)>,
+    /// The open PR it's based on, which merges first: its number and its page on GitHub.
+    pub after: Option<(i64, String)>,
+    /// A word on what happens about a problem: "the agent was told".
+    pub note: String,
+    pub draft: bool,
 }
 
-pub fn pr_rows(c: &Connection, project_id: i64, now: i64) -> anyhow::Result<Vec<PrRow>> {
+/// The project's open PRs in merge order, drafts last.
+pub fn pr_lines(c: &Connection, project_id: i64) -> anyhow::Result<Vec<PrLine>> {
     let order = prs::merge_order(c, project_id)?;
-    let mut rows: Vec<PrRow> = Vec::new();
+    let url_of = |n: i64| order.iter().find(|o| o.record.number == n).map(|o| o.record.str("url").to_owned());
+    let mut lines = Vec::new();
     for o in &order {
         let r = &o.record;
-        let mut buttons = views(c, r.id, now)?;
-        let ready = prs::ready_in_order(o);
-        let (chip, chip_class) = match (&ready, o.after) {
-            (Ok(()), None) => ("ready".to_owned(), tone("ready")),
-            // Ready, waiting for the one under it to merge first.
-            (Ok(()), Some(_)) => ("ready".to_owned(), tone("queued")),
-            // A draft is the normal state of work in progress, not a problem.
-            (Err(why), _) if why == "still a draft" => ("draft".to_owned(), tone("draft")),
-            (Err(why), _) => (
-                why.clone(),
-                if r.str("ci") == "failing" || r.str("mergeable") == "conflicting" { tone("failing") } else { "" },
-            ),
-        };
-        let base = match o.after {
-            Some(n) => format!("based on #{n}, merges after it"),
-            None if r.str("base").is_empty() => String::new(),
-            None => format!("based on {}", r.str("base")),
-        };
-        // A stacked PR merges only with the PRs below it, from the bottom (D-214): one button,
-        // "Merge #a–#b", instead of its own Merge; a locked Merge says what holds the stack.
-        let mut up_to = None;
-        if o.after.is_some() {
-            let merge_ids: Vec<i64> =
-                actions::for_record(c, r.id)?.iter().filter(|a| a.is_merge()).map(|a| a.id).collect();
-            match prs::chain_to(c, &order, r.number)? {
-                Ok(steps) => {
-                    let label = format!("Merge #{}–#{}", steps[0].number, r.number);
-                    let ids = chain_ids(&steps);
-                    let confirm = chain_confirm(c, &order, &label, &steps)?;
-                    up_to = Some((label, ids, confirm));
-                    // A failed one stays, for its output.
-                    buttons.retain(|b| !merge_ids.contains(&b.id) || b.state == "failed");
-                    for b in buttons.iter_mut().filter(|b| merge_ids.contains(&b.id)) {
-                        b.enabled = false;
-                        b.why = "merges with the button next to it".into();
-                    }
+        let draft = r.data.get("draft").and_then(serde_json::Value::as_bool).unwrap_or(false);
+        let (chip, chip_class, note) = if draft {
+            ("draft".to_owned(), tone("draft"), "")
+        } else {
+            match prs::ready_in_order(o) {
+                Ok(()) => ("ready".to_owned(), tone("ready"), ""),
+                Err(_) if r.str("ci") == "failing" => ("CI failing".to_owned(), tone("failing"), "the agent was told"),
+                Err(_) if r.str("mergeable") == "conflicting" => {
+                    ("conflicts".to_owned(), tone("failing"), "the agent was told")
                 }
-                Err(why) => {
-                    for b in buttons.iter_mut().filter(|b| merge_ids.contains(&b.id) && !b.why.is_empty()) {
-                        if matches!(b.state.as_str(), "waiting" | "failed") {
-                            b.why = why.clone();
-                        }
-                    }
-                }
+                Err(_) if r.str("ci") == "pending" => ("CI running".to_owned(), tone("running"), ""),
+                Err(why) => (why, tone("waiting"), ""),
             }
-        }
-        rows.push(PrRow {
-            position: o.position,
+        };
+        lines.push(PrLine {
+            position: 0,
             number: r.number,
             title: r.title.clone(),
             url: r.str("url").to_owned(),
-            record_url: r.url(),
             chip,
             chip_class,
-            base,
-            buttons,
-            up_to,
+            after: o.after.map(|n| (n, url_of(n).unwrap_or_default())),
+            note: note.to_owned(),
+            draft,
         });
     }
-    Ok(rows)
-}
-
-/// The confirmation of "Merge #a–#b" (D-263): AgentFlow's own merges are said in words, with the
-/// PRs in their order; when one is an agent's own command, every command is shown as it runs.
-fn chain_confirm(
-    c: &Connection,
-    order: &[prs::Ordered],
-    label: &str,
-    steps: &[prs::ChainStep],
-) -> anyhow::Result<actions::Confirm> {
-    let title = |n: i64| order.iter().find(|o| o.record.number == n).map(|o| o.record.title.as_str()).unwrap_or("");
-    let mut all = Vec::new();
-    for s in steps {
-        all.push(actions::confirm(c, &s.action)?);
+    // Drafts fold away under the list; the others keep the merge order, numbered from 1.
+    lines.sort_by_key(|l| l.draft);
+    for (i, l) in lines.iter_mut().filter(|l| !l.draft).enumerate() {
+        l.position = i + 1;
     }
-    let commands = steps.iter().map(|s| s.action.command.as_str()).collect::<Vec<_>>().join("\n");
-    let own = all.iter().all(|x| !x.block_is_command);
-    let repo = steps.iter().find_map(|s| match prs::describe(&s.action.command) {
-        Some(prs::Described::Merge { repo, .. }) => Some(repo),
-        _ => None,
-    });
-    Ok(match (own, repo) {
-        (true, Some(repo)) => actions::Confirm {
-            title: format!("{label}?"),
-            lead: format!(
-                "This runs AgentFlow's merge command for each PR in {repo}, one after the other from the bottom, \
-                 and stops at the first that fails. It's the same command for every PR; each branch is deleted \
-                 once it's merged."
-            ),
-            block_label: "In this order".into(),
-            block: steps.iter().map(|s| format!("#{}  {}", s.number, title(s.number))).collect::<Vec<_>>().join("\n"),
-            command: commands,
-            ..Default::default()
-        },
-        _ => actions::Confirm {
-            title: format!("{label}?"),
-            lead: "This runs these commands one after the other with bash, from the bottom, and stops at the first \
-                   that fails. They run exactly as shown."
-                .into(),
-            block_label: "The commands".into(),
-            block: steps.iter().map(|s| format!("#{}: {}", s.number, s.action.command)).collect::<Vec<_>>().join("\n"),
-            block_is_command: true,
-            ..Default::default()
-        },
-    })
+    Ok(lines)
 }
 
-/// "id:hash,id:hash": a chain's merge buttons as the page shows them, bottom first.
-fn chain_ids(steps: &[prs::ChainStep]) -> String {
-    steps.iter().map(|s| format!("{}:{}", s.action.id, s.action.hash())).collect::<Vec<_>>().join(",")
+/// One of the repository's earlier tags beside the next release.
+pub struct TagLine {
+    pub name: String,
+    pub title: String,
+    pub when: String,
+    /// Its page on GitHub.
+    pub url: String,
+}
+
+/// Tags the Releases card lists, newest first.
+pub const TAGS_SHOWN: i64 = 8;
+
+/// The repository's newest tags for the Releases card, and how many it has in all.
+pub fn tag_lines(
+    c: &Connection,
+    project_id: i64,
+    repo: &str,
+    tz: &crate::tz::Tz,
+) -> anyhow::Result<(Vec<TagLine>, i64)> {
+    let (tags, total) = prs::repo_tags(c, project_id, TAGS_SHOWN)?;
+    let repo = repo.trim();
+    Ok((
+        tags.into_iter()
+            .map(|t| TagLine {
+                url: format!("https://github.com/{repo}/releases/tag/{}", t.name),
+                when: if t.at > 0 { tz.day(t.at) } else { String::new() },
+                name: t.name,
+                title: t.title,
+            })
+            .collect(),
+        total,
+    ))
 }
 
 /// A release card.
@@ -270,26 +229,18 @@ async fn run_one(
     Form(form): Form<RunForm>,
 ) -> AppResult<Response> {
     actor.require_owner()?;
-    let (record, ok) = press(&state, &actor, &ip, id, &form.hash, false).await?;
+    let (record, ok) = press(&state, &actor, &ip, id, &form.hash).await?;
     let next = safe_next(form.next, record.url());
     let sep = if next.contains('?') { '&' } else { '?' };
     Ok(Redirect::to(&format!("{next}{sep}ran={id}&ok={}", u8::from(ok))).into_response())
 }
 
-/// Claims, runs and records one button; refreshes a merged PR right away. `in_chain`: a step of
-/// "Merge #a–#b", whose order and CI [`prs::chain_to`] checked.
-async fn press(
-    state: &AppState,
-    actor: &Actor,
-    ip: &ClientIp,
-    id: i64,
-    hash: &str,
-    in_chain: bool,
-) -> AppResult<(Record, bool)> {
+/// Claims, runs and records one button; refreshes a merged PR right away.
+async fn press(state: &AppState, actor: &Actor, ip: &ClientIp, id: i64, hash: &str) -> AppResult<(Record, bool)> {
     let hash = hash.to_owned();
     let claimed = state
         .db
-        .call(move |c| if in_chain { actions::claim_in_chain(c, id, &hash) } else { actions::claim(c, id, &hash) })
+        .call(move |c| actions::claim(c, id, &hash))
         .await
         .map_err(|e| AppError::BadRequest(format!("{e:#}")))?;
     // The run lives in its own task: if the phone drops the connection, the merge still finishes
@@ -340,69 +291,4 @@ async fn refresh_pr(state: &AppState, record: &Record) {
         }
         Err(e) => tracing::warn!("refreshing {} after a press: {e:#}", record.ref_id),
     }
-}
-
-#[derive(Deserialize)]
-struct UpToForm {
-    /// "id:hash,id:hash": the merge buttons the page showed, bottom of the stack first.
-    actions: String,
-}
-
-/// "Merge #48–#50": the server works the stack out again and, if it's what the page showed,
-/// presses each PR's merge button from the bottom, stopping at the first failure. It runs on its
-/// own, so a long stack finishes even when the page is closed; each PR leaves the list once merged.
-async fn merge_up_to(
-    State(state): State<AppState>,
-    Extension(actor): Extension<Actor>,
-    Extension(ip): Extension<ClientIp>,
-    Path((slug, number)): Path<(String, i64)>,
-    Form(form): Form<UpToForm>,
-) -> AppResult<Response> {
-    actor.require_owner()?;
-    if crate::projects::check_slug(&slug).is_err() {
-        return Err(AppError::NotFound);
-    }
-    let s2 = slug.clone();
-    let steps = state
-        .db
-        .call(move |c| {
-            let p = projects::require(c, &s2)?;
-            let order = prs::merge_order(c, p.id)?;
-            prs::chain_to(c, &order, number)
-        })
-        .await?
-        .map_err(|why| AppError::BadRequest(format!("Can't merge up to #{number}: {why}.")))?;
-    if chain_ids(&steps) != form.actions {
-        return Err(AppError::BadRequest(
-            "The stack changed since the page was loaded; reload it and look again.".into(),
-        ));
-    }
-    let (first, total) = (steps[0].number, steps.len());
-    let (state2, actor2, ip2, slug2) = (state.clone(), actor.clone(), ip.clone(), slug.clone());
-    tokio::spawn(async move {
-        let started = std::time::Instant::now();
-        let mut merged = 0;
-        for s in &steps {
-            match press(&state2, &actor2, &ip2, s.action.id, &s.action.hash(), true).await {
-                Ok((_, true)) => merged += 1,
-                Ok((_, false)) => break,
-                Err(e) => {
-                    tracing::warn!("Merge #{first}–#{number}: #{} didn't start: {e:?}", s.number);
-                    break;
-                }
-            }
-        }
-        let e = Entry::new(
-            &actor2,
-            Via::Button,
-            Action::Run,
-            format!("Merge #{first}–#{number}: {merged} of {total} merged"),
-        )
-        .project(slug2)
-        .duration_ms(started.elapsed().as_millis() as i64)
-        .ip(Some(ip2.0.clone()))
-        .severity(if merged == total { "info" } else { "warn" });
-        activity::write(&state2.db, e).await;
-    });
-    Ok(Redirect::to(&format!("/p/{slug}?tab=prs&merging={first}-{number}")).into_response())
 }
