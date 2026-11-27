@@ -1,8 +1,8 @@
 {% import "ui.html" as ui %}
 {# The Questions tab, questions and decisions as one (the owner, 2026-11-23, Q-6, Q-8; S-38, S-39;
    called Questions, D-250): open questions on top, answered in place, or plainly none (D-249); then
-   the decisions under the app's filter band, as a timeline by day quoting the owner.
-   src/web/decisions.rs builds it. #}
+   the decisions under the app's filter band, as a timeline by day quoting the owner, a page at a
+   time (the pager by links in the card's foot). src/web/decisions.rs builds it. #}
 {% if !dv.questions.is_empty() %}
 <section class="qsec qfull" aria-labelledby="dq-h" data-qpage="cards">
   <div class="qsec-h"><span class="qsec-ico">{{ crate::web::icons::icon("question")|safe }}</span><h2 id="dq-h">Waiting on you</h2><span class="chip warn">{{ dv.questions.len() }} question{% if dv.questions.len() != 1 %}s{% endif %}</span><span class="grow"></span><span class="sub hide-phone">an answer becomes a decision below, quoting you</span>{% call ui::pager("warn") %}{% endcall %}</div>
@@ -67,4 +67,5 @@
   </div>
   {% endif %}
   {% if !dv.foot.is_empty() %}<p class="sub nfoot dec-foot">{{ crate::web::icons::icon("history")|safe }}<span>{{ dv.foot }}</span></p>{% endif %}
+  {% if dv.pager.pages > 1 %}<div class="card-foot">{% call ui::pager_links(dv.pager) %}{% endcall %}</div>{% endif %}
 </section>

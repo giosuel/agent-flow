@@ -7,7 +7,9 @@
 //!
 //! The filters come from the address: `dq` (words), `dscope` (scopes picked, `|` between them:
 //! `project` or a milestone's name; project-wide and the milestones that aren't closed when left
-//! out), `dstate` (in force by default; replaced, archived, all) and `drange` (24h, 7d, 30d).
+//! out), `dstate` (in force by default; replaced, archived, all) and `drange` (24h, 7d, 30d); and
+//! `dpage`, the page of the timeline, PER_PAGE decisions a page (the owner, 2026-11-27: "there are
+//! still very long lists in the app, like the decisions one, can we make that paginated as well?").
 
 use std::collections::HashMap;
 
@@ -15,7 +17,7 @@ use rusqlite::Connection;
 use serde_json::Value;
 
 use super::notes::{Choice, marked};
-use super::uilib::Choice as AnswerChoice;
+use super::uilib::{Choice as AnswerChoice, Pager};
 use crate::records::{self, Kind, Record};
 use crate::tz::Tz;
 use crate::util::ago;
@@ -27,10 +29,21 @@ pub struct Filter {
     pub scopes: Vec<String>,
     pub state: String,
     pub range: String,
+    /// The page of the timeline, from 1; 0 or 1 is the first.
+    pub page: i64,
 }
 
+/// Decisions a page of the timeline.
+pub const PER_PAGE: i64 = 20;
+
 impl Filter {
-    pub fn new(q: Option<&str>, scopes: Option<&str>, state: Option<&str>, range: Option<&str>) -> Self {
+    pub fn new(
+        q: Option<&str>,
+        scopes: Option<&str>,
+        state: Option<&str>,
+        range: Option<&str>,
+        page: Option<&str>,
+    ) -> Self {
         let pick = |v: Option<&str>, ok: &[&str]| v.filter(|v| ok.contains(v)).unwrap_or("").to_owned();
         Filter {
             q: q.unwrap_or("").trim().chars().take(200).collect(),
@@ -43,10 +56,11 @@ impl Filter {
                 .collect(),
             state: pick(state, &["replaced", "archived", "all"]),
             range: pick(range, &["24h", "7d", "30d"]),
+            page: page.and_then(|p| p.trim().parse().ok()).filter(|p| *p > 1).unwrap_or(0),
         }
     }
 
-    /// The tab's address with these filters.
+    /// The tab's address with these filters (and the page, after the first).
     pub fn href(&self, slug: &str) -> String {
         use super::log::enc;
         let mut u = format!("/p/{slug}?tab=questions");
@@ -61,11 +75,16 @@ impl Filter {
                 u += &format!("&{k}={v}");
             }
         }
+        if self.page > 1 {
+            u += &format!("&dpage={}", self.page);
+        }
         u
     }
 
+    /// These filters changed: a change starts again at the first page.
     fn with(&self, f: impl FnOnce(&mut Filter)) -> Filter {
         let mut x = self.clone();
+        x.page = 0;
         f(&mut x);
         x
     }
@@ -153,7 +172,10 @@ pub struct DecisionsView {
     pub states: Vec<Choice>,
     pub ranges: Vec<Choice>,
     pub reset: Option<String>,
+    /// This page's decisions.
     pub days: Vec<Day>,
+    /// The timeline's pages, in the card's foot; shown when there's more than one.
+    pub pager: Pager,
     /// "79 in project-wide and M14 · newest first".
     pub summary: String,
     /// Under the timeline: what the State filter hides.
@@ -381,10 +403,18 @@ pub fn view(
     let mut shown: Vec<&Record> =
         decisions.iter().copied().filter(|r| scope_ok(r) && f.state_ok(r) && time_ok(r) && search_ok(r)).collect();
     shown.sort_by_key(|r| std::cmp::Reverse((said_at(r), r.number)));
+    // A page at a time, newest first; its links come back down to the timeline.
+    let pager = Pager::new("Pages of the decisions", shown.len() as i64, f.page.max(1), PER_PAGE, |p| {
+        let mut g = f.clone();
+        g.page = p;
+        g.href(slug) + "#decided"
+    })
+    .labels("Newer decisions", "Older decisions");
+    let page_rows = shown.iter().skip(pager.offset(PER_PAGE) as usize).take(PER_PAGE as usize);
     // In force, a replaced decision folds under the one that replaced it.
     let fold = f.state.is_empty();
     let mut days: Vec<(i64, Day)> = Vec::new();
-    for r in &shown {
+    for r in page_rows {
         let at = said_at(r);
         let words_q = r.str("owner_words");
         let answer = answers.get(&r.id).and_then(|q| by_id.get(q)).map(|q| (q.short_id(), q.url(), q.title.clone()));
@@ -484,6 +514,7 @@ pub fn view(
         ranges,
         reset: (*f != Filter::default()).then(|| Filter::default().href(slug)),
         days: days.into_iter().map(|(_, d)| d).collect(),
+        pager,
         summary,
         foot,
         none,
@@ -505,10 +536,16 @@ mod tests {
 
     #[test]
     fn filters_round_trip_through_the_address() {
-        let f = Filter::new(Some("cookie"), Some("project|M14"), Some("all"), Some("7d"));
-        assert_eq!(f.href("x"), "/p/x?tab=questions&dq=cookie&dscope=project%7CM14&dstate=all&drange=7d");
-        let g = Filter::new(None, None, Some("bogus"), Some("1y"));
+        let f = Filter::new(Some("cookie"), Some("project|M14"), Some("all"), Some("7d"), Some("3"));
+        assert_eq!(f.href("x"), "/p/x?tab=questions&dq=cookie&dscope=project%7CM14&dstate=all&drange=7d&dpage=3");
+        let g = Filter::new(None, None, Some("bogus"), Some("1y"), Some("x"));
         assert_eq!(g, Filter::default());
         assert_eq!(g.href("x"), "/p/x?tab=questions");
+        // The first page has no number; changing a filter starts again at the first page.
+        assert_eq!(Filter::new(None, None, None, None, Some("1")).href("x"), "/p/x?tab=questions");
+        assert_eq!(
+            f.with(|x| x.range.clear()).href("x"),
+            "/p/x?tab=questions&dq=cookie&dscope=project%7CM14&dstate=all"
+        );
     }
 }
