@@ -1,7 +1,8 @@
 {% import "table.html" as tbl %}
+{% import "ui.html" as ui %}
 {# The Notes tab like the Log (the owner, 2026-11-18): search and filters on top, one table, an icon
-   per file type. #}
-<section class="card lpanel npanel" aria-labelledby="notes-h">
+   per file type; 25 rows a page (the pager in the card's head, 2026-11-27). #}
+<section class="card lpanel npanel" aria-labelledby="notes-h" data-pager="25">
 <form method="get" action="/p/{{ slug }}" class="toolbar ntool" id="notes">
   <input type="hidden" name="tab" value="notes">
   {% for (k, v) in nv.keep %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
@@ -23,7 +24,7 @@
   <div class="seg" role="group" aria-label="Added">{% for (label, _n, href, on) in nv.ranges %}<a{% if *on %} class="on"{% endif %} href="{{ href }}"{% if *on %} aria-current="true"{% endif %}>{{ label }}</a>{% endfor %}</div>
   {% if let Some(r) = nv.reset %}<a class="sub" href="{{ r }}">Clear</a>{% endif %}
 </form>
-  <div class="card-head flat lp-top"><h2 id="notes-h">Notes</h2><span class="sub">{{ nv.summary }}</span><span class="grow"></span><span class="sub hide-phone">files and short notes the agent hands in</span></div>
+  <div class="card-head flat lp-top"><h2 id="notes-h">Notes</h2><span class="sub">{{ nv.summary }}</span><span class="grow"></span><span class="sub hide-phone">files and short notes the agent hands in</span>{% call ui::pager("") %}{% endcall %}</div>
   {% if nv.none %}<p class="empty-in">No notes yet. Agents add files with <span class="mono">flow note &lt;file&gt;</span> and short notes with <span class="mono">add_note</span>.</p>
   {% else %}
   <div class="ntable" role="table" aria-label="Notes" data-sortable>

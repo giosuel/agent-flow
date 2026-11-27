@@ -1291,11 +1291,11 @@ document.addEventListener("click", (e) => {
 })();
 
 // A long table a page at a time (data-pager="10" on its card; the pager component, ui.html pager):
-// Earlier builds. Sorting starts again at page 1 of the new order.
+// Earlier builds, Notes. Sorting starts again at page 1 of the new order.
 (() => {
   document.querySelectorAll('[data-pager]').forEach((box) => {
     const per = Math.max(1, parseInt(box.dataset.pager, 10) || 10);
-    const body = box.querySelector('tbody');
+    const body = box.querySelector('tbody, [role=rowgroup]');
     const pager = box.querySelector('.pager');
     if (!body || !pager) return;
     let page = 1;

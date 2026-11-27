@@ -5584,3 +5584,45 @@ async fn withdrawing_a_question_unblocks_its_tasks() {
     let (ok, c) = call("conclude_step", json!({"step": "K1", "summary": "Binds are read."})).await;
     assert!(ok, "{c}");
 }
+
+/// The Decided timeline a page at a time (the owner, 2026-11-27: "there are still very long lists
+/// in the app, like the decisions one, can we make that paginated as well?"): 20 a page, newest
+/// first, the pager by links in the card's foot; a filter change starts again at the first page.
+#[tokio::test]
+async fn decisions_come_a_page_at_a_time() {
+    let s = TestServer::start().await;
+    let token = s.token(TokenKind::Project, Some("vinculum")).await;
+    let sess = mcp_session(&s, &token).await;
+    let hello = json!({"session": "V", "machine": "m", "model": "o", "effort": "h"});
+    assert!(mcp_tool(&s, &token, &sess, "hello", hello).await.0);
+    for i in 1..=45 {
+        let d = json!({"title": format!("Rule {i:02}"), "owner_words": "yes", "source": "owner", "scope": "project"});
+        let (ok, r) = mcp_tool(&s, &token, &sess, "record_decision", d).await;
+        assert!(ok, "{r}");
+    }
+    let cookie = s.owner_cookie().await;
+    let get = |path: &'static str| {
+        let (s, cookie) = (&s, cookie.clone());
+        async move { s.http.get(s.url(path)).header(COOKIE, &cookie).send().await.unwrap().text().await.unwrap() }
+    };
+    let first = get("/p/vinculum?tab=questions").await;
+    assert!(first.contains("Rule 45") && first.contains("Rule 26") && !first.contains("Rule 25"), "{first}");
+    assert!(first.contains("1–20 of 45") && first.contains("page 1 of 3"), "{first}");
+    assert!(
+        first.contains(r#"href="/p/vinculum?tab=questions&#38;dpage=2#decided" title="Older decisions""#),
+        "{first}"
+    );
+    let last = get("/p/vinculum?tab=questions&dpage=3").await;
+    assert!(last.contains("41–45 of 45") && last.contains("Rule 05") && last.contains("Rule 01"), "{last}");
+    assert!(!last.contains("Rule 06"), "{last}");
+    // Only the link back to page 2 names a page: the filters start again at the first.
+    assert_eq!(last.matches("dpage=").count(), 1, "{last}");
+    assert!(last.contains("dpage=2#decided"), "{last}");
+    // A page past the end shows the last one; a list that fits one page has no pager.
+    assert!(get("/p/vinculum?tab=questions&dpage=9").await.contains("41–45 of 45"));
+    let found = get("/p/vinculum?tab=questions&dq=rule+0").await;
+    assert!(found.contains("13 found") && !found.contains("pager links"), "{found}");
+    // Notes sort in the page, so they page there too, 25 rows at a time.
+    let notes = get("/p/vinculum?tab=notes").await;
+    assert!(notes.contains(r#"data-pager="25""#) && notes.contains(r#"<div class="pager" hidden>"#), "{notes}");
+}

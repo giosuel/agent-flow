@@ -929,6 +929,7 @@ struct TabQuery {
     dscope: Option<String>,
     dstate: Option<String>,
     drange: Option<String>,
+    dpage: Option<String>,
     /// After answering a question on the overview: its id.
     answered: Option<String>,
 }
@@ -1104,6 +1105,7 @@ async fn project(
             q.dscope.as_deref(),
             q.dstate.as_deref(),
             q.drange.as_deref(),
+            q.dpage.as_deref(),
         );
         let tz2 = tz_d;
         page.dview = Some(
