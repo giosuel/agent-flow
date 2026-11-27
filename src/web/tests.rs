@@ -5622,4 +5622,7 @@ async fn decisions_come_a_page_at_a_time() {
     assert!(get("/p/vinculum?tab=questions&dpage=9").await.contains("41–45 of 45"));
     let found = get("/p/vinculum?tab=questions&dq=rule+0").await;
     assert!(found.contains("13 found") && !found.contains("pager links"), "{found}");
+    // Notes sort in the page, so they page there too, 25 rows at a time.
+    let notes = get("/p/vinculum?tab=notes").await;
+    assert!(notes.contains(r#"data-pager="25""#) && notes.contains(r#"<div class="pager" hidden>"#), "{notes}");
 }

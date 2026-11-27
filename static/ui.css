@@ -151,9 +151,11 @@ code, pre, .mono { font-family: var(--mono); }
 .ibtn.warn:hover { color: var(--warn-ink); background: var(--warn-line); border-color: var(--warn-line); }
 .ibtn.warn[disabled], .ibtn.warn.off { color: var(--warn-ink); border-color: var(--warn-line); background: transparent; opacity: .35; }
 /* Pager: a list a page at a time, "1–10 of 69 · page 1 of 7" and ‹ › (templates/ui.html pager;
-   app.js fills it in). The questions island and Earlier builds. */
+   app.js fills it in). The questions island, Earlier builds and Notes. */
 .pager { display: flex; align-items: center; gap: var(--sp-2); }
 .pager[hidden] { display: none; }
+/* The rows a pager hides: a table's, or a grid table's (its rows set their own display). */
+[data-pager] :is(tbody, [role=rowgroup]) > [hidden] { display: none; }
 .ibtn.busy .i { animation: spin 1.2s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
