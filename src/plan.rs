@@ -171,10 +171,191 @@ pub fn median(mut v: Vec<f64>) -> Option<f64> {
     Some(if !v.len().is_multiple_of(2) { v[m] } else { (v[m - 1] + v[m]) / 2.0 })
 }
 
+pub const DAY: i64 = 86_400_000;
+
+/// The week's pace (the owner, 2026-11-27: "where we are in the weekly token budget compared where
+/// we are in the week, if we are ahead or behind, and then also an indication when we will run out
+/// of tokens if we continue at the current usage"; drawn as a burn-up chart, D-295).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Pace {
+    /// The week: from its start (its reset less seven days) to its reset.
+    pub start: i64,
+    pub reset: i64,
+    pub now: i64,
+    /// % used: the newest sample's, taken as still true now.
+    pub used: f64,
+    /// % of the week gone.
+    pub gone: f64,
+    /// % a day over the last 24 hours (since the week began when it's younger), and over the whole
+    /// week so far; none in the week's first three hours.
+    pub day_rate: Option<f64>,
+    pub week_rate: Option<f64>,
+    /// Whether `day_rate` covers a whole day.
+    pub full_day: bool,
+    /// The week's % used over time, oldest first: 0% at its start, the samples (thinned to one every
+    /// 20 minutes), and `used` now.
+    pub points: Vec<(i64, f64)>,
+}
+
+impl Pace {
+    /// How many points of the budget more than an even pace has used (less: behind).
+    pub fn ahead(&self) -> f64 {
+        self.used - self.gone
+    }
+
+    /// When `rate` (% a day) from now reaches 100%, if that's before the reset; when it did, if it
+    /// already has.
+    pub fn runs_out(&self, rate: f64) -> Option<i64> {
+        if self.used >= 100.0 {
+            return self.points.iter().find(|(_, p)| *p >= 100.0).map(|(t, _)| *t);
+        }
+        if rate <= 0.0 {
+            return None;
+        }
+        let at = self.now + ((100.0 - self.used) / rate * DAY as f64) as i64;
+        (at < self.reset).then_some(at)
+    }
+
+    /// Where `rate` (% a day) from now ends at the reset, at most 100%.
+    pub fn ends_at(&self, rate: f64) -> f64 {
+        (self.used + rate.max(0.0) * (self.reset - self.now) as f64 / DAY as f64).min(100.0)
+    }
+
+    /// % used at `t`, between the points (the last one after it).
+    pub fn used_at(&self, t: i64) -> f64 {
+        let i = self.points.partition_point(|(at, _)| *at <= t);
+        match (i.checked_sub(1).map(|k| self.points[k]), self.points.get(i).copied()) {
+            (Some((a, pa)), Some((b, pb))) if b > a => pa + (pb - pa) * (t - a) as f64 / (b - a) as f64,
+            (Some((_, p)), _) => p,
+            (None, Some((_, p))) => p,
+            (None, None) => 0.0,
+        }
+    }
+}
+
+/// The current week's pace, from its samples; none without a sample of a week still running.
+pub fn week_pace(conn: &Connection, now: i64) -> anyhow::Result<Option<Pace>> {
+    let Some(last) = latest(conn)? else { return Ok(None) };
+    let (Some(used), Some(reset)) = (last.week_pct, last.week_reset) else { return Ok(None) };
+    if reset <= now {
+        return Ok(None);
+    }
+    let start = reset - WEEK;
+    // This week's samples (a reset can come a second apart between samples), never going down.
+    let mut points = vec![(start, 0.0)];
+    let mut top = 0.0_f64;
+    for s in between(conn, start, now + 1)? {
+        let (Some(p), Some(r)) = (s.week_pct, s.week_reset) else { continue };
+        if (r - reset).abs() >= 120_000 {
+            continue;
+        }
+        top = top.max(p);
+        if s.at - points[points.len() - 1].0 >= 20 * 60_000 {
+            points.push((s.at, top));
+        }
+    }
+    let used = used.max(top);
+    match points.last_mut() {
+        Some(last) if last.0 >= now => last.1 = used,
+        _ => points.push((now, used)),
+    }
+    let mut pace = Pace {
+        start,
+        reset,
+        now,
+        used,
+        gone: ((now - start) as f64 / WEEK as f64 * 100.0).clamp(0.0, 100.0),
+        day_rate: None,
+        week_rate: None,
+        full_day: now - start >= DAY,
+        points,
+    };
+    if now - start >= 3 * 3_600_000 {
+        let from = (now - DAY).max(start);
+        pace.day_rate = Some((used - pace.used_at(from)).max(0.0) / (now - from) as f64 * DAY as f64);
+        pace.week_rate = Some(used / (now - start) as f64 * DAY as f64);
+    }
+    Ok(Some(pace))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::db::Db;
+
+    #[test]
+    fn the_weeks_pace_compares_used_with_the_week_gone_and_says_when_it_runs_out() {
+        let db = Db::open_memory();
+        db.call_blocking(|c| {
+            let h = 3_600_000_i64;
+            let reset = 1_764_600_000_000_i64; // a reset on the minute, in ms
+            let start = reset - WEEK;
+            let sample = |at: i64, pct: f64, r: i64| {
+                let l =
+                    Limits { five_hour: None, seven_day: Some(Window { used_percentage: pct, resets_at: r / 1000 }) };
+                store(c, &l, at, None, "")
+            };
+            assert_eq!(week_pace(c, start + h)?, None, "no samples");
+            // Last week's sample doesn't count; this week: 30% by day 3, then 20 points in the
+            // last day (one sample every 10 minutes, kept one every 20).
+            sample(start - h, 90.0, start)?;
+            sample(start + 2 * DAY, 30.0, reset + 1000)?;
+            let now = start + 3 * DAY + 12 * h;
+            for k in 0..=24 * 6 {
+                let at = now - DAY + k * 600_000;
+                sample(at, 30.0 + 20.0 * (k as f64 / 144.0), reset)?;
+            }
+            let p = week_pace(c, now)?.unwrap();
+            assert_eq!((p.start, p.reset), (start, reset));
+            assert!((p.used - 50.0).abs() < 1e-9, "{}", p.used);
+            assert!((p.gone - 50.0).abs() < 1e-9, "3.5 of 7 days: {}", p.gone);
+            assert!(p.ahead().abs() < 1e-9);
+            assert_eq!(p.points[0], (start, 0.0));
+            assert!(p.points.windows(2).all(|w| w[1].0 - w[0].0 >= 20 * 60_000 || w[1].0 == now), "thinned");
+            assert!(p.points.len() < 80, "{}", p.points.len());
+            let day = p.day_rate.unwrap();
+            assert!((day - 20.0).abs() < 0.2, "20 points in the last day: {day}");
+            let week = p.week_rate.unwrap();
+            assert!((week - 50.0 / 3.5).abs() < 1e-6, "{week}");
+            assert!(p.full_day);
+            // At 20% a day the other 50% take 2.5 days, before the reset in 3.5.
+            let out = p.runs_out(day).unwrap();
+            assert!((out - (now + 5 * DAY / 2)).abs() < 2 * h, "{}", (out - now) as f64 / DAY as f64);
+            assert_eq!(p.ends_at(day), 100.0);
+            // At 10% a day it lasts, and ends at 85%; at none it never runs out.
+            assert_eq!(p.runs_out(10.0), None);
+            assert!((p.ends_at(10.0) - 85.0).abs() < 1e-9);
+            assert_eq!(p.runs_out(0.0), None);
+            // Between two kept points, and after the last.
+            assert!((p.used_at(start + DAY) - 15.0).abs() < 1e-9, "0% at the start, 30% two days in");
+            assert_eq!(p.used_at(now + h), 50.0);
+            // Used up: when it reached 100%.
+            sample(now + h, 100.0, reset)?;
+            let p = week_pace(c, now + 2 * h)?.unwrap();
+            assert_eq!(p.runs_out(5.0), Some(now + h));
+            assert_eq!(p.points.iter().filter(|(t, _)| *t >= now).count(), 3, "now, the 100% sample, and now again");
+            Ok(())
+        })
+        .unwrap();
+        // A young week has no rate yet; a week that's over has no pace.
+        let young = Db::open_memory();
+        young
+            .call_blocking(|c| {
+                let reset = 1_764_600_000_000_i64;
+                let start = reset - WEEK;
+                let l = Limits {
+                    five_hour: None,
+                    seven_day: Some(Window { used_percentage: 4.0, resets_at: reset / 1000 }),
+                };
+                store(c, &l, start + 3_600_000, None, "")?;
+                let p = week_pace(c, start + 7_200_000)?.unwrap();
+                assert_eq!((p.day_rate, p.week_rate, p.full_day), (None, None, false));
+                assert_eq!((p.used, p.points.len()), (4.0, 3));
+                assert_eq!(week_pace(c, reset + 1)?, None);
+                Ok(())
+            })
+            .unwrap();
+    }
 
     #[test]
     fn samples_come_at_most_once_a_minute_and_nonsense_is_dropped() {

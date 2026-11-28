@@ -19,8 +19,25 @@
     {% for m in meters %}
     <div class="meter-p">
       <div class="mp-top"><span class="label">{{ m.label }}</span><span class="sub">resets <span class="ink">{{ m.reset }}</span></span></div>
+      {% if let Some(p) = m.pace %}
+      {# The week against an even pace, as a burn-up chart (D-295). #}
+      <div class="mp-pct"><strong class="t-num{% if m.warn %} warn-text{% endif %}">{{ m.pct }}</strong><span class="sub">used · {{ p.gone }}</span><span class="chip{% if !p.chip_tone.is_empty() %} {{ p.chip_tone }}{% endif %} pace-chip" title="{{ p.chip_title }}">{{ p.chip }}</span></div>
+      <div class="chart burn">
+        <div class="burn-plot">
+          {{ p.svg|safe }}
+          <span class="burn-y mono" style="top: 0%" aria-hidden="true">100%</span><span class="burn-y mono warn" style="top: 20%" aria-hidden="true">80%</span><span class="burn-y mono" style="top: 50%" aria-hidden="true">50%</span><span class="burn-y mono" style="top: 100%" aria-hidden="true">0%</span>
+          <span class="burn-now mono{% if p.now_left %} left{% endif %}" style="left: {{ p.now_x }}%" aria-hidden="true">now</span>
+          <span class="burn-dot" style="left: {{ p.now_x }}%; top: {{ p.used_y }}%"></span>
+          {% if let Some(x) = p.out_x %}<span class="burn-dot warn" style="left: {{ x }}%; top: 0%"></span><span class="burn-out{% if p.out_right %} right{% endif %}" style="left: {{ x }}%" aria-hidden="true">{{ p.out_label }}</span>{% endif %}
+        </div>
+        <div class="burn-x mono" aria-hidden="true">{% for (x, d) in p.days %}<span style="left: {{ x }}%">{{ d }}</span>{% endfor %}</div>
+      </div>
+      <ul class="legend burn-legend" aria-label="Lines"><li><span class="swatch line" style="--c: var(--accent)"></span>Used</li><li><span class="swatch limit"></span>Even pace</li>{% if !p.proj_name.is_empty() %}<li><span class="swatch limit" style="--c: var(--{% if p.proj_warn %}warn{% else %}accent{% endif %})"></span>{{ p.proj_name }}</li>{% endif %}</ul>
+      <p class="notice{% if !p.tone.is_empty() %} {{ p.tone }}{% endif %} burn-notice">{% if p.tone == "warn" %}{{ crate::web::icons::icon("alert")|safe }}{% else if p.tone == "ok" %}{{ crate::web::icons::icon("check")|safe }}{% else %}{{ crate::web::icons::icon("info")|safe }}{% endif %}<span>{{ p.lead }}{% if !p.bold.is_empty() %}<strong>{{ p.bold }}</strong>{% endif %}{{ p.tail }}{% if !p.sub.is_empty() %}<span class="sub">{{ p.sub }}</span>{% endif %}</span></p>
+      {% else %}
       <div class="mp-pct"><strong class="t-num{% if m.warn %} warn-text{% endif %}">{{ m.pct }}</strong><span class="sub">used</span></div>
       <div class="meter" role="meter" aria-valuenow="{{ m.width }}" aria-valuemin="0" aria-valuemax="100" aria-label="{{ m.label }}: {{ m.pct }} used"><i style="width: {{ m.width }}%"{% if m.warn %} class="warn"{% endif %}></i><span class="mark" style="left: 80%" title="80%: a push"></span></div>
+      {% endif %}
       <p class="mp-sofar"><span class="sub">So far</span> <span class="mono">{{ m.so_far }}</span> <span class="sub">· {{ m.so_far_sub }}</span></p>
       <p class="mp-est">{{ crate::web::icons::icon("info")|safe }}<span>{{ m.estimate }}</span>{% if !m.basis.is_empty() %}<span class="sub">{{ m.basis }}</span>{% endif %}</p>
     </div>

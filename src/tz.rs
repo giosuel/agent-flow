@@ -76,6 +76,16 @@ impl Tz {
         self.at(ms).strftime("%-d %b").to_string()
     }
 
+    /// "Sun 29 Nov 09:15": a moment in the coming days.
+    pub fn when(&self, ms: i64) -> String {
+        self.at(ms).strftime("%a %-d %b %H:%M").to_string()
+    }
+
+    /// "Sun".
+    pub fn weekday(&self, ms: i64) -> String {
+        self.at(ms).strftime("%a").to_string()
+    }
+
     /// "Mon 10", a day's bar label.
     pub fn day_label(&self, ms: i64) -> String {
         self.at(ms).strftime("%a %-d").to_string()

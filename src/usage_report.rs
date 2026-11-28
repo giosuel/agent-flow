@@ -55,6 +55,26 @@ fn rfc3339(ms: i64) -> String {
 }
 
 /// The plan's windows now, or why there are none.
+/// The week's pace (D-295), as the Usage page draws it: ahead or behind an even pace, the rates,
+/// and when it runs out at the last 24 hours' pace.
+fn pace_json(p: &crate::plan::Pace) -> Value {
+    let one = |v: f64| (v * 10.0).round() / 10.0;
+    let mut v = json!({
+        "week_gone": one(p.gone),
+        "ahead_points": one(p.ahead()),
+        "note": "ahead_points: % used less % of the week gone (negative: behind an even pace). runs_out_at: when it reaches 100% at the last 24 hours' pace, if that's before the reset; otherwise at_reset says where that pace ends.",
+    });
+    if let (Some(day), Some(week)) = (p.day_rate, p.week_rate) {
+        v["per_day_last_24h"] = json!(one(day));
+        v["per_day_this_week"] = json!(one(week));
+        match p.runs_out(day) {
+            Some(t) => v["runs_out_at"] = json!(rfc3339(t)),
+            None => v["at_reset"] = json!(one(p.ends_at(day))),
+        }
+    }
+    v
+}
+
 fn plan(c: &Connection, now: i64) -> anyhow::Result<Value> {
     let Some(s) = crate::plan::latest(c)? else {
         return Ok(
@@ -89,6 +109,9 @@ fn plan(c: &Connection, now: i64) -> anyhow::Result<Value> {
             w["full_new_tokens"] = json!(tok.round() as i64);
             w["estimate_from"] = json!(basis);
             w["left_usd"] = json!(((100.0 - pct).max(0.0) / 100.0 * usd).round());
+        }
+        if !five && let Some(p) = crate::plan::week_pace(c, now)? {
+            w["pace"] = pace_json(&p);
         }
         out.insert(key.into(), w);
     }
@@ -215,6 +238,33 @@ pub fn print(v: &Value, all: bool) -> String {
             ],
             on,
         ));
+        // The week against an even pace, and when it runs out at the last day's pace (D-295).
+        let pace = &w["pace"];
+        if pace.is_object() {
+            let ahead = pace["ahead_points"].as_f64().unwrap_or(0.0).round();
+            let side = if ahead >= 1.0 {
+                format!("{ahead:.0} points ahead of")
+            } else if ahead <= -1.0 {
+                format!("{:.0} points behind", -ahead)
+            } else {
+                "on".to_owned()
+            };
+            let mut line =
+                format!("{side} an even pace ({:.0}% of the week gone)", pace["week_gone"].as_f64().unwrap_or(0.0));
+            let out_at = pace["runs_out_at"].as_str();
+            if let Some(d) = pace["per_day_last_24h"].as_f64() {
+                match out_at {
+                    Some(r) => line += &format!(" · at {d}% a day it runs out {}", local(r)),
+                    None => {
+                        line += &format!(
+                            " · at {d}% a day it lasts, ending near {:.0}%",
+                            pace["at_reset"].as_f64().unwrap_or(0.0)
+                        )
+                    }
+                }
+            }
+            out.push(crate::ui::wrap(4, if out_at.is_some() { Tone::Commit } else { Tone::Dim }, &line, on));
+        }
     }
     if !any {
         out.push(crate::ui::wrap(2, Tone::Dim, plan["note"].as_str().unwrap_or("no samples yet"), on));
@@ -284,5 +334,36 @@ mod tests {
         assert!(estimate(&[], &t(10.0, 100), 3.0, true).is_none(), "too early to say");
         let (usd, _, basis) = estimate(&[], &t(10.0, 100), 4.0 * 1.25, true).unwrap();
         assert_eq!((usd.round(), basis.as_str()), (200.0, "this window so far"));
+    }
+
+    #[test]
+    fn flow_usage_says_the_weeks_pace() {
+        let week = |pace: Value| json!({"plan": {"week": {"used": 64.0, "resets_at": "2026-12-02T01:24:00Z", "resets_in_min": 4000, "so_far": {"usd": 949.0}, "pace": pace}}, "projects": []});
+        // Wrapped to the terminal: compared as one line.
+        let flat = |t: String| t.split_whitespace().collect::<Vec<_>>().join(" ");
+        let text = flat(print(
+            &week(
+                json!({"week_gone": 53.6, "ahead_points": 10.4, "per_day_last_24h": 19.0, "per_day_this_week": 17.1, "runs_out_at": "2026-11-30T17:11:00Z"}),
+            ),
+            false,
+        ));
+        assert!(
+            text.contains("10 points ahead of an even pace (54% of the week gone) · at 19% a day it runs out "),
+            "{text}"
+        );
+        let text = flat(print(
+            &week(
+                json!({"week_gone": 53.6, "ahead_points": -18.6, "per_day_last_24h": 6.3, "per_day_this_week": 9.3, "at_reset": 54.4}),
+            ),
+            false,
+        ));
+        assert!(
+            text.contains(
+                "19 points behind an even pace (54% of the week gone) · at 6.3% a day it lasts, ending near 54%"
+            ),
+            "{text}"
+        );
+        let text = flat(print(&week(json!({"week_gone": 1.0, "ahead_points": 0.2})), false));
+        assert!(text.contains("on an even pace (1% of the week gone)") && !text.contains("a day"), "{text}");
     }
 }

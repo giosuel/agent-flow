@@ -1244,6 +1244,35 @@ ol.lrows { padding: 0; margin: 0; list-style: none; gap: 0; }
 .pct-marks .pct-area { fill: var(--accent); fill-opacity: .16; }
 .pct-marks .pct-line { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linejoin: round; }
 .chart-marks .limit.warn { stroke: var(--warn-ink); stroke-opacity: .75; }
+/* The Week as a burn-up chart (D-295): stretched marks with HTML labels around them, so they keep
+   their size on the phone. Room above for the run-out label, on the left for the scale. */
+.mp-pct .pace-chip { margin-left: auto; align-self: center; }
+.burn { padding: 20px 0 0 38px; }
+.burn-plot { position: relative; }
+.burn-marks { height: 150px; }
+.burn-marks .even { stroke: var(--muted); stroke-width: 1.5; stroke-dasharray: 4 4; }
+.burn-marks .burn-area { fill: var(--accent); fill-opacity: .14; }
+.burn-marks .burn-used { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linejoin: round; }
+.burn-marks .burn-proj { stroke: var(--accent); stroke-width: 2; stroke-dasharray: 6 4; }
+.burn-marks .burn-proj.warn { stroke: var(--warn); }
+.burn-marks .burn-now { stroke: var(--ink2); stroke-opacity: .6; }
+/* The 80% mark stays behind the projection, which is amber and dashed too. */
+.burn-marks .limit.warn { stroke-opacity: .4; stroke-dasharray: 2 4; }
+/* Three lines: in a row, each its whole name (the library's grid is for many projects). */
+.burn-legend { display: flex; flex-wrap: wrap; gap: 6px 20px; }
+.burn-y, .burn-now, .burn-dot, .burn-out { position: absolute; pointer-events: none; }
+.burn-y { right: calc(100% + 6px); transform: translateY(-50%); font-size: var(--fs-micro); color: var(--muted); }
+.burn-y.warn { color: var(--warn-ink); }
+.burn-now { bottom: 2px; padding: 0 6px; font-size: var(--fs-micro); color: var(--ink2); }
+.burn-now.left { transform: translateX(-100%); }
+.burn-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 2px var(--panel); transform: translate(-50%, -50%); }
+.burn-dot.warn { background: var(--warn); }
+.burn-out { bottom: calc(100% + 6px); transform: translateX(-100%); white-space: nowrap; font-size: var(--fs-label); font-weight: 600; color: var(--warn-ink); }
+.burn-out.right { transform: none; }
+.burn-x { position: relative; height: 16px; margin-top: 4px; }
+.burn-x span { position: absolute; top: 0; padding-left: 4px; font-size: var(--fs-micro); color: var(--muted); white-space: nowrap; }
+.burn-notice strong { font-weight: 600; }
+.burn-notice .sub { display: block; margin-top: 2px; }
 @media (max-width: 700px) {
   .meter-p + .meter-p { border-left: 0; border-top: 1px solid var(--line2); }
 }
