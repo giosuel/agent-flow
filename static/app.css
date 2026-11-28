@@ -1256,6 +1256,10 @@ ol.lrows { padding: 0; margin: 0; list-style: none; gap: 0; }
 .burn-marks .burn-proj { stroke: var(--accent); stroke-width: 2; stroke-dasharray: 6 4; }
 .burn-marks .burn-proj.warn { stroke: var(--warn); }
 .burn-marks .burn-now { stroke: var(--ink2); stroke-opacity: .6; }
+/* The 80% mark stays behind the projection, which is amber and dashed too. */
+.burn-marks .limit.warn { stroke-opacity: .4; stroke-dasharray: 2 4; }
+/* Three lines: in a row, each its whole name (the library's grid is for many projects). */
+.burn-legend { display: flex; flex-wrap: wrap; gap: 6px 20px; }
 .burn-y, .burn-now, .burn-dot, .burn-out { position: absolute; pointer-events: none; }
 .burn-y { right: calc(100% + 6px); transform: translateY(-50%); font-size: var(--fs-micro); color: var(--muted); }
 .burn-y.warn { color: var(--warn-ink); }
