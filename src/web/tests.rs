@@ -1111,8 +1111,11 @@ async fn the_usage_page_shows_the_plan_and_the_cost() {
         page.contains("42%") && page.contains("81%") && page.contains(r#"<div class="meter" role="meter""#),
         "{page}"
     );
-    assert!(page.contains(r#"class="warn""#), "the week is past 80%: {page}");
+    assert!(page.contains("t-num warn-text"), "the week is past 80%: {page}");
     assert!(page.contains("pct-marks"), "the strip under the bars: {page}");
+    // 81% used with 84% of the week gone: behind an even pace, and it lasts at this pace (D-295).
+    assert!(page.contains(r#"<span class="chip ok pace-chip""#) && page.contains(">3 points behind<"), "{page}");
+    assert!(page.contains("<strong>lasts until the reset</strong>, ending near 9"), "{page}");
     let page = get("/usage?metric=cost").await;
     assert!(page.contains("Cost per day") && page.contains(r#"aria-current="true">Cost<"#), "{page}");
     assert!(get("/usage?metric=total").await.contains("Total tokens per day"));
@@ -1135,6 +1138,60 @@ async fn the_usage_page_shows_the_plan_and_the_cost() {
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     }
     assert_eq!(usage_pushes, 1);
+}
+
+#[tokio::test]
+async fn the_usage_page_draws_the_weeks_pace() {
+    // The owner, 2026-11-27: "where we are in the weekly token budget compared where we are in the
+    // week, if we are ahead or behind, and then also an indication when we will run out"; as a
+    // burn-up chart (D-295).
+    use crate::plan::{Limits, WEEK, Window};
+    let s = TestServer::start().await;
+    let token = s.token(TokenKind::Project, Some("vinculum")).await;
+    let cookie = s.owner_cookie().await;
+    let (now, h, day) = (crate::util::now_ms(), 3_600_000_i64, 86_400_000_i64);
+    // Half the week gone: 20% two days in, then 30 points in the last day, 60% now.
+    // The status line sends whole seconds.
+    let reset = (now + 3 * day + 12 * h) / 1000 * 1000;
+    let start = reset - WEEK;
+    s.db.call(move |c| {
+        for (at, pct) in [(start + 2 * day, 20.0), (now - day, 30.0), (now - 12 * h, 45.0), (now - 60_000, 60.0)] {
+            let l =
+                Limits { five_hour: None, seven_day: Some(Window { used_percentage: pct, resets_at: reset / 1000 }) };
+            crate::plan::store(c, &l, at, None, "m")?;
+        }
+        Ok(())
+    })
+    .await
+    .unwrap();
+    let page = owner_page(&s, &cookie, "/usage").await;
+    for part in [
+        "used · 50% of the week gone",
+        r#"<span class="chip warn pace-chip""#,
+        ">10 points ahead<",
+        r#"class="chart-marks burn-marks""#,
+        r#"data-mode="points""#,
+        "even pace",
+        // At 30% a day the other 40% last 32 hours: 2 days 4 h before the reset.
+        r#"<p class="notice warn burn-notice">"#,
+        "(30% a day) it <strong>runs out ",
+        ", 2 days 4 h before the reset.",
+        "(17% a day): runs out ",
+        r#"<span class="burn-dot warn""#,
+        r#"<span class="swatch limit" style="--c: var(--warn)">"#,
+        "Even pace",
+    ] {
+        assert!(page.contains(part), "{part}: {page}");
+    }
+    assert!(!page.contains(r#"aria-label="Week: 60% used""#), "no bar for the week: {page}");
+    let days = page.split(r#"<div class="burn-x mono""#).nth(1).unwrap().split("</div>").next().unwrap();
+    assert!(days.matches("<span").count() >= 6, "a name for each day: {days}");
+    // Agents read the same: flow usage and the usage tool.
+    let v: serde_json::Value =
+        s.http.get(s.url("/api/usage")).bearer_auth(&token).send().await.unwrap().json().await.unwrap();
+    let pace = &v["plan"]["week"]["pace"];
+    assert_eq!((pace["ahead_points"].as_f64(), pace["per_day_last_24h"].as_f64()), (Some(10.0), Some(30.0)), "{v}");
+    assert!(pace["runs_out_at"].as_str().is_some() && pace["at_reset"].is_null(), "{v}");
 }
 
 #[tokio::test]

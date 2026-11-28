@@ -156,6 +156,200 @@ struct Meter {
     /// "100% ≈ $250 at API prices ≈ 10.3M new tokens", and what it's based on.
     estimate: String,
     basis: String,
+    /// The Week's pace, drawn as a burn-up chart instead of the bar (D-295).
+    pace: Option<WeekPace>,
+}
+
+/// The Week against an even pace (D-295): a chip, the chart, and a line on when it runs out.
+struct WeekPace {
+    /// "53% of the week gone".
+    gone: String,
+    /// "11 points ahead", its tone ("warn" ahead, "ok" behind) and what it means.
+    chip: String,
+    chip_tone: &'static str,
+    chip_title: String,
+    svg: String,
+    /// Each day's name at its start, in % across.
+    days: Vec<(f64, String)>,
+    /// Now, across; the label sits left of the line near the right edge.
+    now_x: f64,
+    now_left: bool,
+    /// The dot at now's % used, from the top.
+    used_y: f64,
+    /// Where it runs out (or ran out): the dot across, its label, which side of the dot it's on.
+    out_x: Option<f64>,
+    out_label: String,
+    out_right: bool,
+    /// The projection: its tone and its name in the legend.
+    proj_warn: bool,
+    proj_name: String,
+    /// The line under the chart: "warn", "ok" or "" (no pace yet), and its parts around the bold one.
+    tone: &'static str,
+    lead: String,
+    bold: String,
+    tail: String,
+    sub: String,
+}
+
+/// "1 day 9 h", "9 h 20 min", "40 min".
+fn span(ms: i64) -> String {
+    let m = (ms.max(0) + 59_999) / 60_000;
+    let (d, h, min) = (m / 1440, m % 1440 / 60, m % 60);
+    let days = if d == 1 { "1 day".to_string() } else { format!("{d} days") };
+    match (d, h, min) {
+        (0, 0, _) => format!("{min} min"),
+        (0, _, 0) => format!("{h} h"),
+        (0, _, _) => format!("{h} h {min} min"),
+        (_, 0, _) => days,
+        _ => format!("{days} {h} h"),
+    }
+}
+
+/// "19", "7.5", "0.4": % a day.
+fn rate(r: f64) -> String {
+    if r >= 10.0 { format!("{r:.0}") } else { format!("{r:.1}").trim_end_matches(".0").to_string() }
+}
+
+fn week_pace(p: &crate::plan::Pace, tz: &Tz) -> WeekPace {
+    use crate::plan::{DAY, WEEK};
+    let ahead = p.ahead().round();
+    let points = |n: f64| if n == 1.0 { "1 point".to_string() } else { format!("{n:.0} points") };
+    let said = format!("{:.0}% used with {:.0}% of the week gone", p.used, p.gone);
+    let (chip, chip_tone, chip_title) = if ahead >= 1.0 {
+        (format!("{} ahead", points(ahead)), "warn", format!("{said}: faster than an even pace"))
+    } else if ahead <= -1.0 {
+        (format!("{} behind", points(-ahead)), "ok", format!("{said}: slower than an even pace"))
+    } else {
+        ("on pace".to_string(), "", format!("{said}: about an even pace"))
+    };
+    let pace_name = if p.full_day { "the last 24 hours' pace" } else { "the pace since the week began" };
+    let r = p.day_rate.filter(|_| p.used < 100.0);
+    let out = if p.used >= 100.0 { p.runs_out(0.0) } else { r.and_then(|r| p.runs_out(r)) };
+    let projection = r.map(|r| match out {
+        Some(t) => (t, 100.0),
+        None => (p.reset, p.ends_at(r)),
+    });
+    // The week's average, under the line once the week is a day old.
+    let sub = match p.week_rate.filter(|_| p.full_day && p.used < 100.0) {
+        Some(w) => match p.runs_out(w) {
+            Some(t) => format!("At the week's average pace ({}% a day): runs out {}.", rate(w), tz.when(t)),
+            None => {
+                format!("At the week's average pace ({}% a day): lasts, ending near {:.0}%.", rate(w), p.ends_at(w))
+            }
+        },
+        None => String::new(),
+    };
+    let (tone, lead, bold, tail) = match (p.used >= 100.0, r) {
+        (true, _) => (
+            "warn",
+            String::new(),
+            "The week's limit is used up".to_string(),
+            format!(", until the reset {}.", tz.when(p.reset)),
+        ),
+        (false, Some(r)) => {
+            let lead = format!("At {pace_name} ({}% a day) it ", rate(r));
+            match out {
+                Some(t) => (
+                    "warn",
+                    lead,
+                    format!("runs out {}", tz.when(t)),
+                    format!(", {} before the reset.", span(p.reset - t)),
+                ),
+                None => {
+                    ("ok", lead, "lasts until the reset".to_string(), format!(", ending near {:.0}%.", p.ends_at(r)))
+                }
+            }
+        }
+        (false, None) => {
+            ("", String::new(), String::new(), "The pace shows once the week is three hours old.".to_string())
+        }
+    };
+    // The days' names, each at its local midnight, when there's room for it before the next.
+    let mut mids: Vec<i64> = tz.days(p.reset, 9).into_iter().filter(|t| *t > p.start && *t < p.reset).collect();
+    mids.dedup();
+    let mut days = Vec::new();
+    if mids.first().is_some_and(|m| m - p.start >= 12 * 3_600_000) {
+        days.push((0.0, tz.weekday(p.start)));
+    }
+    for (k, m) in mids.iter().enumerate() {
+        let next = mids.get(k + 1).copied().unwrap_or(p.reset);
+        if next - m >= 8 * 3_600_000 {
+            days.push(((m - p.start) as f64 / WEEK as f64 * 100.0, tz.weekday(*m)));
+        }
+    }
+    // The hover layer, every two hours.
+    let step = 2 * 3_600_000;
+    let at: Vec<i64> = (0..=WEEK / step).map(|i| p.start + i * step).collect();
+    let used_color = "#A78BFA";
+    let proj_color = if out.is_some() { "#FBBF24" } else { used_color };
+    let tip_series = [
+        charts::Series {
+            name: format!("at {pace_name}"),
+            color: proj_color,
+            values: at
+                .iter()
+                .map(|t| match r {
+                    Some(r) if *t >= p.now => (p.used + r * (t - p.now) as f64 / DAY as f64).min(100.0),
+                    _ => 0.0,
+                })
+                .collect(),
+        },
+        charts::Series {
+            name: "even pace".into(),
+            color: "#8E8E9A",
+            values: at.iter().map(|t| (t - p.start) as f64 / WEEK as f64 * 100.0).collect(),
+        },
+        charts::Series {
+            name: "used".into(),
+            color: used_color,
+            values: at.iter().map(|t| if *t <= p.now { p.used_at(*t) } else { 0.0 }).collect(),
+        },
+    ];
+    let tip_labels: Vec<String> = at.iter().map(|t| tz.when(*t)).collect();
+    let ticks = mids.clone();
+    let label =
+        format!("Week: {said}.{}", if bold.is_empty() { String::new() } else { format!(" {lead}{bold}{tail}") });
+    let burn = charts::Burn {
+        label: &label,
+        start: p.start,
+        end: p.reset,
+        now: p.now,
+        used: &p.points,
+        projection,
+        warn: out.is_some(),
+        ticks: &ticks,
+        tip_labels: &tip_labels,
+        tip_series: &tip_series,
+    };
+    // Positions in style attributes, to a hundredth of a %.
+    let r2 = |v: f64| (v * 100.0).round() / 100.0;
+    let now_x = r2(burn.x(p.now));
+    let out_x = out.map(|t| r2(burn.x(t)));
+    WeekPace {
+        gone: format!("{:.0}% of the week gone", p.gone),
+        chip,
+        chip_tone,
+        chip_title,
+        svg: charts::burn_up(&burn),
+        days: days.into_iter().map(|(x, d)| (r2(x), d)).collect(),
+        now_x,
+        now_left: now_x > 88.0,
+        used_y: r2(100.0 - p.used.clamp(0.0, 100.0)),
+        out_x,
+        out_label: match out {
+            Some(t) if p.used >= 100.0 => format!("used up {} {}", tz.weekday(t), tz.hm(t)),
+            Some(t) => format!("runs out {} {}", tz.weekday(t), tz.hm(t)),
+            None => String::new(),
+        },
+        out_right: out_x.is_some_and(|x| x < 50.0),
+        proj_warn: out.is_some(),
+        proj_name: if projection.is_some() { format!("At {pace_name}") } else { String::new() },
+        tone,
+        lead,
+        bold,
+        tail,
+        sub,
+    }
 }
 
 /// A finished 5-hour window in "How big a window is".
@@ -600,6 +794,8 @@ struct PlanData {
     week_past: Vec<(crate::plan::Past, Tokens)>,
     /// The samples in the chart's range, for the strip.
     samples: Vec<crate::plan::Sample>,
+    /// The week's pace, while a week runs.
+    pace: Option<crate::plan::Pace>,
 }
 
 fn plan_data(c: &rusqlite::Connection, now: i64, from: i64, to: i64) -> anyhow::Result<PlanData> {
@@ -627,7 +823,15 @@ fn plan_data(c: &rusqlite::Connection, now: i64, from: i64, to: i64) -> anyhow::
     for p in crate::plan::past(c, false, now, 6)? {
         week_past.push((p, total(p.start, p.end)?));
     }
-    Ok(PlanData { latest, five_now, week_now, five_past, week_past, samples: crate::plan::between(c, from, to)? })
+    Ok(PlanData {
+        latest,
+        five_now,
+        week_now,
+        five_past,
+        week_past,
+        samples: crate::plan::between(c, from, to)?,
+        pace: crate::plan::week_pace(c, now)?,
+    })
 }
 
 /// "3 h 20 min", "4 days": how long until `t`.
@@ -676,6 +880,7 @@ fn plan_view(p: &PlanData, now: i64, tz: &Tz) -> (Vec<Meter>, Vec<EstRow>, (Stri
                     None => "100%: known once the window is 5% used".into(),
                 },
                 basis: est.map(|e| e.2).unwrap_or_default(),
+                pace: if five || over { None } else { p.pace.as_ref().map(|x| week_pace(x, tz)) },
             });
         }
     }

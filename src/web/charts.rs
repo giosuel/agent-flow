@@ -269,6 +269,74 @@ pub fn percent_line(label: &str, labels: &[String], values: &[Option<f64>]) -> S
     out
 }
 
+/// A burn-up chart of a time window (the plan's week, D-295): % used so far, the even pace from 0%
+/// at the start to 100% at the end, and a projection from now. Fixed 0–100 scale, one axis.
+pub struct Burn<'a> {
+    pub label: &'a str,
+    pub start: i64,
+    pub end: i64,
+    pub now: i64,
+    /// % used over time, oldest first, up to now.
+    pub used: &'a [(i64, f64)],
+    /// Where the projection from (now, the last % used) ends: when and at what %.
+    pub projection: Option<(i64, f64)>,
+    /// The projection runs out before the end: drawn in the warning colour.
+    pub warn: bool,
+    /// A vertical grid line at each (local midnights).
+    pub ticks: &'a [i64],
+    /// The hover layer's points, evenly spaced from start to end, and their series (projection,
+    /// even pace, used: the tooltip lists them the other way round).
+    pub tip_labels: &'a [String],
+    pub tip_series: &'a [Series],
+}
+
+impl Burn<'_> {
+    /// Where `t` sits across the chart, in % of its width.
+    pub fn x(&self, t: i64) -> f64 {
+        ((t - self.start) as f64 / (self.end - self.start).max(1) as f64 * 100.0).clamp(0.0, 100.0)
+    }
+}
+
+pub fn burn_up(b: &Burn) -> String {
+    let x = |t: i64| b.x(t) / 100.0 * W;
+    let y = |v: f64| H - v.clamp(0.0, 100.0) / 100.0 * H;
+    let mut out = String::new();
+    let _ = write!(
+        out,
+        r#"<svg class="chart-marks burn-marks" viewBox="0 0 {W} {H}" preserveAspectRatio="none" role="img" aria-label="{}" data-tips="{}" data-mode="points">"#,
+        esc(b.label),
+        tips(b.tip_labels, b.tip_series, &|v| format!("{v:.0}%"), false)
+    );
+    let line = |out: &mut String, class: &str, x1: f64, y1: f64, x2: f64, y2: f64| {
+        let _ = write!(
+            out,
+            r#"<line class="{class}" x1="{x1:.1}" y1="{y1:.2}" x2="{x2:.1}" y2="{y2:.2}" vector-effect="non-scaling-stroke"/>"#
+        );
+    };
+    for v in [100.0, 50.0] {
+        line(&mut out, "grid", 0.0, y(v), W, y(v));
+    }
+    for t in b.ticks {
+        line(&mut out, "grid", x(*t), 0.0, x(*t), H);
+    }
+    line(&mut out, "limit warn", 0.0, y(80.0), W, y(80.0));
+    line(&mut out, "even", 0.0, H, W, 0.0);
+    if let (Some(first), Some(last)) = (b.used.first(), b.used.last()) {
+        let mut d = String::new();
+        for (k, (t, v)) in b.used.iter().enumerate() {
+            let _ = write!(d, "{}{:.1},{:.2} ", if k == 0 { "M" } else { "L" }, x(*t), y(*v));
+        }
+        let _ = write!(out, r#"<path d="{d}L{:.1},{H} L{:.1},{H} Z" class="burn-area"/>"#, x(last.0), x(first.0));
+        let _ = write!(out, r#"<path d="{d}" class="burn-used" vector-effect="non-scaling-stroke"/>"#);
+        if let Some((t, v)) = b.projection {
+            line(&mut out, if b.warn { "burn-proj warn" } else { "burn-proj" }, x(b.now), y(last.1), x(t), y(v));
+        }
+    }
+    line(&mut out, "burn-now", x(b.now), 0.0, x(b.now), H);
+    out.push_str("</svg>");
+    out
+}
+
 /// A round number at or above `v` for the top of the scale: 1, 2, 2.5 or 5 × a power of ten.
 pub fn nice_max(v: f64) -> f64 {
     if v <= 0.0 {

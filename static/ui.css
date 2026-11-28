@@ -643,13 +643,14 @@ a.item-row:hover { background: var(--hover-bg); }
 
 /* ---------------------------------------------------------------- Legend and swatch: one
    ul.legend: a grid (the owner, 2026-11-23: many projects don't make a long column) of li, each a
-   .swatch (a square, .line, or a dashed .limit) in the series' colour (--c), its name, a value.
+   .swatch (a square, .line, or a dashed .limit: grey, or --c for a projection) in the series' colour (--c),
+   its name, a value.
    The chart tooltip uses the same swatch. (N-20 G3–G5: three swatch copies, two legends) */
 .legend { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 6px var(--sp-5); padding: 0; margin: 0; list-style: none; font-size: var(--fs-sub); color: var(--ink2); }
 .legend li { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .swatch { display: inline-block; width: 10px; height: 10px; margin-right: 6px; border-radius: 3px; background: var(--c); vertical-align: middle; flex: none; }
 .swatch.line { width: 14px; height: 3px; border-radius: 2px; }
-.swatch.limit { width: 14px; height: 0; border-radius: 0; border-top: 2px dashed var(--muted); background: none; }
+.swatch.limit { width: 14px; height: 0; border-radius: 0; border-top: 2px dashed var(--c, var(--muted)); background: none; }
 
 /* ---------------------------------------------------------------- Dialog: one, in four sizes
    A head (the title 18/600, its tools, the close icon button), a body, a foot (actions on the
