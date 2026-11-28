@@ -55,6 +55,26 @@ fn rfc3339(ms: i64) -> String {
 }
 
 /// The plan's windows now, or why there are none.
+/// The week's pace (D-295), as the Usage page draws it: ahead or behind an even pace, the rates,
+/// and when it runs out at the last 24 hours' pace.
+fn pace_json(p: &crate::plan::Pace) -> Value {
+    let one = |v: f64| (v * 10.0).round() / 10.0;
+    let mut v = json!({
+        "week_gone": one(p.gone),
+        "ahead_points": one(p.ahead()),
+        "note": "ahead_points: % used less % of the week gone (negative: behind an even pace). runs_out_at: when it reaches 100% at the last 24 hours' pace, if that's before the reset; otherwise at_reset says where that pace ends.",
+    });
+    if let (Some(day), Some(week)) = (p.day_rate, p.week_rate) {
+        v["per_day_last_24h"] = json!(one(day));
+        v["per_day_this_week"] = json!(one(week));
+        match p.runs_out(day) {
+            Some(t) => v["runs_out_at"] = json!(rfc3339(t)),
+            None => v["at_reset"] = json!(one(p.ends_at(day))),
+        }
+    }
+    v
+}
+
 fn plan(c: &Connection, now: i64) -> anyhow::Result<Value> {
     let Some(s) = crate::plan::latest(c)? else {
         return Ok(
@@ -89,6 +109,9 @@ fn plan(c: &Connection, now: i64) -> anyhow::Result<Value> {
             w["full_new_tokens"] = json!(tok.round() as i64);
             w["estimate_from"] = json!(basis);
             w["left_usd"] = json!(((100.0 - pct).max(0.0) / 100.0 * usd).round());
+        }
+        if !five && let Some(p) = crate::plan::week_pace(c, now)? {
+            w["pace"] = pace_json(&p);
         }
         out.insert(key.into(), w);
     }
